@@ -5,12 +5,15 @@ use ts_rs::TS;
 #[ts(export, export_to = "../../src/types/")]
 #[serde(rename_all = "camelCase")]
 pub struct Action {
+    #[ts(type = "number")]
     pub id: i64,
+    #[ts(type = "number")]
     pub project_id: i64,
     pub label: String,
     pub command: String,
     pub working_dir: Option<String>,
     pub source: Option<String>,
+    #[ts(type = "number")]
     pub sort_order: i64,
 }
 
@@ -18,6 +21,7 @@ pub struct Action {
 #[ts(export, export_to = "../../src/types/")]
 #[serde(rename_all = "camelCase")]
 pub struct ActionInput {
+    #[ts(type = "number")]
     pub project_id: i64,
     pub label: String,
     pub command: String,
