@@ -1,31 +1,20 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { applyTheme, type ThemeMode } from '../../styles/theme';
-
-type Ctx = { mode: ThemeMode; setMode: (m: ThemeMode) => void };
-const ThemeCtx = createContext<Ctx | null>(null);
-const STORAGE_KEY = 'abeoncode.theme';
+import { useEffect, type ReactNode } from 'react';
+import { applyTheme } from '../../styles/theme';
+import { useStore } from '../../store';
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [mode, setModeState] = useState<ThemeMode>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return (saved === 'light' || saved === 'dark' || saved === 'system') ? saved : 'dark';
-  });
-
+  const mode = useStore(s => s.theme);
   useEffect(() => {
     applyTheme(mode);
-    localStorage.setItem(STORAGE_KEY, mode);
     if (mode !== 'system') return;
     const mql = window.matchMedia('(prefers-color-scheme: dark)');
-    const handler = () => applyTheme('system');
-    mql.addEventListener('change', handler);
-    return () => mql.removeEventListener('change', handler);
+    const h = () => applyTheme('system');
+    mql.addEventListener('change', h);
+    return () => mql.removeEventListener('change', h);
   }, [mode]);
-
-  return <ThemeCtx.Provider value={{ mode, setMode: setModeState }}>{children}</ThemeCtx.Provider>;
+  return <>{children}</>;
 }
 
-export function useTheme(): Ctx {
-  const ctx = useContext(ThemeCtx);
-  if (!ctx) throw new Error('useTheme outside ThemeProvider');
-  return ctx;
+export function useTheme() {
+  return { mode: useStore(s => s.theme), setMode: useStore(s => s.setTheme) };
 }

@@ -1,12 +1,14 @@
-import { useState } from 'react';
 import { ResizableSplit } from './ResizableSplit';
 import { Sidebar } from '../sidebar/Sidebar';
 import { CenterPanel } from '../center/CenterPanel';
 import { RightPanel } from '../right/RightPanel';
+import { useStore } from '../../store';
 
 export function AppShell() {
-  const [leftWidth, setLeftWidth] = useState(260);
-  const [rightWidth, setRightWidth] = useState(300);
+  const leftWidth = useStore(s => s.leftWidth);
+  const rightWidth = useStore(s => s.rightWidth);
+  const setLeftWidth = useStore(s => s.setLeftWidth);
+  const setRightWidth = useStore(s => s.setRightWidth);
 
   return (
     <div className="h-full w-full">
