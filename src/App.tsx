@@ -1,11 +1,10 @@
 import { ThemeProvider } from './components/layout/ThemeProvider';
+import { AppShell } from './components/layout/AppShell';
 
 export default function App() {
   return (
     <ThemeProvider>
-      <div className="h-full grid place-items-center text-fg">
-        <span>AbeonCode shell</span>
-      </div>
+      <AppShell />
     </ThemeProvider>
   );
 }
