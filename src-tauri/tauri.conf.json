@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "abeoncode-scaffold",
+  "productName": "AbeonCode",
   "version": "0.1.0",
   "identifier": "pl.cyberstudio.abeoncode",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "abeoncode-scaffold",
+        "title": "AbeonCode",
         "width": 800,
         "height": 600
       }
