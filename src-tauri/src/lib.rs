@@ -1,6 +1,7 @@
 pub mod error;
 pub mod db;
 pub mod domain;
+pub mod sessions;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
