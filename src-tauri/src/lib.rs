@@ -3,6 +3,7 @@ pub mod db;
 pub mod domain;
 pub mod sessions;
 pub mod state;
+pub mod commands;
 
 use state::AppState;
 
@@ -23,7 +24,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(app_state)
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            commands::projects::list_projects,
+            commands::projects::add_project,
+            commands::projects::update_project,
+            commands::projects::remove_project,
+            commands::projects::reorder_projects,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
