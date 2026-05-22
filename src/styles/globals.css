@@ -35,5 +35,25 @@
     background: var(--color-bg);
     color: var(--color-fg);
     font-family: 'Geist', theme(fontFamily.sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+@layer utilities {
+  .scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+  .scroll-thin::-webkit-scrollbar-track { background: transparent; }
+  .scroll-thin::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 99px; }
+  .scroll-thin::-webkit-scrollbar-thumb:hover { background: var(--color-muted); }
+
+  .path-ellipsis {
+    direction: rtl;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    unicode-bidi: plaintext;
   }
 }
