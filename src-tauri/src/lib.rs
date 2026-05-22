@@ -6,6 +6,7 @@ pub mod pty;
 pub mod state;
 pub mod commands;
 pub mod detectors;
+pub mod git;
 
 use state::AppState;
 
@@ -46,6 +47,7 @@ pub fn run() {
             commands::actions::add_action,
             commands::actions::update_action,
             commands::actions::remove_action,
+            commands::git::git_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,3 +2,4 @@ pub mod projects;
 pub mod sessions;
 pub mod pty;
 pub mod actions;
+pub mod git;
