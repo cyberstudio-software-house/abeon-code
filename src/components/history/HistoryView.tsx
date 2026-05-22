@@ -20,6 +20,18 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
       .catch(e => setError(e instanceof Error ? e.message : String(e)));
   }, [projectId, sessionId]);
 
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    tauri.openSessionWatch(projectId, sessionId).catch(() => {});
+    tauri.onSessionAppend(sessionId, (blocks) => {
+      setData(prev => prev ? ({ ...prev, blocks: [...prev.blocks, ...blocks] }) : prev);
+    }).then(fn => { unlisten = fn; });
+    return () => {
+      if (unlisten) unlisten();
+      tauri.closeSessionWatch(sessionId).catch(() => {});
+    };
+  }, [projectId, sessionId]);
+
   const loadMore = async () => {
     if (!data || !data.hasMoreBefore || data.blocks.length === 0) return;
     const firstUuid = blockUuid(data.blocks[0]);

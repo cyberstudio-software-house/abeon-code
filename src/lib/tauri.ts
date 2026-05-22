@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Project, SessionMeta, SessionHistory } from '../types';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { Project, SessionMeta, SessionHistory, HistoryBlock } from '../types';
 
 export const tauri = {
   listProjects: () => invoke<Project[]>('list_projects'),
@@ -13,4 +14,10 @@ export const tauri = {
     invoke<SessionMeta[]>('list_sessions', { projectId, limit, offset }),
   readSessionHistory: (projectId: number, sessionId: string, limit?: number, beforeUuid?: string) =>
     invoke<SessionHistory>('read_session_history', { projectId, sessionId, limit, beforeUuid }),
+  openSessionWatch: (projectId: number, sessionId: string) =>
+    invoke<void>('open_session_watch', { projectId, sessionId }),
+  closeSessionWatch: (sessionId: string) =>
+    invoke<void>('close_session_watch', { sessionId }),
+  onSessionAppend: (sessionId: string, cb: (blocks: HistoryBlock[]) => void): Promise<UnlistenFn> =>
+    listen<{ blocks: HistoryBlock[] }>(`session:${sessionId}:append`, e => cb(e.payload.blocks)),
 };
