@@ -1,7 +1,34 @@
-# Tauri + React + Typescript
+# AbeonCode
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+Desktopowa aplikacja (Tauri 2) do zarządzania wieloma sesjami Claude Code: lista projektów, podgląd historii sesji, wbudowany terminal do kontynuacji, panel akcji i status git.
 
-## Recommended IDE Setup
+## Wymagania
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- Linux lub macOS
+- Node.js 20+
+- Rust toolchain (stable)
+- `claude` CLI w PATH
+
+## Rozwój
+
+```bash
+npm install
+npm run tauri dev
+```
+
+## Build
+
+```bash
+npm run tauri build
+```
+
+## Testy
+
+```bash
+npm test              # frontend (vitest)
+npm run test:rust     # backend (cargo test)
+```
+
+## Architektura
+
+Patrz `docs/superpowers/specs/2026-05-21-abeoncode-design.md` i `docs/superpowers/plans/2026-05-21-abeoncode-implementation.md`.
