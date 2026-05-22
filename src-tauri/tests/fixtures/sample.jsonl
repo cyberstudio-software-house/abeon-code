@@ -1,0 +1,7 @@
+{"type":"queue-operation","operation":"start","timestamp":"2026-05-21T12:00:00Z","sessionId":"s1"}
+{"type":"user","uuid":"u1","timestamp":"2026-05-21T12:00:01Z","sessionId":"s1","cwd":"/x","gitBranch":"main","message":{"role":"user","content":[{"type":"text","text":"Hello"}]}}
+{"type":"assistant","uuid":"a1","timestamp":"2026-05-21T12:00:02Z","sessionId":"s1","cwd":"/x","gitBranch":"main","message":{"role":"assistant","content":[{"type":"thinking","thinking":"hmm","signature":"x"},{"type":"text","text":"Hi there!"},{"type":"tool_use","id":"t1","name":"read_file","input":{"path":"src/a.ts"}}]}}
+{"type":"user","uuid":"u2","timestamp":"2026-05-21T12:00:03Z","sessionId":"s1","cwd":"/x","gitBranch":"main","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"file contents","is_error":false}]}}
+{"type":"attachment","uuid":"at1","timestamp":"2026-05-21T12:00:04Z","sessionId":"s1","cwd":"/x","attachment":{"kind":"image","name":"screenshot.png"}}
+{"type":"system","uuid":"sys1","timestamp":"2026-05-21T12:00:05Z","sessionId":"s1","subtype":"hook","hookCount":1,"hasOutput":false,"level":"info","cwd":"/x"}
+{"type":"last-prompt","lastPrompt":"...","leafUuid":"a1","sessionId":"s1"}
