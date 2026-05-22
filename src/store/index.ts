@@ -4,8 +4,9 @@ import { createSettingsSlice, type SettingsSlice } from './settingsSlice';
 import { createProjectsSlice, type ProjectsSlice } from './projectsSlice';
 import { createSessionsSlice, type SessionsSlice } from './sessionsSlice';
 import { createTabsSlice, type TabsSlice } from './tabsSlice';
+import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 
-export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice;
+export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice;
 
 export const useStore = create<AppState>()(
   persist(
@@ -14,6 +15,7 @@ export const useStore = create<AppState>()(
       ...createProjectsSlice(...a),
       ...createSessionsSlice(...a),
       ...createTabsSlice(...a),
+      ...createActionsSlice(...a),
     }),
     {
       name: 'abeoncode.store',
