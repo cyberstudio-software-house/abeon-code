@@ -4,12 +4,12 @@ import { ActionList } from './ActionList';
 import { AddActionDialog } from '../dialogs/AddActionDialog';
 
 export function ActionsSection() {
-  const projects = useStore(s => s.projects);
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
   const activeTab = tabs.find(t => t.id === activeTabId);
-  const projectId = activeTab?.projectId ?? projects[0]?.id ?? null;
-  const project = projects.find(p => p.id === projectId) ?? null;
+  const projectId = activeTab?.projectId ?? null;
+  const projects = useStore(s => s.projects);
+  const project = projectId != null ? projects.find(p => p.id === projectId) ?? null : null;
   const load = useStore(s => s.loadActions);
   const [dialogOpen, setDialogOpen] = useState(false);
 

@@ -4,11 +4,10 @@ import { GitFileList } from './GitFileList';
 import { Icon } from '../shared/Icon';
 
 export function GitSection() {
-  const projects = useStore(s => s.projects);
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
   const activeTab = tabs.find(t => t.id === activeTabId);
-  const projectId = activeTab?.projectId ?? projects[0]?.id ?? null;
+  const projectId = activeTab?.projectId ?? null;
   const status = useStore(s => projectId != null ? s.gitByProject[projectId] : null);
   const refresh = useStore(s => s.refreshGit);
 

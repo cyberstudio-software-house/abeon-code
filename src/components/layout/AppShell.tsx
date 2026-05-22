@@ -17,6 +17,8 @@ type DragHandleProps = {
 
 function DragHandle({ onDrag, ariaLabel }: DragHandleProps) {
   const startX = useRef<number | null>(null);
+  const onDragRef = useRef(onDrag);
+  onDragRef.current = onDrag;
   const handlersRef = useRef<{ move: (e: MouseEvent) => void; up: () => void } | null>(null);
 
   const detach = useCallback(() => {
@@ -37,7 +39,7 @@ function DragHandle({ onDrag, ariaLabel }: DragHandleProps) {
       if (startX.current === null) return;
       const delta = ev.clientX - startX.current;
       startX.current = ev.clientX;
-      onDrag(delta);
+      onDragRef.current(delta);
     };
     const up = () => detach();
     handlersRef.current = { move, up };
@@ -65,6 +67,9 @@ export function AppShell() {
   const rightWidth = useStore(s => s.rightWidth);
   const setLeftWidth = useStore(s => s.setLeftWidth);
   const setRightWidth = useStore(s => s.setRightWidth);
+  const tabs = useStore(s => s.tabs);
+  const activeTabId = useStore(s => s.activeTabId);
+  const hasActiveProject = tabs.some(t => t.id === activeTabId);
 
   const onLeftDrag = useCallback(
     (delta: number) => setLeftWidth(clamp(leftWidth + delta, LEFT_MIN, LEFT_MAX)),
@@ -86,10 +91,14 @@ export function AppShell() {
         <div className="flex-1 h-full min-w-0">
           <CenterPanel />
         </div>
-        <DragHandle onDrag={onRightDrag} ariaLabel="Resize right panel" />
-        <div style={{ width: rightWidth }} className="h-full flex-shrink-0">
-          <RightPanel />
-        </div>
+        {hasActiveProject && (
+          <>
+            <DragHandle onDrag={onRightDrag} ariaLabel="Resize right panel" />
+            <div style={{ width: rightWidth }} className="h-full flex-shrink-0">
+              <RightPanel />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
