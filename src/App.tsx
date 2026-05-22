@@ -8,6 +8,8 @@ export default function App() {
     <ThemeProvider>
       <ErrorBoundary>
         <AppShell />
+      </ErrorBoundary>
+      <ErrorBoundary>
         <Toaster richColors position="bottom-right" />
       </ErrorBoundary>
     </ThemeProvider>
