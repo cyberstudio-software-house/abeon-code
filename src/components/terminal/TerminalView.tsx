@@ -59,7 +59,13 @@ export function TerminalView({ projectId, kind, sessionId, actionId }: Props) {
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
     term.open(container);
-    fit.fit();
+
+    const safeFit = () => {
+      if (container.offsetWidth > 0 && container.offsetHeight > 0) {
+        fit.fit();
+      }
+    };
+    safeFit();
     termRef.current = term;
     fitRef.current = fit;
 
@@ -77,35 +83,43 @@ export function TerminalView({ projectId, kind, sessionId, actionId }: Props) {
         return;
       }
       ptyRef.current = id;
-      const offOut = await tauri.onPtyOutput(id, (bytes) => term.write(bytes));
-      const offExit = await tauri.onPtyExit(id, (code) =>
-        term.write(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m\r\n`),
-      );
+      const offOut = await tauri.onPtyOutput(id, (bytes) => {
+        if (!cancelled) term.write(bytes);
+      });
+      const offExit = await tauri.onPtyExit(id, (code) => {
+        if (!cancelled) term.write(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m\r\n`);
+      });
       unlistenRefs.current.push(offOut, offExit);
 
       term.onData((d) => {
+        if (cancelled) return;
         const enc = btoa(unescape(encodeURIComponent(d)));
         tauri.ptyWrite(id, enc).catch(() => {});
       });
       term.onResize(({ cols, rows }) => {
+        if (cancelled) return;
         tauri.ptyResize(id, cols, rows).catch(() => {});
       });
     });
 
-    const onResize = () => fit.fit();
-    window.addEventListener('resize', onResize);
-    const ro = new ResizeObserver(() => fit.fit());
+    window.addEventListener('resize', safeFit);
+    const ro = new ResizeObserver(safeFit);
     ro.observe(container);
 
     return () => {
       cancelled = true;
-      window.removeEventListener('resize', onResize);
+      window.removeEventListener('resize', safeFit);
       ro.disconnect();
       unlistenRefs.current.forEach((fn) => fn());
       unlistenRefs.current = [];
       if (ptyRef.current) tauri.ptyKill(ptyRef.current).catch(() => {});
       ptyRef.current = null;
-      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+      // Defer dispose to next frame so React finishes DOM removal first.
+      // Calling dispose() synchronously during React commit phase causes
+      // webkit2gtk NeedDebuggerBreak trap (DOM mutation storm).
+      setTimeout(() => { try { term.dispose(); } catch {} }, 0);
     };
   }, [projectId, kind, sessionId, actionId]);
 
