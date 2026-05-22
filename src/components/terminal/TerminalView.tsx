@@ -10,14 +10,18 @@ type Props = {
   kind: 'claude' | 'action';
   sessionId?: string;
   actionId?: number;
+  visible?: boolean;
 };
 
-export function TerminalView({ projectId, kind, sessionId, actionId }: Props) {
+export function TerminalView({ projectId, kind, sessionId, actionId, visible = true }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const ptyRef = useRef<string | null>(null);
   const unlistenRefs = useRef<Array<() => void>>([]);
+  const pendingWrites = useRef<Uint8Array[]>([]);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -59,13 +63,7 @@ export function TerminalView({ projectId, kind, sessionId, actionId }: Props) {
     term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
     term.open(container);
-
-    const safeFit = () => {
-      if (container.offsetWidth > 0 && container.offsetHeight > 0) {
-        fit.fit();
-      }
-    };
-    safeFit();
+    fit.fit();
     termRef.current = term;
     fitRef.current = fit;
 
@@ -84,7 +82,12 @@ export function TerminalView({ projectId, kind, sessionId, actionId }: Props) {
       }
       ptyRef.current = id;
       const offOut = await tauri.onPtyOutput(id, (bytes) => {
-        if (!cancelled) term.write(bytes);
+        if (cancelled) return;
+        if (visibleRef.current) {
+          term.write(bytes);
+        } else {
+          pendingWrites.current.push(bytes);
+        }
       });
       const offExit = await tauri.onPtyExit(id, (code) => {
         if (!cancelled) term.write(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m\r\n`);
@@ -102,26 +105,55 @@ export function TerminalView({ projectId, kind, sessionId, actionId }: Props) {
       });
     });
 
-    window.addEventListener('resize', safeFit);
-    const ro = new ResizeObserver(safeFit);
-    ro.observe(container);
-
     return () => {
       cancelled = true;
-      window.removeEventListener('resize', safeFit);
-      ro.disconnect();
       unlistenRefs.current.forEach((fn) => fn());
       unlistenRefs.current = [];
       if (ptyRef.current) tauri.ptyKill(ptyRef.current).catch(() => {});
       ptyRef.current = null;
       termRef.current = null;
       fitRef.current = null;
-      // Defer dispose to next frame so React finishes DOM removal first.
-      // Calling dispose() synchronously during React commit phase causes
-      // webkit2gtk NeedDebuggerBreak trap (DOM mutation storm).
-      setTimeout(() => { try { term.dispose(); } catch {} }, 0);
+      // Do NOT call term.dispose() — it triggers webkit2gtk crash.
+      // React removes the DOM container; PTY is killed; listeners detached.
+      // xterm internal state will be GC'd with the Terminal object.
     };
   }, [projectId, kind, sessionId, actionId]);
+
+  useEffect(() => {
+    if (!visible || !termRef.current || !fitRef.current) return;
+    const term = termRef.current;
+    const fit = fitRef.current;
+    const container = containerRef.current;
+    if (!container || container.offsetWidth === 0) return;
+
+    // Flush pending writes that arrived while hidden
+    for (const bytes of pendingWrites.current) {
+      term.write(bytes);
+    }
+    pendingWrites.current = [];
+    fit.fit();
+  }, [visible]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const fit = fitRef.current;
+    if (!fit) return;
+
+    const safeFit = () => {
+      if (visibleRef.current && container.offsetWidth > 0 && container.offsetHeight > 0) {
+        fit.fit();
+      }
+    };
+
+    window.addEventListener('resize', safeFit);
+    const ro = new ResizeObserver(safeFit);
+    ro.observe(container);
+    return () => {
+      window.removeEventListener('resize', safeFit);
+      ro.disconnect();
+    };
+  }, []);
 
   return <div ref={containerRef} className="h-full w-full bg-bg-elev p-4 pb-6" />;
 }
