@@ -6,12 +6,12 @@ use crate::error::{AppError, AppResult};
 use super::parser::parse_line;
 
 const DEFAULT_PAGE: usize = 200;
+const META_SCAN_LIMIT: usize = 100;
 
 pub fn session_file(claude_dir: &Path, session_id: &str) -> PathBuf {
     claude_dir.join(format!("{session_id}.jsonl"))
 }
 
-/// Lists sessions in the Claude project directory with meta for each.
 pub fn list_sessions(
     project_id: i64,
     project_claude_dir: &Path,
@@ -37,72 +37,73 @@ pub fn list_sessions(
 
     let mut out = Vec::new();
     for entry in entries.into_iter().skip(offset).take(limit) {
-        if let Ok(meta) = meta_for_file(project_id, &entry.path()) {
+        if let Ok(meta) = meta_for_file_fast(project_id, &entry.path()) {
             out.push(meta);
         }
     }
     Ok(out)
 }
 
-fn meta_for_file(project_id: i64, path: &Path) -> AppResult<SessionMeta> {
+fn meta_for_file_fast(project_id: i64, path: &Path) -> AppResult<SessionMeta> {
     let id = path.file_stem()
         .and_then(|s| s.to_str())
         .ok_or_else(|| AppError::NotFound(path.display().to_string()))?
         .to_string();
 
-    let last_modified = path.metadata()?
-        .modified()?
+    let file_meta = path.metadata()?;
+    let last_modified = file_meta.modified()?
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
 
+    let file_size = file_meta.len();
+    let approx_messages = (file_size / 500).max(1) as usize;
+
     let mut title = format!("Sesja {}", &id[..8.min(id.len())]);
-    let mut message_count = 0usize;
     let mut git_branch = None;
     let mut cwd = None;
     let mut first_user_set = false;
-    let mut first_assistant_text: Option<String> = None;
 
     let file = fs::File::open(path)?;
-    for line in BufReader::new(file).lines().map_while(Result::ok) {
+    for (i, line) in BufReader::new(file).lines().map_while(Result::ok).enumerate() {
+        if i >= META_SCAN_LIMIT { break; }
         if line.trim().is_empty() { continue; }
-        let Ok(blocks) = parse_line(&line) else { continue };
-        for b in blocks {
-            message_count += 1;
-            match &b {
-                HistoryBlock::UserText { text, .. } if !first_user_set => {
-                    title = truncate(text, 80);
-                    first_user_set = true;
-                }
-                HistoryBlock::AssistantText { text, .. } if first_assistant_text.is_none() => {
-                    first_assistant_text = Some(truncate(text, 80));
-                }
-                _ => {}
-            }
-        }
-        if cwd.is_none() {
+
+        if !first_user_set || cwd.is_none() {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                if let Some(c) = v.get("cwd").and_then(|x| x.as_str()) {
-                    cwd = Some(c.to_string());
+                if !first_user_set {
+                    if let Some(text) = v.get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| arr.iter().find(|i| i.get("type").and_then(|t| t.as_str()) == Some("text")))
+                        .and_then(|i| i.get("text"))
+                        .and_then(|t| t.as_str())
+                    {
+                        if v.get("type").and_then(|t| t.as_str()) == Some("user") && !text.is_empty() {
+                            title = truncate(text, 80);
+                            first_user_set = true;
+                        }
+                    }
                 }
-                if let Some(b) = v.get("gitBranch").and_then(|x| x.as_str()) {
-                    git_branch = Some(b.to_string());
+                if cwd.is_none() {
+                    if let Some(c) = v.get("cwd").and_then(|x| x.as_str()) {
+                        cwd = Some(c.to_string());
+                    }
+                    if let Some(b) = v.get("gitBranch").and_then(|x| x.as_str()) {
+                        git_branch = Some(b.to_string());
+                    }
                 }
             }
         }
+
+        if first_user_set && cwd.is_some() { break; }
     }
 
-    if !first_user_set {
-        if let Some(t) = first_assistant_text { title = t; }
-        else {
-            let ts = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(last_modified)
-                .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
-                .unwrap_or_else(|| id.clone());
-            title = ts;
-        }
-    }
-
-    Ok(SessionMeta { id, project_id, title, message_count, last_modified, git_branch, cwd })
+    Ok(SessionMeta {
+        id, project_id, title,
+        message_count: approx_messages,
+        last_modified, git_branch, cwd,
+    })
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -111,7 +112,6 @@ fn truncate(s: &str, max: usize) -> String {
     else { let mut t: String = trimmed.chars().take(max).collect(); t.push('…'); t }
 }
 
-/// Reads the last `limit` records, optionally paging back from `before_uuid`.
 pub fn read_history(
     project_id: i64,
     claude_dir: &Path,
@@ -120,13 +120,60 @@ pub fn read_history(
     before_uuid: Option<&str>,
 ) -> AppResult<SessionHistory> {
     let path = session_file(claude_dir, session_id);
-    let meta = meta_for_file(project_id, &path)?;
-    let limit = limit.unwrap_or(DEFAULT_PAGE);
+    let limit = limit.unwrap_or(DEFAULT_PAGE).min(500);
+
+    let file_meta = path.metadata()?;
+    let last_modified = file_meta.modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    let id = path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
 
     let file = fs::File::open(&path)?;
     let mut all_blocks: Vec<HistoryBlock> = Vec::new();
+    let mut title = format!("Sesja {}", &id[..8.min(id.len())]);
+    let mut first_user_set = false;
+    let mut git_branch = None;
+    let mut cwd = None;
+    let mut line_count = 0usize;
+
     for line in BufReader::new(file).lines().map_while(Result::ok) {
         if line.trim().is_empty() { continue; }
+        line_count += 1;
+
+        if !first_user_set || cwd.is_none() {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                if !first_user_set {
+                    if v.get("type").and_then(|t| t.as_str()) == Some("user") {
+                        if let Some(text) = v.get("message")
+                            .and_then(|m| m.get("content"))
+                            .and_then(|c| c.as_array())
+                            .and_then(|arr| arr.iter().find(|i| i.get("type").and_then(|t| t.as_str()) == Some("text")))
+                            .and_then(|i| i.get("text"))
+                            .and_then(|t| t.as_str())
+                        {
+                            if !text.is_empty() {
+                                title = truncate(text, 80);
+                                first_user_set = true;
+                            }
+                        }
+                    }
+                }
+                if cwd.is_none() {
+                    if let Some(c) = v.get("cwd").and_then(|x| x.as_str()) {
+                        cwd = Some(c.to_string());
+                    }
+                    if let Some(b) = v.get("gitBranch").and_then(|x| x.as_str()) {
+                        git_branch = Some(b.to_string());
+                    }
+                }
+            }
+        }
+
         if let Ok(bs) = parse_line(&line) {
             all_blocks.extend(bs);
         }
@@ -141,6 +188,12 @@ pub fn read_history(
     let start = end.saturating_sub(limit);
     let blocks = all_blocks[start..end].to_vec();
     let has_more_before = start > 0;
+
+    let meta = SessionMeta {
+        id, project_id, title,
+        message_count: line_count,
+        last_modified, git_branch, cwd,
+    };
 
     Ok(SessionHistory { meta, blocks, has_more_before })
 }
