@@ -6,7 +6,7 @@ import type { Project, SessionMeta, SessionHistory, HistoryBlock, Action, Action
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
 // in tagged enums).
 export type PtyKindClient =
-  | { kind: 'claude'; session_id: string }
+  | { kind: 'claude'; session_id?: string; model?: string; skip_permissions?: boolean }
   | { kind: 'action'; action_id: number };
 
 export const tauri = {

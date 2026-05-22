@@ -10,6 +10,7 @@ type Props = { project: Project };
 export function ProjectItem({ project }: Props) {
   const expanded = useStore(s => s.expandedProjectIds.has(project.id));
   const toggle = useStore(s => s.toggleProjectExpanded);
+  const openNew = useStore(s => s.openNewSessionTab);
   const [count, setCount] = useState<number | null>(null);
 
   useEffect(() => {
@@ -43,6 +44,13 @@ export function ProjectItem({ project }: Props) {
       </button>
       {expanded && (
         <div className="mt-1 mb-2.5 ml-4 pl-2.5 border-l border-border">
+          <button
+            onClick={(e) => { e.stopPropagation(); openNew(project.id); }}
+            className="w-full flex items-center gap-1.5 pl-7 pr-2 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors"
+          >
+            <Icon name="plus" className="w-3 h-3" strokeWidth={2} />
+            <span>New session</span>
+          </button>
           <SessionList projectId={project.id} />
         </div>
       )}

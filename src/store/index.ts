@@ -19,7 +19,16 @@ export const useStore = create<AppState>()((...a) => ({
 
 const PERSIST_KEY = 'abeoncode.settings';
 
-type Persisted = { theme?: 'dark' | 'light' | 'system'; leftWidth?: number; rightWidth?: number };
+type Persisted = {
+  theme?: 'dark' | 'light' | 'system';
+  leftWidth?: number;
+  rightWidth?: number;
+  displayName?: string;
+  defaultModelId?: string;
+  modelEfforts?: Record<string, string>;
+  customModels?: Array<{ id: string; modelId: string; label: string }>;
+  skipPermissions?: boolean;
+};
 
 function loadPersisted(): Persisted {
   try {
@@ -39,6 +48,11 @@ if (typeof persisted.leftWidth === 'number') {
 if (typeof persisted.rightWidth === 'number') {
   useStore.setState({ rightWidth: clamp(persisted.rightWidth, 220, 480) });
 }
+if (persisted.displayName) useStore.setState({ displayName: persisted.displayName });
+if (persisted.defaultModelId) useStore.setState({ defaultModelId: persisted.defaultModelId });
+if (persisted.modelEfforts) useStore.setState({ modelEfforts: persisted.modelEfforts as Record<string, 'low' | 'medium' | 'high'> });
+if (persisted.customModels) useStore.setState({ customModels: persisted.customModels });
+if (persisted.skipPermissions !== undefined) useStore.setState({ skipPermissions: persisted.skipPermissions });
 
 useStore.subscribe((state) => {
   try {
@@ -46,6 +60,11 @@ useStore.subscribe((state) => {
       theme: state.theme,
       leftWidth: state.leftWidth,
       rightWidth: state.rightWidth,
+      displayName: state.displayName,
+      defaultModelId: state.defaultModelId,
+      modelEfforts: state.modelEfforts,
+      customModels: state.customModels,
+      skipPermissions: state.skipPermissions,
     }));
   } catch {
     /* storage full or unavailable */

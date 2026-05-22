@@ -12,9 +12,10 @@ function TabPanel({ tab, visible }: { tab: Tab; visible: boolean }) {
     );
   }
   if (tab.kind === 'session' && tab.mode === 'terminal') {
+    const resumeId = tab.sessionId.startsWith('new-') ? undefined : tab.sessionId;
     return (
       <div className={`absolute inset-0 ${visible ? '' : 'invisible pointer-events-none'}`}>
-        <TerminalView projectId={tab.projectId} kind="claude" sessionId={tab.sessionId} visible={visible} />
+        <TerminalView projectId={tab.projectId} kind="claude" sessionId={resumeId} visible={visible} />
       </div>
     );
   }

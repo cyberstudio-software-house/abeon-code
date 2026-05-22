@@ -11,7 +11,12 @@ use crate::db::{projects_repo, actions_repo};
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum PtyKind {
     Claude {
-        session_id: String,
+        #[serde(default)]
+        session_id: Option<String>,
+        #[serde(default)]
+        model: Option<String>,
+        #[serde(default)]
+        skip_permissions: bool,
     },
     Action {
         #[ts(type = "number")]
@@ -33,13 +38,20 @@ pub fn spawn_pty(
     let cwd = std::path::PathBuf::from(&proj.path);
 
     let (program, args_owned) = match &kind {
-        PtyKind::Claude { session_id } => (
-            "bash".to_string(),
-            vec![
-                "-lc".to_string(),
-                format!("claude --resume {session_id}"),
-            ],
-        ),
+        PtyKind::Claude { session_id, model, skip_permissions } => {
+            let mut cmd = match (session_id, model) {
+                (Some(id), _) => format!("claude --resume {id}"),
+                (None, Some(m)) => format!("claude --model {m}"),
+                (None, None) => "claude".to_string(),
+            };
+            if *skip_permissions {
+                cmd.push_str(" --dangerously-skip-permissions");
+            }
+            (
+                "bash".to_string(),
+                vec!["-lc".to_string(), cmd],
+            )
+        }
         PtyKind::Action { action_id } => {
             let action = actions_repo::get(&c, *action_id)?;
             (

@@ -19,6 +19,8 @@ const paths: Record<string, ReactNode> = {
   dot:      <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/>,
   terminal: <g><polyline points="4 6 9 11 4 16"/><line x1="12" y1="16" x2="20" y2="16"/></g>,
   refresh:  <g><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></g>,
+  trash:    <g><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></g>,
+  close:    <g><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g>,
 };
 
 export type IconName = keyof typeof paths;

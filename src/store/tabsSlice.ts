@@ -8,6 +8,7 @@ export type TabsSlice = {
   tabs: Tab[];
   activeTabId: string | null;
   openSessionTab: (projectId: number, sessionId: string, title: string) => void;
+  openNewSessionTab: (projectId: number) => void;
   setSessionMode: (tabId: string, mode: 'history' | 'terminal') => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
@@ -25,6 +26,14 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
     if (existing) { set({ activeTabId: id }); return; }
     set({
       tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title, mode: 'history' }],
+      activeTabId: id,
+    });
+  },
+  openNewSessionTab: (projectId) => {
+    const sessionId = `new-${crypto.randomUUID()}`;
+    const id = sessionTabId(sessionId);
+    set({
+      tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title: 'New session', mode: 'terminal' }],
       activeTabId: id,
     });
   },

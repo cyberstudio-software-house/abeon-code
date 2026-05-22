@@ -32,6 +32,7 @@ export function HistoryStream({ blocks, onLoadMore, hasMore, header }: Props) {
   return (
     <Virtuoso
       data={blocks}
+      initialTopMostItemIndex={blocks.length > 0 ? blocks.length - 1 : 0}
       itemContent={(_, b) => <div className="px-7">{render(b)}</div>}
       startReached={() => { if (hasMore && onLoadMore) onLoadMore(); }}
       followOutput="auto"

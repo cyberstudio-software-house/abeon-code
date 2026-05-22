@@ -4,6 +4,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { tauri, type PtyKindClient } from '../../lib/tauri';
+import { useStore } from '../../store';
+import { getCliModelString } from '../../lib/models';
 
 type Props = {
   projectId: number;
@@ -14,6 +16,9 @@ type Props = {
 };
 
 export function TerminalView({ projectId, kind, sessionId, actionId, visible = true }: Props) {
+  const defaultModelId = useStore(s => s.defaultModelId);
+  const customModels = useStore(s => s.customModels);
+  const skipPermissions = useStore(s => s.skipPermissions);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -69,9 +74,13 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
 
     const cols = term.cols;
     const rows = term.rows;
+    const isResume = kind === 'claude' && !!sessionId;
+    const cliModel = !isResume && kind === 'claude'
+      ? getCliModelString(defaultModelId, customModels)
+      : undefined;
     const ptyKind: PtyKindClient =
       kind === 'claude'
-        ? { kind: 'claude', session_id: sessionId! }
+        ? { kind: 'claude', ...(sessionId ? { session_id: sessionId } : {}), ...(cliModel ? { model: cliModel } : {}), ...(skipPermissions ? { skip_permissions: true } : {}) }
         : { kind: 'action', action_id: actionId! };
 
     let cancelled = false;
