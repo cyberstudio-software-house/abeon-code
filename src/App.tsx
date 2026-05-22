@@ -10,7 +10,13 @@ export default function App() {
         <AppShell />
       </ErrorBoundary>
       <ErrorBoundary>
-        <Toaster richColors position="bottom-right" />
+        <Toaster
+          richColors
+          position="bottom-right"
+          toastOptions={{
+            style: { borderRadius: 0, fontFamily: "'Geist', sans-serif" },
+          }}
+        />
       </ErrorBoundary>
     </ThemeProvider>
   );

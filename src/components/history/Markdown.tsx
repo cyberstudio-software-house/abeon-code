@@ -25,7 +25,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   }, [code, lang, theme]);
   return (
     <div
-      className="text-xs overflow-x-auto rounded"
+      className="text-[11px] overflow-x-auto"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
@@ -39,13 +39,11 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
         code({ className, children, ...props }) {
           const m = /language-(\w+)/.exec(className || '');
           const code = String(children).replace(/\n$/, '');
-          // react-markdown v9+ no longer passes `inline` - use heuristic:
-          // language class OR newline in code = block code.
           const isBlock = !!m || code.includes('\n');
           if (!isBlock) {
             return (
               <code
-                className="bg-bg-elev-2 px-1 rounded text-[0.95em]"
+                className="bg-bg-elev-2 px-1 text-[0.95em] font-mono"
                 {...props}
               >
                 {children}

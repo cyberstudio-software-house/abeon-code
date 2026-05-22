@@ -43,8 +43,8 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
     });
   };
 
-  if (error) return <div className="p-4 text-danger text-sm">Błąd: {error}</div>;
-  if (!data) return <div className="p-4 text-muted text-sm">Wczytywanie historii…</div>;
+  if (error) return <div className="p-6 text-danger text-[13px]">Błąd: {error}</div>;
+  if (!data) return <div className="p-6 text-muted text-[13px]">Wczytywanie historii…</div>;
   return (
     <div className="h-full flex flex-col">
       <HistoryHeader meta={data.meta} tabId={tabId} />

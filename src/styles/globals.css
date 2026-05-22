@@ -3,31 +3,37 @@
 
 @layer base {
   :root {
-    --color-bg: #ffffff;
-    --color-bg-elev: #f6f7f9;
-    --color-bg-elev-2: #eceef2;
-    --color-fg: #0f1115;
-    --color-muted: #6a6d75;
-    --color-border: #d8dbe1;
-    --color-accent: #6366f1;
+    --color-bg: #faf8f5;
+    --color-bg-elev: #ffffff;
+    --color-bg-elev-2: #f2f0ed;
+    --color-fg: #1a1a1a;
+    --color-fg-secondary: #52504a;
+    --color-muted: #94918a;
+    --color-border: #e8e6e1;
+    --color-accent: #b78640;
     --color-accent-fg: #ffffff;
-    --color-danger: #dc2626;
-    --color-success: #16a34a;
-    --color-warn: #d97706;
+    --color-danger: #c14a3d;
+    --color-success: #61c454;
+    --color-warn: #f4be4f;
   }
   :root[data-theme="dark"] {
-    --color-bg: #0f1115;
-    --color-bg-elev: #13161d;
-    --color-bg-elev-2: #1a1e29;
-    --color-fg: #e6e8ec;
-    --color-muted: #8a8d96;
-    --color-border: #2a2d35;
-    --color-accent: #818cf8;
-    --color-accent-fg: #0b0d12;
-    --color-danger: #f87171;
-    --color-success: #4ade80;
-    --color-warn: #fbbf24;
+    --color-bg: #121210;
+    --color-bg-elev: #1a1917;
+    --color-bg-elev-2: #232220;
+    --color-fg: #e8e6e1;
+    --color-fg-secondary: #a8a59e;
+    --color-muted: #6b6860;
+    --color-border: #2e2d2a;
+    --color-accent: #d4a04e;
+    --color-accent-fg: #121210;
+    --color-danger: #ec6a5e;
+    --color-success: #61c454;
+    --color-warn: #f4be4f;
   }
   html, body, #root { height: 100%; }
-  body { background: var(--color-bg); color: var(--color-fg); font-family: theme(fontFamily.sans); }
+  body {
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: 'Geist', theme(fontFamily.sans);
+  }
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { Sidebar } from '../sidebar/Sidebar';
 import { CenterPanel } from '../center/CenterPanel';
 import { RightPanel } from '../right/RightPanel';
+import { TitleBar } from './TitleBar';
 import { useStore } from '../../store';
 
 const LEFT_MIN = 200;
@@ -50,7 +51,7 @@ function DragHandle({ onDrag, ariaLabel }: DragHandleProps) {
       aria-orientation="vertical"
       aria-label={ariaLabel}
       onMouseDown={onMouseDown}
-      className="w-1 cursor-col-resize bg-border hover:bg-accent transition-colors flex-shrink-0"
+      className="w-px cursor-col-resize bg-border hover:bg-accent transition-colors flex-shrink-0"
     />
   );
 }
@@ -75,17 +76,20 @@ export function AppShell() {
   );
 
   return (
-    <div className="flex h-full w-full overflow-hidden">
-      <div style={{ width: leftWidth }} className="h-full flex-shrink-0">
-        <Sidebar />
-      </div>
-      <DragHandle onDrag={onLeftDrag} ariaLabel="Resize sidebar" />
-      <div className="flex-1 h-full min-w-0">
-        <CenterPanel />
-      </div>
-      <DragHandle onDrag={onRightDrag} ariaLabel="Resize right panel" />
-      <div style={{ width: rightWidth }} className="h-full flex-shrink-0">
-        <RightPanel />
+    <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
+      <TitleBar />
+      <div className="flex flex-1 min-h-0">
+        <div style={{ width: leftWidth }} className="h-full flex-shrink-0">
+          <Sidebar />
+        </div>
+        <DragHandle onDrag={onLeftDrag} ariaLabel="Resize sidebar" />
+        <div className="flex-1 h-full min-w-0">
+          <CenterPanel />
+        </div>
+        <DragHandle onDrag={onRightDrag} ariaLabel="Resize right panel" />
+        <div style={{ width: rightWidth }} className="h-full flex-shrink-0">
+          <RightPanel />
+        </div>
       </div>
     </div>
   );

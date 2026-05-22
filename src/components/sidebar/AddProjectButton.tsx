@@ -6,7 +6,7 @@ export function AddProjectButton() {
   return (
     <>
       <button onClick={() => setOpen(true)}
-        className="w-full mt-3 py-2 text-sm border border-dashed border-border rounded text-muted hover:text-fg hover:border-fg">
+        className="w-full py-2 text-[11.5px] border border-dashed border-border text-muted hover:text-fg hover:border-fg-secondary">
         + Dodaj projekt
       </button>
       {open && <AddProjectDialog onClose={() => setOpen(false)} />}

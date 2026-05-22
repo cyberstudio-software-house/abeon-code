@@ -3,7 +3,7 @@ import { Markdown } from '../Markdown';
 export function ThinkingBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="text-xs text-muted italic my-1 pl-4">
+    <div className="text-[11px] text-muted italic my-1 ml-14">
       <button onClick={() => setOpen(o => !o)} className="hover:text-fg">
         {open ? '▾' : '▸'} thinking ({text.length} znaków)
       </button>

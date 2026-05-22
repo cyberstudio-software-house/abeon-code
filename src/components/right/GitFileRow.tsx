@@ -1,10 +1,16 @@
 import type { GitFile } from '../../types';
-const COLOR: Record<string, string> = { M: 'text-warn', A: 'text-success', D: 'text-danger', R: 'text-accent', '?': 'text-muted' };
+const STATUS_COLOR: Record<string, string> = {
+  M: 'text-accent',
+  A: 'text-success',
+  D: 'text-danger',
+  R: 'text-fg-secondary',
+  '?': 'text-muted',
+};
 export function GitFileRow({ file }: { file: GitFile }) {
   return (
-    <div className="flex items-center gap-2 text-xs font-mono px-2 py-0.5 hover:bg-bg-elev-2">
-      <span className={`w-3 ${COLOR[file.status] ?? 'text-muted'}`}>{file.status}</span>
-      <span className="truncate flex-1" title={file.path}>{file.path}</span>
+    <div className="flex items-center gap-2 text-[11.5px] px-2 py-1 hover:bg-bg-elev">
+      <span className={`text-[10px] font-semibold w-3 shrink-0 ${STATUS_COLOR[file.status] ?? 'text-muted'}`}>{file.status}</span>
+      <span className="truncate flex-1 text-fg" title={file.path}>{file.path}</span>
       {file.staged && <span className="text-[10px] text-success">●</span>}
     </div>
   );

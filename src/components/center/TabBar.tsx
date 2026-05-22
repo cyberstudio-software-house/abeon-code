@@ -23,19 +23,19 @@ export function TabBar() {
   if (tabs.length === 0) return null;
   return (
     <>
-      <div className="flex h-8 border-b border-border bg-bg-elev px-2 gap-1 items-end">
+      <div className="flex h-8 border-b border-border bg-bg px-2 gap-0.5 items-end">
         {tabs.map(t => (
           <button
             key={t.id}
             onClick={() => setActive(t.id)}
-            className={`group relative px-3 py-1 text-xs rounded-t border ${
+            className={`group relative px-3 py-1 text-[11px] border-x border-t ${
               t.id === active
-                ? 'bg-bg border-border border-b-bg text-fg'
-                : 'bg-bg-elev-2 border-transparent text-muted hover:text-fg'
+                ? 'bg-bg-elev border-border text-fg'
+                : 'bg-bg border-transparent text-muted hover:text-fg'
             }`}
           >
-            <span className="mr-2">
-              {t.kind === 'session' ? (t.mode === 'terminal' ? '⌘' : '◇') : '▶'}
+            <span className="mr-1.5 text-muted">
+              {t.kind === 'session' ? (t.mode === 'terminal' ? '›' : '◇') : '▶'}
             </span>
             <span className="truncate max-w-[160px] inline-block align-middle">{t.title}</span>
             <span

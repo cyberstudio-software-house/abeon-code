@@ -25,7 +25,7 @@ export function TerminalView({ projectId, kind, sessionId, actionId }: Props) {
     const bg =
       getComputedStyle(document.documentElement).getPropertyValue('--color-bg').trim() || '#0f1115';
     const term = new Terminal({
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
       theme: { background: bg },
       cursorBlink: true,

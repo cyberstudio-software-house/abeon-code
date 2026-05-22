@@ -26,7 +26,7 @@ export function HistoryStream({ blocks, onLoadMore, hasMore }: Props) {
   return (
     <Virtuoso
       data={blocks}
-      itemContent={(_, b) => <div className="px-4">{render(b)}</div>}
+      itemContent={(_, b) => <div className="px-6">{render(b)}</div>}
       startReached={() => { if (hasMore && onLoadMore) onLoadMore(); }}
       followOutput="auto"
       className="flex-1"

@@ -22,13 +22,19 @@ export function ActionRow({ action }: Props) {
   };
 
   return (
-    <div className="flex items-center gap-2 px-2 py-1 rounded hover:bg-bg-elev-2 text-xs">
+    <div className="flex items-center gap-3 px-2 py-2 hover:bg-bg-elev text-[12px]">
       <button onClick={isRunning ? stop : start}
-        className={`w-5 h-5 grid place-items-center rounded ${isRunning ? 'text-warn' : 'text-success'} hover:bg-bg`}>
-        {isRunning ? '■' : '▶'}
+        className={`shrink-0 ${isRunning ? 'text-warn' : 'text-fg-secondary'} hover:text-fg`}>
+        {isRunning ? (
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" /></svg>
+        ) : (
+          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="6,4 20,12 6,20" /></svg>
+        )}
       </button>
-      <span className="flex-1 truncate" title={action.command}>{action.label}</span>
-      {action.source && <span className="text-[10px] text-muted uppercase">{action.source}</span>}
+      <div className="flex-1 min-w-0">
+        <div className="text-fg truncate">{action.label}</div>
+        {action.source && <div className="text-[10px] text-muted">{action.source}{isRunning ? ' · uruchomione' : ''}</div>}
+      </div>
     </div>
   );
 }
