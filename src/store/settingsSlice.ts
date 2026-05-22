@@ -11,6 +11,7 @@ export type SettingsSlice = {
   defaultModelId: string;
   modelEfforts: Record<string, EffortLevel>;
   customModels: CustomModel[];
+  projectsBasePath: string;
   skipPermissions: boolean;
   settingsOpen: boolean;
 
@@ -22,6 +23,7 @@ export type SettingsSlice = {
   setModelEffort: (modelId: string, effort: EffortLevel) => void;
   addCustomModel: (model: CustomModel) => void;
   removeCustomModel: (id: string) => void;
+  setProjectsBasePath: (path: string) => void;
   setSkipPermissions: (v: boolean) => void;
   openSettings: () => void;
   closeSettings: () => void;
@@ -35,6 +37,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   defaultModelId: DEFAULT_MODEL_ID,
   modelEfforts: {},
   customModels: [],
+  projectsBasePath: '',
   skipPermissions: false,
   settingsOpen: false,
 
@@ -47,6 +50,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
     set({ modelEfforts: { ...get().modelEfforts, [modelId]: effort } }),
   addCustomModel: (model) =>
     set({ customModels: [...get().customModels, model] }),
+  setProjectsBasePath: (projectsBasePath) => set({ projectsBasePath }),
   setSkipPermissions: (skipPermissions) => set({ skipPermissions }),
   removeCustomModel: (id) => {
     const customModels = get().customModels.filter(m => m.id !== id);

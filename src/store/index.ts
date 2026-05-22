@@ -27,6 +27,7 @@ type Persisted = {
   defaultModelId?: string;
   modelEfforts?: Record<string, string>;
   customModels?: Array<{ id: string; modelId: string; label: string }>;
+  projectsBasePath?: string;
   skipPermissions?: boolean;
 };
 
@@ -52,6 +53,7 @@ if (persisted.displayName) useStore.setState({ displayName: persisted.displayNam
 if (persisted.defaultModelId) useStore.setState({ defaultModelId: persisted.defaultModelId });
 if (persisted.modelEfforts) useStore.setState({ modelEfforts: persisted.modelEfforts as Record<string, 'low' | 'medium' | 'high'> });
 if (persisted.customModels) useStore.setState({ customModels: persisted.customModels });
+if (persisted.projectsBasePath) useStore.setState({ projectsBasePath: persisted.projectsBasePath });
 if (persisted.skipPermissions !== undefined) useStore.setState({ skipPermissions: persisted.skipPermissions });
 
 useStore.subscribe((state) => {
@@ -64,6 +66,7 @@ useStore.subscribe((state) => {
       defaultModelId: state.defaultModelId,
       modelEfforts: state.modelEfforts,
       customModels: state.customModels,
+      projectsBasePath: state.projectsBasePath,
       skipPermissions: state.skipPermissions,
     }));
   } catch {

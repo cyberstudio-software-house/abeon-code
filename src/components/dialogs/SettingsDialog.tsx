@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../../store';
 import { Icon } from '../shared/Icon';
 import { BUILTIN_MODELS, type EffortLevel } from '../../lib/models';
@@ -79,8 +80,19 @@ function GeneralTab() {
   const setDisplayName = useStore(s => s.setDisplayName);
   const theme = useStore(s => s.theme);
   const setTheme = useStore(s => s.setTheme);
+  const projectsBasePath = useStore(s => s.projectsBasePath);
+  const setProjectsBasePath = useStore(s => s.setProjectsBasePath);
   const skipPermissions = useStore(s => s.skipPermissions);
   const setSkipPermissions = useStore(s => s.setSkipPermissions);
+
+  const pickProjectsBase = async () => {
+    const sel = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: projectsBasePath || undefined,
+    });
+    if (typeof sel === 'string') setProjectsBasePath(sel);
+  };
 
   return (
     <div className="space-y-6">
@@ -96,6 +108,29 @@ function GeneralTab() {
         />
         <p className="text-[11px] text-muted mt-2">
           Wyświetlana w stopce panelu bocznego. Puste pole oznacza użycie nazwy z Git.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">
+          Ścieżka bazowa projektów
+        </label>
+        <div className="flex gap-2">
+          <input
+            value={projectsBasePath}
+            onChange={e => setProjectsBasePath(e.target.value)}
+            placeholder="Nie ustawiono"
+            className="flex-1 bg-bg border border-border px-3 py-1.5 text-[13px] font-mono placeholder:text-muted/60"
+          />
+          <button
+            onClick={pickProjectsBase}
+            className="px-3 py-1.5 border border-border bg-bg-elev-2 text-[12px] text-fg-secondary hover:text-fg shrink-0"
+          >
+            Wybierz…
+          </button>
+        </div>
+        <p className="text-[11px] text-muted mt-2">
+          Katalog, od którego rozpoczyna się wybieranie folderu przy dodawaniu nowego projektu.
         </p>
       </div>
 

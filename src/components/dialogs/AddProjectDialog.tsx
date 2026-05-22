@@ -13,6 +13,7 @@ export function AddProjectDialog({ onClose }: Props) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const addProject = useStore(s => s.addProject);
+  const projectsBasePath = useStore(s => s.projectsBasePath);
 
   useEffect(() => {
     if (!path) { setScripts([]); return; }
@@ -20,7 +21,11 @@ export function AddProjectDialog({ onClose }: Props) {
   }, [path]);
 
   const pickFolder = async () => {
-    const sel = await open({ directory: true, multiple: false });
+    const sel = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: projectsBasePath || undefined,
+    });
     if (typeof sel === 'string') {
       setPath(sel);
       if (!name) setName(sel.split('/').pop() ?? sel);
