@@ -1,5 +1,6 @@
 import { useStore } from '../../store';
 import { HistoryView } from '../history/HistoryView';
+import { TerminalView } from '../terminal/TerminalView';
 
 export function TabContent() {
   const tabs = useStore(s => s.tabs);
@@ -11,7 +12,10 @@ export function TabContent() {
     return <HistoryView projectId={tab.projectId} sessionId={tab.sessionId} tabId={tab.id} />;
   }
   if (tab.kind === 'session' && tab.mode === 'terminal') {
-    return <div className="flex-1 grid place-items-center text-muted">(Terminal — Phase 5)</div>;
+    return <TerminalView projectId={tab.projectId} kind="claude" sessionId={tab.sessionId} />;
   }
-  return <div className="flex-1 grid place-items-center text-muted">(Action log — Phase 6)</div>;
+  if (tab.kind === 'action') {
+    return <TerminalView projectId={tab.projectId} kind="action" actionId={tab.actionId} />;
+  }
+  return null;
 }
