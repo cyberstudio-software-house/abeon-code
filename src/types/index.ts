@@ -6,3 +6,4 @@ export type { ActionPatch } from './ActionPatch';
 export type { SessionMeta } from './SessionMeta';
 export type { HistoryBlock } from './HistoryBlock';
 export type { SessionHistory } from './SessionHistory';
+export type { PtyKind } from './PtyKind';

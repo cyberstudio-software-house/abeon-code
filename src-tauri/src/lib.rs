@@ -36,6 +36,10 @@ pub fn run() {
             commands::sessions::read_session_history,
             commands::sessions::open_session_watch,
             commands::sessions::close_session_watch,
+            commands::pty::spawn_pty,
+            commands::pty::pty_write,
+            commands::pty::pty_resize,
+            commands::pty::pty_kill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

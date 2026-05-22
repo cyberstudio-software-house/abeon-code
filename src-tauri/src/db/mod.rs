@@ -6,6 +6,7 @@ use crate::error::{AppError, AppResult};
 pub type DbPool = Pool<SqliteConnectionManager>;
 
 pub mod projects_repo;
+pub mod actions_repo;
 
 const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
 
