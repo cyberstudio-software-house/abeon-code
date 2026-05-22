@@ -1,6 +1,7 @@
 import { useStore } from '../../store';
 import type { Project } from '../../types';
 import { SessionList } from './SessionList';
+import { Icon } from '../shared/Icon';
 
 type Props = { project: Project };
 
@@ -13,13 +14,12 @@ export function ProjectItem({ project }: Props) {
         onClick={() => toggle(project.id)}
         className="w-full text-left px-2 py-1.5 flex items-center gap-2 hover:bg-bg-elev"
       >
-        <svg className={`w-2.5 h-2.5 text-fg transition-transform ${expanded ? 'rotate-90' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <polyline points="9 18 15 12 9 6" />
-        </svg>
+        <Icon name="chevR" className={`w-2.5 h-2.5 text-fg transition-transform ${expanded ? 'rotate-90' : ''}`} strokeWidth={2.5} />
         <div className="flex-1 min-w-0">
           <div className="text-[12.5px] font-semibold truncate">{project.name}</div>
           <div className="text-[10px] text-muted truncate">{project.path}</div>
         </div>
+        <span className="text-[10px] text-muted shrink-0">...</span>
       </button>
       {expanded && <SessionList projectId={project.id} />}
     </li>

@@ -12,8 +12,10 @@ export function SessionItem({ session, active, onClick }: Props) {
     >
       <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${active ? 'bg-muted' : 'bg-muted'}`} />
       <div className="flex-1 min-w-0">
-        <div className="truncate font-medium">{session.title}</div>
-        <div className="text-[10px] text-muted">{formatRelative(session.lastModified)}</div>
+        <div className="truncate font-medium text-[12px]">{session.title}</div>
+        <div className="font-mono text-[10px] text-muted">
+          s-{session.id.slice(0, 4)} · {session.messageCount} tur · {formatRelative(session.lastModified)}
+        </div>
       </div>
     </li>
   );

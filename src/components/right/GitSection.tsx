@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useStore } from '../../store';
 import { GitFileList } from './GitFileList';
+import { Icon } from '../shared/Icon';
 
 export function GitSection() {
   const projects = useStore(s => s.projects);
@@ -24,13 +25,11 @@ export function GitSection() {
     <section className="flex-1 min-h-0 overflow-auto">
       <div className="flex items-center justify-between mb-3">
         <span className="text-[10px] text-muted font-medium uppercase tracking-wider">Zmiany</span>
-        <span className="text-[10px] text-muted">plików</span>
+        {status && status.isRepo && <span className="text-[10px] text-muted">{status.files.length} plików</span>}
       </div>
       {status?.branch && (
         <div className="flex items-center gap-2 bg-bg-elev px-3 py-1.5 mb-3 text-[11px]">
-          <svg className="w-3.5 h-3.5 text-fg-secondary shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M13 6h3a2 2 0 0 1 2 2v7" />
-          </svg>
+          <Icon name="branch" className="w-3.5 h-3.5 text-fg-secondary shrink-0" />
           <span className="text-fg font-medium">{status.branch}</span>
           {(status.ahead > 0 || status.behind > 0) && (
             <span className="text-muted ml-auto">↑{status.ahead} ↓{status.behind}</span>
