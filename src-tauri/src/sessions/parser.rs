@@ -119,7 +119,10 @@ fn summarize_input(v: &Value) -> String {
             let mut parts = Vec::new();
             for (k, val) in map.iter().take(3) {
                 let short = match val {
-                    Value::String(s) if s.len() > 40 => format!("\"{}…\"", &s[..40]),
+                    Value::String(s) if s.chars().count() > 40 => {
+                        let truncated: String = s.chars().take(40).collect();
+                        format!("\"{truncated}…\"")
+                    }
                     other => other.to_string(),
                 };
                 parts.push(format!("{k}: {short}"));
