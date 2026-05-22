@@ -5,6 +5,7 @@ pub mod sessions;
 pub mod pty;
 pub mod state;
 pub mod commands;
+pub mod detectors;
 
 use state::AppState;
 
