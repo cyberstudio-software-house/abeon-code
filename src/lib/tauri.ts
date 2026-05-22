@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Project, SessionMeta, SessionHistory, HistoryBlock } from '../types';
+import type { Project, SessionMeta, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript } from '../types';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -42,4 +42,9 @@ export const tauri = {
     }),
   onPtyExit: (ptyId: string, cb: (code: number) => void): Promise<UnlistenFn> =>
     listen<{ code: number }>(`pty:${ptyId}:exit`, e => cb(e.payload.code)),
+  listActions: (projectId: number) => invoke<Action[]>('list_actions', { projectId }),
+  detectScripts: (projectPath: string) => invoke<DetectedScript[]>('detect_scripts', { projectPath }),
+  addAction: (input: ActionInput) => invoke<Action>('add_action', { input }),
+  updateAction: (id: number, patch: ActionPatch) => invoke<Action>('update_action', { id, patch }),
+  removeAction: (id: number) => invoke<void>('remove_action', { id }),
 };
