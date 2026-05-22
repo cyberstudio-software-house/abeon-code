@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useStore } from '../../store';
 import { AddProjectButton } from './AddProjectButton';
 import { ProjectItem } from './ProjectItem';
+import { ThemeSwitcher } from '../layout/ThemeSwitcher';
 
 export function Sidebar() {
   const projects = useStore(s => s.projects);
@@ -16,6 +17,10 @@ export function Sidebar() {
         {projects.map(p => <ProjectItem key={p.id} project={p} />)}
       </ul>
       <AddProjectButton />
+      <div className="mt-3 pt-3 border-t border-border flex items-center justify-between">
+        <span className="text-[10px] text-muted uppercase">Motyw</span>
+        <ThemeSwitcher />
+      </div>
     </aside>
   );
 }
