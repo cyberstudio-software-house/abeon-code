@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Project } from '../types';
+import type { Project, SessionMeta, SessionHistory } from '../types';
 
 export const tauri = {
   listProjects: () => invoke<Project[]>('list_projects'),
@@ -9,4 +9,8 @@ export const tauri = {
     invoke<Project>('update_project', { id, ...patch }),
   removeProject: (id: number) => invoke<void>('remove_project', { id }),
   reorderProjects: (ids: number[]) => invoke<void>('reorder_projects', { ids }),
+  listSessions: (projectId: number, limit = 20, offset = 0) =>
+    invoke<SessionMeta[]>('list_sessions', { projectId, limit, offset }),
+  readSessionHistory: (projectId: number, sessionId: string, limit?: number, beforeUuid?: string) =>
+    invoke<SessionHistory>('read_session_history', { projectId, sessionId, limit, beforeUuid }),
 };
