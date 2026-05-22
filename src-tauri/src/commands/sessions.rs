@@ -74,3 +74,75 @@ pub fn count_sessions(
         .count();
     Ok(count)
 }
+
+#[tauri::command]
+pub fn export_session(
+    state: State<AppState>,
+    project_id: i64,
+    session_id: String,
+    format: String,
+) -> AppResult<String> {
+    let c = state.db.get()?;
+    let proj = projects_repo::get(&c, project_id)?;
+    let dir = claude_root()?.join(&proj.claude_dir);
+    let history = reader::read_history(project_id, &dir, &session_id, None, None)?;
+
+    match format.as_str() {
+        "json" => Ok(serde_json::to_string_pretty(&history)?),
+        "md" | _ => Ok(render_markdown(&history)),
+    }
+}
+
+fn render_markdown(h: &crate::domain::SessionHistory) -> String {
+    use crate::domain::HistoryBlock;
+    let mut out = String::new();
+    out.push_str(&format!("# {}\n\n", h.meta.title));
+    out.push_str(&format!(
+        "Session: {} | {} messages | {}\n\n---\n\n",
+        h.meta.id,
+        h.meta.message_count,
+        h.meta.git_branch.as_deref().unwrap_or("no branch"),
+    ));
+    for block in &h.blocks {
+        match block {
+            HistoryBlock::UserText { text, .. } => {
+                out.push_str(&format!("**You:**\n\n{}\n\n", text));
+            }
+            HistoryBlock::AssistantText { text, .. } => {
+                out.push_str(&format!("**Claude:**\n\n{}\n\n", text));
+            }
+            HistoryBlock::AssistantThinking { text, .. } => {
+                out.push_str(&format!(
+                    "<details><summary>Thinking</summary>\n\n{}\n\n</details>\n\n",
+                    text
+                ));
+            }
+            HistoryBlock::ToolUse {
+                name, input_summary, ..
+            } => {
+                out.push_str(&format!("> **{}** > {}\n\n", name, input_summary));
+            }
+            HistoryBlock::ToolResult {
+                content, is_error, ..
+            } => {
+                if *is_error {
+                    out.push_str(&format!(
+                        "```\n[ERROR] {}\n```\n\n",
+                        &content[..content.len().min(500)]
+                    ));
+                }
+            }
+            HistoryBlock::Attachment {
+                attachment_kind,
+                name,
+                ..
+            } => {
+                out.push_str(&format!("Attachment: {} - {}\n\n", attachment_kind, name));
+            }
+            HistoryBlock::System { subtype, .. } => {
+                out.push_str(&format!("*[system: {}]*\n\n", subtype));
+            }
+        }
+    }
+    out
+}

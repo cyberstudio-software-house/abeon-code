@@ -22,12 +22,36 @@ export function TerminalView({ projectId, kind, sessionId, actionId }: Props) {
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
-    const bg =
-      getComputedStyle(document.documentElement).getPropertyValue('--color-bg').trim() || '#0f1115';
+    const cs = getComputedStyle(document.documentElement);
+    const v = (name: string) => cs.getPropertyValue(name).trim();
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const term = new Terminal({
       fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
-      theme: { background: bg },
+      lineHeight: 1.4,
+      theme: {
+        background:  v('--color-bg-elev') || (isDark ? '#1a1917' : '#ffffff'),
+        foreground:  v('--color-fg') || (isDark ? '#e8e6e1' : '#1a1a1a'),
+        cursor:      v('--color-accent') || '#b78640',
+        cursorAccent: v('--color-bg-elev') || '#ffffff',
+        selectionBackground: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
+        black:   isDark ? '#1a1917' : '#1a1a1a',
+        red:     '#c14a3d',
+        green:   '#61c454',
+        yellow:  '#f4be4f',
+        blue:    '#5b9bd5',
+        magenta: '#b78640',
+        cyan:    '#4db8a4',
+        white:   isDark ? '#e8e6e1' : '#52504a',
+        brightBlack:   isDark ? '#6b6860' : '#94918a',
+        brightRed:     '#ec6a5e',
+        brightGreen:   '#7dd56f',
+        brightYellow:  '#f5cf6e',
+        brightBlue:    '#7db8e8',
+        brightMagenta: '#d4a04e',
+        brightCyan:    '#6dd4bf',
+        brightWhite:   isDark ? '#faf8f5' : '#1a1a1a',
+      },
       cursorBlink: true,
       convertEol: true,
     });
@@ -85,5 +109,5 @@ export function TerminalView({ projectId, kind, sessionId, actionId }: Props) {
     };
   }, [projectId, kind, sessionId, actionId]);
 
-  return <div ref={containerRef} className="h-full w-full bg-bg p-2" />;
+  return <div ref={containerRef} className="h-full w-full bg-bg-elev p-4 pb-6" />;
 }

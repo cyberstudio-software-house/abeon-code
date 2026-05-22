@@ -50,6 +50,7 @@ pub fn run() {
             commands::git::git_status,
             commands::settings::get_git_user,
             commands::sessions::count_sessions,
+            commands::sessions::export_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
