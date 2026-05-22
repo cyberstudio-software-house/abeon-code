@@ -31,9 +31,14 @@ function loadPersisted(): Persisted {
 }
 
 const persisted = loadPersisted();
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 if (persisted.theme !== undefined) useStore.setState({ theme: persisted.theme });
-if (persisted.leftWidth !== undefined) useStore.setState({ leftWidth: persisted.leftWidth });
-if (persisted.rightWidth !== undefined) useStore.setState({ rightWidth: persisted.rightWidth });
+if (typeof persisted.leftWidth === 'number') {
+  useStore.setState({ leftWidth: clamp(persisted.leftWidth, 200, 420) });
+}
+if (typeof persisted.rightWidth === 'number') {
+  useStore.setState({ rightWidth: clamp(persisted.rightWidth, 220, 480) });
+}
 
 useStore.subscribe((state) => {
   try {
