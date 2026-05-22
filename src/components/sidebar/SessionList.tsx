@@ -8,6 +8,7 @@ export function SessionList({ projectId }: Props) {
   const state = useStore(s => s.sessionsByProject[projectId]);
   const load = useStore(s => s.loadInitialSessions);
   const loadMore = useStore(s => s.loadMoreSessions);
+  const openTab = useStore(s => s.openSessionTab);
 
   useEffect(() => { if (!state) load(projectId); }, [projectId, state, load]);
 
@@ -17,7 +18,7 @@ export function SessionList({ projectId }: Props) {
   return (
     <ul className="pl-4 space-y-0.5 mt-1">
       {state.items.map(s => (
-        <SessionItem key={s.id} session={s} onClick={() => {/* hook to tabs slice in Task 3.6 */}} />
+        <SessionItem key={s.id} session={s} onClick={() => openTab(projectId, s.id, s.title)} />
       ))}
       {state.hasMore && (
         <li>
