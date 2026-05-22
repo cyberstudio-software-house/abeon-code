@@ -3,6 +3,8 @@ import { tauri } from '../../lib/tauri';
 import type { SessionHistory, HistoryBlock } from '../../types';
 import { HistoryHeader } from './HistoryHeader';
 import { HistoryStream } from './HistoryStream';
+import { ReadOnlyPill } from './ReadOnlyPill';
+import { SessionFooter } from './SessionFooter';
 
 type Props = { projectId: number; sessionId: string; tabId: string };
 
@@ -47,8 +49,14 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
   if (!data) return <div className="p-6 text-muted text-[13px]">Wczytywanie historii…</div>;
   return (
     <div className="h-full flex flex-col">
-      <HistoryHeader meta={data.meta} tabId={tabId} />
-      <HistoryStream blocks={data.blocks} onLoadMore={loadMore} hasMore={data.hasMoreBefore} />
+      <HistoryHeader meta={data.meta} />
+      <HistoryStream
+        blocks={data.blocks}
+        onLoadMore={loadMore}
+        hasMore={data.hasMoreBefore}
+        header={<div className="px-7 py-[18px]"><ReadOnlyPill /></div>}
+      />
+      <SessionFooter sessionId={sessionId} tabId={tabId} />
     </div>
   );
 }

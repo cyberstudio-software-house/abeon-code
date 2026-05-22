@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Virtuoso } from 'react-virtuoso';
 import type { HistoryBlock } from '../../types';
 import { UserBubble } from './blocks/UserBubble';
@@ -8,7 +9,12 @@ import { ToolResultBlock } from './blocks/ToolResultBlock';
 import { AttachmentBlock } from './blocks/AttachmentBlock';
 import { SystemBlock } from './blocks/SystemBlock';
 
-type Props = { blocks: HistoryBlock[]; onLoadMore?: () => void; hasMore: boolean };
+type Props = {
+  blocks: HistoryBlock[];
+  onLoadMore?: () => void;
+  hasMore: boolean;
+  header?: ReactNode;
+};
 
 function render(b: HistoryBlock) {
   switch (b.kind) {
@@ -22,14 +28,15 @@ function render(b: HistoryBlock) {
   }
 }
 
-export function HistoryStream({ blocks, onLoadMore, hasMore }: Props) {
+export function HistoryStream({ blocks, onLoadMore, hasMore, header }: Props) {
   return (
     <Virtuoso
       data={blocks}
-      itemContent={(_, b) => <div className="px-6">{render(b)}</div>}
+      itemContent={(_, b) => <div className="px-7">{render(b)}</div>}
       startReached={() => { if (hasMore && onLoadMore) onLoadMore(); }}
       followOutput="auto"
       className="flex-1"
+      components={header ? { Header: () => <>{header}</> } : undefined}
     />
   );
 }
