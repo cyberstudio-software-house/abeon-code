@@ -1,14 +1,14 @@
-use parking_lot::RwLock;
 use std::sync::Arc;
 use crate::db::DbPool;
+use crate::sessions::watcher::SessionWatchers;
 
 pub struct AppState {
     pub db: DbPool,
-    pub watchers: Arc<RwLock<Vec<()>>>,
+    pub session_watchers: Arc<SessionWatchers>,
 }
 
 impl AppState {
     pub fn new(db: DbPool) -> Self {
-        Self { db, watchers: Arc::new(RwLock::new(Vec::new())) }
+        Self { db, session_watchers: SessionWatchers::new() }
     }
 }
