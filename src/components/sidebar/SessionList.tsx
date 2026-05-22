@@ -12,8 +12,8 @@ export function SessionList({ projectId }: Props) {
 
   useEffect(() => { if (!state) load(projectId); }, [projectId, state, load]);
 
-  if (!state) return <div className="text-[12px] text-muted pl-7 py-1">Wczytywanie…</div>;
-  if (state.items.length === 0) return <div className="text-[12px] text-muted pl-7 py-1">Brak sesji</div>;
+  if (!state) return <div className="text-[12px] text-muted py-1">Wczytywanie…</div>;
+  if (state.items.length === 0) return <div className="text-[12px] text-muted py-1">Brak sesji</div>;
 
   return (
     <ul className="space-y-0.5 mt-1">
@@ -23,7 +23,7 @@ export function SessionList({ projectId }: Props) {
       {state.hasMore && (
         <li>
           <button onClick={() => loadMore(projectId)}
-            className="text-[11.5px] text-muted hover:text-fg pl-7 py-1">
+            className="text-[11.5px] text-muted hover:text-fg py-1">
             Załaduj starsze…
           </button>
         </li>

@@ -34,19 +34,16 @@ export function ProjectItem({ project }: Props) {
           <div className={`text-[12.5px] truncate ${expanded ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>
             {project.name}
           </div>
-          <div className="font-mono text-[10px] text-muted mt-px truncate">
-            {project.path}
-          </div>
         </div>
         {count !== null && (
           <span className="font-mono text-[10px] text-muted tabular-nums">{count}</span>
         )}
       </button>
       {expanded && (
-        <div className="mt-1 mb-2.5 ml-4 pl-2.5 border-l border-border">
+        <div className="mt-1 mb-2.5 ml-4 pl-3.5 border-l border-border">
           <button
             onClick={(e) => { e.stopPropagation(); openNew(project.id); }}
-            className="w-full flex items-center gap-1.5 pl-7 pr-2 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors"
+            className="w-full flex items-center gap-1.5 pr-2 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors"
           >
             <Icon name="plus" className="w-3 h-3" strokeWidth={2} />
             <span>New session</span>

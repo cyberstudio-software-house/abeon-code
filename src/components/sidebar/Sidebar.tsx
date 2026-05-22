@@ -34,7 +34,7 @@ export function Sidebar() {
     : projects;
 
   return (
-    <aside className="h-full bg-bg px-[18px] pt-[18px] pb-2.5 text-[13px] flex flex-col">
+    <aside className="h-full bg-bg px-2.5 pt-[18px] pb-2.5 text-[13px] flex flex-col">
       <div className="text-[10px] tracking-[0.14em] uppercase text-muted font-medium">
         Projekty
       </div>
@@ -51,7 +51,7 @@ export function Sidebar() {
         <Kbd>⌘K</Kbd>
       </div>
 
-      <ul className="mt-3 space-y-0.5 overflow-y-auto scroll-thin flex-1 px-1.5 pb-3">
+      <ul className="mt-3 space-y-0.5 overflow-y-auto scroll-thin flex-1 pb-3">
         {filtered.length === 0 && <li className="text-muted text-[12px] px-2.5">— pusto —</li>}
         {filtered.map(p => <ProjectItem key={p.id} project={p} />)}
       </ul>
