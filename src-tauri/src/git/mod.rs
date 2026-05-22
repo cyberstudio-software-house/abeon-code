@@ -27,11 +27,45 @@ pub fn status(path: &Path) -> AppResult<GitStatus> {
     opts.include_untracked(true).recurse_untracked_dirs(true);
     let statuses = repo.statuses(Some(&mut opts))?;
 
+    // Compute per-file diff stats (additions/deletions)
+    let mut diff_opts = git2::DiffOptions::new();
+    diff_opts.include_untracked(true);
+
+    // Index vs workdir diff (unstaged changes)
+    let diff_wt = repo.diff_index_to_workdir(None, Some(&mut diff_opts))?;
+    // HEAD vs index diff (staged changes)
+    let head_tree = head.as_ref()
+        .and_then(|h| h.peel_to_tree().ok());
+    let diff_idx = repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut diff_opts))?;
+
+    // Build a map of path -> (additions, deletions)
+    let mut stats_map: std::collections::HashMap<String, (usize, usize)> = std::collections::HashMap::new();
+
+    for diff in [&diff_wt, &diff_idx] {
+        diff.foreach(
+            &mut |_delta, _| true,
+            None,
+            None,
+            Some(&mut |delta, _hunk, line| {
+                if let Some(path) = delta.new_file().path().and_then(|p| p.to_str()) {
+                    let entry = stats_map.entry(path.to_string()).or_insert((0, 0));
+                    match line.origin() {
+                        '+' => entry.0 += 1,
+                        '-' => entry.1 += 1,
+                        _ => {}
+                    }
+                }
+                true
+            }),
+        )?;
+    }
+
     let files: Vec<GitFile> = statuses.iter().filter_map(|s| {
         let p = s.path()?.to_string();
         let st = s.status();
         let (status, staged) = status_to_char(st);
-        Some(GitFile { path: p, status, staged })
+        let (additions, deletions) = stats_map.get(&p).copied().unwrap_or((0, 0));
+        Some(GitFile { path: p, status, staged, additions, deletions })
     }).collect();
 
     Ok(GitStatus { branch, ahead, behind, files, is_repo: true })

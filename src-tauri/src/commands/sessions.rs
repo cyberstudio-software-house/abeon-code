@@ -58,3 +58,19 @@ pub fn close_session_watch(state: State<AppState>, session_id: String) -> AppRes
     state.session_watchers.close(&session_id);
     Ok(())
 }
+
+#[tauri::command]
+pub fn count_sessions(
+    state: State<AppState>,
+    project_id: i64,
+) -> AppResult<usize> {
+    let c = state.db.get()?;
+    let proj = projects_repo::get(&c, project_id)?;
+    let dir = claude_root()?.join(&proj.claude_dir);
+    if !dir.exists() { return Ok(0); }
+    let count = std::fs::read_dir(&dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))
+        .count();
+    Ok(count)
+}

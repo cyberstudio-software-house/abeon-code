@@ -8,6 +8,10 @@ pub struct GitFile {
     pub path: String,
     pub status: String,
     pub staged: bool,
+    #[ts(type = "number")]
+    pub additions: usize,
+    #[ts(type = "number")]
+    pub deletions: usize,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]

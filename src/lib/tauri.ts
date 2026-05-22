@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Project, SessionMeta, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus } from '../types';
+import type { Project, SessionMeta, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser } from '../types';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -48,4 +48,6 @@ export const tauri = {
   updateAction: (id: number, patch: ActionPatch) => invoke<Action>('update_action', { id, patch }),
   removeAction: (id: number) => invoke<void>('remove_action', { id }),
   gitStatus: (projectId: number) => invoke<GitStatus>('git_status', { projectId }),
+  getGitUser: () => invoke<GitUser>('get_git_user'),
+  countSessions: (projectId: number) => invoke<number>('count_sessions', { projectId }),
 };

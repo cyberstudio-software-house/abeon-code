@@ -48,6 +48,8 @@ pub fn run() {
             commands::actions::update_action,
             commands::actions::remove_action,
             commands::git::git_status,
+            commands::settings::get_git_user,
+            commands::sessions::count_sessions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

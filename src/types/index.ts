@@ -10,3 +10,4 @@ export type { PtyKind } from './PtyKind';
 export type { DetectedScript } from './DetectedScript';
 export type { GitFile } from './GitFile';
 export type { GitStatus } from './GitStatus';
+export type { GitUser } from './GitUser';
