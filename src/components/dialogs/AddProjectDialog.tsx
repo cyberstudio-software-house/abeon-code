@@ -1,39 +1,60 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { tauri } from '../../lib/tauri';
 import { useStore } from '../../store';
+import type { DetectedScript } from '../../types';
 
 type Props = { onClose: () => void };
 
 export function AddProjectDialog({ onClose }: Props) {
   const [name, setName] = useState('');
   const [path, setPath] = useState('');
+  const [scripts, setScripts] = useState<DetectedScript[]>([]);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const addProject = useStore(s => s.addProject);
 
+  useEffect(() => {
+    if (!path) { setScripts([]); return; }
+    tauri.detectScripts(path).then(setScripts).catch(() => setScripts([]));
+  }, [path]);
+
   const pickFolder = async () => {
-    const selected = await open({ directory: true, multiple: false });
-    if (typeof selected === 'string') {
-      setPath(selected);
-      if (!name) setName(selected.split('/').pop() ?? selected);
+    const sel = await open({ directory: true, multiple: false });
+    if (typeof sel === 'string') {
+      setPath(sel);
+      if (!name) setName(sel.split('/').pop() ?? sel);
     }
+  };
+
+  const toggle = (i: number) => {
+    const next = new Set(selected);
+    if (next.has(i)) next.delete(i); else next.add(i);
+    setSelected(next);
   };
 
   const submit = async () => {
     setError(null);
     try {
-      await addProject(name.trim(), path.trim());
+      const project = await addProject(name.trim(), path.trim());
+      for (const i of selected) {
+        const s = scripts[i];
+        await tauri.addAction({
+          projectId: project.id, label: s.label, command: s.command,
+          workingDir: null, source: s.source,
+        });
+      }
       onClose();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setError(msg);
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 grid place-items-center z-50">
-      <div className="bg-bg-elev border border-border rounded-lg p-5 w-[420px]">
+      <div className="bg-bg-elev border border-border rounded-lg p-5 w-[520px] max-h-[80vh] overflow-auto">
         <h2 className="text-lg font-semibold mb-3">Dodaj projekt</h2>
-        <label className="block text-xs text-muted mb-1">Ścieżka katalogu</label>
+        <label className="block text-xs text-muted mb-1">Ścieżka</label>
         <div className="flex gap-2 mb-3">
           <input value={path} onChange={e => setPath(e.target.value)}
             className="flex-1 bg-bg border border-border rounded px-2 py-1" />
@@ -42,7 +63,23 @@ export function AddProjectDialog({ onClose }: Props) {
         </div>
         <label className="block text-xs text-muted mb-1">Nazwa</label>
         <input value={name} onChange={e => setName(e.target.value)}
-          className="w-full bg-bg border border-border rounded px-2 py-1 mb-3" />
+          className="w-full bg-bg border border-border rounded px-2 py-1 mb-4" />
+
+        {scripts.length > 0 && (
+          <>
+            <div className="text-xs text-muted mb-2">Wykryte skrypty — wybierz, które dodać jako akcje:</div>
+            <div className="space-y-1 mb-4 max-h-64 overflow-auto border border-border rounded p-2">
+              {scripts.map((s, i) => (
+                <label key={`${s.source}-${s.label}-${i}`} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                  <input type="checkbox" checked={selected.has(i)} onChange={() => toggle(i)} />
+                  <span className="text-[10px] text-muted uppercase w-16">{s.source}</span>
+                  <span className="font-mono text-xs">{s.label}</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
+
         {error && <div className="text-danger text-sm mb-3">{error}</div>}
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-1 border border-border rounded">Anuluj</button>
