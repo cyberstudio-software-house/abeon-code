@@ -1,3 +1,4 @@
+use std::panic;
 use std::path::PathBuf;
 use tauri::{AppHandle, State};
 use crate::domain::{SessionMeta, SessionHistory};
@@ -12,6 +13,18 @@ fn claude_root() -> AppResult<PathBuf> {
     Ok(home.join(".claude").join("projects"))
 }
 
+fn catch<T, F: FnOnce() -> AppResult<T> + panic::UnwindSafe>(f: F) -> AppResult<T> {
+    match panic::catch_unwind(f) {
+        Ok(result) => result,
+        Err(e) => {
+            let msg = e.downcast_ref::<String>().map(|s| s.as_str())
+                .or_else(|| e.downcast_ref::<&str>().copied())
+                .unwrap_or("unknown panic");
+            Err(AppError::Other(format!("internal error: {msg}")))
+        }
+    }
+}
+
 #[tauri::command]
 pub fn list_sessions(
     state: State<AppState>,
@@ -22,7 +35,7 @@ pub fn list_sessions(
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
     let dir = claude_root()?.join(&proj.claude_dir);
-    reader::list_sessions(project_id, &dir, limit, offset)
+    catch(move || reader::list_sessions(project_id, &dir, limit, offset))
 }
 
 #[tauri::command]
@@ -36,7 +49,7 @@ pub fn read_session_history(
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
     let dir = claude_root()?.join(&proj.claude_dir);
-    reader::read_history(project_id, &dir, &session_id, limit, before_uuid.as_deref())
+    catch(move || reader::read_history(project_id, &dir, &session_id, limit, before_uuid.as_deref()))
 }
 
 #[tauri::command]
@@ -85,62 +98,48 @@ pub fn export_session(
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
     let dir = claude_root()?.join(&proj.claude_dir);
-    let history = reader::read_history(project_id, &dir, &session_id, None, None)?;
-
-    match format.as_str() {
-        "json" => Ok(serde_json::to_string_pretty(&history)?),
-        "md" | _ => Ok(render_markdown(&history)),
-    }
+    catch(move || {
+        let history = reader::read_history(project_id, &dir, &session_id, None, None)?;
+        match format.as_str() {
+            "json" => Ok(serde_json::to_string_pretty(&history)?),
+            "md" | _ => Ok(render_markdown(&history)),
+        }
+    })
 }
 
-fn render_markdown(h: &crate::domain::SessionHistory) -> String {
+fn render_markdown(h: &SessionHistory) -> String {
     use crate::domain::HistoryBlock;
     let mut out = String::new();
     out.push_str(&format!("# {}\n\n", h.meta.title));
-    out.push_str(&format!(
-        "Session: {} | {} messages | {}\n\n---\n\n",
-        h.meta.id,
-        h.meta.message_count,
+    out.push_str(&format!("Session: {} | {} messages | {}\n\n---\n\n",
+        h.meta.id, h.meta.message_count,
         h.meta.git_branch.as_deref().unwrap_or("no branch"),
     ));
     for block in &h.blocks {
         match block {
             HistoryBlock::UserText { text, .. } => {
-                out.push_str(&format!("**You:**\n\n{}\n\n", text));
+                out.push_str(&format!("**You:**\n\n{text}\n\n"));
             }
             HistoryBlock::AssistantText { text, .. } => {
-                out.push_str(&format!("**Claude:**\n\n{}\n\n", text));
+                out.push_str(&format!("**Claude:**\n\n{text}\n\n"));
             }
             HistoryBlock::AssistantThinking { text, .. } => {
-                out.push_str(&format!(
-                    "<details><summary>Thinking</summary>\n\n{}\n\n</details>\n\n",
-                    text
-                ));
+                out.push_str(&format!("<details><summary>Thinking</summary>\n\n{text}\n\n</details>\n\n"));
             }
-            HistoryBlock::ToolUse {
-                name, input_summary, ..
-            } => {
-                out.push_str(&format!("> **{}** > {}\n\n", name, input_summary));
+            HistoryBlock::ToolUse { name, input_summary, .. } => {
+                out.push_str(&format!("> **{name}** › {input_summary}\n\n"));
             }
-            HistoryBlock::ToolResult {
-                content, is_error, ..
-            } => {
+            HistoryBlock::ToolResult { content, is_error, .. } => {
                 if *is_error {
-                    out.push_str(&format!(
-                        "```\n[ERROR] {}\n```\n\n",
-                        &content[..content.len().min(500)]
-                    ));
+                    let preview = if content.len() > 500 { &content[..500] } else { content.as_str() };
+                    out.push_str(&format!("```\n[ERROR] {preview}\n```\n\n"));
                 }
             }
-            HistoryBlock::Attachment {
-                attachment_kind,
-                name,
-                ..
-            } => {
-                out.push_str(&format!("Attachment: {} - {}\n\n", attachment_kind, name));
+            HistoryBlock::Attachment { attachment_kind, name, .. } => {
+                out.push_str(&format!("📎 {attachment_kind} — {name}\n\n"));
             }
             HistoryBlock::System { subtype, .. } => {
-                out.push_str(&format!("*[system: {}]*\n\n", subtype));
+                out.push_str(&format!("*[system: {subtype}]*\n\n"));
             }
         }
     }
