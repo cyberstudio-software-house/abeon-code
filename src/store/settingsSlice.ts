@@ -3,6 +3,8 @@ import type { ThemeMode } from '../styles/theme';
 import type { EffortLevel, CustomModel } from '../lib/models';
 import { DEFAULT_MODEL_ID } from '../lib/models';
 
+export type SortMode = 'manual' | 'alpha' | 'activity';
+
 export type SettingsSlice = {
   theme: ThemeMode;
   leftWidth: number;
@@ -13,6 +15,7 @@ export type SettingsSlice = {
   customModels: CustomModel[];
   projectsBasePath: string;
   skipPermissions: boolean;
+  sortMode: SortMode;
   settingsOpen: boolean;
 
   setTheme: (t: ThemeMode) => void;
@@ -25,6 +28,7 @@ export type SettingsSlice = {
   removeCustomModel: (id: string) => void;
   setProjectsBasePath: (path: string) => void;
   setSkipPermissions: (v: boolean) => void;
+  setSortMode: (mode: SortMode) => void;
   openSettings: () => void;
   closeSettings: () => void;
 };
@@ -39,6 +43,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   customModels: [],
   projectsBasePath: '',
   skipPermissions: false,
+  sortMode: 'manual',
   settingsOpen: false,
 
   setTheme: (theme) => set({ theme }),
@@ -52,6 +57,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
     set({ customModels: [...get().customModels, model] }),
   setProjectsBasePath: (projectsBasePath) => set({ projectsBasePath }),
   setSkipPermissions: (skipPermissions) => set({ skipPermissions }),
+  setSortMode: (sortMode) => set({ sortMode }),
   removeCustomModel: (id) => {
     const customModels = get().customModels.filter(m => m.id !== id);
     const defaultModelId = get().defaultModelId === id ? DEFAULT_MODEL_ID : get().defaultModelId;

@@ -33,12 +33,14 @@ type Persisted = {
   customModels?: CustomModelLite[];
   projectsBasePath?: string;
   skipPermissions?: boolean;
+  sortMode?: 'manual' | 'alpha' | 'activity';
 };
 
 const PERSISTED_KEYS = [
   'theme', 'leftWidth', 'rightWidth', 'displayName',
   'defaultModelId', 'modelEfforts', 'customModels',
   'projectsBasePath', 'skipPermissions',
+  'sortMode',
 ] as const satisfies readonly (keyof Persisted)[];
 
 type PersistedKey = typeof PERSISTED_KEYS[number];
@@ -56,6 +58,7 @@ function pickPersistedFields(state: AppState): Persisted {
     customModels: state.customModels,
     projectsBasePath: state.projectsBasePath,
     skipPermissions: state.skipPermissions,
+    sortMode: state.sortMode,
   };
 }
 
@@ -114,6 +117,9 @@ function applyPersistedToState(p: Persisted) {
   if (p.customModels) patch.customModels = p.customModels as AppState['customModels'];
   if (p.projectsBasePath) patch.projectsBasePath = p.projectsBasePath;
   if (p.skipPermissions !== undefined) patch.skipPermissions = p.skipPermissions;
+  if (p.sortMode === 'manual' || p.sortMode === 'alpha' || p.sortMode === 'activity') {
+    patch.sortMode = p.sortMode;
+  }
   if (Object.keys(patch).length > 0) useStore.setState(patch);
 }
 
