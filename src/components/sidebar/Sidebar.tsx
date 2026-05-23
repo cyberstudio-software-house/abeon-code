@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useStore } from '../../store';
 import { selectSortedProjects } from '../../store/projectsSlice';
@@ -10,7 +11,7 @@ import { Kbd } from '../shared/Kbd';
 import { AddProjectDialog } from '../dialogs/AddProjectDialog';
 
 export function Sidebar() {
-  const projects = useStore(selectSortedProjects);
+  const projects = useStore(useShallow(selectSortedProjects));
   const load = useStore(s => s.loadProjects);
   const loadActivity = useStore(s => s.loadActivity);
   const [query, setQuery] = useState('');
