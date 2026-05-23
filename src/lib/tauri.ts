@@ -50,4 +50,12 @@ export const tauri = {
   gitStatus: (projectId: number) => invoke<GitStatus>('git_status', { projectId }),
   getGitUser: () => invoke<GitUser>('get_git_user'),
   countSessions: (projectId: number) => invoke<number>('count_sessions', { projectId }),
+  getSetting: (key: string) =>
+    invoke<string | null>('get_setting', { key }),
+  getAllSettings: () =>
+    invoke<Record<string, string>>('get_all_settings'),
+  setSetting: (key: string, value: string) =>
+    invoke<void>('set_setting', { key, value }),
+  deleteSetting: (key: string) =>
+    invoke<void>('delete_setting', { key }),
 };
