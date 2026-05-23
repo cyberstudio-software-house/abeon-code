@@ -96,8 +96,14 @@ fn parse_assistant(v: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
 
 fn parse_attachment(v: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
     let Some(att) = v.get("attachment") else { return vec![] };
-    let attachment_kind = att.get("kind").and_then(|x| x.as_str()).unwrap_or("file").to_string();
-    let name = att.get("name").and_then(|x| x.as_str()).unwrap_or("(unnamed)").to_string();
+    let att_type = att.get("type").and_then(|x| x.as_str()).unwrap_or("");
+    let attachment_kind = att.get("kind").and_then(|x| x.as_str())
+        .unwrap_or(if att_type.is_empty() { "file" } else { att_type })
+        .to_string();
+    let name = att.get("name").and_then(|x| x.as_str())
+        .or_else(|| att.get("hookName").and_then(|x| x.as_str()))
+        .unwrap_or_else(|| if att_type.is_empty() { "(unnamed)" } else { att_type })
+        .to_string();
     vec![HistoryBlock::Attachment { uuid: uuid.into(), timestamp: ts, attachment_kind, name }]
 }
 
