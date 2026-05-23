@@ -5,6 +5,7 @@ import { createSessionsSlice, type SessionsSlice } from './sessionsSlice';
 import { createTabsSlice, type TabsSlice } from './tabsSlice';
 import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 import { createGitSlice, type GitSlice } from './gitSlice';
+import { tauri } from '../lib/tauri';
 
 export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice;
 
@@ -58,7 +59,7 @@ function pickPersistedFields(state: AppState): Persisted {
   };
 }
 
-export function serializeValue(key: PersistedKey, value: unknown): string {
+function serializeValue(key: PersistedKey, value: unknown): string {
   if (value === undefined || value === null) return '';
   switch (key) {
     case 'leftWidth':
@@ -139,11 +140,22 @@ applyPersistedToState(loadFromLocalStorage());
 // --- prevSnapshot tracks last persisted state for diffing ---
 let prevSnapshot: Persisted = pickPersistedFields(useStore.getState());
 
-// --- Subscribe: on any state change, diff + write localStorage ---
+// --- Subscribe: on any state change, diff + write localStorage + SQLite ---
 useStore.subscribe((state) => {
   const next = pickPersistedFields(state);
   const changed = diffKeys(prevSnapshot, next);
   if (changed.length === 0) return;
+
+  // 1. Instant cache to localStorage
   writeLocalStorage(next);
+
+  // 2. Durable write to SQLite per changed key (fire-and-forget)
+  for (const key of changed) {
+    const value = serializeValue(key, next[key]);
+    tauri.setSetting(key, value).catch(err => {
+      console.error('[settings] setSetting failed', key, err);
+    });
+  }
+
   prevSnapshot = next;
 });
