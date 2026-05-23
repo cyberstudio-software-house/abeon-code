@@ -75,7 +75,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
   }
 }
 
-export function deserializeValue(key: PersistedKey, raw: string): unknown {
+function deserializeValue(key: PersistedKey, raw: string): unknown {
   if (raw === '') return undefined;
   switch (key) {
     case 'leftWidth':
@@ -159,3 +159,73 @@ useStore.subscribe((state) => {
 
   prevSnapshot = next;
 });
+
+const MIGRATION_FLAG_KEY = 'migrated_v2';
+
+function persistedFromRawMap(raw: Record<string, string>): Persisted {
+  const out: Persisted = {};
+  for (const key of PERSISTED_KEYS) {
+    const v = raw[key];
+    if (v === undefined) continue;
+    const parsed = deserializeValue(key, v);
+    if (parsed === undefined) continue;
+    (out as Record<string, unknown>)[key] = parsed;
+  }
+  return out;
+}
+
+async function hydrateFromSqlite(): Promise<void> {
+  let raw: Record<string, string>;
+  try {
+    raw = await tauri.getAllSettings();
+  } catch (err) {
+    console.error('[settings] hydrateFromSqlite: getAllSettings failed', err);
+    return;
+  }
+
+  const sqliteHasMigrationFlag = raw[MIGRATION_FLAG_KEY] === '1';
+  const sqliteSnapshot = persistedFromRawMap(raw);
+  const localSnapshot = loadFromLocalStorage();
+
+  // Case 1: first boot post-migration — SQLite empty, localStorage has data.
+  // Use CURRENT state (not the cached localSnapshot) to win any race where the
+  // user changed a setting during the async window.
+  if (!sqliteHasMigrationFlag && Object.keys(localSnapshot).length > 0) {
+    for (const key of PERSISTED_KEYS) {
+      const value = pickPersistedFields(useStore.getState())[key];
+      if (value === undefined) continue;
+      const serialized = serializeValue(key, value);
+      try {
+        await tauri.setSetting(key, serialized);
+      } catch (err) {
+        console.error('[settings] migration setSetting failed', key, err);
+      }
+    }
+    try {
+      await tauri.setSetting(MIGRATION_FLAG_KEY, '1');
+    } catch (err) {
+      console.error('[settings] migration flag setSetting failed', err);
+    }
+    // Reset prevSnapshot to current state — any subscribe-handler writes that landed
+    // during the loop have already been persisted by the subscribe path itself.
+    prevSnapshot = pickPersistedFields(useStore.getState());
+    return;
+  }
+
+  // Case 4: fresh install — both empty. Nothing to reconcile.
+  if (!sqliteHasMigrationFlag && Object.keys(sqliteSnapshot).length === 0) {
+    return;
+  }
+
+  // Case 2 / Case 3: SQLite has data, possibly differs from localStorage.
+  // SQLite is canonical. To prevent the subscribe handler from re-writing the
+  // hydrated values back to SQLite as a "diff", we PRE-SET prevSnapshot to the
+  // future state BEFORE applying it.
+  const currentState = pickPersistedFields(useStore.getState());
+  const futureState: Persisted = { ...currentState, ...sqliteSnapshot };
+  prevSnapshot = futureState;
+  applyPersistedToState(sqliteSnapshot);
+  writeLocalStorage(futureState);
+}
+
+void hydrateFromSqlite();
