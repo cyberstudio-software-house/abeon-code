@@ -6,7 +6,7 @@ use crate::error::{AppError, AppResult};
 use crate::sessions::reader;
 use crate::sessions::reader::session_file;
 use crate::state::AppState;
-use crate::db::projects_repo;
+use crate::db::{projects_repo, session_titles_repo};
 
 fn claude_root() -> AppResult<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home".into()))?;
@@ -35,7 +35,14 @@ pub fn list_sessions(
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
     let dir = claude_root()?.join(&proj.claude_dir);
-    catch(move || reader::list_sessions(project_id, &dir, limit, offset))
+    let mut sessions = catch(move || reader::list_sessions(project_id, &dir, limit, offset))?;
+    let titles = session_titles_repo::get_all(&c, project_id);
+    for s in &mut sessions {
+        if let Some(t) = titles.get(&s.id) {
+            s.title = t.clone();
+        }
+    }
+    Ok(sessions)
 }
 
 #[tauri::command]
@@ -49,7 +56,12 @@ pub fn read_session_history(
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
     let dir = claude_root()?.join(&proj.claude_dir);
-    catch(move || reader::read_history(project_id, &dir, &session_id, limit, before_uuid.as_deref()))
+    let sid = session_id.clone();
+    let mut history = catch(move || reader::read_history(project_id, &dir, &sid, limit, before_uuid.as_deref()))?;
+    if let Some(t) = session_titles_repo::get(&c, project_id, &session_id) {
+        history.meta.title = t;
+    }
+    Ok(history)
 }
 
 #[tauri::command]
@@ -105,6 +117,18 @@ pub fn export_session(
             "md" | _ => Ok(render_markdown(&history)),
         }
     })
+}
+
+#[tauri::command]
+pub fn rename_session(
+    state: State<AppState>,
+    project_id: i64,
+    session_id: String,
+    title: String,
+) -> AppResult<()> {
+    let c = state.db.get()?;
+    session_titles_repo::set(&c, project_id, &session_id, &title);
+    Ok(())
 }
 
 fn render_markdown(h: &SessionHistory) -> String {

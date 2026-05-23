@@ -1,9 +1,23 @@
+import { useRef, useState } from 'react';
 import type { SessionMeta } from '../../types';
 import { formatRelative } from '../../lib/format';
+import { useStore } from '../../store';
 
 type Props = { session: SessionMeta; active?: boolean; onClick: () => void };
 
 export function SessionItem({ session, active, onClick }: Props) {
+  const [editing, setEditing] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const rename = useStore(s => s.renameSession);
+
+  const commitRename = () => {
+    const value = inputRef.current?.value.trim();
+    if (value && value !== session.title) {
+      rename(session.projectId, session.id, value);
+    }
+    setEditing(false);
+  };
+
   return (
     <li
       onClick={onClick}
@@ -11,7 +25,28 @@ export function SessionItem({ session, active, onClick }: Props) {
       title={session.title}
     >
       <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${active ? 'bg-muted' : 'bg-muted'}`} />
-      <span className="truncate font-medium text-[12px] flex-1 min-w-0">{session.title}</span>
+      {editing ? (
+        <input
+          ref={inputRef}
+          defaultValue={session.title}
+          autoFocus
+          onFocus={e => e.target.select()}
+          onBlur={commitRename}
+          onKeyDown={e => {
+            if (e.key === 'Enter') commitRename();
+            if (e.key === 'Escape') setEditing(false);
+          }}
+          onClick={e => e.stopPropagation()}
+          className="bg-transparent border-b border-accent outline-none text-[12px] text-fg font-medium flex-1 min-w-0"
+        />
+      ) : (
+        <span
+          className="truncate font-medium text-[12px] flex-1 min-w-0"
+          onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+        >
+          {session.title}
+        </span>
+      )}
       <span className="font-mono text-[10px] text-muted shrink-0">{formatRelative(session.lastModified)}</span>
     </li>
   );

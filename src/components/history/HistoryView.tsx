@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { tauri } from '../../lib/tauri';
+import { useStore } from '../../store';
 import type { SessionHistory, HistoryBlock } from '../../types';
 import { HistoryHeader } from './HistoryHeader';
 import { HistoryStream } from './HistoryStream';
@@ -45,11 +46,24 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
     });
   };
 
+  const storeTitle = useStore(s => {
+    const items = s.sessionsByProject[projectId]?.items;
+    return items?.find(i => i.id === sessionId)?.title;
+  });
+
+  const meta = useMemo(() => {
+    if (!data) return null;
+    if (storeTitle && storeTitle !== data.meta.title) {
+      return { ...data.meta, title: storeTitle };
+    }
+    return data.meta;
+  }, [data, storeTitle]);
+
   if (error) return <div className="p-6 text-danger text-[13px]">Błąd: {error}</div>;
-  if (!data) return <div className="p-6 text-muted text-[13px]">Wczytywanie historii…</div>;
+  if (!data || !meta) return <div className="p-6 text-muted text-[13px]">Wczytywanie historii…</div>;
   return (
     <div className="h-full flex flex-col">
-      <HistoryHeader meta={data.meta} />
+      <HistoryHeader meta={meta} />
       <HistoryStream
         blocks={data.blocks}
         onLoadMore={loadMore}

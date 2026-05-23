@@ -2,16 +2,19 @@ import type { StateCreator } from 'zustand';
 
 export type Tab =
   | { kind: 'session'; id: string; projectId: number; sessionId: string; title: string; mode: 'history' | 'terminal' }
-  | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited' };
+  | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited' }
+  | { kind: 'terminal'; id: string; projectId: number; title: string };
 
 export type TabsSlice = {
   tabs: Tab[];
   activeTabId: string | null;
   openSessionTab: (projectId: number, sessionId: string, title: string) => void;
   openNewSessionTab: (projectId: number) => void;
+  openNewTerminalTab: (projectId: number) => void;
   setSessionMode: (tabId: string, mode: 'history' | 'terminal') => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
+  renameTab: (id: string, title: string) => void;
   upsertActionTab: (tab: Extract<Tab, { kind: 'action' }>) => void;
 };
 
@@ -37,6 +40,13 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
       activeTabId: id,
     });
   },
+  openNewTerminalTab: (projectId) => {
+    const id = `terminal:${crypto.randomUUID()}`;
+    set({
+      tabs: [...get().tabs, { kind: 'terminal', id, projectId, title: 'Terminal' }],
+      activeTabId: id,
+    });
+  },
   setSessionMode: (tabId, mode) => set({
     tabs: get().tabs.map(t => t.id === tabId && t.kind === 'session' ? { ...t, mode } : t),
   }),
@@ -46,6 +56,9 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
     set({ tabs, activeTabId });
   },
   setActive: (id) => set({ activeTabId: id }),
+  renameTab: (id, title) => set({
+    tabs: get().tabs.map(t => t.id === id ? { ...t, title } : t),
+  }),
   upsertActionTab: (tab) => {
     const existing = get().tabs.find(t => t.id === tab.id);
     if (existing) {

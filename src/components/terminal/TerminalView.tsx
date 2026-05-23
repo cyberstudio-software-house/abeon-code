@@ -9,7 +9,7 @@ import { getCliModelString } from '../../lib/models';
 
 type Props = {
   projectId: number;
-  kind: 'claude' | 'action';
+  kind: 'claude' | 'action' | 'shell';
   sessionId?: string;
   actionId?: number;
   visible?: boolean;
@@ -81,7 +81,9 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
     const ptyKind: PtyKindClient =
       kind === 'claude'
         ? { kind: 'claude', ...(sessionId ? { session_id: sessionId } : {}), ...(cliModel ? { model: cliModel } : {}), ...(skipPermissions ? { skip_permissions: true } : {}) }
-        : { kind: 'action', action_id: actionId! };
+        : kind === 'action'
+          ? { kind: 'action', action_id: actionId! }
+          : { kind: 'shell' };
 
     let cancelled = false;
     tauri.spawnPty(projectId, ptyKind, cols, rows).then(async (id) => {

@@ -1,17 +1,26 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
+
+function TabIcon({ tab }: { tab: import('../../store/tabsSlice').Tab }) {
+  if (tab.kind === 'session') return <>{tab.mode === 'terminal' ? '›' : '◇'}</>;
+  if (tab.kind === 'terminal') return <>$</>;
+  return <>▶</>;
+}
 
 export function TabBar() {
   const tabs = useStore(s => s.tabs);
   const active = useStore(s => s.activeTabId);
   const setActive = useStore(s => s.setActive);
   const closeTab = useStore(s => s.closeTab);
+  const renameTab = useStore(s => s.renameTab);
   const [pendingClose, setPendingClose] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
 
   const isActiveProcess = (id: string) => {
     const t = tabs.find(x => x.id === id);
-    return !!t && ((t.kind === 'session' && t.mode === 'terminal') || t.kind === 'action');
+    return !!t && ((t.kind === 'session' && t.mode === 'terminal') || t.kind === 'action' || t.kind === 'terminal');
   };
 
   const requestClose = (e: React.MouseEvent, id: string) => {
@@ -20,29 +29,59 @@ export function TabBar() {
     else closeTab(id);
   };
 
+  const commitRename = (id: string) => {
+    const value = inputRef.current?.value.trim();
+    if (value) renameTab(id, value);
+    setEditingId(null);
+  };
+
   if (tabs.length === 0) return null;
   return (
     <>
       <div className="flex h-8 border-b border-border bg-bg px-2 gap-0.5 items-end">
         {tabs.map(t => (
-          <button
+          <div
             key={t.id}
             onClick={() => setActive(t.id)}
-            className={`group relative px-3 py-1 text-[11px] border-x border-t ${
+            className={`group relative flex items-center px-3 py-1 text-[11px] border-x border-t cursor-pointer ${
               t.id === active
                 ? 'bg-bg-elev border-border text-fg'
                 : 'bg-bg border-transparent text-muted hover:text-fg'
             }`}
           >
             <span className="mr-1.5 text-muted">
-              {t.kind === 'session' ? (t.mode === 'terminal' ? '›' : '◇') : '▶'}
+              <TabIcon tab={t} />
             </span>
-            <span className="truncate max-w-[160px] inline-block align-middle">{t.title}</span>
+            {editingId === t.id ? (
+              <input
+                ref={inputRef}
+                defaultValue={t.title}
+                autoFocus
+                onFocus={e => e.target.select()}
+                onBlur={() => commitRename(t.id)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') commitRename(t.id);
+                  if (e.key === 'Escape') setEditingId(null);
+                }}
+                onClick={e => e.stopPropagation()}
+                className="bg-transparent border-b border-accent outline-none text-[11px] text-fg w-[120px]"
+              />
+            ) : (
+              <span
+                className="truncate max-w-[160px] inline-block align-middle"
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  setEditingId(t.id);
+                }}
+              >
+                {t.title}
+              </span>
+            )}
             <span
               onClick={(e) => requestClose(e, t.id)}
               className="ml-2 text-muted hover:text-danger opacity-0 group-hover:opacity-100"
             >×</span>
-          </button>
+          </div>
         ))}
       </div>
       {pendingClose && (

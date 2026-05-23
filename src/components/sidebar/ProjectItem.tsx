@@ -11,6 +11,7 @@ export function ProjectItem({ project }: Props) {
   const expanded = useStore(s => s.expandedProjectIds.has(project.id));
   const toggle = useStore(s => s.toggleProjectExpanded);
   const openNew = useStore(s => s.openNewSessionTab);
+  const openTerminal = useStore(s => s.openNewTerminalTab);
   const [count, setCount] = useState<number | null>(null);
 
   useEffect(() => {
@@ -41,13 +42,22 @@ export function ProjectItem({ project }: Props) {
       </button>
       {expanded && (
         <div className="mt-1 mb-2.5 ml-4 pl-3.5 border-l border-border">
-          <button
-            onClick={(e) => { e.stopPropagation(); openNew(project.id); }}
-            className="w-full flex items-center gap-1.5 pr-2 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors"
-          >
-            <Icon name="plus" className="w-3 h-3" strokeWidth={2} />
-            <span>New session</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={(e) => { e.stopPropagation(); openNew(project.id); }}
+              className="flex-1 flex items-center gap-1.5 pr-2 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors"
+            >
+              <Icon name="plus" className="w-3 h-3" strokeWidth={2} />
+              <span>New session</span>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); openTerminal(project.id); }}
+              className="flex items-center gap-1 px-1.5 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors rounded"
+              title="New terminal"
+            >
+              <Icon name="terminal" className="w-3 h-3" strokeWidth={2} />
+            </button>
+          </div>
           <SessionList projectId={project.id} />
         </div>
       )}

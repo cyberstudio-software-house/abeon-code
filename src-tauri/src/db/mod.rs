@@ -7,9 +7,11 @@ pub type DbPool = Pool<SqliteConnectionManager>;
 
 pub mod projects_repo;
 pub mod actions_repo;
+pub mod session_titles_repo;
 pub mod settings_repo;
 
 const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
+const MIGRATION_002: &str = include_str!("migrations/002_session_titles.sql");
 
 pub fn db_path() -> AppResult<PathBuf> {
     let mut dir = dirs::config_dir().ok_or_else(|| AppError::Other("no config dir".into()))?;
@@ -31,6 +33,10 @@ pub fn init_pool(path: &PathBuf) -> AppResult<DbPool> {
 fn run_migrations(pool: &DbPool) -> AppResult<()> {
     let conn = pool.get()?;
     conn.execute_batch(MIGRATION_001)?;
+    let v: i64 = conn.query_row(
+        "SELECT COALESCE(MAX(version),0) FROM schema_version", [], |r| r.get(0)
+    ).unwrap_or(0);
+    if v < 2 { conn.execute_batch(MIGRATION_002)?; }
     Ok(())
 }
 

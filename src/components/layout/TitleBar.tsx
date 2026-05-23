@@ -4,7 +4,7 @@ const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 
 export function TitleBar() {
   const tabs = useStore(s => s.tabs);
-  const activeSessions = tabs.filter(t => t.kind === 'session' && t.mode === 'terminal').length;
+  const activeSessions = tabs.filter(t => (t.kind === 'session' && t.mode === 'terminal') || t.kind === 'terminal').length;
 
   return (
     <header

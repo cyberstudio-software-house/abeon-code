@@ -26,6 +26,13 @@ function TabPanel({ tab, visible }: { tab: Tab; visible: boolean }) {
       </div>
     );
   }
+  if (tab.kind === 'terminal') {
+    return (
+      <div className={`absolute inset-0 ${visible ? '' : 'invisible pointer-events-none'}`}>
+        <TerminalView projectId={tab.projectId} kind="shell" visible={visible} />
+      </div>
+    );
+  }
   return null;
 }
 

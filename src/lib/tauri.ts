@@ -7,7 +7,8 @@ import type { Project, SessionMeta, SessionHistory, HistoryBlock, Action, Action
 // in tagged enums).
 export type PtyKindClient =
   | { kind: 'claude'; session_id?: string; model?: string; skip_permissions?: boolean }
-  | { kind: 'action'; action_id: number };
+  | { kind: 'action'; action_id: number }
+  | { kind: 'shell' };
 
 export const tauri = {
   listProjects: () => invoke<Project[]>('list_projects'),
@@ -49,6 +50,8 @@ export const tauri = {
   removeAction: (id: number) => invoke<void>('remove_action', { id }),
   gitStatus: (projectId: number) => invoke<GitStatus>('git_status', { projectId }),
   getGitUser: () => invoke<GitUser>('get_git_user'),
+  renameSession: (projectId: number, sessionId: string, title: string) =>
+    invoke<void>('rename_session', { projectId, sessionId, title }),
   countSessions: (projectId: number) => invoke<number>('count_sessions', { projectId }),
   getSetting: (key: string) =>
     invoke<string | null>('get_setting', { key }),

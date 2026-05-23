@@ -22,6 +22,7 @@ pub enum PtyKind {
         #[ts(type = "number")]
         action_id: i64,
     },
+    Shell,
 }
 
 #[tauri::command]
@@ -59,6 +60,10 @@ pub fn spawn_pty(
                 vec!["-lc".to_string(), action.command.clone()],
             )
         }
+        PtyKind::Shell => (
+            "bash".to_string(),
+            vec!["-l".to_string()],
+        ),
     };
 
     let args_ref: Vec<&str> = args_owned.iter().map(|s| s.as_str()).collect();
