@@ -58,4 +58,6 @@ export const tauri = {
     invoke<void>('set_setting', { key, value }),
   deleteSetting: (key: string) =>
     invoke<void>('delete_setting', { key }),
+  getProjectsActivity: () =>
+    invoke<Record<number, number>>('get_projects_activity'),
 };
