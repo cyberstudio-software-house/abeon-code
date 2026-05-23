@@ -1,19 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useStore } from '../../store';
+import { selectSortedProjects } from '../../store/projectsSlice';
 import { ProjectItem } from './ProjectItem';
 import { SidebarFooter } from './SidebarFooter';
+import { SortMenu } from './SortMenu';
 import { Icon } from '../shared/Icon';
 import { Kbd } from '../shared/Kbd';
 import { AddProjectDialog } from '../dialogs/AddProjectDialog';
 
 export function Sidebar() {
-  const projects = useStore(s => s.projects);
+  const projects = useStore(selectSortedProjects);
   const load = useStore(s => s.loadProjects);
+  const loadActivity = useStore(s => s.loadActivity);
   const [query, setQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { load(); }, [load]);
+
+  // Load activity on mount + refresh when the window regains focus.
+  useEffect(() => {
+    loadActivity();
+    let unlisten: (() => void) | null = null;
+    const win = getCurrentWebviewWindow();
+    win.onFocusChanged(({ payload: focused }) => {
+      if (focused) loadActivity();
+    }).then(fn => { unlisten = fn; });
+    return () => { if (unlisten) unlisten(); };
+  }, [loadActivity]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -40,13 +55,16 @@ export function Sidebar() {
         <div className="text-[10px] tracking-[0.14em] uppercase text-muted font-medium">
           Projekty
         </div>
-        <button
-          onClick={() => setAddOpen(true)}
-          className="text-muted hover:text-fg transition-colors p-0.5"
-          aria-label="Dodaj projekt"
-        >
-          <Icon name="plus" className="w-3.5 h-3.5" strokeWidth={2} />
-        </button>
+        <div className="flex items-center gap-1">
+          <SortMenu />
+          <button
+            onClick={() => setAddOpen(true)}
+            className="text-muted hover:text-fg transition-colors p-0.5"
+            aria-label="Dodaj projekt"
+          >
+            <Icon name="plus" className="w-3.5 h-3.5" strokeWidth={2} />
+          </button>
+        </div>
       </div>
       {addOpen && <AddProjectDialog onClose={() => setAddOpen(false)} />}
 
