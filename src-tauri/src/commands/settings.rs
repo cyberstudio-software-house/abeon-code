@@ -1,6 +1,10 @@
 use serde::Serialize;
+use std::collections::HashMap;
+use tauri::State;
 use ts_rs::TS;
+use crate::db::settings_repo;
 use crate::error::AppResult;
+use crate::state::AppState;
 
 #[derive(Serialize, TS)]
 #[ts(export, export_to = "../../src/types/")]
@@ -32,4 +36,28 @@ fn read_git_config(key: &str) -> Option<String> {
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+#[tauri::command]
+pub fn get_setting(state: State<AppState>, key: String) -> AppResult<Option<String>> {
+    let c = state.db.get()?;
+    settings_repo::get(&c, &key)
+}
+
+#[tauri::command]
+pub fn get_all_settings(state: State<AppState>) -> AppResult<HashMap<String, String>> {
+    let c = state.db.get()?;
+    settings_repo::get_all(&c)
+}
+
+#[tauri::command]
+pub fn set_setting(state: State<AppState>, key: String, value: String) -> AppResult<()> {
+    let c = state.db.get()?;
+    settings_repo::set(&c, &key, &value)
+}
+
+#[tauri::command]
+pub fn delete_setting(state: State<AppState>, key: String) -> AppResult<()> {
+    let c = state.db.get()?;
+    settings_repo::delete(&c, &key)
 }

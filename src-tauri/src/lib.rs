@@ -49,6 +49,10 @@ pub fn run() {
             commands::actions::remove_action,
             commands::git::git_status,
             commands::settings::get_git_user,
+            commands::settings::get_setting,
+            commands::settings::get_all_settings,
+            commands::settings::set_setting,
+            commands::settings::delete_setting,
             commands::sessions::count_sessions,
             commands::sessions::export_session,
         ])
