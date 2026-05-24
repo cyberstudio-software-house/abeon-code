@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useStore } from './index';
+import { tauri } from '../lib/tauri';
 import type { SessionMeta } from '../types';
 
 function fakeMeta(id: string, projectId: number, activity: SessionMeta['activity'] = 'idle'): SessionMeta {
@@ -52,5 +53,33 @@ describe('sessionsSlice activity', () => {
     });
     useStore.getState().patchActivity('zzz', 'running');
     expect(useStore.getState().sessionsByProject[1].items[0].activity).toBe('idle');
+  });
+});
+
+describe('refreshActivity', () => {
+  beforeEach(() => {
+    useStore.setState({ sessionsByProject: {} });
+    vi.restoreAllMocks();
+  });
+
+  it('patches activity but preserves title', async () => {
+    useStore.setState({
+      sessionsByProject: {
+        1: { items: [{ ...fakeMeta('a', 1, 'idle'), title: 'My Rename' }], hasMore: false },
+      },
+    });
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([
+      { ...fakeMeta('a', 1, 'running'), title: 'WHATEVER-FROM-BACKEND' },
+    ]);
+    await useStore.getState().refreshActivity(1);
+    const item = useStore.getState().sessionsByProject[1].items[0];
+    expect(item.activity).toBe('running');
+    expect(item.title).toBe('My Rename');
+  });
+
+  it('does nothing when project bucket is missing', async () => {
+    const spy = vi.spyOn(tauri, 'listSessions');
+    await useStore.getState().refreshActivity(42);
+    expect(spy).not.toHaveBeenCalled();
   });
 });
