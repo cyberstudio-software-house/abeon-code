@@ -1,7 +1,8 @@
 import type { StateCreator } from 'zustand';
 import { tauri } from '../lib/tauri';
-import type { SessionMeta } from '../types';
+import type { SessionActivity, SessionMeta } from '../types';
 import type { TabsSlice } from './tabsSlice';
+import type { AppState } from './index';
 
 const PAGE = 5;
 
@@ -10,7 +11,17 @@ export type SessionsSlice = {
   loadInitialSessions: (projectId: number) => Promise<void>;
   loadMoreSessions: (projectId: number) => Promise<void>;
   renameSession: (projectId: number, sessionId: string, title: string) => Promise<void>;
+  patchActivity: (sessionId: string, activity: SessionActivity) => void;
 };
+
+export const selectSessionActivity =
+  (sid: string) => (s: AppState): SessionActivity => {
+    for (const proj of Object.values(s.sessionsByProject)) {
+      const found = proj.items.find(x => x.id === sid);
+      if (found) return found.activity;
+    }
+    return 'idle';
+  };
 
 export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], [], SessionsSlice> = (set, get) => ({
   sessionsByProject: {},
@@ -46,5 +57,25 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
       }});
     }
     get().renameTab(`session:${sessionId}`, title);
+  },
+  patchActivity: (sessionId, activity) => {
+    const current = get().sessionsByProject;
+    let changed = false;
+    const next: typeof current = {};
+    for (const [pid, bucket] of Object.entries(current)) {
+      const idx = bucket.items.findIndex(s => s.id === sessionId);
+      if (idx >= 0) {
+        const existing = bucket.items[idx];
+        if (existing.activity !== activity) {
+          const items = bucket.items.slice();
+          items[idx] = { ...existing, activity };
+          next[Number(pid)] = { ...bucket, items };
+          changed = true;
+          continue;
+        }
+      }
+      next[Number(pid)] = bucket;
+    }
+    if (changed) set({ sessionsByProject: next });
   },
 });
