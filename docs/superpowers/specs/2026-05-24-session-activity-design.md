@@ -54,7 +54,10 @@ Add a derived "activity" state to each Claude Code session in AbeonCode so users
 │                                                            │
 │  sidebar/SessionItem.tsx (MOD)   — dot color from activity │
 │  center/TabBar.tsx       (MOD)   — dot in session tabs     │
-│  center/CenterPanel.tsx  (MOD)   — badge in panel header   │
+│  history/HistoryHeader.tsx (MOD) — wire existing badge to  │
+│                                    activity (replaces      │
+│                                    current hardcoded       │
+│                                    "aktywna" placeholder)  │
 │                                                            │
 │  store/sessionsSlice.ts exposes                            │
 │    startActivityPolling / stopActivityPolling              │
@@ -273,21 +276,22 @@ export const selectSessionActivity =
   };
 ```
 
-### `CenterPanel.tsx` (panel header badge)
+### `HistoryHeader.tsx` (session header badge)
 
-Before the session title, render a small badge:
+`HistoryHeader.tsx:95-98` already contains a hardcoded badge always saying "aktywna" with an accent dot. Replace it with a dynamic version driven by `meta.activity`:
 
 ```tsx
 <span
-  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] ${ACTIVITY_DOT[activity]} text-bg`}
-  title={ACTIVITY_LABEL[activity]}
+  className={`inline-flex items-center gap-1.5 text-[10px] font-mono px-[7px] py-0.5 rounded-full ${ACTIVITY_DOT[meta.activity]} text-bg`}
+  title={ACTIVITY_LABEL[meta.activity]}
 >
-  <Icon name={ACTIVITY_ICON[activity]}
-        className={`w-3 h-3 ${activity === 'running' ? 'animate-spin' : ''}`} />
+  <Icon name={ACTIVITY_ICON[meta.activity]}
+        className={`w-3 h-3 ${meta.activity === 'running' ? 'animate-spin' : ''}`} />
+  {ACTIVITY_LABEL[meta.activity]}
 </span>
 ```
 
-Only `running` animates. All other states render statically.
+Only `running` animates. The badge is only visible for `mode: 'history'` tabs (the only place HistoryHeader renders). For live `mode: 'terminal'` tabs, the TabBar dot is the primary indicator and no additional header element is needed.
 
 ## 9. Error handling
 
@@ -359,7 +363,7 @@ onSessionActivity listener updates the correct session in store
 - `src/lib/tauri.ts` — `onSessionActivity` helper.
 - `src/components/sidebar/SessionItem.tsx` — dot color.
 - `src/components/center/TabBar.tsx` — dot in `session` tabs.
-- `src/components/center/CenterPanel.tsx` — header badge.
+- `src/components/history/HistoryHeader.tsx` — wire existing badge to `meta.activity` (replaces hardcoded "aktywna" placeholder at lines 95-98).
 - `src/components/layout/AppShell.tsx` — single `useEffect` mounting the polling lifecycle.
 
 ## 13. Open questions
