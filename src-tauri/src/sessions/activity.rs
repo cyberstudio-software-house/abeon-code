@@ -6,8 +6,39 @@ const LIVE_WINDOW_MS: i64 = 5_000;
 const TOOL_STALL_MS: i64 = 30_000;
 const IDLE_HARD_CAP_MS: i64 = 24 * 60 * 60 * 1000;
 
-pub fn compute_activity(_path: &Path, _now_ms: i64) -> SessionActivity {
-    SessionActivity::Idle
+pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
+    let Ok(meta) = path.metadata() else { return SessionActivity::Idle };
+    let Ok(mtime_st) = meta.modified() else { return SessionActivity::Idle };
+    let mtime_ms = match mtime_st.duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_millis() as i64,
+        Err(_) => return SessionActivity::Idle,
+    };
+    let age_ms = now_ms - mtime_ms;
+
+    if age_ms > IDLE_HARD_CAP_MS {
+        return SessionActivity::Idle;
+    }
+    if age_ms < LIVE_WINDOW_MS {
+        return SessionActivity::Running;
+    }
+
+    let Some(lines) = read_tail_lines(path) else { return SessionActivity::Idle };
+    let Some(last) = find_last_significant(&lines) else { return SessionActivity::Idle };
+
+    match last {
+        LastEvent::UserText => SessionActivity::Running,
+        LastEvent::UserToolResult { is_error: false } => SessionActivity::Running,
+        LastEvent::UserToolResult { is_error: true } => SessionActivity::WaitingUser,
+        LastEvent::AssistantToolUseUnresolved => {
+            if age_ms < TOOL_STALL_MS {
+                SessionActivity::Running
+            } else {
+                SessionActivity::WaitingTool
+            }
+        }
+        LastEvent::AssistantToolUseResolved => SessionActivity::WaitingUser,
+        LastEvent::AssistantText => SessionActivity::WaitingUser,
+    }
 }
 
 fn read_tail_lines(path: &Path) -> Option<Vec<String>> {
@@ -126,7 +157,10 @@ mod tests {
         let td = TempDir::new().unwrap();
         let p = td.path().join("empty.jsonl");
         std::fs::write(&p, "").unwrap();
-        assert_eq!(compute_activity(&p, 0), SessionActivity::Idle);
+        let mtime = p.metadata().unwrap().modified().unwrap()
+            .duration_since(std::time::UNIX_EPOCH).unwrap()
+            .as_millis() as i64;
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Idle);
     }
 
     #[test]
@@ -243,5 +277,124 @@ mod tests {
     fn empty_returns_none() {
         let lines: Vec<&str> = vec![];
         assert_eq!(last_event_from_lines(&lines), None);
+    }
+
+    fn write_with_mtime(td: &TempDir, name: &str, body: &str) -> (PathBuf, i64) {
+        let p = td.path().join(name);
+        std::fs::write(&p, body).unwrap();
+        let mtime = p.metadata().unwrap().modified().unwrap()
+            .duration_since(std::time::UNIX_EPOCH).unwrap()
+            .as_millis() as i64;
+        (p, mtime)
+    }
+
+    #[test]
+    fn file_modified_now_returns_running_regardless_of_content() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"done"}]}}"#);
+        assert_eq!(compute_activity(&p, mtime + 1_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn file_modified_25h_ago_returns_idle() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"hi"}]}}"#);
+        let twenty_five_hours = 25 * 60 * 60 * 1000;
+        assert_eq!(compute_activity(&p, mtime + twenty_five_hours), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn last_event_assistant_text_returns_waiting_user() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"hi"}]}}
+{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"hello"}]}}"#);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::WaitingUser);
+    }
+
+    #[test]
+    fn last_event_user_text_returns_running() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"do it"}]}}"#);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn user_tool_result_ok_returns_running() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]}}"#);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn user_tool_result_error_returns_waiting_user() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"err","is_error":true}]}}"#);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::WaitingUser);
+    }
+
+    #[test]
+    fn tool_use_fresh_returns_running() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"tool_use","id":"t1","name":"read","input":{}}]}}"#);
+        assert_eq!(compute_activity(&p, mtime + 10_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn tool_use_stale_returns_waiting_tool() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"tool_use","id":"t1","name":"read","input":{}}]}}"#);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::WaitingTool);
+    }
+
+    #[test]
+    fn tool_use_paired_with_result_treated_as_done_then_followed_by_assistant_text() {
+        let td = TempDir::new().unwrap();
+        let body = r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"tool_use","id":"t1","name":"read","input":{}}]}}
+{"type":"user","uuid":"u2","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]}}
+{"type":"assistant","uuid":"a2","message":{"content":[{"type":"text","text":"done"}]}}"#;
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl", body);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::WaitingUser);
+    }
+
+    #[test]
+    fn only_meta_user_records_returns_idle() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":"<command-name>x</command-name>"}}
+{"type":"user","uuid":"u2","message":{"content":""}}"#);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn only_system_records_returns_idle() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"system","subtype":"hook"}
+{"type":"queue-operation"}"#);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn huge_assistant_text_truncates_correctly() {
+        let td = TempDir::new().unwrap();
+        let huge: String = "a".repeat(20_000);
+        let body = format!(
+            r#"{{"type":"user","uuid":"u1","message":{{"content":[{{"type":"text","text":"hi"}}]}}}}
+{{"type":"assistant","uuid":"a1","message":{{"content":[{{"type":"text","text":"{huge}"}}]}}}}"#
+        );
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl", &body);
+        let result = compute_activity(&p, mtime + 60_000);
+        assert!(
+            matches!(result, SessionActivity::WaitingUser | SessionActivity::Idle),
+            "got {result:?}"
+        );
     }
 }
