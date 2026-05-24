@@ -29,6 +29,7 @@ type Persisted = {
   rightWidth?: number;
   displayName?: string;
   defaultModelId?: string;
+  titleGenModelId?: string;
   modelEfforts?: Record<string, EffortLevelStr>;
   customModels?: CustomModelLite[];
   projectsBasePath?: string;
@@ -38,7 +39,7 @@ type Persisted = {
 
 const PERSISTED_KEYS = [
   'theme', 'leftWidth', 'rightWidth', 'displayName',
-  'defaultModelId', 'modelEfforts', 'customModels',
+  'defaultModelId', 'titleGenModelId', 'modelEfforts', 'customModels',
   'projectsBasePath', 'skipPermissions',
   'sortMode',
 ] as const satisfies readonly (keyof Persisted)[];
@@ -54,6 +55,7 @@ function pickPersistedFields(state: AppState): Persisted {
     rightWidth: state.rightWidth,
     displayName: state.displayName,
     defaultModelId: state.defaultModelId,
+    titleGenModelId: state.titleGenModelId,
     modelEfforts: state.modelEfforts as Record<string, EffortLevelStr>,
     customModels: state.customModels,
     projectsBasePath: state.projectsBasePath,
@@ -113,6 +115,7 @@ function applyPersistedToState(p: Persisted) {
   if (typeof p.rightWidth === 'number') patch.rightWidth = clamp(p.rightWidth, 220, 480);
   if (p.displayName) patch.displayName = p.displayName;
   if (p.defaultModelId) patch.defaultModelId = p.defaultModelId;
+  if (p.titleGenModelId) patch.titleGenModelId = p.titleGenModelId;
   if (p.modelEfforts) patch.modelEfforts = p.modelEfforts as AppState['modelEfforts'];
   if (p.customModels) patch.customModels = p.customModels as AppState['customModels'];
   if (p.projectsBasePath) patch.projectsBasePath = p.projectsBasePath;

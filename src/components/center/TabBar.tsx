@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 
@@ -23,11 +23,28 @@ export function TabBar() {
     return !!t && ((t.kind === 'session' && t.mode === 'terminal') || t.kind === 'action' || t.kind === 'terminal');
   };
 
-  const requestClose = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
+  const closeWithGuard = (id: string) => {
     if (isActiveProcess(id)) setPendingClose(id);
     else closeTab(id);
   };
+
+  const requestClose = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    closeWithGuard(id);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      if (e.key !== 'w' && e.key !== 'W') return;
+      if (!active) return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeWithGuard(active);
+    };
+    document.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => document.removeEventListener('keydown', onKeyDown, { capture: true });
+  }, [active, tabs, closeTab]);
 
   const commitRename = (id: string) => {
     const value = inputRef.current?.value.trim();
@@ -43,6 +60,13 @@ export function TabBar() {
           <div
             key={t.id}
             onClick={() => setActive(t.id)}
+            onMouseDown={(e) => {
+              if (e.button === 1) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeWithGuard(t.id);
+              }
+            }}
             className={`group relative flex items-center px-3 py-1 text-[11px] border-x border-t cursor-pointer ${
               t.id === active
                 ? 'bg-bg-elev border-border text-fg'

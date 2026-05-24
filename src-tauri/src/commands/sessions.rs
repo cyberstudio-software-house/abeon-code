@@ -131,6 +131,63 @@ pub fn rename_session(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn generate_session_title(
+    state: State<'_, AppState>,
+    project_id: i64,
+    session_id: String,
+    model: Option<String>,
+) -> AppResult<String> {
+    let (proj_path, claude_dir) = {
+        let c = state.db.get()?;
+        let proj = projects_repo::get(&c, project_id)?;
+        (proj.path.clone(), claude_root()?.join(&proj.claude_dir))
+    };
+    let path = reader::session_file(&claude_dir, &session_id);
+
+    let first = reader::first_user_prompt(&path)?
+        .ok_or_else(|| AppError::Other("Sesja nie zawiera promptu użytkownika".into()))?;
+
+    let truncated: String = first.chars().take(2000).collect();
+    let prompt = format!(
+        "Generate a short, concise title (max 60 characters) for a coding session that started with the user prompt below.\n\n\
+        CRITICAL: Write the title in the SAME LANGUAGE as the user's prompt. If they wrote in Polish, respond in Polish. If English, respond in English. If German, respond in German. Match the language exactly.\n\n\
+        Respond with ONLY the title — no quotes, no prefixes, no commentary, no markdown.\n\n\
+        User's first prompt:\n<<<\n{truncated}\n>>>"
+    );
+
+    let mut cmd = tokio::process::Command::new("claude");
+    cmd.arg("-p").arg("--no-session-persistence").arg(&prompt);
+    if let Some(m) = &model {
+        if !m.is_empty() { cmd.arg("--model").arg(m); }
+    }
+    cmd.current_dir(&proj_path);
+    cmd.kill_on_drop(true);
+
+    let timeout = std::time::Duration::from_secs(60);
+    let output = tokio::time::timeout(timeout, cmd.output()).await
+        .map_err(|_| AppError::Other("Generowanie tytułu przekroczyło limit 60s".into()))?
+        .map_err(|e| AppError::Other(format!("claude -p: {e}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AppError::Other(format!("claude -p failed: {}", stderr.trim())));
+    }
+
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let first_line = raw.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+    let cleaned: String = first_line
+        .trim()
+        .trim_matches(|c: char| c == '"' || c == '\'' || c == '`')
+        .trim()
+        .chars()
+        .take(80)
+        .collect();
+    if cleaned.is_empty() {
+        return Err(AppError::Other("Pusta odpowiedź z claude -p".into()));
+    }
+    Ok(cleaned)
+}
+
 fn render_markdown(h: &SessionHistory) -> String {
     use crate::domain::HistoryBlock;
     let mut out = String::new();

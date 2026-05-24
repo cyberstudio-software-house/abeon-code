@@ -19,6 +19,8 @@ const paths: Record<string, ReactNode> = {
   folder:   <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>,
   dot:      <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none"/>,
   terminal: <g><polyline points="4 6 9 11 4 16"/><line x1="12" y1="16" x2="20" y2="16"/></g>,
+  sparkles: <g><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6z"/><path d="M19 14l.7 1.9L21.5 16.6 19.7 17.3 19 19.2 18.3 17.3 16.5 16.6 18.3 15.9z"/><path d="M5 4l.6 1.6L7.2 6.2l-1.6.6L5 8.4l-.6-1.6L2.8 6.2l1.6-.6z"/></g>,
+  spinner:  <path d="M21 12a9 9 0 1 1-6.219-8.56"/>,
   refresh:  <g><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></g>,
   trash:    <g><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></g>,
   close:    <g><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g>,

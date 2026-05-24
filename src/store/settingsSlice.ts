@@ -11,6 +11,7 @@ export type SettingsSlice = {
   rightWidth: number;
   displayName: string;
   defaultModelId: string;
+  titleGenModelId: string;
   modelEfforts: Record<string, EffortLevel>;
   customModels: CustomModel[];
   projectsBasePath: string;
@@ -23,6 +24,7 @@ export type SettingsSlice = {
   setRightWidth: (w: number) => void;
   setDisplayName: (name: string) => void;
   setDefaultModel: (id: string) => void;
+  setTitleGenModel: (id: string) => void;
   setModelEffort: (modelId: string, effort: EffortLevel) => void;
   addCustomModel: (model: CustomModel) => void;
   removeCustomModel: (id: string) => void;
@@ -39,6 +41,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   rightWidth: 300,
   displayName: '',
   defaultModelId: DEFAULT_MODEL_ID,
+  titleGenModelId: 'haiku-4.5',
   modelEfforts: {},
   customModels: [],
   projectsBasePath: '',
@@ -51,6 +54,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   setRightWidth: (rightWidth) => set({ rightWidth }),
   setDisplayName: (displayName) => set({ displayName }),
   setDefaultModel: (defaultModelId) => set({ defaultModelId }),
+  setTitleGenModel: (titleGenModelId) => set({ titleGenModelId }),
   setModelEffort: (modelId, effort) =>
     set({ modelEfforts: { ...get().modelEfforts, [modelId]: effort } }),
   addCustomModel: (model) =>
@@ -61,7 +65,8 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   removeCustomModel: (id) => {
     const customModels = get().customModels.filter(m => m.id !== id);
     const defaultModelId = get().defaultModelId === id ? DEFAULT_MODEL_ID : get().defaultModelId;
-    set({ customModels, defaultModelId });
+    const titleGenModelId = get().titleGenModelId === id ? 'haiku-4.5' : get().titleGenModelId;
+    set({ customModels, defaultModelId, titleGenModelId });
   },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),

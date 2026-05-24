@@ -13,6 +13,11 @@ fn uuid_of(v: &Value) -> String {
     v.get("uuid").and_then(|u| u.as_str()).unwrap_or("").to_string()
 }
 
+pub(super) fn is_meta_user_content(text: &str) -> bool {
+    let t = text.trim_start();
+    t.starts_with("<local-command-caveat>") || t.starts_with("<command-name>")
+}
+
 /// Parses one JSONL line into zero or more `HistoryBlock`s.
 /// Returns `Ok(vec![])` for infrastructure records (queue-operation, last-prompt).
 pub fn parse_line(line: &str) -> Result<Vec<HistoryBlock>, serde_json::Error> {
@@ -42,6 +47,12 @@ fn content_array<'a>(v: &'a Value) -> Option<&'a Vec<Value>> {
 }
 
 fn parse_user(v: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
+    if let Some(s) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+        if s.is_empty() || is_meta_user_content(s) {
+            return vec![];
+        }
+        return vec![HistoryBlock::UserText { uuid: uuid.into(), timestamp: ts, text: s.to_string() }];
+    }
     let Some(arr) = content_array(v) else { return vec![] };
     let mut out = Vec::new();
     for item in arr {

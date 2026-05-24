@@ -184,9 +184,11 @@ function GeneralTab() {
 
 function ModelsTab() {
   const defaultModelId = useStore(s => s.defaultModelId);
+  const titleGenModelId = useStore(s => s.titleGenModelId);
   const modelEfforts = useStore(s => s.modelEfforts);
   const customModels = useStore(s => s.customModels);
   const setDefaultModel = useStore(s => s.setDefaultModel);
+  const setTitleGenModel = useStore(s => s.setTitleGenModel);
   const setModelEffort = useStore(s => s.setModelEffort);
   const addCustomModel = useStore(s => s.addCustomModel);
   const removeCustomModel = useStore(s => s.removeCustomModel);
@@ -262,6 +264,31 @@ function ModelsTab() {
           </div>
         </>
       )}
+
+      <div className="border-t border-border pt-4 mb-4">
+        <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
+          Model do generowania tytułów
+        </label>
+        <p className="text-[11px] text-muted mb-2">
+          Używany przy ręcznym wywołaniu „Generuj tytuł sesji" (ikona ✨ w nagłówku sesji).
+          Zwykle wystarczy najszybszy/najtańszy model.
+        </p>
+        <select
+          value={titleGenModelId}
+          onChange={e => setTitleGenModel(e.target.value)}
+          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
+        >
+          {BUILTIN_MODELS.map(m => (
+            <option key={m.id} value={m.id}>
+              {m.label}{m.context ? ` (${m.context})` : ''}
+            </option>
+          ))}
+          {customModels.length > 0 && <option disabled>──────────</option>}
+          {customModels.map(m => (
+            <option key={m.id} value={m.id}>{m.label}</option>
+          ))}
+        </select>
+      </div>
 
       {adding ? (
         <div className="border border-border p-3 space-y-2">

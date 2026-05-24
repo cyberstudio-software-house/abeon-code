@@ -57,6 +57,7 @@ pub fn run() {
             commands::sessions::count_sessions,
             commands::sessions::export_session,
             commands::sessions::rename_session,
+            commands::sessions::generate_session_title,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

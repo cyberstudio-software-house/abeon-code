@@ -52,6 +52,8 @@ export const tauri = {
   getGitUser: () => invoke<GitUser>('get_git_user'),
   renameSession: (projectId: number, sessionId: string, title: string) =>
     invoke<void>('rename_session', { projectId, sessionId, title }),
+  generateSessionTitle: (projectId: number, sessionId: string, model?: string) =>
+    invoke<string>('generate_session_title', { projectId, sessionId, model }),
   countSessions: (projectId: number) => invoke<number>('count_sessions', { projectId }),
   getSetting: (key: string) =>
     invoke<string | null>('get_setting', { key }),

@@ -12,6 +12,32 @@ pub fn session_file(claude_dir: &Path, session_id: &str) -> PathBuf {
     claude_dir.join(format!("{session_id}.jsonl"))
 }
 
+pub fn first_user_prompt(path: &Path) -> AppResult<Option<String>> {
+    let file = fs::File::open(path)?;
+    for (i, line) in BufReader::new(file).lines().map_while(Result::ok).enumerate() {
+        if i >= META_SCAN_LIMIT { break; }
+        if line.trim().is_empty() { continue; }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue; };
+        if v.get("type").and_then(|t| t.as_str()) != Some("user") { continue; }
+        let content = v.get("message").and_then(|m| m.get("content"));
+        let text = content
+            .and_then(|c| c.as_str())
+            .map(|s| s.to_string())
+            .or_else(|| content
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.iter().find(|i| i.get("type").and_then(|t| t.as_str()) == Some("text")))
+                .and_then(|i| i.get("text"))
+                .and_then(|t| t.as_str())
+                .map(|s| s.to_string()));
+        if let Some(text) = text {
+            if !text.is_empty() && !super::parser::is_meta_user_content(&text) {
+                return Ok(Some(text));
+            }
+        }
+    }
+    Ok(None)
+}
+
 pub fn list_sessions(
     project_id: i64,
     project_claude_dir: &Path,
