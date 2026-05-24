@@ -6,6 +6,19 @@ import type { AppState } from './index';
 
 const PAGE = 5;
 
+let pollIntervalId: ReturnType<typeof setInterval> | null = null;
+let focusHandler: (() => void) | null = null;
+let blurHandler: (() => void) | null = null;
+
+const POLL_INTERVAL_MS = 10_000;
+
+function clearPoll() {
+  if (pollIntervalId !== null) {
+    clearInterval(pollIntervalId);
+    pollIntervalId = null;
+  }
+}
+
 export type SessionsSlice = {
   sessionsByProject: Record<number, { items: SessionMeta[]; hasMore: boolean }>;
   loadInitialSessions: (projectId: number) => Promise<void>;
@@ -13,6 +26,8 @@ export type SessionsSlice = {
   renameSession: (projectId: number, sessionId: string, title: string) => Promise<void>;
   patchActivity: (sessionId: string, activity: SessionActivity) => void;
   refreshActivity: (projectId: number) => Promise<void>;
+  startActivityPolling: () => void;
+  stopActivityPolling: () => void;
 };
 
 export const selectSessionActivity =
@@ -91,5 +106,29 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
       ...get().sessionsByProject,
       [projectId]: { ...current, items },
     }});
+  },
+  startActivityPolling: () => {
+    const tick = () => {
+      const projectIds = Object.keys(get().sessionsByProject).map(Number);
+      for (const pid of projectIds) {
+        get().refreshActivity(pid).catch(() => {});
+      }
+    };
+    focusHandler = () => {
+      clearPoll();
+      tick();
+      pollIntervalId = setInterval(tick, POLL_INTERVAL_MS);
+    };
+    blurHandler = () => clearPoll();
+    window.addEventListener('focus', focusHandler);
+    window.addEventListener('blur', blurHandler);
+    if (document.hasFocus()) focusHandler();
+  },
+  stopActivityPolling: () => {
+    clearPoll();
+    if (focusHandler) window.removeEventListener('focus', focusHandler);
+    if (blurHandler) window.removeEventListener('blur', blurHandler);
+    focusHandler = null;
+    blurHandler = null;
   },
 });

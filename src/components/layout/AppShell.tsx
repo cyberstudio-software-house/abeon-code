@@ -70,6 +70,13 @@ export function AppShell() {
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
   const hasActiveProject = tabs.some(t => t.id === activeTabId);
+  const startActivityPolling = useStore(s => s.startActivityPolling);
+  const stopActivityPolling = useStore(s => s.stopActivityPolling);
+
+  useEffect(() => {
+    startActivityPolling();
+    return () => stopActivityPolling();
+  }, [startActivityPolling, stopActivityPolling]);
 
   const onLeftDrag = useCallback(
     (delta: number) => setLeftWidth(clamp(leftWidth + delta, LEFT_MIN, LEFT_MAX)),
