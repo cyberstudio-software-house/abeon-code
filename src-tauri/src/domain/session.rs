@@ -1,6 +1,16 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub enum SessionActivity {
+    Running,
+    WaitingUser,
+    WaitingTool,
+    Idle,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/")]
 #[serde(rename_all = "camelCase")]
@@ -15,6 +25,7 @@ pub struct SessionMeta {
     pub last_modified: i64,
     pub git_branch: Option<String>,
     pub cwd: Option<String>,
+    pub activity: SessionActivity,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
