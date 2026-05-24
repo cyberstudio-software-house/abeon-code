@@ -1,12 +1,20 @@
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use crate::domain::{HistoryBlock, SessionActivity, SessionHistory, SessionMeta};
+use crate::domain::{HistoryBlock, SessionHistory, SessionMeta};
 use crate::error::{AppError, AppResult};
+use super::activity::compute_activity;
 use super::parser::parse_line;
 
 const DEFAULT_PAGE: usize = 200;
 const META_SCAN_LIMIT: usize = 100;
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
 
 pub fn session_file(claude_dir: &Path, session_id: &str) -> PathBuf {
     claude_dir.join(format!("{session_id}.jsonl"))
@@ -129,7 +137,7 @@ fn meta_for_file_fast(project_id: i64, path: &Path) -> AppResult<SessionMeta> {
         id, project_id, title,
         message_count: approx_messages,
         last_modified, git_branch, cwd,
-        activity: SessionActivity::Idle,
+        activity: compute_activity(path, now_ms()),
     })
 }
 
@@ -220,7 +228,7 @@ pub fn read_history(
         id, project_id, title,
         message_count: line_count,
         last_modified, git_branch, cwd,
-        activity: SessionActivity::Idle,
+        activity: compute_activity(&path, now_ms()),
     };
 
     Ok(SessionHistory { meta, blocks, has_more_before })
@@ -241,6 +249,7 @@ fn block_uuid(b: &HistoryBlock) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::SessionActivity;
     use std::fs;
     use tempfile::TempDir;
 
@@ -248,6 +257,17 @@ mod tests {
         let p = dir.join(format!("{name}.jsonl"));
         fs::write(&p, content).unwrap();
         p
+    }
+
+    #[test]
+    fn list_sessions_includes_activity() {
+        let td = TempDir::new().unwrap();
+        let content = r#"{"type":"user","uuid":"u1","timestamp":"2026-05-21T12:00:00Z","sessionId":"s1","cwd":"/x","gitBranch":"main","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}"#;
+        setup(td.path(), "sess-active", content);
+
+        let list = list_sessions(1, td.path(), 10, 0).unwrap();
+        let s = list.iter().find(|m| m.id == "sess-active").unwrap();
+        assert_eq!(s.activity, SessionActivity::Running);
     }
 
     #[test]
