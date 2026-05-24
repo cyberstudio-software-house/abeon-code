@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { SessionMeta } from '../../types';
 import { formatRelative } from '../../lib/format';
 import { useStore } from '../../store';
+import { ACTIVITY_DOT, ACTIVITY_LABEL } from '../../lib/activity';
 
 type Props = { session: SessionMeta; active?: boolean; onClick: () => void };
 
@@ -24,7 +25,10 @@ export function SessionItem({ session, active, onClick }: Props) {
       className={`pr-2 py-1 text-[12px] cursor-pointer flex items-center gap-2 ${active ? 'bg-bg-elev text-fg' : 'text-fg hover:bg-bg-elev'}`}
       title={session.title}
     >
-      <span className={`w-[5px] h-[5px] rounded-full shrink-0 ${active ? 'bg-muted' : 'bg-muted'}`} />
+      <span
+        className={`w-[5px] h-[5px] rounded-full shrink-0 ${ACTIVITY_DOT[session.activity]}`}
+        title={ACTIVITY_LABEL[session.activity]}
+      />
       {editing ? (
         <input
           ref={inputRef}
