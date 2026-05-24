@@ -16,6 +16,7 @@ function blockUuid(b: HistoryBlock): string {
 export function HistoryView({ projectId, sessionId, tabId }: Props) {
   const [data, setData] = useState<SessionHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const patchActivity = useStore(s => s.patchActivity);
 
   useEffect(() => {
     tauri.readSessionHistory(projectId, sessionId)
@@ -24,16 +25,21 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
   }, [projectId, sessionId]);
 
   useEffect(() => {
-    let unlisten: (() => void) | null = null;
+    let unlistenAppend: (() => void) | null = null;
+    let unlistenActivity: (() => void) | null = null;
     tauri.openSessionWatch(projectId, sessionId).catch(() => {});
     tauri.onSessionAppend(sessionId, (blocks) => {
       setData(prev => prev ? ({ ...prev, blocks: [...prev.blocks, ...blocks] }) : prev);
-    }).then(fn => { unlisten = fn; });
+    }).then(fn => { unlistenAppend = fn; });
+    tauri.onSessionActivity(sessionId, (activity) => {
+      patchActivity(sessionId, activity);
+    }).then(fn => { unlistenActivity = fn; });
     return () => {
-      if (unlisten) unlisten();
+      if (unlistenAppend) unlistenAppend();
+      if (unlistenActivity) unlistenActivity();
       tauri.closeSessionWatch(sessionId).catch(() => {});
     };
-  }, [projectId, sessionId]);
+  }, [projectId, sessionId, patchActivity]);
 
   const loadMore = async () => {
     if (!data || !data.hasMoreBefore || data.blocks.length === 0) return;

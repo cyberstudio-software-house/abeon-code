@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Project, SessionMeta, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser } from '../types';
+import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser } from '../types';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -28,6 +28,8 @@ export const tauri = {
     invoke<void>('close_session_watch', { sessionId }),
   onSessionAppend: (sessionId: string, cb: (blocks: HistoryBlock[]) => void): Promise<UnlistenFn> =>
     listen<{ blocks: HistoryBlock[] }>(`session:${sessionId}:append`, e => cb(e.payload.blocks)),
+  onSessionActivity: (sessionId: string, cb: (activity: SessionActivity) => void): Promise<UnlistenFn> =>
+    listen<{ activity: SessionActivity }>(`session:${sessionId}:activity`, e => cb(e.payload.activity)),
   spawnPty: (projectId: number, kind: PtyKindClient, cols: number, rows: number) =>
     invoke<string>('spawn_pty', { projectId, kind, cols, rows }),
   ptyWrite: (ptyId: string, data: string) => invoke<void>('pty_write', { ptyId, data }),
