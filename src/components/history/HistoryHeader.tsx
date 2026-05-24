@@ -4,6 +4,8 @@ import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import { getCliModelString } from '../../lib/models';
 import { IconBtn } from '../shared/IconBtn';
+import { ACTIVITY_DOT, ACTIVITY_LABEL, ACTIVITY_ICON } from '../../lib/activity';
+import { Icon } from '../shared/Icon';
 
 type Props = { meta: SessionMeta };
 
@@ -92,9 +94,15 @@ export function HistoryHeader({ meta }: Props) {
             {meta.title}
           </h1>
         )}
-        <span className="inline-flex items-center gap-1.5 text-[10px] font-mono text-accent bg-bg-elev-2 px-[7px] py-0.5 rounded-full">
-          <span className="w-1 h-1 rounded-full bg-accent" />
-          aktywna
+        <span
+          className={`inline-flex items-center gap-1.5 text-[10px] font-mono ${ACTIVITY_DOT[meta.activity]} text-bg px-[7px] py-0.5 rounded-full`}
+          title={ACTIVITY_LABEL[meta.activity]}
+        >
+          <Icon
+            name={ACTIVITY_ICON[meta.activity]}
+            className={`w-3 h-3 ${meta.activity === 'running' ? 'animate-spin' : ''}`}
+          />
+          {ACTIVITY_LABEL[meta.activity]}
         </span>
         <div className="ml-auto flex items-center gap-2.5">
           {generating ? (

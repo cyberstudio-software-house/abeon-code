@@ -57,13 +57,18 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
     return items?.find(i => i.id === sessionId)?.title;
   });
 
+  const storeActivity = useStore(s => {
+    const items = s.sessionsByProject[projectId]?.items;
+    return items?.find(i => i.id === sessionId)?.activity;
+  });
+
   const meta = useMemo(() => {
     if (!data) return null;
-    if (storeTitle && storeTitle !== data.meta.title) {
-      return { ...data.meta, title: storeTitle };
-    }
-    return data.meta;
-  }, [data, storeTitle]);
+    const patched = { ...data.meta };
+    if (storeTitle && storeTitle !== data.meta.title) patched.title = storeTitle;
+    if (storeActivity && storeActivity !== data.meta.activity) patched.activity = storeActivity;
+    return patched;
+  }, [data, storeTitle, storeActivity]);
 
   if (error) return <div className="p-6 text-danger text-[13px]">Błąd: {error}</div>;
   if (!data || !meta) return <div className="p-6 text-muted text-[13px]">Wczytywanie historii…</div>;
