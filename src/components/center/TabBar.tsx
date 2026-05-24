@@ -1,6 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
+import { ACTIVITY_DOT, ACTIVITY_LABEL } from '../../lib/activity';
+import { selectSessionActivity } from '../../store/sessionsSlice';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
+
+function TabActivityDot({ sessionId }: { sessionId: string }) {
+  const activity = useStore(selectSessionActivity(sessionId));
+  return (
+    <span
+      className={`mr-1.5 w-[5px] h-[5px] rounded-full ${ACTIVITY_DOT[activity]}`}
+      title={ACTIVITY_LABEL[activity]}
+    />
+  );
+}
 
 function TabIcon({ tab }: { tab: import('../../store/tabsSlice').Tab }) {
   if (tab.kind === 'session') return <>{tab.mode === 'terminal' ? '›' : '◇'}</>;
@@ -73,6 +85,7 @@ export function TabBar() {
                 : 'bg-bg border-transparent text-muted hover:text-fg'
             }`}
           >
+            {t.kind === 'session' && <TabActivityDot sessionId={t.sessionId} />}
             <span className="mr-1.5 text-muted">
               <TabIcon tab={t} />
             </span>
