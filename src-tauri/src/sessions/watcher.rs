@@ -5,9 +5,10 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher as _, Event, EventKind};
 use tauri::{AppHandle, Emitter};
-use crate::domain::HistoryBlock;
+use crate::domain::{HistoryBlock, SessionActivity};
 use crate::error::AppResult;
 use crate::sessions::parser::parse_line;
+use crate::sessions::activity::compute_activity;
 
 struct OpenSession {
     path: PathBuf,
@@ -17,6 +18,7 @@ struct OpenSession {
 pub struct SessionWatchers {
     sessions: Mutex<HashMap<String, OpenSession>>,
     watcher: Mutex<Option<RecommendedWatcher>>,
+    last_activity: Mutex<HashMap<String, SessionActivity>>,
 }
 
 impl SessionWatchers {
@@ -24,6 +26,7 @@ impl SessionWatchers {
         Arc::new(Self {
             sessions: Mutex::new(HashMap::new()),
             watcher: Mutex::new(None),
+            last_activity: Mutex::new(HashMap::new()),
         })
     }
 
@@ -57,11 +60,13 @@ impl SessionWatchers {
 
     pub fn close(&self, session_id: &str) {
         self.sessions.lock().remove(session_id);
+        self.last_activity.lock().remove(session_id);
     }
 
     fn handle_change(&self, app: &AppHandle, changed: &Path) {
         let mut sessions = self.sessions.lock();
-        let mut updates: Vec<(String, Vec<HistoryBlock>)> = Vec::new();
+        let mut block_updates: Vec<(String, Vec<HistoryBlock>)> = Vec::new();
+        let mut activity_inputs: Vec<(String, PathBuf)> = Vec::new();
 
         for (sid, sess) in sessions.iter_mut() {
             if sess.path != changed { continue; }
@@ -69,18 +74,43 @@ impl SessionWatchers {
                 Ok(m) => m.len(),
                 Err(_) => continue,
             };
-            if new_size <= sess.last_offset { continue; }
+            if new_size <= sess.last_offset {
+                // file changed but didn't grow (e.g. mtime touch) — still
+                // recompute activity, no blocks to append.
+                activity_inputs.push((sid.clone(), sess.path.clone()));
+                continue;
+            }
             let blocks = read_tail(&sess.path, sess.last_offset, new_size);
             sess.last_offset = new_size;
             if !blocks.is_empty() {
-                updates.push((sid.clone(), blocks));
+                block_updates.push((sid.clone(), blocks));
             }
+            activity_inputs.push((sid.clone(), sess.path.clone()));
         }
         drop(sessions);
 
-        for (sid, blocks) in updates {
+        for (sid, blocks) in block_updates {
             let _ = app.emit(&format!("session:{sid}:append"), serde_json::json!({ "blocks": blocks }));
         }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let mut last = self.last_activity.lock();
+        for (sid, path) in activity_inputs {
+            let new_activity = compute_activity(&path, now);
+            let changed_state = last.get(&sid).copied() != Some(new_activity);
+            if changed_state {
+                last.insert(sid.clone(), new_activity);
+                let _ = app.emit(
+                    &format!("session:{sid}:activity"),
+                    serde_json::json!({ "activity": new_activity }),
+                );
+            }
+        }
+        drop(last);
+
         std::thread::sleep(Duration::from_millis(50));
     }
 }
