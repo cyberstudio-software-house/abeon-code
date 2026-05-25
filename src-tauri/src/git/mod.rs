@@ -1,6 +1,6 @@
 use std::path::Path;
 use git2::{Repository, StatusOptions, Status};
-use crate::domain::{GitFile, GitRepo, GitStatus};
+use crate::domain::{DiffHunk, DiffLine, DiffResult, GitFile, GitRepo, GitStatus};
 use crate::error::AppResult;
 
 pub fn status(path: &Path) -> AppResult<GitStatus> {
@@ -111,10 +111,91 @@ fn status_to_char(s: Status) -> (String, bool) {
     ("?".into(), false)
 }
 
+const DIFF_SIZE_LIMIT: u64 = 2 * 1024 * 1024;
+
+pub fn diff_file(repo_path: &Path, file_path: &str) -> AppResult<DiffResult> {
+    let repo = Repository::open(repo_path)?;
+
+    let workdir_file = repo_path.join(file_path);
+    if let Ok(meta) = std::fs::metadata(&workdir_file) {
+        if meta.is_file() && meta.len() > DIFF_SIZE_LIMIT {
+            return Ok(DiffResult::TooLarge { size: meta.len() as usize });
+        }
+    }
+
+    let is_untracked = match repo.status_file(Path::new(file_path)) {
+        Ok(s) => s.contains(Status::WT_NEW) && !s.contains(Status::INDEX_NEW),
+        Err(_) => false,
+    };
+    if is_untracked {
+        let content = std::fs::read_to_string(&workdir_file).unwrap_or_default();
+        let lines: Vec<DiffLine> = content.lines().enumerate().map(|(i, line)| DiffLine {
+            kind: "add".into(),
+            old_lineno: None,
+            new_lineno: Some(i + 1),
+            content: format!("{line}\n"),
+        }).collect();
+        let count = lines.len();
+        let hunk = DiffHunk {
+            header: format!("@@ -0,0 +1,{count} @@"),
+            old_start: 0,
+            new_start: 1,
+            lines,
+        };
+        return Ok(DiffResult::Text { hunks: vec![hunk] });
+    }
+
+    let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+    let mut opts = git2::DiffOptions::new();
+    opts.pathspec(file_path).include_untracked(true);
+    let diff = repo.diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))?;
+
+    if let Some(delta) = diff.deltas().next() {
+        if delta.flags().is_binary() {
+            return Ok(DiffResult::Binary);
+        }
+    }
+
+    let hunks: std::cell::RefCell<Vec<DiffHunk>> = std::cell::RefCell::new(Vec::new());
+    diff.foreach(
+        &mut |_, _| true,
+        None,
+        Some(&mut |_delta, hunk| {
+            hunks.borrow_mut().push(DiffHunk {
+                header: String::from_utf8_lossy(hunk.header()).trim_end().to_string(),
+                old_start: hunk.old_start() as usize,
+                new_start: hunk.new_start() as usize,
+                lines: Vec::new(),
+            });
+            true
+        }),
+        Some(&mut |_delta, _hunk, line| {
+            if let Some(last) = hunks.borrow_mut().last_mut() {
+                let kind = match line.origin() {
+                    '+' => "add",
+                    '-' => "del",
+                    _ => "context",
+                };
+                last.lines.push(DiffLine {
+                    kind: kind.into(),
+                    old_lineno: line.old_lineno().map(|n| n as usize),
+                    new_lineno: line.new_lineno().map(|n| n as usize),
+                    content: String::from_utf8_lossy(line.content()).to_string(),
+                });
+            }
+            true
+        }),
+    )?;
+
+    Ok(DiffResult::Text { hunks: hunks.into_inner() })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::DiffResult;
     use std::fs;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn init_repo(path: &Path) {
@@ -182,5 +263,76 @@ mod tests {
         let st = status(tmp.path()).unwrap();
         assert_eq!(st.repos.len(), 1);
         assert_eq!(st.repos[0].label, "frontend");
+    }
+
+    use std::process::Command;
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git").current_dir(dir).args(args).output().expect("git");
+        if !out.status.success() {
+            panic!("git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
+        }
+    }
+
+    fn init_repo_with_commit(dir: &Path) {
+        run_git(dir, &["init", "-q", "-b", "main"]);
+        run_git(dir, &["config", "user.email", "t@t"]);
+        run_git(dir, &["config", "user.name", "t"]);
+        fs::write(dir.join("seed.txt"), "x\n").unwrap();
+        run_git(dir, &["add", "."]);
+        run_git(dir, &["commit", "-q", "-m", "seed"]);
+    }
+
+    #[test]
+    fn diff_file_modified_returns_add_and_del_lines() {
+        let tmp = TempDir::new().unwrap();
+        init_repo_with_commit(tmp.path());
+        fs::write(tmp.path().join("a.txt"), "one\ntwo\nthree\n").unwrap();
+        run_git(tmp.path(), &["add", "."]);
+        run_git(tmp.path(), &["commit", "-q", "-m", "add a"]);
+        fs::write(tmp.path().join("a.txt"), "one\nTWO\nthree\n").unwrap();
+
+        let res = diff_file(tmp.path(), "a.txt").unwrap();
+        let hunks = match res {
+            DiffResult::Text { hunks } => hunks,
+            other => panic!("expected Text, got {:?}", other),
+        };
+        assert!(!hunks.is_empty());
+        let has_add = hunks.iter().any(|h| h.lines.iter().any(|l| l.kind == "add"));
+        let has_del = hunks.iter().any(|h| h.lines.iter().any(|l| l.kind == "del"));
+        assert!(has_add, "expected at least one add line");
+        assert!(has_del, "expected at least one del line");
+    }
+
+    #[test]
+    fn diff_file_untracked_returns_synthetic_add_hunk() {
+        let tmp = TempDir::new().unwrap();
+        init_repo_with_commit(tmp.path());
+        fs::write(tmp.path().join("new.txt"), "line1\nline2\n").unwrap();
+
+        let res = diff_file(tmp.path(), "new.txt").unwrap();
+        let hunks = match res {
+            DiffResult::Text { hunks } => hunks,
+            other => panic!("expected Text, got {:?}", other),
+        };
+        assert_eq!(hunks.len(), 1);
+        let h = &hunks[0];
+        assert_eq!(h.old_start, 0);
+        assert_eq!(h.new_start, 1);
+        assert_eq!(h.lines.len(), 2);
+        assert!(h.lines.iter().all(|l| l.kind == "add"));
+    }
+
+    #[test]
+    fn diff_file_too_large_returns_too_large_variant() {
+        let tmp = TempDir::new().unwrap();
+        init_repo_with_commit(tmp.path());
+        let big: Vec<u8> = vec![b'x'; 3 * 1024 * 1024];
+        fs::write(tmp.path().join("big.bin"), &big).unwrap();
+        let res = diff_file(tmp.path(), "big.bin").unwrap();
+        match res {
+            DiffResult::TooLarge { size } => assert!(size >= 2 * 1024 * 1024),
+            other => panic!("expected TooLarge, got {:?}", other),
+        }
     }
 }

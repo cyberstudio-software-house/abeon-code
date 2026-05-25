@@ -48,6 +48,7 @@ pub fn run() {
             commands::actions::update_action,
             commands::actions::remove_action,
             commands::git::git_status,
+            commands::git::git_diff_file,
             commands::settings::get_git_user,
             commands::settings::get_setting,
             commands::settings::get_all_settings,
