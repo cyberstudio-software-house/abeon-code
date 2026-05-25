@@ -81,10 +81,14 @@ pub fn delete_setting(state: State<AppState>, key: String) -> AppResult<()> {
 #[cfg(test)]
 mod detect_tests {
     use super::*;
+    use std::sync::Mutex;
     use tempfile::TempDir;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn returns_some_when_shell_env_points_to_existing_file() {
+        let _guard = ENV_LOCK.lock().unwrap();
         let td = TempDir::new().unwrap();
         let fake_shell = td.path().join("zsh");
         std::fs::write(&fake_shell, "").unwrap();
@@ -95,12 +99,14 @@ mod detect_tests {
 
     #[test]
     fn returns_none_when_shell_env_missing() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("SHELL");
         assert_eq!(detect_default_shell_impl(), None);
     }
 
     #[test]
     fn returns_none_when_shell_path_missing() {
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::set_var("SHELL", "/nonexistent/zsh");
         assert_eq!(detect_default_shell_impl(), None);
     }
