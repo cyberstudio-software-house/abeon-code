@@ -35,6 +35,7 @@ type Persisted = {
   projectsBasePath?: string;
   skipPermissions?: boolean;
   sortMode?: 'manual' | 'alpha' | 'activity';
+  shellPath?: string;
 };
 
 const PERSISTED_KEYS = [
@@ -42,6 +43,7 @@ const PERSISTED_KEYS = [
   'defaultModelId', 'titleGenModelId', 'modelEfforts', 'customModels',
   'projectsBasePath', 'skipPermissions',
   'sortMode',
+  'shellPath',
 ] as const satisfies readonly (keyof Persisted)[];
 
 type PersistedKey = typeof PERSISTED_KEYS[number];
@@ -61,6 +63,7 @@ function pickPersistedFields(state: AppState): Persisted {
     projectsBasePath: state.projectsBasePath,
     skipPermissions: state.skipPermissions,
     sortMode: state.sortMode,
+    shellPath: state.shellPath,
   };
 }
 
@@ -123,6 +126,7 @@ function applyPersistedToState(p: Persisted) {
   if (p.sortMode === 'manual' || p.sortMode === 'alpha' || p.sortMode === 'activity') {
     patch.sortMode = p.sortMode;
   }
+  if (typeof p.shellPath === 'string') patch.shellPath = p.shellPath;
   if (Object.keys(patch).length > 0) useStore.setState(patch);
 }
 
@@ -237,4 +241,17 @@ async function hydrateFromSqlite(): Promise<void> {
   writeLocalStorage(futureState);
 }
 
-void hydrateFromSqlite();
+async function bootstrapShellPath(): Promise<void> {
+  await hydrateFromSqlite();
+  if (useStore.getState().shellPath !== '') return;
+  try {
+    const detected = await tauri.detectDefaultShell();
+    if (detected && detected.length > 0) {
+      useStore.setState({ shellPath: detected });
+    }
+  } catch (err) {
+    console.error('[settings] detectDefaultShell failed', err);
+  }
+}
+
+void bootstrapShellPath();
