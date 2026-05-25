@@ -8,9 +8,19 @@ const STATUS_COLOR: Record<string, string> = {
   '?': 'text-muted',
 };
 
-export function GitFileRow({ file }: { file: GitFile }) {
+type Props = {
+  file: GitFile;
+  active?: boolean;
+  onClick?: () => void;
+};
+
+export function GitFileRow({ file, active, onClick }: Props) {
   return (
-    <button className="w-full flex items-center gap-2 px-2 py-[5px] border-b border-border/50 hover:bg-bg-elev transition-colors text-left">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full flex items-center gap-2 px-2 py-[5px] border-b border-border/50 hover:bg-bg-elev transition-colors text-left ${active ? 'bg-bg-elev' : ''}`}
+    >
       <span className={`font-mono text-[10px] w-3 text-center font-semibold ${STATUS_COLOR[file.status] ?? 'text-muted'}`}>
         {file.status}
       </span>
