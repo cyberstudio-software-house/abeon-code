@@ -19,6 +19,7 @@ export const useStore = create<AppState>()((...a) => ({
 }));
 
 const PERSIST_KEY = 'abeoncode.settings';
+const TABS_PERSIST_KEY = 'abeoncode.tabs';
 
 type EffortLevelStr = 'low' | 'medium' | 'high';
 type CustomModelLite = { id: string; modelId: string; label: string };
@@ -147,30 +148,98 @@ function writeLocalStorage(snapshot: Persisted) {
   }
 }
 
+// --- Tab persistence (localStorage only) ---
+
+type PersistedTab = {
+  kind: 'session';
+  id: string;
+  projectId: number;
+  sessionId: string;
+  linkedSessionId?: string;
+  title: string;
+};
+
+type PersistedTabs = {
+  tabs: PersistedTab[];
+  activeTabId: string | null;
+};
+
+function loadTabsFromLocalStorage(): PersistedTabs | null {
+  try {
+    const raw = localStorage.getItem(TABS_PERSIST_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedTabs;
+    if (!Array.isArray(parsed.tabs)) return null;
+    const tabs = parsed.tabs.filter(
+      (t): t is PersistedTab => t.kind === 'session' && typeof t.id === 'string' && typeof t.sessionId === 'string',
+    );
+    const activeTabId = tabs.some(t => t.id === parsed.activeTabId)
+      ? parsed.activeTabId
+      : (tabs[tabs.length - 1]?.id ?? null);
+    return { tabs, activeTabId };
+  } catch {
+    return null;
+  }
+}
+
+function writeTabsToLocalStorage(state: AppState) {
+  const sessionTabs: PersistedTab[] = state.tabs
+    .filter((t): t is Extract<typeof t, { kind: 'session' }> => t.kind === 'session')
+    .map(t => ({
+      kind: 'session' as const,
+      id: t.id,
+      projectId: t.projectId,
+      sessionId: t.sessionId,
+      ...(t.linkedSessionId ? { linkedSessionId: t.linkedSessionId } : {}),
+      title: t.title,
+    }));
+  const activeTabId = sessionTabs.some(t => t.id === state.activeTabId)
+    ? state.activeTabId
+    : (sessionTabs[sessionTabs.length - 1]?.id ?? null);
+  try {
+    localStorage.setItem(TABS_PERSIST_KEY, JSON.stringify({ tabs: sessionTabs, activeTabId }));
+  } catch { /* storage full */ }
+}
+
 // --- Boot: sync hydrate from localStorage ---
 applyPersistedToState(loadFromLocalStorage());
+
+// --- Boot: restore persisted tabs ---
+const savedTabs = loadTabsFromLocalStorage();
+if (savedTabs && savedTabs.tabs.length > 0) {
+  useStore.setState({
+    tabs: savedTabs.tabs.map(t => ({ ...t, mode: 'history' as const })),
+    activeTabId: savedTabs.activeTabId,
+  });
+}
 
 // --- prevSnapshot tracks last persisted state for diffing ---
 let prevSnapshot: Persisted = pickPersistedFields(useStore.getState());
 
 // --- Subscribe: on any state change, diff + write localStorage + SQLite ---
+let prevTabsJson = JSON.stringify(useStore.getState().tabs) + '|' + (useStore.getState().activeTabId ?? '');
+
 useStore.subscribe((state) => {
+  // Settings persistence
   const next = pickPersistedFields(state);
   const changed = diffKeys(prevSnapshot, next);
-  if (changed.length === 0) return;
-
-  // 1. Instant cache to localStorage
-  writeLocalStorage(next);
-
-  // 2. Durable write to SQLite per changed key (fire-and-forget)
-  for (const key of changed) {
-    const value = serializeValue(key, next[key]);
-    tauri.setSetting(key, value).catch(err => {
-      console.error('[settings] setSetting failed', key, err);
-    });
+  if (changed.length > 0) {
+    writeLocalStorage(next);
+    for (const key of changed) {
+      const value = serializeValue(key, next[key]);
+      tauri.setSetting(key, value).catch(err => {
+        console.error('[settings] setSetting failed', key, err);
+      });
+    }
+    prevSnapshot = next;
   }
 
-  prevSnapshot = next;
+  // Tabs persistence (tabs array or activeTabId change)
+  const tabsJson = JSON.stringify(state.tabs) + '|' + (state.activeTabId ?? '');
+  if (tabsJson !== prevTabsJson) {
+    prevTabsJson = tabsJson;
+    writeTabsToLocalStorage(state);
+  }
 });
 
 const MIGRATION_FLAG_KEY = 'migrated_v2';
