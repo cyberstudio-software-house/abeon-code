@@ -4,6 +4,8 @@ import { useStore } from '../../store';
 import { Icon } from '../shared/Icon';
 import { BUILTIN_MODELS, type EffortLevel } from '../../lib/models';
 import type { ThemeMode } from '../../styles/theme';
+import { tauri } from '../../lib/tauri';
+import type { ShellInfo } from '../../types';
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'light', label: 'Jasny' },
@@ -84,6 +86,33 @@ function GeneralTab() {
   const setProjectsBasePath = useStore(s => s.setProjectsBasePath);
   const skipPermissions = useStore(s => s.skipPermissions);
   const setSkipPermissions = useStore(s => s.setSkipPermissions);
+  const shellPath = useStore(s => s.shellPath);
+  const setShellPath = useStore(s => s.setShellPath);
+  const [shells, setShells] = useState<ShellInfo[]>([]);
+  const [detectedName, setDetectedName] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [list, detected] = await Promise.all([
+          tauri.listAvailableShells(),
+          tauri.detectDefaultShell(),
+        ]);
+        if (cancelled) return;
+        setShells(list);
+        if (detected) {
+          const match = list.find(s => s.path === detected || s.name === detected);
+          setDetectedName(match?.name ?? detected);
+        }
+      } catch (err) {
+        console.error('[settings] failed to load shells', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const isCustom = shellPath !== '' && !shells.some(s => s.name === shellPath || s.path === shellPath);
 
   const pickProjectsBase = async () => {
     const sel = await open({
@@ -155,6 +184,44 @@ function GeneralTab() {
         </div>
         <p className="text-[11px] text-muted mt-2">
           Opcja „Systemowy" automatycznie dostosowuje motyw do ustawień systemu operacyjnego.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">
+          Domyślny shell
+        </label>
+        <select
+          value={isCustom ? '__custom__' : shellPath}
+          onChange={e => {
+            const v = e.target.value;
+            if (v === '__custom__') {
+              setShellPath(shellPath || '');
+            } else {
+              setShellPath(v);
+            }
+          }}
+          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
+        >
+          <option value="">Auto (z $SHELL)</option>
+          {shells.map(s => (
+            <option key={s.path} value={s.name}>{s.name} ({s.path})</option>
+          ))}
+          <option value="__custom__">Inny…</option>
+        </select>
+        {isCustom && (
+          <input
+            value={shellPath}
+            onChange={e => setShellPath(e.target.value)}
+            placeholder="/opt/homebrew/bin/fish"
+            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] font-mono mt-2"
+          />
+        )}
+        <p className="text-[11px] text-muted mt-2">
+          {detectedName
+            ? <>Wykryto: <code className="font-mono text-fg-secondary">{detectedName}</code>. </>
+            : null}
+          Dotyczy tylko interaktywnych terminali (tab Shell).
         </p>
       </div>
 
