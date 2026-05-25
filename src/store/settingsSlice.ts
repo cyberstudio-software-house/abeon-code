@@ -17,6 +17,7 @@ export type SettingsSlice = {
   projectsBasePath: string;
   skipPermissions: boolean;
   sortMode: SortMode;
+  shellPath: string;
   settingsOpen: boolean;
 
   setTheme: (t: ThemeMode) => void;
@@ -31,6 +32,7 @@ export type SettingsSlice = {
   setProjectsBasePath: (path: string) => void;
   setSkipPermissions: (v: boolean) => void;
   setSortMode: (mode: SortMode) => void;
+  setShellPath: (path: string) => void;
   openSettings: () => void;
   closeSettings: () => void;
 };
@@ -47,6 +49,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   projectsBasePath: '',
   skipPermissions: false,
   sortMode: 'manual',
+  shellPath: '',
   settingsOpen: false,
 
   setTheme: (theme) => set({ theme }),
@@ -62,6 +65,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   setProjectsBasePath: (projectsBasePath) => set({ projectsBasePath }),
   setSkipPermissions: (skipPermissions) => set({ skipPermissions }),
   setSortMode: (sortMode) => set({ sortMode }),
+  setShellPath: (shellPath) => set({ shellPath }),
   removeCustomModel: (id) => {
     const customModels = get().customModels.filter(m => m.id !== id);
     const defaultModelId = get().defaultModelId === id ? DEFAULT_MODEL_ID : get().defaultModelId;

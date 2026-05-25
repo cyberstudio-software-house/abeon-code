@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser } from '../types';
+import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo } from '../types';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -65,6 +65,8 @@ export const tauri = {
     invoke<void>('set_setting', { key, value }),
   deleteSetting: (key: string) =>
     invoke<void>('delete_setting', { key }),
+  detectDefaultShell: () => invoke<string | null>('detect_default_shell'),
+  listAvailableShells: () => invoke<ShellInfo[]>('list_available_shells'),
   getProjectsActivity: () =>
     invoke<Record<number, number>>('get_projects_activity'),
 };

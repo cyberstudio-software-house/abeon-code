@@ -12,3 +12,4 @@ export type { DetectedScript } from './DetectedScript';
 export type { GitFile } from './GitFile';
 export type { GitStatus } from './GitStatus';
 export type { GitUser } from './GitUser';
+export type { ShellInfo } from './ShellInfo';
