@@ -4,6 +4,7 @@ use crate::domain::SessionActivity;
 const TAIL_BYTES: u64 = 8 * 1024;
 const LIVE_WINDOW_MS: i64 = 5_000;
 const TOOL_STALL_MS: i64 = 30_000;
+const WAITING_DECAY_MS: i64 = 4 * 60 * 60 * 1000;
 const IDLE_HARD_CAP_MS: i64 = 24 * 60 * 60 * 1000;
 
 pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
@@ -25,20 +26,25 @@ pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
     let Some(lines) = read_tail_lines(path) else { return SessionActivity::Idle };
     let Some(last) = find_last_significant(&lines) else { return SessionActivity::Idle };
 
-    match last {
-        LastEvent::UserText => SessionActivity::Running,
-        LastEvent::UserToolResult { is_error: false } => SessionActivity::Running,
-        LastEvent::UserToolResult { is_error: true } => SessionActivity::WaitingUser,
+    let waiting = match last {
+        LastEvent::UserText => return SessionActivity::Running,
+        LastEvent::UserToolResult { is_error: false } => return SessionActivity::Running,
+        LastEvent::SessionAway => return SessionActivity::Idle,
         LastEvent::AssistantToolUseUnresolved => {
             if age_ms < TOOL_STALL_MS {
-                SessionActivity::Running
-            } else {
-                SessionActivity::WaitingTool
+                return SessionActivity::Running;
             }
+            SessionActivity::WaitingTool
         }
+        LastEvent::UserToolResult { is_error: true } => SessionActivity::WaitingUser,
         LastEvent::AssistantToolUseResolved => SessionActivity::WaitingUser,
         LastEvent::AssistantText => SessionActivity::WaitingUser,
-        LastEvent::SessionAway => SessionActivity::Idle,
+    };
+
+    if age_ms > WAITING_DECAY_MS {
+        SessionActivity::Idle
+    } else {
+        waiting
     }
 }
 
@@ -389,6 +395,53 @@ mod tests {
             r#"{"type":"system","subtype":"hook"}
 {"type":"queue-operation"}"#);
         assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn assistant_text_after_5h_returns_idle_via_waiting_decay() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"hi"}]}}
+{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"hello"}]}}"#);
+        let five_hours = 5 * 60 * 60 * 1000;
+        assert_eq!(compute_activity(&p, mtime + five_hours), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn assistant_text_after_2h_still_waiting_user() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"hi"}]}}
+{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"hello"}]}}"#);
+        let two_hours = 2 * 60 * 60 * 1000;
+        assert_eq!(compute_activity(&p, mtime + two_hours), SessionActivity::WaitingUser);
+    }
+
+    #[test]
+    fn waiting_tool_after_5h_returns_idle_via_waiting_decay() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"tool_use","id":"t1","name":"read","input":{}}]}}"#);
+        let five_hours = 5 * 60 * 60 * 1000;
+        assert_eq!(compute_activity(&p, mtime + five_hours), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn tool_result_error_after_5h_returns_idle_via_waiting_decay() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"boom","is_error":true}]}}"#);
+        let five_hours = 5 * 60 * 60 * 1000;
+        assert_eq!(compute_activity(&p, mtime + five_hours), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn user_text_after_5h_returns_running_not_decayed() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"do it"}]}}"#);
+        let five_hours = 5 * 60 * 60 * 1000;
+        assert_eq!(compute_activity(&p, mtime + five_hours), SessionActivity::Running);
     }
 
     #[test]
