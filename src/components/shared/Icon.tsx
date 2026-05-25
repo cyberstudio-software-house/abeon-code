@@ -5,6 +5,7 @@ const paths: Record<string, ReactNode> = {
   chevR:    <polyline points="9 6 15 12 9 18"/>,
   chevD:    <polyline points="6 9 12 15 18 9"/>,
   chevU:    <polyline points="6 15 12 9 18 15"/>,
+  chevron:  <polyline points="6 9 12 15 18 9"/>,
   plus:     <g><path d="M12 5v14"/><path d="M5 12h14"/></g>,
   play:     <polygon points="6 4 20 12 6 20" fill="currentColor" stroke="none"/>,
   pause:    <g fill="currentColor" stroke="none"><rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/></g>,
