@@ -53,6 +53,8 @@ pub fn run() {
             commands::settings::get_all_settings,
             commands::settings::set_setting,
             commands::settings::delete_setting,
+            commands::settings::detect_default_shell,
+            commands::settings::list_available_shells,
             commands::activity::get_projects_activity,
             commands::sessions::count_sessions,
             commands::sessions::export_session,

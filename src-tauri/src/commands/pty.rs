@@ -61,7 +61,7 @@ pub fn spawn_pty(
             )
         }
         PtyKind::Shell => (
-            "bash".to_string(),
+            crate::commands::settings::resolve_shell(&c),
             vec!["-l".to_string()],
         ),
     };
