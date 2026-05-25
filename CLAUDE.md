@@ -81,7 +81,7 @@ Pattern when adding a new global shortcut that may conflict with xterm: register
 - **ts-rs exports `src/types/*.ts` during `cargo test`, NOT `cargo build`**. After adding `#[derive(TS)]`, run `cargo test` once to materialize the file.
 - **Known lint baseline**: `npm run lint` reports 2 pre-existing errors (`vite.config.ts(5,1)` unused `@ts-expect-error`, `tsconfig.json(24,18)` TS6310). Treat them as baseline; only flag NEW errors.
 - **Process-env mutating Rust tests** use shared `TEST_ENV_LOCK: Mutex<()>` at parent-module scope in `commands/settings.rs`. Reuse this pattern (not new local locks) when adding tests that touch `std::env::set_var`/`remove_var`.
-- **Shell PTY program** is resolved per-spawn via `commands::settings::resolve_shell(&conn)` (fallback: `shellPath` setting → `$SHELL` → `"bash"`). Claude/Action PTYs deliberately keep `bash -lc <cmd>` as a stable command runner — do not route them through `resolve_shell`.
+- **All PTY programs** are resolved per-spawn via `commands::settings::resolve_shell(&conn)` (fallback: `shellPath` setting → `$SHELL` → `"bash"`). Shell PTY uses `<shell> -l`; Claude/Action PTYs use `<shell> -lc <cmd>`. All four supported shells (bash/zsh/fish/sh) accept `-l` and `-c`; the `<cmd>` strings are plain binary invocations with no shell-specific syntax (no `$(...)`, no `[[ ]]`).
 
 ## Useful commands
 
