@@ -90,6 +90,7 @@ function GeneralTab() {
   const setShellPath = useStore(s => s.setShellPath);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [detectedName, setDetectedName] = useState<string | null>(null);
+  const [customMode, setCustomMode] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +114,7 @@ function GeneralTab() {
   }, []);
 
   const isCustom = shellPath !== '' && !shells.some(s => s.name === shellPath || s.path === shellPath);
+  const showCustom = isCustom || customMode;
 
   const pickProjectsBase = async () => {
     const sel = await open({
@@ -192,12 +194,13 @@ function GeneralTab() {
           Domyślny shell
         </label>
         <select
-          value={isCustom ? '__custom__' : shellPath}
+          value={showCustom ? '__custom__' : shellPath}
           onChange={e => {
             const v = e.target.value;
             if (v === '__custom__') {
-              setShellPath(shellPath || '');
+              setCustomMode(true);
             } else {
+              setCustomMode(false);
               setShellPath(v);
             }
           }}
@@ -209,7 +212,7 @@ function GeneralTab() {
           ))}
           <option value="__custom__">Inny…</option>
         </select>
-        {isCustom && (
+        {showCustom && (
           <input
             value={shellPath}
             onChange={e => setShellPath(e.target.value)}
