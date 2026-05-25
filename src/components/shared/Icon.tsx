@@ -3,7 +3,6 @@ import type { ReactNode, SVGProps } from 'react';
 const paths: Record<string, ReactNode> = {
   search:   <g><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></g>,
   chevR:    <polyline points="9 6 15 12 9 18"/>,
-  chevD:    <polyline points="6 9 12 15 18 9"/>,
   chevU:    <polyline points="6 15 12 9 18 15"/>,
   chevron:  <polyline points="6 9 12 15 18 9"/>,
   plus:     <g><path d="M12 5v14"/><path d="M5 12h14"/></g>,

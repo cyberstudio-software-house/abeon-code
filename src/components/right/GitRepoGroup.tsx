@@ -17,6 +17,7 @@ export function GitRepoGroup({ repo, collapsed, onToggle, onSelectFile }: Props)
         onClick={onToggle}
         className="w-full flex items-center gap-2 px-2 py-1.5 bg-bg-elev hover:bg-bg-elev/80 text-left"
         aria-label={repo.label}
+        aria-expanded={!collapsed}
       >
         <Icon
           name="chevron"
