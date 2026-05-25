@@ -115,11 +115,11 @@ function DiffBody({ loading, result, error }: { loading: boolean; result: DiffRe
             const bg = l.kind === 'add' ? 'bg-success/10' : l.kind === 'del' ? 'bg-danger/10' : '';
             const prefix = l.kind === 'add' ? '+' : l.kind === 'del' ? '-' : ' ';
             return (
-              <div key={li} className={`flex ${bg}`}>
+              <div key={li} className={`flex items-start ${bg}`}>
                 <span className="w-10 px-1 text-right text-muted tabular-nums shrink-0">{l.oldLineno ?? ''}</span>
                 <span className="w-10 px-1 text-right text-muted tabular-nums shrink-0">{l.newLineno ?? ''}</span>
                 <span className="w-4 text-center text-muted shrink-0">{prefix}</span>
-                <span className="whitespace-pre flex-1 min-w-0 text-fg">{l.content.replace(/\r?\n$/, '')}</span>
+                <span className="whitespace-pre-wrap break-all flex-1 min-w-0 text-fg">{l.content.replace(/\r?\n$/, '')}</span>
               </div>
             );
           })}
