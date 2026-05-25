@@ -115,7 +115,7 @@ function DiffBody({ loading, result }: { loading: boolean; result: DiffResult | 
                 <span className="w-10 px-1 text-right text-muted tabular-nums shrink-0">{l.oldLineno ?? ''}</span>
                 <span className="w-10 px-1 text-right text-muted tabular-nums shrink-0">{l.newLineno ?? ''}</span>
                 <span className="w-4 text-center text-muted shrink-0">{prefix}</span>
-                <span className="whitespace-pre flex-1 min-w-0 text-fg">{l.content.replace(/\n$/, '')}</span>
+                <span className="whitespace-pre flex-1 min-w-0 text-fg">{l.content.replace(/\r?\n$/, '')}</span>
               </div>
             );
           })}
