@@ -16,17 +16,20 @@ export function DiffDialog({ projectId, repoLabel, files, initialFilePath, onClo
   const [activeFile, setActiveFile] = useState<string>(initialFilePath);
   const [result, setResult] = useState<DiffResult | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setResult(null);
+    setError(null);
     tauri.gitDiffFile(projectId, repoLabel, activeFile).then(res => {
       if (cancelled) return;
       setResult(res);
       setLoading(false);
-    }).catch(() => {
+    }).catch(err => {
       if (cancelled) return;
+      setError(typeof err === 'string' ? err : (err?.message ?? 'Błąd wczytywania diffa'));
       setLoading(false);
     });
     return () => { cancelled = true; };
@@ -84,7 +87,7 @@ export function DiffDialog({ projectId, repoLabel, files, initialFilePath, onClo
             <GitFileList files={files} activeFilePath={activeFile} onSelect={setActiveFile} />
           </aside>
           <main className="flex-1 min-w-0 overflow-auto bg-bg">
-            <DiffBody loading={loading} result={result} />
+            <DiffBody loading={loading} result={result} error={error} />
           </main>
         </div>
       </div>
@@ -92,7 +95,8 @@ export function DiffDialog({ projectId, repoLabel, files, initialFilePath, onClo
   );
 }
 
-function DiffBody({ loading, result }: { loading: boolean; result: DiffResult | null }) {
+function DiffBody({ loading, result, error }: { loading: boolean; result: DiffResult | null; error: string | null }) {
+  if (error) return <div className="p-5 text-[12px] text-danger">Błąd: {error}</div>;
   if (loading || !result) return <div className="p-5 text-[12px] text-muted">Wczytywanie diffa…</div>;
   if (result.kind === 'binary') return <div className="p-5 text-[12px] text-muted">Plik binarny — diff niedostępny</div>;
   if (result.kind === 'tooLarge') {

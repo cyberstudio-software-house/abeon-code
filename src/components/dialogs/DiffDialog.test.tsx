@@ -63,4 +63,12 @@ describe('DiffDialog', () => {
     fireEvent.click(screen.getByText('b.txt'));
     await waitFor(() => expect(tauri.gitDiffFile).toHaveBeenCalledWith(1, 'frontend', 'b.txt'));
   });
+
+  it('navigates files via ArrowDown', async () => {
+    (tauri.gitDiffFile as ReturnType<typeof vi.fn>).mockResolvedValue({ kind: 'text', hunks: [] } satisfies DiffResult);
+    render(<DiffDialog projectId={1} repoLabel="." files={FILES} initialFilePath="a.txt" onClose={() => {}} />);
+    await waitFor(() => expect(tauri.gitDiffFile).toHaveBeenCalledWith(1, '.', 'a.txt'));
+    fireEvent.keyDown(document, { key: 'ArrowDown' });
+    await waitFor(() => expect(tauri.gitDiffFile).toHaveBeenCalledWith(1, '.', 'b.txt'));
+  });
 });

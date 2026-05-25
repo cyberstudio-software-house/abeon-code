@@ -150,16 +150,14 @@ pub fn diff_file(repo_path: &Path, file_path: &str) -> AppResult<DiffResult> {
     opts.pathspec(file_path).include_untracked(true);
     let diff = repo.diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))?;
 
-    if let Some(delta) = diff.deltas().next() {
-        if delta.flags().is_binary() {
-            return Ok(DiffResult::Binary);
-        }
-    }
-
+    let is_binary = std::cell::Cell::new(false);
     let hunks: std::cell::RefCell<Vec<DiffHunk>> = std::cell::RefCell::new(Vec::new());
     diff.foreach(
         &mut |_, _| true,
-        None,
+        Some(&mut |_delta, _binary| {
+            is_binary.set(true);
+            true
+        }),
         Some(&mut |_delta, hunk| {
             hunks.borrow_mut().push(DiffHunk {
                 header: String::from_utf8_lossy(hunk.header()).trim_end().to_string(),
@@ -186,6 +184,10 @@ pub fn diff_file(repo_path: &Path, file_path: &str) -> AppResult<DiffResult> {
             true
         }),
     )?;
+
+    if is_binary.get() {
+        return Ok(DiffResult::Binary);
+    }
 
     Ok(DiffResult::Text { hunks: hunks.into_inner() })
 }
@@ -333,6 +335,26 @@ mod tests {
         match res {
             DiffResult::TooLarge { size } => assert!(size >= 2 * 1024 * 1024),
             other => panic!("expected TooLarge, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn diff_file_binary_returns_binary_variant() {
+        let tmp = TempDir::new().unwrap();
+        init_repo_with_commit(tmp.path());
+        // 512 NUL bytes — large enough that libgit2's heuristic marks the delta as binary
+        let bin: Vec<u8> = vec![0u8; 512];
+        fs::write(tmp.path().join("img.bin"), &bin).unwrap();
+        run_git(tmp.path(), &["add", "."]);
+        run_git(tmp.path(), &["commit", "-q", "-m", "add bin"]);
+        let mut bin2: Vec<u8> = vec![0u8; 512];
+        bin2[0] = 1;
+        fs::write(tmp.path().join("img.bin"), &bin2).unwrap();
+
+        let res = diff_file(tmp.path(), "img.bin").unwrap();
+        match res {
+            DiffResult::Binary => {}
+            other => panic!("expected Binary, got {:?}", other),
         }
     }
 }
