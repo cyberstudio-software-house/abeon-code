@@ -97,14 +97,22 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
   refreshActivity: async (projectId) => {
     const current = get().sessionsByProject[projectId];
     if (!current) return;
-    const fresh = await tauri.listSessions(projectId, current.items.length || PAGE, 0);
-    const byId = new Map(fresh.map(s => [s.id, s.activity]));
-    const items = current.items.map(s =>
-      byId.has(s.id) ? { ...s, activity: byId.get(s.id)! } : s
-    );
+    const limit = current.items.length + PAGE;
+    const fresh = await tauri.listSessions(projectId, limit, 0);
+    const currentIds = new Set(current.items.map(s => s.id));
+    const newSessions: SessionMeta[] = [];
+    for (const s of fresh) {
+      if (currentIds.has(s.id)) break;
+      newSessions.push(s);
+    }
+    const freshById = new Map(fresh.map(s => [s.id, s]));
+    const refreshedExisting = current.items.map(s => freshById.get(s.id) ?? s);
     set({ sessionsByProject: {
       ...get().sessionsByProject,
-      [projectId]: { ...current, items },
+      [projectId]: {
+        items: [...newSessions, ...refreshedExisting],
+        hasMore: current.hasMore,
+      },
     }});
   },
   startActivityPolling: () => {
