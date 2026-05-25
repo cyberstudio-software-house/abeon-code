@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, atomic::{AtomicU32, Ordering}};
 use std::io::{Read, Write};
 use std::thread;
@@ -21,6 +22,7 @@ impl PtyHandle {
         cwd: &std::path::Path,
         cols: u16,
         rows: u16,
+        env: &HashMap<String, String>,
     ) -> AppResult<Self> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -30,7 +32,7 @@ impl PtyHandle {
         let mut cmd = CommandBuilder::new(program);
         for a in args { cmd.arg(a); }
         cmd.cwd(cwd);
-        for (k, v) in std::env::vars() { cmd.env(k, v); }
+        for (k, v) in env { cmd.env(k, v); }
         cmd.env("TERM", "xterm-256color");
 
         let child = pair.slave.spawn_command(cmd).map_err(|e| AppError::Pty(e.to_string()))?;

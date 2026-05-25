@@ -24,9 +24,10 @@ impl PtyManager {
         cwd: &std::path::Path,
         cols: u16,
         rows: u16,
+        env: &HashMap<String, String>,
     ) -> AppResult<String> {
         let id = Uuid::new_v4().to_string();
-        let h = PtyHandle::spawn(app, id.clone(), program, args, cwd, cols, rows)?;
+        let h = PtyHandle::spawn(app, id.clone(), program, args, cwd, cols, rows, env)?;
         self.inner.lock().insert(id.clone(), Arc::new(h));
         Ok(id)
     }

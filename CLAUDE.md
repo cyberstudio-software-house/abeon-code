@@ -82,6 +82,7 @@ Pattern when adding a new global shortcut that may conflict with xterm: register
 - **Known lint baseline**: `npm run lint` reports 2 pre-existing errors (`vite.config.ts(5,1)` unused `@ts-expect-error`, `tsconfig.json(24,18)` TS6310). Treat them as baseline; only flag NEW errors.
 - **Process-env mutating Rust tests** use shared `TEST_ENV_LOCK: Mutex<()>` at parent-module scope in `commands/settings.rs`. Reuse this pattern (not new local locks) when adding tests that touch `std::env::set_var`/`remove_var`.
 - **Shell PTY program** is resolved per-spawn via `commands::settings::resolve_shell(&conn)` (fallback: `shellPath` setting → `$SHELL` → `"bash"`). Claude/Action PTYs deliberately keep `bash -lc <cmd>` as a stable command runner — routing them through fish/zsh broke `claude` startup when node version managers (nvm/fnm) were only initialized in the user's interactive shell rcfile but not in bash's profile chain.
+- **PTY env is loaded from the user's chosen shell**, not inherited from the Tauri process. `commands::settings::ensure_shell_env(&state, &shell)` runs `<shell> -lc 'env -0'` once and caches in `AppState::shell_env` (`Mutex<Option<HashMap>>`). Falls back to `std::env::vars()` if the subprocess fails. Cache is invalidated by `set_setting` when key == `"shellPath"`. This is how `bash -lc "claude"` finds the right node binary even when nvm is set up only in zsh/fish rcfiles.
 
 ## Useful commands
 

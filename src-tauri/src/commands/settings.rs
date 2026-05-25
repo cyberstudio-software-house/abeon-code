@@ -90,6 +90,49 @@ pub fn resolve_shell(conn: &rusqlite::Connection) -> String {
     detect_default_shell_impl().unwrap_or_else(|| "bash".to_string())
 }
 
+// Returns the cached shell env, populating it on first access.
+// On load failure the cache is filled with the inherited process env so we don't
+// retry on every PTY spawn and we still spawn with sensible defaults.
+pub fn ensure_shell_env(state: &AppState, shell: &str) -> HashMap<String, String> {
+    let mut guard = state.shell_env.lock();
+    if guard.is_none() {
+        let env = load_shell_env(shell)
+            .unwrap_or_else(|| std::env::vars().collect());
+        *guard = Some(env);
+    }
+    guard.as_ref().unwrap().clone()
+}
+
+pub fn invalidate_shell_env(state: &AppState) {
+    *state.shell_env.lock() = None;
+}
+
+// Loads the environment exported by the user's login shell.
+// Runs `<shell> -lc 'env -0'` which sources the shell's rc/profile files and
+// dumps the resulting environment as null-separated KEY=VALUE pairs.
+// Returns None on subprocess failure, non-zero exit, or invalid UTF-8.
+pub fn load_shell_env(shell: &str) -> Option<HashMap<String, String>> {
+    let output = std::process::Command::new(shell)
+        .args(["-lc", "env -0"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let mut map = HashMap::new();
+    for chunk in output.stdout.split(|&b| b == 0) {
+        if chunk.is_empty() {
+            continue;
+        }
+        let s = std::str::from_utf8(chunk).ok()?;
+        if let Some(eq) = s.find('=') {
+            let (k, rest) = s.split_at(eq);
+            map.insert(k.to_string(), rest[1..].to_string());
+        }
+    }
+    Some(map)
+}
+
 #[tauri::command]
 pub fn get_setting(state: State<AppState>, key: String) -> AppResult<Option<String>> {
     let c = state.db.get()?;
@@ -105,7 +148,11 @@ pub fn get_all_settings(state: State<AppState>) -> AppResult<HashMap<String, Str
 #[tauri::command]
 pub fn set_setting(state: State<AppState>, key: String, value: String) -> AppResult<()> {
     let c = state.db.get()?;
-    settings_repo::set(&c, &key, &value)
+    settings_repo::set(&c, &key, &value)?;
+    if key == "shellPath" {
+        invalidate_shell_env(&state);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -157,6 +204,23 @@ mod list_tests {
         let shells = list_available_shells();
         assert!(!shells.is_empty(), "expected at least one shell (bash) on PATH");
         assert!(shells.iter().any(|s| s.name == "bash"));
+    }
+}
+
+#[cfg(test)]
+mod load_env_tests {
+    use super::*;
+
+    #[test]
+    fn returns_env_from_bash_with_path() {
+        let env = load_shell_env("bash").expect("bash should be available in CI");
+        assert!(env.contains_key("PATH"), "expected PATH in shell env");
+        assert!(!env.get("PATH").unwrap().is_empty());
+    }
+
+    #[test]
+    fn returns_none_for_nonexistent_shell() {
+        assert!(load_shell_env("/nonexistent/shell").is_none());
     }
 }
 

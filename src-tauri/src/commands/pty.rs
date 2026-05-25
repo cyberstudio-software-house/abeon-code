@@ -67,7 +67,9 @@ pub fn spawn_pty(
     };
 
     let args_ref: Vec<&str> = args_owned.iter().map(|s| s.as_str()).collect();
-    state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows)
+    let shell = crate::commands::settings::resolve_shell(&c);
+    let env = crate::commands::settings::ensure_shell_env(&state, &shell);
+    state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows, &env)
 }
 
 #[tauri::command]
