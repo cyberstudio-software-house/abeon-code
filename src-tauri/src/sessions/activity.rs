@@ -38,6 +38,7 @@ pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
         }
         LastEvent::AssistantToolUseResolved => SessionActivity::WaitingUser,
         LastEvent::AssistantText => SessionActivity::WaitingUser,
+        LastEvent::SessionAway => SessionActivity::Idle,
     }
 }
 
@@ -65,6 +66,7 @@ enum LastEvent {
     AssistantText,
     AssistantToolUseUnresolved,
     AssistantToolUseResolved,
+    SessionAway,
 }
 
 use serde_json::Value;
@@ -89,7 +91,14 @@ fn find_last_significant(lines: &[String]) -> Option<LastEvent> {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue; };
         let kind = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
         match kind {
-            "queue-operation" | "last-prompt" | "system" | "attachment" => continue,
+            "queue-operation" | "last-prompt" | "attachment" => continue,
+            "system" => {
+                let subtype = v.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
+                if subtype == "away_summary" {
+                    return Some(LastEvent::SessionAway);
+                }
+                continue;
+            }
             "user" => {
                 if let Some(s) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
                     if s.is_empty() || is_meta_user_content(s) { continue; }
@@ -380,6 +389,28 @@ mod tests {
             r#"{"type":"system","subtype":"hook"}
 {"type":"queue-operation"}"#);
         assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn away_summary_after_assistant_text_returns_idle() {
+        let td = TempDir::new().unwrap();
+        let body = r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"hi"}]}}
+{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"done"}]}}
+{"type":"system","uuid":"s1","subtype":"stop_hook_summary"}
+{"type":"system","uuid":"s2","subtype":"turn_duration","durationMs":1234,"messageCount":2}
+{"type":"system","uuid":"s3","subtype":"away_summary","content":"recap of work"}"#;
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl", body);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn user_text_after_away_summary_returns_running() {
+        let td = TempDir::new().unwrap();
+        let body = r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"done"}]}}
+{"type":"system","uuid":"s1","subtype":"away_summary","content":"recap"}
+{"type":"user","uuid":"u2","message":{"content":[{"type":"text","text":"i'm back"}]}}"#;
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl", body);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Running);
     }
 
     #[test]
