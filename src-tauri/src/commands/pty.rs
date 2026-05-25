@@ -49,14 +49,14 @@ pub fn spawn_pty(
                 cmd.push_str(" --dangerously-skip-permissions");
             }
             (
-                crate::commands::settings::resolve_shell(&c),
+                "bash".to_string(),
                 vec!["-lc".to_string(), cmd],
             )
         }
         PtyKind::Action { action_id } => {
             let action = actions_repo::get(&c, *action_id)?;
             (
-                crate::commands::settings::resolve_shell(&c),
+                "bash".to_string(),
                 vec!["-lc".to_string(), action.command.clone()],
             )
         }
