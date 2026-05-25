@@ -38,6 +38,22 @@ fn read_git_config(key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+pub fn detect_default_shell_impl() -> Option<String> {
+    let raw = std::env::var("SHELL").ok()?;
+    if raw.is_empty() {
+        return None;
+    }
+    if !std::path::Path::new(&raw).exists() {
+        return None;
+    }
+    Some(raw)
+}
+
+#[tauri::command]
+pub fn detect_default_shell() -> Option<String> {
+    detect_default_shell_impl()
+}
+
 #[tauri::command]
 pub fn get_setting(state: State<AppState>, key: String) -> AppResult<Option<String>> {
     let c = state.db.get()?;
@@ -60,4 +76,32 @@ pub fn set_setting(state: State<AppState>, key: String, value: String) -> AppRes
 pub fn delete_setting(state: State<AppState>, key: String) -> AppResult<()> {
     let c = state.db.get()?;
     settings_repo::delete(&c, &key)
+}
+
+#[cfg(test)]
+mod detect_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn returns_some_when_shell_env_points_to_existing_file() {
+        let td = TempDir::new().unwrap();
+        let fake_shell = td.path().join("zsh");
+        std::fs::write(&fake_shell, "").unwrap();
+        std::env::set_var("SHELL", &fake_shell);
+        let got = detect_default_shell_impl();
+        assert_eq!(got, Some(fake_shell.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn returns_none_when_shell_env_missing() {
+        std::env::remove_var("SHELL");
+        assert_eq!(detect_default_shell_impl(), None);
+    }
+
+    #[test]
+    fn returns_none_when_shell_path_missing() {
+        std::env::set_var("SHELL", "/nonexistent/zsh");
+        assert_eq!(detect_default_shell_impl(), None);
+    }
 }
