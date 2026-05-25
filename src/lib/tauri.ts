@@ -30,6 +30,8 @@ export const tauri = {
     listen<{ blocks: HistoryBlock[] }>(`session:${sessionId}:append`, e => cb(e.payload.blocks)),
   onSessionActivity: (sessionId: string, cb: (activity: SessionActivity) => void): Promise<UnlistenFn> =>
     listen<{ activity: SessionActivity }>(`session:${sessionId}:activity`, e => cb(e.payload.activity)),
+  onSessionTitle: (sessionId: string, cb: (title: string) => void): Promise<UnlistenFn> =>
+    listen<{ title: string }>(`session:${sessionId}:title`, e => cb(e.payload.title)),
   spawnPty: (projectId: number, kind: PtyKindClient, cols: number, rows: number) =>
     invoke<string>('spawn_pty', { projectId, kind, cols, rows }),
   ptyWrite: (ptyId: string, data: string) => invoke<void>('pty_write', { ptyId, data }),

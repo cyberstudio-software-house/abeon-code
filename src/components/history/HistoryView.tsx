@@ -24,9 +24,12 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
       .catch(e => setError(e instanceof Error ? e.message : String(e)));
   }, [projectId, sessionId]);
 
+  const renameTab = useStore(s => s.renameTab);
+
   useEffect(() => {
     let unlistenAppend: (() => void) | null = null;
     let unlistenActivity: (() => void) | null = null;
+    let unlistenTitle: (() => void) | null = null;
     tauri.openSessionWatch(projectId, sessionId).catch(() => {});
     tauri.onSessionAppend(sessionId, (blocks) => {
       setData(prev => prev ? ({ ...prev, blocks: [...prev.blocks, ...blocks] }) : prev);
@@ -34,12 +37,17 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
     tauri.onSessionActivity(sessionId, (activity) => {
       patchActivity(sessionId, activity);
     }).then(fn => { unlistenActivity = fn; });
+    tauri.onSessionTitle(sessionId, (title) => {
+      renameTab(`session:${sessionId}`, title);
+      setData(prev => prev ? ({ ...prev, meta: { ...prev.meta, title } }) : prev);
+    }).then(fn => { unlistenTitle = fn; });
     return () => {
       if (unlistenAppend) unlistenAppend();
       if (unlistenActivity) unlistenActivity();
+      if (unlistenTitle) unlistenTitle();
       tauri.closeSessionWatch(sessionId).catch(() => {});
     };
-  }, [projectId, sessionId, patchActivity]);
+  }, [projectId, sessionId, patchActivity, renameTab]);
 
   const loadMore = async () => {
     if (!data || !data.hasMoreBefore || data.blocks.length === 0) return;

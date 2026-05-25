@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand';
 
 export type Tab =
-  | { kind: 'session'; id: string; projectId: number; sessionId: string; title: string; mode: 'history' | 'terminal' }
+  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal' }
   | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited' }
   | { kind: 'terminal'; id: string; projectId: number; title: string };
 
@@ -15,6 +15,7 @@ export type TabsSlice = {
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
   renameTab: (id: string, title: string) => void;
+  linkNewSession: (tabId: string, realSessionId: string) => void;
   upsertActionTab: (tab: Extract<Tab, { kind: 'action' }>) => void;
 };
 
@@ -58,6 +59,11 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
   setActive: (id) => set({ activeTabId: id }),
   renameTab: (id, title) => set({
     tabs: get().tabs.map(t => t.id === id ? { ...t, title } : t),
+  }),
+  linkNewSession: (tabId, realSessionId) => set({
+    tabs: get().tabs.map(t =>
+      t.id === tabId && t.kind === 'session' ? { ...t, linkedSessionId: realSessionId } : t
+    ),
   }),
   upsertActionTab: (tab) => {
     const existing = get().tabs.find(t => t.id === tab.id);

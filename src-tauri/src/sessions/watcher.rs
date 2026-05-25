@@ -66,6 +66,7 @@ impl SessionWatchers {
     fn handle_change(&self, app: &AppHandle, changed: &Path) {
         let mut sessions = self.sessions.lock();
         let mut block_updates: Vec<(String, Vec<HistoryBlock>)> = Vec::new();
+        let mut title_updates: Vec<(String, String)> = Vec::new();
         let mut activity_inputs: Vec<(String, PathBuf)> = Vec::new();
 
         for (sid, sess) in sessions.iter_mut() {
@@ -75,15 +76,16 @@ impl SessionWatchers {
                 Err(_) => continue,
             };
             if new_size <= sess.last_offset {
-                // file changed but didn't grow (e.g. mtime touch) — still
-                // recompute activity, no blocks to append.
                 activity_inputs.push((sid.clone(), sess.path.clone()));
                 continue;
             }
-            let blocks = read_tail(&sess.path, sess.last_offset, new_size);
+            let tail = read_tail(&sess.path, sess.last_offset, new_size);
             sess.last_offset = new_size;
-            if !blocks.is_empty() {
-                block_updates.push((sid.clone(), blocks));
+            if !tail.blocks.is_empty() {
+                block_updates.push((sid.clone(), tail.blocks));
+            }
+            if let Some(title) = tail.title {
+                title_updates.push((sid.clone(), title));
             }
             activity_inputs.push((sid.clone(), sess.path.clone()));
         }
@@ -91,6 +93,9 @@ impl SessionWatchers {
 
         for (sid, blocks) in block_updates {
             let _ = app.emit(&format!("session:{sid}:append"), serde_json::json!({ "blocks": blocks }));
+        }
+        for (sid, title) in title_updates {
+            let _ = app.emit(&format!("session:{sid}:title"), serde_json::json!({ "title": title }));
         }
 
         let now = std::time::SystemTime::now()
@@ -115,19 +120,35 @@ impl SessionWatchers {
     }
 }
 
-fn read_tail(path: &Path, from: u64, to: u64) -> Vec<HistoryBlock> {
+struct TailResult {
+    blocks: Vec<HistoryBlock>,
+    title: Option<String>,
+}
+
+fn read_tail(path: &Path, from: u64, to: u64) -> TailResult {
     use std::io::{Read, Seek, SeekFrom};
-    let mut f = match std::fs::File::open(path) { Ok(f) => f, Err(_) => return vec![] };
-    if f.seek(SeekFrom::Start(from)).is_err() { return vec![]; }
+    let empty = TailResult { blocks: vec![], title: None };
+    let mut f = match std::fs::File::open(path) { Ok(f) => f, Err(_) => return empty };
+    if f.seek(SeekFrom::Start(from)).is_err() { return empty; }
     let mut buf = vec![0u8; (to - from) as usize];
-    if f.read_exact(&mut buf).is_err() { return vec![]; }
+    if f.read_exact(&mut buf).is_err() { return empty; }
     let text = String::from_utf8_lossy(&buf);
-    let mut out = Vec::new();
+    let mut blocks = Vec::new();
+    let mut title = None;
     for line in text.lines() {
         if line.trim().is_empty() { continue; }
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+            if v.get("type").and_then(|t| t.as_str()) == Some("ai-title") {
+                if let Some(t) = v.get("aiTitle").and_then(|t| t.as_str()) {
+                    if !t.is_empty() {
+                        title = Some(t.to_string());
+                    }
+                }
+            }
+        }
         if let Ok(bs) = parse_line(line) {
-            out.extend(bs);
+            blocks.extend(bs);
         }
     }
-    out
+    TailResult { blocks, title }
 }

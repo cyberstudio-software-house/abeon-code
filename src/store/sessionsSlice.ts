@@ -31,9 +31,11 @@ export type SessionsSlice = {
 };
 
 export const selectSessionActivity =
-  (sid: string) => (s: AppState): SessionActivity => {
+  (tabId: string, sessionId: string) => (s: AppState): SessionActivity => {
+    const tab = s.tabs.find(t => t.id === tabId);
+    const realId = (tab?.kind === 'session' && tab.linkedSessionId) || sessionId;
     for (const proj of Object.values(s.sessionsByProject)) {
-      const found = proj.items.find(x => x.id === sid);
+      const found = proj.items.find(x => x.id === realId);
       if (found) return found.activity;
     }
     return 'idle';
@@ -114,6 +116,28 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
         hasMore: current.hasMore,
       },
     }});
+
+    const { tabs, renameTab, linkNewSession } = get() as AppState;
+    const unlinkedNewTabs = tabs.filter(
+      (t): t is Extract<typeof t, { kind: 'session' }> =>
+        t.kind === 'session' && t.projectId === projectId
+        && t.sessionId.startsWith('new-') && !t.linkedSessionId
+    );
+    if (unlinkedNewTabs.length > 0 && newSessions.length > 0) {
+      for (let i = 0; i < Math.min(unlinkedNewTabs.length, newSessions.length); i++) {
+        linkNewSession(unlinkedNewTabs[i].id, newSessions[i].id);
+        renameTab(unlinkedNewTabs[i].id, newSessions[i].title);
+      }
+    }
+
+    for (const tab of (get() as AppState).tabs) {
+      if (tab.kind !== 'session') continue;
+      const sid = tab.linkedSessionId ?? tab.sessionId;
+      const freshMeta = freshById.get(sid);
+      if (freshMeta && freshMeta.title !== tab.title) {
+        renameTab(tab.id, freshMeta.title);
+      }
+    }
   },
   startActivityPolling: () => {
     const tick = () => {
