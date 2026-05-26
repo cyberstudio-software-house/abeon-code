@@ -2,6 +2,7 @@ use serde::Deserialize;
 use ts_rs::TS;
 use tauri::{AppHandle, State};
 use base64::Engine;
+use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::db::{projects_repo, actions_repo};
@@ -94,4 +95,85 @@ pub fn pty_resize(state: State<AppState>, pty_id: String, cols: u16, rows: u16) 
 #[tauri::command]
 pub fn pty_kill(state: State<AppState>, pty_id: String) -> AppResult<()> {
     state.pty.kill(&pty_id)
+}
+
+fn save_clipboard_image_inner(
+    state: &AppState,
+    pty_id: String,
+    data: String,
+) -> AppResult<String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.as_bytes())
+        .map_err(|e| AppError::Other(format!("base64: {e}")))?;
+
+    let dir = std::env::temp_dir().join("abeoncode-images");
+    std::fs::create_dir_all(&dir)?;
+
+    let filename = format!("{}.png", Uuid::new_v4());
+    let path = dir.join(&filename);
+    std::fs::write(&path, &bytes)?;
+
+    let path_str = path.to_string_lossy().to_string();
+    state
+        .clipboard_images
+        .lock()
+        .entry(pty_id)
+        .or_default()
+        .push(path.clone());
+
+    Ok(path_str)
+}
+
+#[tauri::command]
+pub fn save_clipboard_image(
+    state: State<AppState>,
+    pty_id: String,
+    data: String,
+) -> AppResult<String> {
+    save_clipboard_image_inner(&state, pty_id, data)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn save_clipboard_image_creates_file() {
+        let state = crate::state::AppState::new(
+            crate::db::init_pool(&std::path::PathBuf::from(":memory:")).expect("in-memory db"),
+        );
+        let pty_id = "test-pty-img".to_string();
+
+        // 1x1 red PNG as base64
+        let png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+
+        let result = save_clipboard_image_inner(&state, pty_id.clone(), png_b64.to_string());
+        assert!(result.is_ok(), "save failed: {:?}", result.err());
+
+        let path_str = result.unwrap();
+        let path = Path::new(&path_str);
+        assert!(path.exists(), "file should exist at {path_str}");
+        assert!(path_str.contains("abeoncode-images"));
+        assert!(path_str.ends_with(".png"));
+
+        // Verify tracked in state
+        let map = state.clipboard_images.lock();
+        let tracked = map.get(&pty_id).unwrap();
+        assert_eq!(tracked.len(), 1);
+        assert_eq!(tracked[0].to_string_lossy(), path_str);
+
+        // Cleanup
+        drop(map);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_clipboard_image_invalid_base64() {
+        let state = crate::state::AppState::new(
+            crate::db::init_pool(&std::path::PathBuf::from(":memory:")).expect("in-memory db"),
+        );
+        let result = save_clipboard_image_inner(&state, "pty".into(), "not-valid-b64!!!".into());
+        assert!(result.is_err());
+    }
 }
