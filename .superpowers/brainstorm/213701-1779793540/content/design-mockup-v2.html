@@ -1,0 +1,142 @@
+<h2>Tab Grouping — Visual Design v2</h2>
+<p class="subtitle">Added colored bottom border under each group for stronger visual grouping</p>
+
+<h3>1. Multiple projects, all expanded</h3>
+<div class="mockup">
+  <div class="mockup-header">TabBar — two projects with colored group borders</div>
+  <div class="mockup-body" style="background:#1a1a2e;padding:0;overflow-x:auto;">
+    <div style="display:flex;align-items:end;height:34px;padding:0 8px;gap:0;font-size:11px;font-family:monospace;white-space:nowrap;">
+      <!-- Group 1: AbeonCode -->
+      <div style="display:flex;align-items:end;gap:2px;border-bottom:2px solid #6a9fb5;padding-bottom:0;">
+        <div style="display:flex;align-items:center;padding:2px 8px;color:#888;cursor:pointer;font-size:10px;border-radius:3px 3px 0 0;">
+          <span style="margin-right:4px;font-size:8px;">▼</span>
+          <span style="color:#6a9fb5;font-weight:600;">AbeonCode</span>
+        </div>
+        <div style="display:flex;align-items:center;padding:4px 12px;background:#252540;border:1px solid #333;border-bottom:none;border-radius:3px 3px 0 0;color:#e0e0e0;">
+          <span style="color:#888;margin-right:6px;">›</span>
+          <span style="width:5px;height:5px;border-radius:50%;background:#4a9;margin-right:6px;"></span>
+          New session
+          <span style="margin-left:8px;color:#666;font-size:10px;">×</span>
+        </div>
+        <div style="display:flex;align-items:center;padding:4px 12px;background:#1a1a2e;border:1px solid transparent;color:#888;border-radius:3px 3px 0 0;">
+          <span style="margin-right:6px;">◇</span>
+          fix auth bug
+        </div>
+      </div>
+      <!-- Spacer between groups -->
+      <div style="width:8px;flex-shrink:0;"></div>
+      <!-- Group 2: MyOtherProject -->
+      <div style="display:flex;align-items:end;gap:2px;border-bottom:2px solid #b58a6a;padding-bottom:0;">
+        <div style="display:flex;align-items:center;padding:2px 8px;color:#888;cursor:pointer;font-size:10px;border-radius:3px 3px 0 0;">
+          <span style="margin-right:4px;font-size:8px;">▼</span>
+          <span style="color:#b58a6a;font-weight:600;">MyOtherProject</span>
+        </div>
+        <div style="display:flex;align-items:center;padding:4px 12px;background:#1a1a2e;border:1px solid transparent;color:#888;border-radius:3px 3px 0 0;">
+          <span style="margin-right:6px;">$</span>
+          Terminal
+        </div>
+        <div style="display:flex;align-items:center;padding:4px 12px;background:#1a1a2e;border:1px solid transparent;color:#888;border-radius:3px 3px 0 0;">
+          <span style="margin-right:6px;">▶</span>
+          npm test
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3>2. Second group collapsed</h3>
+<div class="mockup">
+  <div class="mockup-header">TabBar — MyOtherProject collapsed, border still visible</div>
+  <div class="mockup-body" style="background:#1a1a2e;padding:0;">
+    <div style="display:flex;align-items:end;height:34px;padding:0 8px;gap:0;font-size:11px;font-family:monospace;white-space:nowrap;">
+      <div style="display:flex;align-items:end;gap:2px;border-bottom:2px solid #6a9fb5;">
+        <div style="display:flex;align-items:center;padding:2px 8px;color:#888;cursor:pointer;font-size:10px;">
+          <span style="margin-right:4px;font-size:8px;">▼</span>
+          <span style="color:#6a9fb5;font-weight:600;">AbeonCode</span>
+        </div>
+        <div style="display:flex;align-items:center;padding:4px 12px;background:#252540;border:1px solid #333;border-bottom:none;border-radius:3px 3px 0 0;color:#e0e0e0;">
+          <span style="color:#888;margin-right:6px;">›</span>
+          New session
+          <span style="margin-left:8px;color:#666;font-size:10px;">×</span>
+        </div>
+        <div style="display:flex;align-items:center;padding:4px 12px;background:#1a1a2e;border:1px solid transparent;color:#888;border-radius:3px 3px 0 0;">
+          <span style="margin-right:6px;">◇</span>
+          fix auth bug
+        </div>
+      </div>
+      <div style="width:8px;flex-shrink:0;"></div>
+      <!-- Collapsed group with border -->
+      <div style="display:flex;align-items:end;gap:2px;border-bottom:2px solid #b58a6a;">
+        <div style="display:flex;align-items:center;padding:2px 8px 4px;color:#888;cursor:pointer;font-size:10px;">
+          <span style="margin-right:4px;font-size:8px;">▶</span>
+          <span style="color:#b58a6a;font-weight:600;">MyOtherProject</span>
+          <span style="margin-left:4px;background:#b58a6a33;color:#b58a6a;padding:0 5px;border-radius:8px;font-size:9px;">2</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3>3. Single project — no group header (unchanged)</h3>
+<div class="mockup">
+  <div class="mockup-header">TabBar — only one project, flat like today</div>
+  <div class="mockup-body" style="background:#1a1a2e;padding:0;">
+    <div style="display:flex;align-items:end;height:32px;padding:0 8px;gap:2px;font-size:11px;font-family:monospace;white-space:nowrap;">
+      <div style="display:flex;align-items:center;padding:4px 12px;background:#252540;border:1px solid #333;border-bottom:none;border-radius:3px 3px 0 0;color:#e0e0e0;">
+        <span style="color:#888;margin-right:6px;">›</span>
+        New session
+        <span style="margin-left:8px;color:#666;font-size:10px;">×</span>
+      </div>
+      <div style="display:flex;align-items:center;padding:4px 12px;background:#1a1a2e;border:1px solid transparent;color:#888;border-radius:3px 3px 0 0;">
+        <span style="margin-right:6px;">◇</span>
+        fix auth bug
+      </div>
+    </div>
+  </div>
+</div>
+
+<h3>4. Overflow with scroll arrows</h3>
+<div class="mockup">
+  <div class="mockup-header">TabBar — many tabs, scroll arrows + group borders</div>
+  <div class="mockup-body" style="background:#1a1a2e;padding:0;">
+    <div style="display:flex;align-items:center;height:34px;font-size:11px;font-family:monospace;white-space:nowrap;position:relative;">
+      <div style="padding:0 6px;color:#888;cursor:pointer;background:linear-gradient(to right,#1a1a2e 70%,transparent);z-index:1;height:100%;display:flex;align-items:center;font-size:14px;">‹</div>
+      <div style="flex:1;overflow:hidden;display:flex;align-items:end;height:100%;gap:0;padding:0 2px;">
+        <!-- Group 1 -->
+        <div style="display:flex;align-items:end;gap:2px;border-bottom:2px solid #6a9fb5;flex-shrink:0;">
+          <div style="display:flex;align-items:center;padding:2px 8px;color:#888;font-size:10px;">
+            <span style="margin-right:4px;font-size:8px;">▼</span>
+            <span style="color:#6a9fb5;font-weight:600;">AbeonCode</span>
+          </div>
+          <div style="display:flex;align-items:center;padding:4px 12px;background:#252540;border:1px solid #333;border-bottom:none;border-radius:3px 3px 0 0;color:#e0e0e0;flex-shrink:0;">
+            <span style="color:#888;margin-right:6px;">›</span>New session<span style="margin-left:8px;color:#666;font-size:10px;">×</span>
+          </div>
+          <div style="display:flex;align-items:center;padding:4px 12px;background:#1a1a2e;color:#888;border-radius:3px 3px 0 0;flex-shrink:0;">◇ fix auth</div>
+          <div style="display:flex;align-items:center;padding:4px 12px;background:#1a1a2e;color:#888;border-radius:3px 3px 0 0;flex-shrink:0;">◇ refactor db</div>
+          <div style="display:flex;align-items:center;padding:4px 12px;background:#1a1a2e;color:#888;border-radius:3px 3px 0 0;flex-shrink:0;">$ Terminal</div>
+        </div>
+        <div style="width:8px;flex-shrink:0;"></div>
+        <!-- Group 2 -->
+        <div style="display:flex;align-items:end;gap:2px;border-bottom:2px solid #b58a6a;flex-shrink:0;">
+          <div style="display:flex;align-items:center;padding:2px 8px;color:#888;font-size:10px;flex-shrink:0;">
+            <span style="margin-right:4px;font-size:8px;">▼</span>
+            <span style="color:#b58a6a;font-weight:600;">OtherPrj</span>
+          </div>
+          <div style="display:flex;align-items:center;padding:4px 12px;background:#1a1a2e;color:#888;border-radius:3px 3px 0 0;flex-shrink:0;">› session 1</div>
+          <div style="display:flex;align-items:center;padding:4px 12px;background:#1a1a2e;color:#888;border-radius:3px 3px 0 0;flex-shrink:0;">› session 2</div>
+        </div>
+      </div>
+      <div style="padding:0 6px;color:#e0e0e0;cursor:pointer;background:linear-gradient(to left,#1a1a2e 70%,transparent);z-index:1;height:100%;display:flex;align-items:center;font-size:14px;">›</div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px;padding:16px;background:#252540;border-radius:8px;border-left:3px solid #6a9fb5;">
+  <h3 style="margin:0 0 8px;">Key changes from v1</h3>
+  <ul style="margin:0;padding-left:20px;color:#ccc;line-height:1.8;">
+    <li><strong>Colored bottom border</strong> — 2px solid line in the project's accent color runs under the entire group (header + tabs)</li>
+    <li><strong>Badge matches group color</strong> — collapsed count badge uses the project color with transparency</li>
+    <li><strong>Bolder project name</strong> — <code>font-weight:600</code> on the group label for more presence</li>
+    <li><strong>Gap replaced with spacer</strong> — 8px spacer between groups (cleaner than the thin divider line)</li>
+  </ul>
+</div>

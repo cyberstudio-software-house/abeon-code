@@ -1,0 +1,63 @@
+<h2>Tab Grouping — Implementation Approaches</h2>
+<p class="subtitle">All approaches use collapsible group headers, scroll arrows on overflow, hidden header for single project, and "ProjectName (N)" for collapsed groups. The difference is in how group state and rendering are structured.</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Pure Derived State (Recommended)</h3>
+      <p><strong>How:</strong> Group headers and ordering are computed on render via a <code>useMemo</code> that groups <code>tabs</code> by <code>projectId</code>. Collapsed state lives in a local <code>useState&lt;Set&lt;number&gt;&gt;</code> inside TabBar.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Zero store changes — tabs array stays flat</li>
+          <li>Tab persistence unchanged</li>
+          <li>Collapsed state resets on app restart (clean slate)</li>
+          <li>Simplest to implement and review</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Collapsed state lost on component unmount (negligible — TabBar is always mounted)</li>
+          <li>If we later want persisted collapse state, needs migration to store</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Store-Level Grouping</h3>
+      <p><strong>How:</strong> Add <code>collapsedProjectIds: Set&lt;number&gt;</code> to <code>tabsSlice</code> with a <code>toggleGroupCollapsed(projectId)</code> action. Grouping logic still computed on render, but collapse state persists across the session via store.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Collapsed state survives any re-renders</li>
+          <li>Easy to persist to localStorage later if needed</li>
+          <li>Other components could react to collapse state</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Adds state to the global store for a UI-only concern</li>
+          <li>Slightly more code in the slice</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Virtual Scroll with Groups</h3>
+      <p><strong>How:</strong> Flatten groups + tabs into a virtual list. Each item is either a group header or a tab. Use a virtualized horizontal list (e.g., <code>react-window</code>) so only visible items render.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Handles 100+ tabs with zero perf penalty</li>
+          <li>Most scalable solution</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Adds a dependency (react-window or similar)</li>
+          <li>Horizontal virtualization is tricky with variable-width tabs</li>
+          <li>Overkill — AbeonCode is unlikely to have 100+ tabs</li>
+          <li>Most complex implementation by far</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>
