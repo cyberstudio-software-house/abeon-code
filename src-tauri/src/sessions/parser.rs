@@ -15,7 +15,9 @@ fn uuid_of(v: &Value) -> String {
 
 pub(super) fn is_meta_user_content(text: &str) -> bool {
     let t = text.trim_start();
-    t.starts_with("<local-command-caveat>") || t.starts_with("<command-name>")
+    t.starts_with("<local-command-caveat>")
+        || t.starts_with("<command-name>")
+        || t.starts_with("<local-command-stdout>")
 }
 
 /// Parses one JSONL line into zero or more `HistoryBlock`s.
@@ -60,7 +62,7 @@ fn parse_user(v: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
         match t {
             "text" => {
                 let text = item.get("text").and_then(|x| x.as_str()).unwrap_or("").to_string();
-                if !text.is_empty() {
+                if !text.is_empty() && !is_meta_user_content(&text) {
                     out.push(HistoryBlock::UserText { uuid: uuid.into(), timestamp: ts, text });
                 }
             }
