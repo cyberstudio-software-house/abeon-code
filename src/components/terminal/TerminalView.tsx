@@ -116,7 +116,8 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
       });
 
       if (kind === 'claude') {
-        const onPaste = async (e: ClipboardEvent) => {
+        const onPaste = async (evt: Event) => {
+          const e = evt as ClipboardEvent;
           const items = e.clipboardData?.items;
           if (!items) return;
 
@@ -152,9 +153,9 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
           }
         };
 
-        container.addEventListener('paste', onPaste as EventListener, { capture: true });
+        container.addEventListener('paste', onPaste, { capture: true });
         unlistenRefs.current.push(() =>
-          container.removeEventListener('paste', onPaste as EventListener, { capture: true })
+          container.removeEventListener('paste', onPaste, { capture: true })
         );
       }
     });
