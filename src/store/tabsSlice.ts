@@ -26,8 +26,8 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
   activeTabId: null,
   openSessionTab: (projectId, sessionId, title) => {
     const id = sessionTabId(sessionId);
-    const existing = get().tabs.find(t => t.id === id);
-    if (existing) { set({ activeTabId: id }); return; }
+    const existing = get().tabs.find(t => t.id === id || (t.kind === 'session' && t.linkedSessionId === sessionId));
+    if (existing) { set({ activeTabId: existing.id }); return; }
     set({
       tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title, mode: 'history' }],
       activeTabId: id,
