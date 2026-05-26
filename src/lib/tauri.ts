@@ -38,6 +38,8 @@ export const tauri = {
   ptyResize: (ptyId: string, cols: number, rows: number) =>
     invoke<void>('pty_resize', { ptyId, cols, rows }),
   ptyKill: (ptyId: string) => invoke<void>('pty_kill', { ptyId }),
+  saveClipboardImage: (ptyId: string, data: string) =>
+    invoke<string>('save_clipboard_image', { ptyId, data }),
   onPtyOutput: (ptyId: string, cb: (bytes: Uint8Array) => void): Promise<UnlistenFn> =>
     listen<{ data: string }>(`pty:${ptyId}:output`, e => {
       const bin = atob(e.payload.data);
