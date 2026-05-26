@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { tauri } from '../../lib/tauri';
 import { useStore } from '../../store';
+import type { HistoryViewMode } from '../../store/settingsSlice';
 import type { SessionHistory, HistoryBlock } from '../../types';
 import { HistoryHeader } from './HistoryHeader';
 import { HistoryStream } from './HistoryStream';
@@ -17,6 +18,8 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
   const [data, setData] = useState<SessionHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
   const patchActivity = useStore(s => s.patchActivity);
+  const defaultViewMode = useStore(s => s.historyViewMode);
+  const [viewMode, setViewMode] = useState<HistoryViewMode>(defaultViewMode);
 
   useEffect(() => {
     tauri.readSessionHistory(projectId, sessionId)
@@ -82,12 +85,13 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
   if (!data || !meta) return <div className="p-6 text-muted text-[13px]">Wczytywanie historii…</div>;
   return (
     <div className="h-full flex flex-col">
-      <HistoryHeader meta={meta} />
+      <HistoryHeader meta={meta} viewMode={viewMode} onViewModeChange={setViewMode} />
       <HistoryStream
         blocks={data.blocks}
         onLoadMore={loadMore}
         hasMore={data.hasMoreBefore}
-        header={<div className="px-7 py-[18px]"><ReadOnlyPill /></div>}
+        header={<div className="px-8 py-5"><ReadOnlyPill /></div>}
+        viewMode={viewMode}
       />
       <SessionFooter sessionId={sessionId} tabId={tabId} />
     </div>

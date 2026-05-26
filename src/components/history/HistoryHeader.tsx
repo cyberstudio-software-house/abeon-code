@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SessionMeta } from '../../types';
+import type { HistoryViewMode } from '../../store/settingsSlice';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import { getCliModelString } from '../../lib/models';
@@ -7,9 +8,13 @@ import { IconBtn } from '../shared/IconBtn';
 import { ACTIVITY_DOT, ACTIVITY_LABEL, ACTIVITY_ICON } from '../../lib/activity';
 import { Icon } from '../shared/Icon';
 
-type Props = { meta: SessionMeta };
+type Props = {
+  meta: SessionMeta;
+  viewMode: HistoryViewMode;
+  onViewModeChange: (mode: HistoryViewMode) => void;
+};
 
-export function HistoryHeader({ meta }: Props) {
+export function HistoryHeader({ meta, viewMode, onViewModeChange }: Props) {
   const [editing, setEditing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
@@ -56,7 +61,7 @@ export function HistoryHeader({ meta }: Props) {
       await navigator.clipboard.writeText(meta.id);
       setCopied(true);
     } catch {
-      // clipboard API can fail in some webviews — ignore silently
+      // clipboard API can fail in some webviews
     }
   };
 
@@ -67,11 +72,11 @@ export function HistoryHeader({ meta }: Props) {
   }, [copied]);
 
   return (
-    <header className="px-7 pt-[18px] pb-3.5 border-b border-border bg-bg shrink-0">
+    <header className="px-8 pt-5 pb-4 border-b border-border bg-bg shrink-0">
       <div className="font-mono text-[10px] text-muted tracking-wide">
         sesja {meta.id.slice(0, 8)} · {new Date(meta.lastModified).toLocaleString('pl-PL')}
       </div>
-      <div className="mt-1.5 flex items-baseline gap-3.5">
+      <div className="mt-2 flex items-baseline gap-3.5">
         {editing ? (
           <input
             ref={inputRef}
@@ -134,10 +139,38 @@ export function HistoryHeader({ meta }: Props) {
           </div>
         </div>
       </div>
-      <div className="mt-2.5 flex gap-[18px] text-[11px] text-fg-secondary font-mono">
-        <span>{meta.messageCount} tur</span>
-        <span className="text-muted">·</span>
-        <span>{meta.gitBranch ?? 'no branch'}</span>
+      <div className="mt-3 flex items-center gap-4">
+        <div className="flex gap-[18px] text-[11px] text-fg-secondary font-mono">
+          <span>{meta.messageCount} tur</span>
+          <span className="text-muted">·</span>
+          <span>{meta.gitBranch ?? 'no branch'}</span>
+        </div>
+        <div className="ml-auto flex rounded-md border border-border overflow-hidden">
+          <button
+            onClick={() => onViewModeChange('communication')}
+            className={`flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium transition-colors ${
+              viewMode === 'communication'
+                ? 'bg-fg text-bg'
+                : 'bg-bg-elev text-muted hover:text-fg-secondary'
+            }`}
+            title="Tylko komunikacja (wiadomości użytkownika i asystenta)"
+          >
+            <Icon name="msgSquare" className="w-3 h-3" />
+            Komunikacja
+          </button>
+          <button
+            onClick={() => onViewModeChange('full')}
+            className={`flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium transition-colors border-l border-border ${
+              viewMode === 'full'
+                ? 'bg-fg text-bg'
+                : 'bg-bg-elev text-muted hover:text-fg-secondary'
+            }`}
+            title="Pełny widok (komunikacja + narzędzia + system)"
+          >
+            <Icon name="layers" className="w-3 h-3" />
+            Pełny
+          </button>
+        </div>
       </div>
       {genError && (
         <div className="mt-2 text-[11px] text-danger font-mono">

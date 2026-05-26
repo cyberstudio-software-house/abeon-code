@@ -94,6 +94,8 @@ function GeneralTab() {
   const setSkipPermissions = useStore(s => s.setSkipPermissions);
   const shellPath = useStore(s => s.shellPath);
   const setShellPath = useStore(s => s.setShellPath);
+  const historyViewMode = useStore(s => s.historyViewMode);
+  const setHistoryViewMode = useStore(s => s.setHistoryViewMode);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [detectedName, setDetectedName] = useState<string | null>(null);
   const [customMode, setCustomMode] = useState(false);
@@ -253,6 +255,38 @@ function GeneralTab() {
             </p>
           </div>
         </label>
+      </div>
+
+      <div>
+        <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
+          Domyślny widok historii
+        </label>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setHistoryViewMode('communication')}
+            className={`px-3 py-1.5 text-[12px] font-medium border transition-colors ${
+              historyViewMode === 'communication'
+                ? 'bg-fg text-bg border-fg'
+                : 'bg-bg border-border text-muted hover:text-fg'
+            }`}
+          >
+            Komunikacja
+          </button>
+          <button
+            onClick={() => setHistoryViewMode('full')}
+            className={`px-3 py-1.5 text-[12px] font-medium border transition-colors ${
+              historyViewMode === 'full'
+                ? 'bg-fg text-bg border-fg'
+                : 'bg-bg border-border text-muted hover:text-fg'
+            }`}
+          >
+            Pełny
+          </button>
+        </div>
+        <p className="text-[11px] text-muted mt-2">
+          Tryb „Komunikacja" pokazuje tylko wiadomości użytkownika i asystenta.
+          „Pełny" zawiera też narzędzia, hooki i zdarzenia systemowe.
+        </p>
       </div>
     </div>
   );
