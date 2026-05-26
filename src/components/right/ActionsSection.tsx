@@ -11,29 +11,9 @@ export function ActionsSection() {
   const projects = useStore(s => s.projects);
   const project = projectId != null ? projects.find(p => p.id === projectId) ?? null : null;
   const load = useStore(s => s.loadActions);
-  const upsertActionTab = useStore(s => s.upsertActionTab);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => { if (projectId != null) load(projectId); }, [projectId, load]);
-
-  useEffect(() => {
-    if (projectId == null) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
-      if (e.key < '1' || e.key > '9') return;
-      const actions = useStore.getState().actionsByProject[projectId] ?? [];
-      const action = actions[Number(e.key) - 1];
-      if (!action) return;
-      e.preventDefault();
-      e.stopPropagation();
-      upsertActionTab({
-        kind: 'action', id: `action:${action.id}`, projectId: action.projectId,
-        actionId: action.id, title: action.label, status: 'running',
-      });
-    };
-    document.addEventListener('keydown', onKey, { capture: true });
-    return () => document.removeEventListener('keydown', onKey, { capture: true });
-  }, [projectId, upsertActionTab]);
 
   if (!project) return <div className="text-[12px] text-muted">— brak projektu —</div>;
   return (
