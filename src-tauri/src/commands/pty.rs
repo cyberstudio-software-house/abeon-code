@@ -92,8 +92,17 @@ pub fn pty_resize(state: State<AppState>, pty_id: String, cols: u16, rows: u16) 
     state.pty.resize(&pty_id, cols, rows)
 }
 
+fn cleanup_clipboard_images(state: &AppState, pty_id: &str) {
+    if let Some(paths) = state.clipboard_images.lock().remove(pty_id) {
+        for path in paths {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
 #[tauri::command]
 pub fn pty_kill(state: State<AppState>, pty_id: String) -> AppResult<()> {
+    cleanup_clipboard_images(&state, &pty_id);
     state.pty.kill(&pty_id)
 }
 
@@ -175,5 +184,31 @@ mod tests {
         );
         let result = save_clipboard_image_inner(&state, "pty".into(), "not-valid-b64!!!".into());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn cleanup_removes_tracked_files() {
+        let state = crate::state::AppState::new(
+            crate::db::init_pool(&std::path::PathBuf::from(":memory:")).expect("in-memory db"),
+        );
+        let pty_id = "cleanup-test".to_string();
+
+        let dir = std::env::temp_dir().join("abeoncode-images");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file1 = dir.join("cleanup1.png");
+        let file2 = dir.join("cleanup2.png");
+        std::fs::write(&file1, b"fake1").unwrap();
+        std::fs::write(&file2, b"fake2").unwrap();
+
+        {
+            let mut map = state.clipboard_images.lock();
+            map.insert(pty_id.clone(), vec![file1.clone(), file2.clone()]);
+        }
+
+        cleanup_clipboard_images(&state, &pty_id);
+
+        assert!(!file1.exists(), "file1 should be deleted");
+        assert!(!file2.exists(), "file2 should be deleted");
+        assert!(state.clipboard_images.lock().get(&pty_id).is_none());
     }
 }
