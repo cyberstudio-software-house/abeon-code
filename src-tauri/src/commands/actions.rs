@@ -22,14 +22,18 @@ pub fn add_action(state: State<AppState>, input: ActionInput) -> AppResult<Actio
     let c = state.db.get()?;
     repo::insert(
         &c, input.project_id, &input.label, &input.command,
-        input.working_dir.as_deref(), input.source.as_deref(),
+        input.working_dir.as_deref(), input.source.as_deref(), input.pre_command.as_deref(),
     )
 }
 
 #[tauri::command]
 pub fn update_action(state: State<AppState>, id: i64, patch: ActionPatch) -> AppResult<Action> {
     let c = state.db.get()?;
-    repo::update(&c, id, patch.label.as_deref(), patch.command.as_deref(), patch.working_dir.as_deref())
+    repo::update(
+        &c, id,
+        patch.label.as_deref(), patch.command.as_deref(),
+        patch.working_dir.as_deref(), patch.pre_command.as_deref(),
+    )
 }
 
 #[tauri::command]

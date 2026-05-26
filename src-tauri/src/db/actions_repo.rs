@@ -10,13 +10,14 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Action> {
         command: r.get(3)?,
         working_dir: r.get(4)?,
         source: r.get(5)?,
-        sort_order: r.get(6)?,
+        pre_command: r.get(6)?,
+        sort_order: r.get(7)?,
     })
 }
 
 pub fn list(conn: &Connection, project_id: i64) -> AppResult<Vec<Action>> {
     let mut s = conn.prepare(
-        "SELECT id,project_id,label,command,working_dir,source,sort_order
+        "SELECT id,project_id,label,command,working_dir,source,pre_command,sort_order
          FROM actions WHERE project_id=? ORDER BY sort_order ASC, id ASC",
     )?;
     let rows = s.query_map(params![project_id], row)?;
@@ -25,7 +26,7 @@ pub fn list(conn: &Connection, project_id: i64) -> AppResult<Vec<Action>> {
 
 pub fn get(conn: &Connection, id: i64) -> AppResult<Action> {
     Ok(conn.query_row(
-        "SELECT id,project_id,label,command,working_dir,source,sort_order FROM actions WHERE id=?",
+        "SELECT id,project_id,label,command,working_dir,source,pre_command,sort_order FROM actions WHERE id=?",
         params![id], row,
     )?)
 }
@@ -33,16 +34,16 @@ pub fn get(conn: &Connection, id: i64) -> AppResult<Action> {
 pub fn insert(
     conn: &Connection,
     project_id: i64, label: &str, command: &str,
-    working_dir: Option<&str>, source: Option<&str>,
+    working_dir: Option<&str>, source: Option<&str>, pre_command: Option<&str>,
 ) -> AppResult<Action> {
     let sort_order: i64 = conn.query_row(
         "SELECT COALESCE(MAX(sort_order)+1, 0) FROM actions WHERE project_id=?",
         params![project_id], |r| r.get(0),
     )?;
     conn.execute(
-        "INSERT INTO actions(project_id,label,command,working_dir,source,sort_order)
-         VALUES(?,?,?,?,?,?)",
-        params![project_id, label, command, working_dir, source, sort_order],
+        "INSERT INTO actions(project_id,label,command,working_dir,source,pre_command,sort_order)
+         VALUES(?,?,?,?,?,?,?)",
+        params![project_id, label, command, working_dir, source, pre_command, sort_order],
     )?;
     let id = conn.last_insert_rowid();
     get(conn, id)
@@ -50,7 +51,7 @@ pub fn insert(
 
 pub fn update(
     conn: &Connection, id: i64,
-    label: Option<&str>, command: Option<&str>, working_dir: Option<&str>,
+    label: Option<&str>, command: Option<&str>, working_dir: Option<&str>, pre_command: Option<&str>,
 ) -> AppResult<Action> {
     if let Some(l) = label {
         conn.execute("UPDATE actions SET label=? WHERE id=?", params![l, id])?;
@@ -60,6 +61,9 @@ pub fn update(
     }
     if let Some(w) = working_dir {
         conn.execute("UPDATE actions SET working_dir=? WHERE id=?", params![w, id])?;
+    }
+    if let Some(p) = pre_command {
+        conn.execute("UPDATE actions SET pre_command=? WHERE id=?", params![p, id])?;
     }
     get(conn, id)
 }
@@ -81,12 +85,25 @@ mod tests {
         let pool = init_pool(&f.path().to_path_buf()).unwrap();
         let c = pool.get().unwrap();
         let p = projects_repo::insert(&c, "X", "/x", "-x", None).unwrap();
-        let a = insert(&c, p.id, "dev", "npm run dev", None, Some("npm")).unwrap();
+        let a = insert(&c, p.id, "dev", "npm run dev", None, Some("npm"), None).unwrap();
         assert_eq!(a.label, "dev");
+        assert_eq!(a.pre_command, None);
         assert_eq!(list(&c, p.id).unwrap().len(), 1);
-        update(&c, a.id, Some("dev2"), None, None).unwrap();
+        update(&c, a.id, Some("dev2"), None, None, None).unwrap();
         assert_eq!(get(&c, a.id).unwrap().label, "dev2");
         delete(&c, a.id).unwrap();
         assert_eq!(list(&c, p.id).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn pre_command_round_trip() {
+        let f = NamedTempFile::new().unwrap();
+        let pool = init_pool(&f.path().to_path_buf()).unwrap();
+        let c = pool.get().unwrap();
+        let p = projects_repo::insert(&c, "X", "/x", "-x", None).unwrap();
+        let a = insert(&c, p.id, "test", "npm test", None, None, Some("nvm use 18")).unwrap();
+        assert_eq!(a.pre_command.as_deref(), Some("nvm use 18"));
+        update(&c, a.id, None, None, None, Some("nvm use 22")).unwrap();
+        assert_eq!(get(&c, a.id).unwrap().pre_command.as_deref(), Some("nvm use 22"));
     }
 }

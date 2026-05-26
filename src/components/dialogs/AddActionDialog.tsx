@@ -9,6 +9,7 @@ export function AddActionDialog({ projectId, projectPath, onClose, onAdded }: Pr
   const [label, setLabel] = useState('');
   const [command, setCommand] = useState('');
   const [workingDir, setWorkingDir] = useState('');
+  const [preCommand, setPreCommand] = useState('');
 
   useEffect(() => {
     tauri.detectScripts(projectPath).then(setScripts).catch(() => {});
@@ -37,6 +38,7 @@ export function AddActionDialog({ projectId, projectPath, onClose, onAdded }: Pr
     await tauri.addAction({
       projectId, label: label.trim(), command: command.trim(),
       workingDir: workingDir.trim() || null, source: 'manual',
+      preCommand: preCommand.trim() || null,
     });
     onAdded();
     onClose();
@@ -77,7 +79,14 @@ export function AddActionDialog({ projectId, projectPath, onClose, onAdded }: Pr
         <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">Katalog roboczy</label>
         <input value={workingDir} onChange={e => setWorkingDir(e.target.value)}
           placeholder="(katalog projektu)"
-          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] mb-4 font-mono text-muted placeholder:text-muted/50" />
+          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] mb-3 font-mono text-muted placeholder:text-muted/50" />
+        <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">Komenda przygotowująca</label>
+        <input value={preCommand} onChange={e => setPreCommand(e.target.value)}
+          placeholder="np. nvm use 18"
+          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] mb-1 font-mono placeholder:text-muted/50" />
+        <p className="text-[10px] text-muted mb-4">
+          Wykonywana przed komendą. Użyteczne dla <code className="font-mono">nvm use X</code> / <code className="font-mono">fnm use X</code>. Bez końcowego <code className="font-mono">&amp;&amp;</code>.
+        </p>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Anuluj</button>
           <button onClick={submit} disabled={!label.trim() || !command.trim()}

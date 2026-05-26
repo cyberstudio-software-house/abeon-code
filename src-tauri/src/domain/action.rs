@@ -13,6 +13,7 @@ pub struct Action {
     pub command: String,
     pub working_dir: Option<String>,
     pub source: Option<String>,
+    pub pre_command: Option<String>,
     #[ts(type = "number")]
     pub sort_order: i64,
 }
@@ -27,6 +28,7 @@ pub struct ActionInput {
     pub command: String,
     pub working_dir: Option<String>,
     pub source: Option<String>,
+    pub pre_command: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -36,4 +38,5 @@ pub struct ActionPatch {
     pub label: Option<String>,
     pub command: Option<String>,
     pub working_dir: Option<String>,
+    pub pre_command: Option<String>,
 }

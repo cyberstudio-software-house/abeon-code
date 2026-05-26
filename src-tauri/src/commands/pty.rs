@@ -62,10 +62,20 @@ pub fn spawn_pty(
                     cwd = resolved;
                 }
             }
-            (
-                "bash".to_string(),
-                vec!["-c".to_string(), action.command.clone()],
-            )
+            let pre = action.pre_command.as_deref().unwrap_or("")
+                .trim_end_matches(|c: char| c == '&' || c == ';' || c.is_whitespace())
+                .trim();
+            if pre.is_empty() {
+                (
+                    "bash".to_string(),
+                    vec!["-c".to_string(), action.command.clone()],
+                )
+            } else {
+                (
+                    "bash".to_string(),
+                    vec!["-lc".to_string(), format!("{} && {}", pre, action.command)],
+                )
+            }
         }
         PtyKind::Shell => (
             crate::commands::settings::resolve_shell(&c),
@@ -142,33 +152,78 @@ pub fn save_clipboard_image(
     save_clipboard_image_inner(&state, pty_id, data)
 }
 
+fn try_clipboard_image_subprocess() -> Option<Vec<u8>> {
+    use std::process::Command;
+
+    // Wayland: wl-paste
+    if let Ok(types_out) = Command::new("wl-paste").args(["--list-types"]).output() {
+        if types_out.status.success() {
+            let types = String::from_utf8_lossy(&types_out.stdout);
+            if types.lines().any(|t| t.starts_with("image/")) {
+                if let Ok(img_out) = Command::new("wl-paste")
+                    .args(["--type", "image/png", "--no-newline"])
+                    .output()
+                {
+                    if img_out.status.success() && img_out.stdout.starts_with(&[0x89, b'P', b'N', b'G']) {
+                        return Some(img_out.stdout);
+                    }
+                }
+            }
+        }
+    }
+
+    // X11: xclip
+    if let Ok(types_out) = Command::new("xclip")
+        .args(["-selection", "clipboard", "-t", "TARGETS", "-o"])
+        .output()
+    {
+        if types_out.status.success() {
+            let types = String::from_utf8_lossy(&types_out.stdout);
+            if types.lines().any(|t| t.starts_with("image/")) {
+                if let Ok(img_out) = Command::new("xclip")
+                    .args(["-selection", "clipboard", "-t", "image/png", "-o"])
+                    .output()
+                {
+                    if img_out.status.success() && img_out.stdout.starts_with(&[0x89, b'P', b'N', b'G']) {
+                        return Some(img_out.stdout);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn read_clipboard_image_inner(state: &AppState, pty_id: String) -> AppResult<Option<String>> {
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| AppError::Other(format!("clipboard: {e}")))?;
-
-    let img = match clipboard.get_image() {
-        Ok(img) => img,
-        Err(_) => return Ok(None),
-    };
-
     let dir = std::env::temp_dir().join("abeoncode-images");
     std::fs::create_dir_all(&dir)?;
-
     let filename = format!("{}.png", Uuid::new_v4());
     let path = dir.join(&filename);
 
-    let file = std::fs::File::create(&path)?;
-    let w = std::io::BufWriter::new(file);
-    let mut encoder = png::Encoder::new(w, img.width as u32, img.height as u32);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder
-        .write_header()
-        .map_err(|e| AppError::Other(format!("png header: {e}")))?;
-    writer
-        .write_image_data(&img.bytes)
-        .map_err(|e| AppError::Other(format!("png write: {e}")))?;
-    drop(writer);
+    if let Some(png_bytes) = try_clipboard_image_subprocess() {
+        std::fs::write(&path, &png_bytes)?;
+    } else {
+        // Fallback: arboard (works on macOS/Windows, unreliable for images on Linux)
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|e| AppError::Other(format!("clipboard: {e}")))?;
+        let img = match clipboard.get_image() {
+            Ok(img) => img,
+            Err(_) => return Ok(None),
+        };
+        let file = std::fs::File::create(&path)?;
+        let w = std::io::BufWriter::new(file);
+        let mut encoder = png::Encoder::new(w, img.width as u32, img.height as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder
+            .write_header()
+            .map_err(|e| AppError::Other(format!("png header: {e}")))?;
+        writer
+            .write_image_data(&img.bytes)
+            .map_err(|e| AppError::Other(format!("png write: {e}")))?;
+        drop(writer);
+    }
 
     let path_str = path.to_string_lossy().to_string();
     state
@@ -187,6 +242,16 @@ pub fn read_clipboard_image(
     pty_id: String,
 ) -> AppResult<Option<String>> {
     read_clipboard_image_inner(&state, pty_id)
+}
+
+#[tauri::command]
+pub fn read_clipboard_text() -> AppResult<Option<String>> {
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| AppError::Other(format!("clipboard: {e}")))?;
+    match clipboard.get_text() {
+        Ok(text) if !text.is_empty() => Ok(Some(text)),
+        _ => Ok(None),
+    }
 }
 
 #[cfg(test)]

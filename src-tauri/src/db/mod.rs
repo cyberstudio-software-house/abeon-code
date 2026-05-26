@@ -12,6 +12,7 @@ pub mod settings_repo;
 
 const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/002_session_titles.sql");
+const MIGRATION_003: &str = include_str!("migrations/003_action_pre_command.sql");
 
 pub fn db_path() -> AppResult<PathBuf> {
     let mut dir = dirs::config_dir().ok_or_else(|| AppError::Other("no config dir".into()))?;
@@ -37,6 +38,7 @@ fn run_migrations(pool: &DbPool) -> AppResult<()> {
         "SELECT COALESCE(MAX(version),0) FROM schema_version", [], |r| r.get(0)
     ).unwrap_or(0);
     if v < 2 { conn.execute_batch(MIGRATION_002)?; }
+    if v < 3 { conn.execute_batch(MIGRATION_003)?; }
     Ok(())
 }
 
