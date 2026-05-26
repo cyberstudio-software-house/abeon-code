@@ -1,0 +1,74 @@
+const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.includes('Mac');
+
+export type ShortcutId = 'newSession' | 'closeTab' | 'focusSearch';
+
+export type ShortcutDef = {
+  id: ShortcutId;
+  label: string;
+  description: string;
+  defaultBinding: string;
+};
+
+export const SHORTCUTS: ShortcutDef[] = [
+  { id: 'newSession', label: 'Nowa sesja', description: 'Otwiera nową sesję w aktywnym projekcie', defaultBinding: 'mod+n' },
+  { id: 'closeTab', label: 'Zamknij tab', description: 'Zamyka aktywny tab (z potwierdzeniem jeśli proces)', defaultBinding: 'mod+w' },
+  { id: 'focusSearch', label: 'Szukaj', description: 'Przenosi fokus do wyszukiwarki projektów', defaultBinding: 'mod+k' },
+];
+
+export const FIXED_SHORTCUTS = [
+  { label: 'Akcja 1–9', description: 'Uruchamia akcję o podanym numerze', binding: 'mod+1…9' },
+];
+
+export function getBinding(id: ShortcutId, overrides: Record<string, string>): string {
+  return overrides[id] || SHORTCUTS.find(s => s.id === id)!.defaultBinding;
+}
+
+export function matchesShortcut(
+  e: KeyboardEvent,
+  id: ShortcutId,
+  overrides: Record<string, string>,
+): boolean {
+  return matchesBinding(e, getBinding(id, overrides));
+}
+
+export function matchesBinding(e: KeyboardEvent, binding: string): boolean {
+  const parts = binding.toLowerCase().split('+');
+  const key = parts.pop()!;
+  const mods = new Set(parts);
+
+  const hasMod = IS_MAC ? e.metaKey : e.ctrlKey;
+  if (mods.has('mod') !== hasMod) return false;
+  if (mods.has('shift') !== e.shiftKey) return false;
+  if (mods.has('alt') !== e.altKey) return false;
+  if (IS_MAC && e.ctrlKey) return false;
+  if (!IS_MAC && e.metaKey) return false;
+
+  return e.key.toLowerCase() === key;
+}
+
+export function eventToBinding(e: KeyboardEvent): string | null {
+  if (['Control', 'Meta', 'Shift', 'Alt'].includes(e.key)) return null;
+
+  const parts: string[] = [];
+  const hasMod = IS_MAC ? e.metaKey : e.ctrlKey;
+  if (hasMod) parts.push('mod');
+  if (e.shiftKey) parts.push('shift');
+  if (e.altKey) parts.push('alt');
+  if (parts.length === 0) return null;
+
+  parts.push(e.key.toLowerCase());
+  return parts.join('+');
+}
+
+export function formatBinding(binding: string): string {
+  const parts = binding.split('+');
+  return parts
+    .map(p => {
+      if (p === 'mod') return IS_MAC ? '⌘' : 'Ctrl';
+      if (p === 'shift') return IS_MAC ? '⇧' : 'Shift';
+      if (p === 'alt') return IS_MAC ? '⌥' : 'Alt';
+      if (p === '1…9') return '1–9';
+      return p.toUpperCase();
+    })
+    .join(IS_MAC ? '' : '+');
+}

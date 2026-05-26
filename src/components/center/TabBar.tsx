@@ -3,6 +3,7 @@ import { useStore } from '../../store';
 import { ACTIVITY_DOT, ACTIVITY_LABEL } from '../../lib/activity';
 import { selectSessionActivity } from '../../store/sessionsSlice';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
+import { matchesShortcut } from '../../lib/shortcuts';
 
 function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
   const activity = useStore(selectSessionActivity(tabId, sessionId));
@@ -47,8 +48,8 @@ export function TabBar() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
-      if (e.key !== 'w' && e.key !== 'W') return;
+      const overrides = useStore.getState().shortcutOverrides;
+      if (!matchesShortcut(e, 'closeTab', overrides)) return;
       if (!active) return;
       e.preventDefault();
       e.stopPropagation();

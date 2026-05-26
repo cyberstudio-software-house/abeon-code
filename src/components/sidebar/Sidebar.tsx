@@ -9,6 +9,7 @@ import { SortMenu } from './SortMenu';
 import { Icon } from '../shared/Icon';
 import { Kbd } from '../shared/Kbd';
 import { AddProjectDialog } from '../dialogs/AddProjectDialog';
+import { matchesShortcut, getBinding, formatBinding } from '../../lib/shortcuts';
 
 export function Sidebar() {
   const projects = useStore(useShallow(selectSortedProjects));
@@ -17,6 +18,7 @@ export function Sidebar() {
   const [query, setQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchBinding = useStore(s => formatBinding(getBinding('focusSearch', s.shortcutOverrides)));
 
   useEffect(() => { load(); }, [load]);
 
@@ -32,7 +34,8 @@ export function Sidebar() {
   }, [loadActivity]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    const overrides = useStore.getState().shortcutOverrides;
+    if (matchesShortcut(e, 'focusSearch', overrides)) {
       e.preventDefault();
       inputRef.current?.focus();
     }
@@ -78,7 +81,7 @@ export function Sidebar() {
           placeholder="Szukaj projektu lub sesji…"
           className="bg-transparent outline-none text-[12px] text-fg flex-1 placeholder:text-muted"
         />
-        <Kbd>⌘K</Kbd>
+        <Kbd>{searchBinding}</Kbd>
       </div>
 
       <ul className="mt-3 space-y-0.5 overflow-y-auto scroll-thin flex-1 pb-3">

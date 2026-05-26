@@ -37,6 +37,8 @@ type Persisted = {
   skipPermissions?: boolean;
   sortMode?: 'manual' | 'alpha' | 'activity';
   shellPath?: string;
+  shortcutOverrides?: Record<string, string>;
+  historyViewMode?: 'communication' | 'full';
 };
 
 const PERSISTED_KEYS = [
@@ -45,6 +47,8 @@ const PERSISTED_KEYS = [
   'projectsBasePath', 'skipPermissions',
   'sortMode',
   'shellPath',
+  'shortcutOverrides',
+  'historyViewMode',
 ] as const satisfies readonly (keyof Persisted)[];
 
 type PersistedKey = typeof PERSISTED_KEYS[number];
@@ -65,6 +69,8 @@ function pickPersistedFields(state: AppState): Persisted {
     skipPermissions: state.skipPermissions,
     sortMode: state.sortMode,
     shellPath: state.shellPath,
+    shortcutOverrides: state.shortcutOverrides,
+    historyViewMode: state.historyViewMode,
   };
 }
 
@@ -78,6 +84,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
       return value ? 'true' : 'false';
     case 'modelEfforts':
     case 'customModels':
+    case 'shortcutOverrides':
       return JSON.stringify(value);
     default:
       return String(value);
@@ -95,6 +102,7 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
       return raw === 'true';
     case 'modelEfforts':
     case 'customModels':
+    case 'shortcutOverrides':
       try { return JSON.parse(raw); } catch { return undefined; }
     default:
       return raw;
@@ -128,6 +136,12 @@ function applyPersistedToState(p: Persisted) {
     patch.sortMode = p.sortMode;
   }
   if (typeof p.shellPath === 'string') patch.shellPath = p.shellPath;
+  if (p.shortcutOverrides && typeof p.shortcutOverrides === 'object') {
+    patch.shortcutOverrides = p.shortcutOverrides as Record<string, string>;
+  }
+  if (p.historyViewMode === 'communication' || p.historyViewMode === 'full') {
+    patch.historyViewMode = p.historyViewMode;
+  }
   if (Object.keys(patch).length > 0) useStore.setState(patch);
 }
 

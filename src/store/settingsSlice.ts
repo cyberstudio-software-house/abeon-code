@@ -4,6 +4,7 @@ import type { EffortLevel, CustomModel } from '../lib/models';
 import { DEFAULT_MODEL_ID } from '../lib/models';
 
 export type SortMode = 'manual' | 'alpha' | 'activity';
+export type HistoryViewMode = 'communication' | 'full';
 
 export type SettingsSlice = {
   theme: ThemeMode;
@@ -18,6 +19,8 @@ export type SettingsSlice = {
   skipPermissions: boolean;
   sortMode: SortMode;
   shellPath: string;
+  shortcutOverrides: Record<string, string>;
+  historyViewMode: HistoryViewMode;
   settingsOpen: boolean;
 
   setTheme: (t: ThemeMode) => void;
@@ -33,6 +36,9 @@ export type SettingsSlice = {
   setSkipPermissions: (v: boolean) => void;
   setSortMode: (mode: SortMode) => void;
   setShellPath: (path: string) => void;
+  setShortcutOverride: (id: string, binding: string) => void;
+  resetShortcutOverrides: () => void;
+  setHistoryViewMode: (mode: HistoryViewMode) => void;
   openSettings: () => void;
   closeSettings: () => void;
 };
@@ -50,6 +56,8 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   skipPermissions: false,
   sortMode: 'manual',
   shellPath: '',
+  shortcutOverrides: {},
+  historyViewMode: 'full',
   settingsOpen: false,
 
   setTheme: (theme) => set({ theme }),
@@ -66,6 +74,10 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   setSkipPermissions: (skipPermissions) => set({ skipPermissions }),
   setSortMode: (sortMode) => set({ sortMode }),
   setShellPath: (shellPath) => set({ shellPath }),
+  setShortcutOverride: (id, binding) =>
+    set({ shortcutOverrides: { ...get().shortcutOverrides, [id]: binding } }),
+  resetShortcutOverrides: () => set({ shortcutOverrides: {} }),
+  setHistoryViewMode: (historyViewMode) => set({ historyViewMode }),
   removeCustomModel: (id) => {
     const customModels = get().customModels.filter(m => m.id !== id);
     const defaultModelId = get().defaultModelId === id ? DEFAULT_MODEL_ID : get().defaultModelId;

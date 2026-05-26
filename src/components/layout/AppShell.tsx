@@ -4,6 +4,7 @@ import { CenterPanel } from '../center/CenterPanel';
 import { RightPanel } from '../right/RightPanel';
 import { TitleBar } from './TitleBar';
 import { useStore } from '../../store';
+import { matchesShortcut } from '../../lib/shortcuts';
 
 const LEFT_MIN = 200;
 const LEFT_MAX = 420;
@@ -80,20 +81,20 @@ export function AppShell() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
 
       const state = useStore.getState();
       const activeTab = state.tabs.find(t => t.id === state.activeTabId);
       const projectId = activeTab?.projectId;
 
-      if ((e.key === 'n' || e.key === 'N') && projectId != null) {
+      if (matchesShortcut(e, 'newSession', state.shortcutOverrides) && projectId != null) {
         e.preventDefault();
         e.stopPropagation();
         state.openNewSessionTab(projectId);
         return;
       }
 
-      if (e.key >= '1' && e.key <= '9' && projectId != null) {
+      if (!e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9' && projectId != null) {
         const action = (state.actionsByProject[projectId] ?? [])[Number(e.key) - 1];
         if (!action) return;
         e.preventDefault();
