@@ -81,19 +81,28 @@ export function AppShell() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
-      if (e.key < '1' || e.key > '9') return;
+
       const state = useStore.getState();
       const activeTab = state.tabs.find(t => t.id === state.activeTabId);
       const projectId = activeTab?.projectId;
-      if (projectId == null) return;
-      const action = (state.actionsByProject[projectId] ?? [])[Number(e.key) - 1];
-      if (!action) return;
-      e.preventDefault();
-      e.stopPropagation();
-      state.upsertActionTab({
-        kind: 'action', id: `action:${action.id}`, projectId: action.projectId,
-        actionId: action.id, title: action.label, status: 'running',
-      });
+
+      if ((e.key === 'n' || e.key === 'N') && projectId != null) {
+        e.preventDefault();
+        e.stopPropagation();
+        state.openNewSessionTab(projectId);
+        return;
+      }
+
+      if (e.key >= '1' && e.key <= '9' && projectId != null) {
+        const action = (state.actionsByProject[projectId] ?? [])[Number(e.key) - 1];
+        if (!action) return;
+        e.preventDefault();
+        e.stopPropagation();
+        state.upsertActionTab({
+          kind: 'action', id: `action:${action.id}`, projectId: action.projectId,
+          actionId: action.id, title: action.label, status: 'running',
+        });
+      }
     };
     document.addEventListener('keydown', onKey, { capture: true });
     return () => document.removeEventListener('keydown', onKey, { capture: true });
