@@ -69,6 +69,7 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
     term.loadAddon(new WebLinksAddon());
     term.open(container);
     fit.fit();
+    if (visibleRef.current) term.focus();
     termRef.current = term;
     fitRef.current = fit;
 
@@ -173,6 +174,7 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
     }
     pendingWrites.current = [];
     fit.fit();
+    term.focus();
   }, [visible]);
 
   useEffect(() => {
