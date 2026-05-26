@@ -50,14 +50,14 @@ pub fn spawn_pty(
             }
             (
                 "bash".to_string(),
-                vec!["-lc".to_string(), cmd],
+                vec!["-c".to_string(), cmd],
             )
         }
         PtyKind::Action { action_id } => {
             let action = actions_repo::get(&c, *action_id)?;
             (
                 "bash".to_string(),
-                vec!["-lc".to_string(), action.command.clone()],
+                vec!["-c".to_string(), action.command.clone()],
             )
         }
         PtyKind::Shell => (
