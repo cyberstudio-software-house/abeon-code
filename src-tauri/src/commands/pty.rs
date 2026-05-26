@@ -36,7 +36,7 @@ pub fn spawn_pty(
 ) -> AppResult<String> {
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
-    let cwd = std::path::PathBuf::from(&proj.path);
+    let mut cwd = std::path::PathBuf::from(&proj.path);
 
     let (program, args_owned) = match &kind {
         PtyKind::Claude { session_id, model, skip_permissions } => {
@@ -55,6 +55,12 @@ pub fn spawn_pty(
         }
         PtyKind::Action { action_id } => {
             let action = actions_repo::get(&c, *action_id)?;
+            if let Some(ref wd) = action.working_dir {
+                let resolved = cwd.join(wd);
+                if resolved.is_dir() {
+                    cwd = resolved;
+                }
+            }
             (
                 "bash".to_string(),
                 vec!["-c".to_string(), action.command.clone()],

@@ -15,6 +15,7 @@ impl ScriptDetector for ComposerDetector {
             label: format!("composer {name}"),
             command: format!("composer {name}"),
             description: None,
+            subdir: None,
         }).collect()
     }
 }

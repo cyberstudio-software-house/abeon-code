@@ -96,41 +96,47 @@ fn meta_for_file_fast(project_id: i64, path: &Path) -> AppResult<SessionMeta> {
     let mut title = format!("Sesja {}", &id[..8.min(id.len())]);
     let mut git_branch = None;
     let mut cwd = None;
-    let mut first_user_set = false;
+    let mut has_ai_title = false;
 
     let file = fs::File::open(path)?;
     for (i, line) in BufReader::new(file).lines().map_while(Result::ok).enumerate() {
         if i >= META_SCAN_LIMIT { break; }
         if line.trim().is_empty() { continue; }
 
-        if !first_user_set || cwd.is_none() {
-            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                if !first_user_set {
-                    if let Some(text) = v.get("message")
-                        .and_then(|m| m.get("content"))
-                        .and_then(|c| c.as_array())
-                        .and_then(|arr| arr.iter().find(|i| i.get("type").and_then(|t| t.as_str()) == Some("text")))
-                        .and_then(|i| i.get("text"))
-                        .and_then(|t| t.as_str())
-                    {
-                        if v.get("type").and_then(|t| t.as_str()) == Some("user") && !text.is_empty() {
-                            title = truncate(text, 80);
-                            first_user_set = true;
-                        }
-                    }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue; };
+        let kind = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+
+        if kind == "ai-title" {
+            if let Some(t) = v.get("aiTitle").and_then(|t| t.as_str()) {
+                if !t.is_empty() {
+                    title = t.to_string();
+                    has_ai_title = true;
                 }
-                if cwd.is_none() {
-                    if let Some(c) = v.get("cwd").and_then(|x| x.as_str()) {
-                        cwd = Some(c.to_string());
-                    }
-                    if let Some(b) = v.get("gitBranch").and_then(|x| x.as_str()) {
-                        git_branch = Some(b.to_string());
-                    }
+            }
+        } else if !has_ai_title && kind == "user" {
+            if let Some(text) = v.get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|c| c.as_array())
+                .and_then(|arr| arr.iter().find(|i| i.get("type").and_then(|t| t.as_str()) == Some("text")))
+                .and_then(|i| i.get("text"))
+                .and_then(|t| t.as_str())
+            {
+                if !text.is_empty() {
+                    title = truncate(text, 80);
                 }
             }
         }
 
-        if first_user_set && cwd.is_some() { break; }
+        if cwd.is_none() {
+            if let Some(c) = v.get("cwd").and_then(|x| x.as_str()) {
+                cwd = Some(c.to_string());
+            }
+            if let Some(b) = v.get("gitBranch").and_then(|x| x.as_str()) {
+                git_branch = Some(b.to_string());
+            }
+        }
+
+        if has_ai_title && cwd.is_some() { break; }
     }
 
     Ok(SessionMeta {
@@ -171,7 +177,7 @@ pub fn read_history(
     let file = fs::File::open(&path)?;
     let mut all_blocks: Vec<HistoryBlock> = Vec::new();
     let mut title = format!("Sesja {}", &id[..8.min(id.len())]);
-    let mut first_user_set = false;
+    let mut has_ai_title = false;
     let mut git_branch = None;
     let mut cwd = None;
     let mut line_count = 0usize;
@@ -180,21 +186,26 @@ pub fn read_history(
         if line.trim().is_empty() { continue; }
         line_count += 1;
 
-        if !first_user_set || cwd.is_none() {
+        if !has_ai_title || cwd.is_none() {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                if !first_user_set {
-                    if v.get("type").and_then(|t| t.as_str()) == Some("user") {
-                        if let Some(text) = v.get("message")
-                            .and_then(|m| m.get("content"))
-                            .and_then(|c| c.as_array())
-                            .and_then(|arr| arr.iter().find(|i| i.get("type").and_then(|t| t.as_str()) == Some("text")))
-                            .and_then(|i| i.get("text"))
-                            .and_then(|t| t.as_str())
-                        {
-                            if !text.is_empty() {
-                                title = truncate(text, 80);
-                                first_user_set = true;
-                            }
+                let kind = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                if kind == "ai-title" {
+                    if let Some(t) = v.get("aiTitle").and_then(|t| t.as_str()) {
+                        if !t.is_empty() {
+                            title = t.to_string();
+                            has_ai_title = true;
+                        }
+                    }
+                } else if !has_ai_title && kind == "user" {
+                    if let Some(text) = v.get("message")
+                        .and_then(|m| m.get("content"))
+                        .and_then(|c| c.as_array())
+                        .and_then(|arr| arr.iter().find(|i| i.get("type").and_then(|t| t.as_str()) == Some("text")))
+                        .and_then(|i| i.get("text"))
+                        .and_then(|t| t.as_str())
+                    {
+                        if !text.is_empty() {
+                            title = truncate(text, 80);
                         }
                     }
                 }
@@ -279,6 +290,35 @@ mod tests {
         let v = list_sessions(1, td.path(), 10, 0).unwrap();
         assert_eq!(v.len(), 2);
         assert!(v[0].id.starts_with("bbbb"));
+    }
+
+    #[test]
+    fn ai_title_overrides_first_user_prompt() {
+        let td = TempDir::new().unwrap();
+        let content = concat!(
+            r#"{"type":"user","uuid":"u1","timestamp":"2026-05-21T12:00:00Z","sessionId":"s1","cwd":"/x","gitBranch":"main","message":{"role":"user","content":[{"type":"text","text":"fix the bug in auth module where tokens expire too early"}]}}"#, "\n",
+            r#"{"type":"assistant","uuid":"a1","timestamp":"2026-05-21T12:00:01Z","message":{"role":"assistant","content":[{"type":"text","text":"I'll look into it."}]}}"#, "\n",
+            r#"{"type":"ai-title","aiTitle":"Fix early token expiration in auth","sessionId":"s1"}"#, "\n",
+        );
+        setup(td.path(), "sess-ai-title", content);
+
+        let list = list_sessions(1, td.path(), 10, 0).unwrap();
+        let s = list.iter().find(|m| m.id == "sess-ai-title").unwrap();
+        assert_eq!(s.title, "Fix early token expiration in auth");
+
+        let h = read_history(1, td.path(), "sess-ai-title", None, None).unwrap();
+        assert_eq!(h.meta.title, "Fix early token expiration in auth");
+    }
+
+    #[test]
+    fn falls_back_to_user_prompt_without_ai_title() {
+        let td = TempDir::new().unwrap();
+        let content = r#"{"type":"user","uuid":"u1","timestamp":"2026-05-21T12:00:00Z","sessionId":"s1","cwd":"/x","gitBranch":"main","message":{"role":"user","content":[{"type":"text","text":"hello world"}]}}"#;
+        setup(td.path(), "sess-no-ai", content);
+
+        let list = list_sessions(1, td.path(), 10, 0).unwrap();
+        let s = list.iter().find(|m| m.id == "sess-no-ai").unwrap();
+        assert_eq!(s.title, "hello world");
     }
 
     #[test]

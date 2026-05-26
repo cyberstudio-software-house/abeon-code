@@ -16,6 +16,7 @@ pub struct DetectedScript {
     pub label: String,
     pub command: String,
     pub description: Option<String>,
+    pub subdir: Option<String>,
 }
 
 pub trait ScriptDetector: Send + Sync {
@@ -34,5 +35,39 @@ pub fn all_detectors() -> Vec<Box<dyn ScriptDetector>> {
 }
 
 pub fn detect_all(path: &Path) -> Vec<DetectedScript> {
-    all_detectors().iter().flat_map(|d| d.detect(path)).collect()
+    let detectors = all_detectors();
+    let mut out: Vec<DetectedScript> = detectors.iter().flat_map(|d| d.detect(path)).collect();
+
+    let entries = match std::fs::read_dir(path) {
+        Ok(it) => it,
+        Err(_) => return out,
+    };
+    for entry in entries.flatten() {
+        let ft = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+        if !ft.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name = match name.to_str() {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        if name.starts_with('.') || name == "node_modules" || name == "vendor" || name == "target" {
+            continue;
+        }
+        let child_path = entry.path();
+        let child_scripts: Vec<DetectedScript> = detectors
+            .iter()
+            .flat_map(|d| d.detect(&child_path))
+            .map(|mut s| {
+                s.subdir = Some(name.clone());
+                s
+            })
+            .collect();
+        out.extend(child_scripts);
+    }
+    out
 }

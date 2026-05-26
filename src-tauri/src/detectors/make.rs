@@ -21,6 +21,7 @@ impl ScriptDetector for MakeDetector {
                     label: format!("make {name}"),
                     command: format!("make {name}"),
                     description: None,
+                    subdir: None,
                 });
             }
         }

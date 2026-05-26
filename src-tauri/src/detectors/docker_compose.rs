@@ -15,6 +15,7 @@ impl ScriptDetector for DockerComposeDetector {
             label: format!("docker compose {sub}"),
             command: format!("docker compose {sub}"),
             description: None,
+            subdir: None,
         }).collect()
     }
 }

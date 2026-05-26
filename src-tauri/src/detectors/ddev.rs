@@ -23,6 +23,7 @@ impl ScriptDetector for DdevDetector {
             label: format!("ddev {name}"),
             command: cmd.to_string(),
             description: None,
+            subdir: None,
         }).collect()
     }
 }

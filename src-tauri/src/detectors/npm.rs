@@ -15,6 +15,7 @@ impl ScriptDetector for NpmDetector {
             label: format!("npm run {name}"),
             command: format!("npm run {name}"),
             description: body.as_str().map(String::from),
+            subdir: None,
         }).collect()
     }
 }

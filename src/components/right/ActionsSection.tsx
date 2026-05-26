@@ -17,12 +17,12 @@ export function ActionsSection() {
 
   if (!project) return <div className="text-[12px] text-muted">— brak projektu —</div>;
   return (
-    <section className="flex-1 min-h-0 overflow-auto">
+    <section className="shrink-0">
       <div className="flex items-center justify-between mb-3">
         <span className="text-[10px] text-muted font-medium uppercase tracking-wider">Akcje</span>
-        <span className="text-[10px] text-muted">z package.json</span>
+        <span className="text-[10px] text-muted">wykrywanie automatyczne</span>
       </div>
-      <ActionList projectId={project.id} />
+      <ActionList projectId={project.id} onChanged={() => load(project.id)} />
       <button
         onClick={() => setDialogOpen(true)}
         className="mt-3 text-[11.5px] text-muted hover:text-fg"
