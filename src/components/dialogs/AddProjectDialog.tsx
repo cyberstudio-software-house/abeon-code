@@ -46,7 +46,7 @@ export function AddProjectDialog({ onClose }: Props) {
         const s = scripts[i];
         await tauri.addAction({
           projectId: project.id, label: s.label, command: s.command,
-          workingDir: null, source: s.source,
+          workingDir: null, source: s.source, preCommand: null,
         });
       }
       onClose();

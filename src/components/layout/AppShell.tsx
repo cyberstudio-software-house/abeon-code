@@ -94,6 +94,13 @@ export function AppShell() {
         return;
       }
 
+      if (matchesShortcut(e, 'newTerminal', state.shortcutOverrides) && projectId != null) {
+        e.preventDefault();
+        e.stopPropagation();
+        state.openNewTerminalTab(projectId);
+        return;
+      }
+
       if (!e.shiftKey && !e.altKey && e.key >= '1' && e.key <= '9' && projectId != null) {
         const action = (state.actionsByProject[projectId] ?? [])[Number(e.key) - 1];
         if (!action) return;

@@ -4,6 +4,7 @@ import { GitFileList } from './GitFileList';
 import { GitRepoGroup } from './GitRepoGroup';
 import { DiffDialog } from '../dialogs/DiffDialog';
 import { Icon } from '../shared/Icon';
+import { IconBtn } from '../shared/IconBtn';
 import type { GitFile } from '../../types';
 
 type DiffTarget = { repoLabel: string; filePath: string; files: GitFile[] };
@@ -18,6 +19,7 @@ export function GitSection() {
 
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     if (projectId == null) return;
@@ -35,7 +37,22 @@ export function GitSection() {
   return (
     <section className="flex-1 min-h-0 overflow-auto">
       <div className="flex items-center justify-between mb-3">
-        <span className="text-[10px] text-muted font-medium uppercase tracking-wider">Zmiany</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-muted font-medium uppercase tracking-wider">Zmiany</span>
+          {status && status.isRepo && (
+            <IconBtn
+              icon="refresh"
+              label="Odśwież"
+              tone="ghost"
+              size="sm"
+              loading={refreshing}
+              onClick={() => {
+                setRefreshing(true);
+                refresh(projectId!).finally(() => setRefreshing(false));
+              }}
+            />
+          )}
+        </div>
         {status && status.isRepo && <span className="text-[10px] text-muted">{totalFiles} plików</span>}
       </div>
 
