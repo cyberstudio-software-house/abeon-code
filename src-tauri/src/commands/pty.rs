@@ -71,9 +71,12 @@ pub fn spawn_pty(
                     vec!["-c".to_string(), action.command.clone()],
                 )
             } else {
+                // pre_command often uses shell functions (nvm/fnm) defined only in the
+                // user's interactive rcfile (~/.zshrc, ~/.bashrc). Run in the chosen shell
+                // with -i so that rcfile is sourced and the function is available.
                 (
-                    "bash".to_string(),
-                    vec!["-lc".to_string(), format!("{} && {}", pre, action.command)],
+                    crate::commands::settings::resolve_shell(&c),
+                    vec!["-ic".to_string(), format!("{} && {}", pre, action.command)],
                 )
             }
         }
