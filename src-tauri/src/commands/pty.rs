@@ -211,4 +211,31 @@ mod tests {
         assert!(!file2.exists(), "file2 should be deleted");
         assert!(state.clipboard_images.lock().get(&pty_id).is_none());
     }
+
+    #[test]
+    fn full_flow_save_then_cleanup() {
+        let state = crate::state::AppState::new(
+            crate::db::init_pool(&std::path::PathBuf::from(":memory:")).expect("in-memory db"),
+        );
+        let pty_id = "flow-test".to_string();
+
+        // 1x1 red PNG
+        let png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
+
+        // Save two images
+        let path1 = save_clipboard_image_inner(&state, pty_id.clone(), png_b64.to_string()).unwrap();
+        let path2 = save_clipboard_image_inner(&state, pty_id.clone(), png_b64.to_string()).unwrap();
+        assert_ne!(path1, path2, "UUIDs should differ");
+        assert!(Path::new(&path1).exists());
+        assert!(Path::new(&path2).exists());
+
+        // Verify both tracked
+        assert_eq!(state.clipboard_images.lock().get(&pty_id).unwrap().len(), 2);
+
+        // Cleanup
+        cleanup_clipboard_images(&state, &pty_id);
+        assert!(!Path::new(&path1).exists());
+        assert!(!Path::new(&path2).exists());
+        assert!(state.clipboard_images.lock().get(&pty_id).is_none());
+    }
 }
