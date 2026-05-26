@@ -34,6 +34,9 @@ export function TabBar() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
 
   const groups = useMemo(() => groupTabsByProject(tabs, projects), [tabs, projects]);
   const showGroups = groups.length > 1;
@@ -55,6 +58,26 @@ export function TabBar() {
         return next;
       });
     }
+  }, [active]);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const check = () => {
+      setCanScrollLeft(el.scrollLeft > 0);
+      setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 1);
+    };
+    check();
+    el.addEventListener('scroll', check);
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => { el.removeEventListener('scroll', check); ro.disconnect(); };
+  }, [tabs, collapsed]);
+
+  useEffect(() => {
+    if (!active || !scrollRef.current) return;
+    const el = scrollRef.current.querySelector(`[data-tab-id="${active}"]`);
+    if (el) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }, [active]);
 
   const isActiveProcess = (id: string) => {
@@ -94,6 +117,7 @@ export function TabBar() {
   const renderTab = (t: import('../../store/tabsSlice').Tab) => (
     <div
       key={t.id}
+      data-tab-id={t.id}
       onClick={() => setActive(t.id)}
       onMouseDown={(e) => {
         if (e.button === 1) {
@@ -148,34 +172,57 @@ export function TabBar() {
 
   return (
     <>
-      <div className="flex h-8 border-b border-border bg-bg px-2 gap-0.5 items-end overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-        {showGroups ? (
-          groups.map((group, gi) => (
-            <div key={group.projectId} className="contents">
-              {gi > 0 && <div className="w-2 shrink-0" />}
-              <div className="flex items-end shrink-0" style={{ borderBottom: `2px solid ${getGroupColor(gi)}` }}>
-                <div
-                  onClick={() => toggleCollapse(group.projectId)}
-                  className="flex items-center px-2 py-1 cursor-pointer text-[10px] shrink-0 select-none"
-                >
-                  <span className="mr-1 text-[8px]">{collapsed.has(group.projectId) ? '▶' : '▼'}</span>
-                  <span className="font-semibold" style={{ color: getGroupColor(gi) }}>{group.name}</span>
-                  {collapsed.has(group.projectId) && (
-                    <span
-                      className="ml-1 px-1.5 rounded-full text-[9px]"
-                      style={{ backgroundColor: `${getGroupColor(gi)}33`, color: getGroupColor(gi) }}
-                    >
-                      {group.tabs.length}
-                    </span>
-                  )}
+      <div className="relative flex h-8 border-b border-border bg-bg items-end">
+        <button
+          onClick={() => scrollRef.current?.scrollBy({ left: -200, behavior: 'smooth' })}
+          className={`absolute left-0 z-10 h-full px-1.5 text-sm bg-gradient-to-r from-bg from-60% to-transparent transition-opacity ${
+            canScrollLeft ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >‹</button>
+        <div
+          ref={scrollRef}
+          onWheel={(e) => {
+            if (scrollRef.current && e.deltaY !== 0) {
+              scrollRef.current.scrollLeft += e.deltaY;
+              e.preventDefault();
+            }
+          }}
+          className="flex items-end h-full px-2 gap-0.5 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+        >
+          {showGroups ? (
+            groups.map((group, gi) => (
+              <div key={group.projectId} className="contents">
+                {gi > 0 && <div className="w-2 shrink-0" />}
+                <div className="flex items-end shrink-0" style={{ borderBottom: `2px solid ${getGroupColor(gi)}` }}>
+                  <div
+                    onClick={() => toggleCollapse(group.projectId)}
+                    className="flex items-center px-2 py-1 cursor-pointer text-[10px] shrink-0 select-none"
+                  >
+                    <span className="mr-1 text-[8px]">{collapsed.has(group.projectId) ? '▶' : '▼'}</span>
+                    <span className="font-semibold" style={{ color: getGroupColor(gi) }}>{group.name}</span>
+                    {collapsed.has(group.projectId) && (
+                      <span
+                        className="ml-1 px-1.5 rounded-full text-[9px]"
+                        style={{ backgroundColor: `${getGroupColor(gi)}33`, color: getGroupColor(gi) }}
+                      >
+                        {group.tabs.length}
+                      </span>
+                    )}
+                  </div>
+                  {!collapsed.has(group.projectId) && group.tabs.map(renderTab)}
                 </div>
-                {!collapsed.has(group.projectId) && group.tabs.map(renderTab)}
               </div>
-            </div>
-          ))
-        ) : (
-          tabs.map(renderTab)
-        )}
+            ))
+          ) : (
+            tabs.map(renderTab)
+          )}
+        </div>
+        <button
+          onClick={() => scrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
+          className={`absolute right-0 z-10 h-full px-1.5 text-sm bg-gradient-to-l from-bg from-60% to-transparent transition-opacity ${
+            canScrollRight ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+        >›</button>
       </div>
       {pendingClose && (
         <ConfirmDialog
