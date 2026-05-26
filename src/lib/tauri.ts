@@ -40,6 +40,8 @@ export const tauri = {
   ptyKill: (ptyId: string) => invoke<void>('pty_kill', { ptyId }),
   saveClipboardImage: (ptyId: string, data: string) =>
     invoke<string>('save_clipboard_image', { ptyId, data }),
+  readClipboardImage: (ptyId: string) =>
+    invoke<string | null>('read_clipboard_image', { ptyId }),
   onPtyOutput: (ptyId: string, cb: (bytes: Uint8Array) => void): Promise<UnlistenFn> =>
     listen<{ data: string }>(`pty:${ptyId}:output`, e => {
       const bin = atob(e.payload.data);

@@ -142,6 +142,53 @@ pub fn save_clipboard_image(
     save_clipboard_image_inner(&state, pty_id, data)
 }
 
+fn read_clipboard_image_inner(state: &AppState, pty_id: String) -> AppResult<Option<String>> {
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| AppError::Other(format!("clipboard: {e}")))?;
+
+    let img = match clipboard.get_image() {
+        Ok(img) => img,
+        Err(_) => return Ok(None),
+    };
+
+    let dir = std::env::temp_dir().join("abeoncode-images");
+    std::fs::create_dir_all(&dir)?;
+
+    let filename = format!("{}.png", Uuid::new_v4());
+    let path = dir.join(&filename);
+
+    let file = std::fs::File::create(&path)?;
+    let w = std::io::BufWriter::new(file);
+    let mut encoder = png::Encoder::new(w, img.width as u32, img.height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder
+        .write_header()
+        .map_err(|e| AppError::Other(format!("png header: {e}")))?;
+    writer
+        .write_image_data(&img.bytes)
+        .map_err(|e| AppError::Other(format!("png write: {e}")))?;
+    drop(writer);
+
+    let path_str = path.to_string_lossy().to_string();
+    state
+        .clipboard_images
+        .lock()
+        .entry(pty_id)
+        .or_default()
+        .push(path.clone());
+
+    Ok(Some(path_str))
+}
+
+#[tauri::command]
+pub fn read_clipboard_image(
+    state: State<AppState>,
+    pty_id: String,
+) -> AppResult<Option<String>> {
+    read_clipboard_image_inner(&state, pty_id)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
