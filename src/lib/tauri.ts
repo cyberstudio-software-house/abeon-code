@@ -42,6 +42,8 @@ export const tauri = {
     invoke<string>('save_clipboard_image', { ptyId, data }),
   readClipboardImage: (ptyId: string) =>
     invoke<string | null>('read_clipboard_image', { ptyId }),
+  readClipboardText: () =>
+    invoke<string | null>('read_clipboard_text'),
   onPtyOutput: (ptyId: string, cb: (bytes: Uint8Array) => void): Promise<UnlistenFn> =>
     listen<{ data: string }>(`pty:${ptyId}:output`, e => {
       const bin = atob(e.payload.data);
@@ -77,4 +79,6 @@ export const tauri = {
   listAvailableShells: () => invoke<ShellInfo[]>('list_available_shells'),
   getProjectsActivity: () =>
     invoke<Record<number, number>>('get_projects_activity'),
+  openInEditor: (projectPath: string, filePath: string, line?: number, col?: number) =>
+    invoke<void>('open_in_editor', { projectPath, filePath, line, col }),
 };

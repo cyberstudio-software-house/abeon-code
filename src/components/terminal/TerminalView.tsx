@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type ILinkProvider, type ILink, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import { tauri, type PtyKindClient } from '../../lib/tauri';
 import { useStore } from '../../store';
@@ -15,10 +16,58 @@ type Props = {
   visible?: boolean;
 };
 
+const FILE_PATH_RE = /((?:\.\.?\/|~\/|\/|[\w@.-]+\/)[\w@.\/-]*\.\w{1,10})(?::(\d+)(?::(\d+))?|\((\d+)[,:](\d+)\))?/g;
+
+function isModClick(e: MouseEvent) {
+  return e.ctrlKey || e.metaKey;
+}
+
+function createFilePathProvider(term: Terminal, projectPathRef: { current: string }): ILinkProvider {
+  return {
+    provideLinks(bufferLineNumber, callback) {
+      const line = term.buffer.active.getLine(bufferLineNumber - 1);
+      if (!line) { callback(undefined); return; }
+      const text = line.translateToString();
+      const links: ILink[] = [];
+      let m: RegExpExecArray | null;
+      FILE_PATH_RE.lastIndex = 0;
+      while ((m = FILE_PATH_RE.exec(text)) !== null) {
+        const before = text.substring(Math.max(0, m.index - 10), m.index);
+        if (/:\/\//.test(before)) continue;
+
+        const filePath = m[1];
+        const lineNum = m[2] ? parseInt(m[2]) : m[4] ? parseInt(m[4]) : undefined;
+        const colNum = m[3] ? parseInt(m[3]) : m[5] ? parseInt(m[5]) : undefined;
+        const startX = m.index + 1;
+        const endX = m.index + m[0].length;
+        const range: IBufferRange = {
+          start: { x: startX, y: bufferLineNumber },
+          end: { x: endX, y: bufferLineNumber },
+        };
+
+        links.push({
+          range,
+          text: m[0],
+          activate(event) {
+            if (!isModClick(event)) return;
+            tauri.openInEditor(projectPathRef.current, filePath, lineNum, colNum).catch(err =>
+              console.warn('[link] open_in_editor failed:', err)
+            );
+          },
+        });
+      }
+      callback(links.length > 0 ? links : undefined);
+    },
+  };
+}
+
 export function TerminalView({ projectId, kind, sessionId, actionId, visible = true }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const customModels = useStore(s => s.customModels);
   const skipPermissions = useStore(s => s.skipPermissions);
+  const projectPath = useStore(s => s.projects.find(p => p.id === projectId)?.path ?? '');
+  const projectPathRef = useRef(projectPath);
+  projectPathRef.current = projectPath;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -66,8 +115,11 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
+    term.loadAddon(new WebLinksAddon((event, uri) => {
+      if (isModClick(event)) openUrl(uri);
+    }));
     term.open(container);
+    term.registerLinkProvider(createFilePathProvider(term, projectPathRef));
     fit.fit();
     if (visibleRef.current) term.focus();
     termRef.current = term;
@@ -117,32 +169,38 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
       });
 
       if (kind === 'claude') {
-        const onPaste = async (evt: Event) => {
-          const e = evt as ClipboardEvent;
+        const onKeyDown = async (e: KeyboardEvent) => {
+          if (!((e.ctrlKey || e.metaKey) && e.key === 'v')) return;
           e.preventDefault();
           e.stopPropagation();
 
           try {
             const imagePath = await tauri.readClipboardImage(id);
+            console.log('[paste] arboard image:', imagePath);
             if (imagePath) {
-              const encoded = btoa(unescape(encodeURIComponent(imagePath)));
-              await tauri.ptyWrite(id, encoded);
+              const enc = btoa(unescape(encodeURIComponent(imagePath)));
+              await tauri.ptyWrite(id, enc);
               return;
             }
-          } catch {
-            // native clipboard read failed — fall through to text
+          } catch (err) {
+            console.log('[paste] arboard image error:', err);
           }
 
-          const text = e.clipboardData?.getData('text/plain');
-          if (text) {
-            const encoded = btoa(unescape(encodeURIComponent(text)));
-            await tauri.ptyWrite(id, encoded);
+          try {
+            const text = await tauri.readClipboardText();
+            console.log('[paste] arboard text:', text ? `"${text.slice(0, 60)}"` : 'null');
+            if (text) {
+              const enc = btoa(unescape(encodeURIComponent(text)));
+              await tauri.ptyWrite(id, enc);
+            }
+          } catch (err) {
+            console.log('[paste] arboard text error:', err);
           }
         };
 
-        container.addEventListener('paste', onPaste, { capture: true });
+        container.addEventListener('keydown', onKeyDown, { capture: true });
         unlistenRefs.current.push(() =>
-          container.removeEventListener('paste', onPaste, { capture: true })
+          container.removeEventListener('keydown', onKeyDown, { capture: true })
         );
       }
     });

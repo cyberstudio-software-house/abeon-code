@@ -133,6 +133,58 @@ pub fn load_shell_env(shell: &str) -> Option<HashMap<String, String>> {
     Some(map)
 }
 
+const EDITORS: &[(&str, &[&str])] = &[
+    ("code", &["--goto"]),
+    ("cursor", &["--goto"]),
+    ("zed", &[]),
+];
+
+#[tauri::command]
+pub async fn open_in_editor(
+    project_path: String,
+    file_path: String,
+    line: Option<u32>,
+    col: Option<u32>,
+) -> Result<(), String> {
+    let resolved = if std::path::Path::new(&file_path).is_absolute() {
+        std::path::PathBuf::from(&file_path)
+    } else {
+        std::path::PathBuf::from(&project_path).join(&file_path)
+    };
+
+    if !resolved.exists() {
+        return Err(format!("File not found: {}", resolved.display()));
+    }
+
+    let abs = resolved.to_string_lossy().to_string();
+    let location = format!(
+        "{}:{}:{}",
+        abs,
+        line.unwrap_or(1),
+        col.unwrap_or(1)
+    );
+
+    for &(editor, flags) in EDITORS {
+        let mut cmd = tokio::process::Command::new(editor);
+        for flag in flags {
+            cmd.arg(flag);
+        }
+        cmd.arg(&location);
+        match cmd.status().await {
+            Ok(status) if status.success() => return Ok(()),
+            _ => continue,
+        }
+    }
+
+    tokio::process::Command::new("xdg-open")
+        .arg(&abs)
+        .status()
+        .await
+        .map_err(|e| format!("No editor found: {e}"))?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_setting(state: State<AppState>, key: String) -> AppResult<Option<String>> {
     let c = state.db.get()?;
