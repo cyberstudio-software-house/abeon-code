@@ -114,6 +114,49 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
         if (cancelled) return;
         tauri.ptyResize(id, cols, rows).catch(() => {});
       });
+
+      if (kind === 'claude') {
+        const onPaste = async (e: ClipboardEvent) => {
+          const items = e.clipboardData?.items;
+          if (!items) return;
+
+          let imageItem: DataTransferItem | null = null;
+          for (let i = 0; i < items.length; i++) {
+            if (items[i].type.startsWith('image/')) {
+              imageItem = items[i];
+              break;
+            }
+          }
+          if (!imageItem) return;
+
+          e.preventDefault();
+          e.stopPropagation();
+
+          const blob = imageItem.getAsFile();
+          if (!blob) return;
+
+          const buf = await blob.arrayBuffer();
+          const bytes = new Uint8Array(buf);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+          }
+          const b64 = btoa(binary);
+
+          try {
+            const filePath = await tauri.saveClipboardImage(id, b64);
+            const encoded = btoa(unescape(encodeURIComponent(filePath)));
+            await tauri.ptyWrite(id, encoded);
+          } catch {
+            // IPC or fs error — silently skip, user can retry
+          }
+        };
+
+        container.addEventListener('paste', onPaste as EventListener, { capture: true });
+        unlistenRefs.current.push(() =>
+          container.removeEventListener('paste', onPaste as EventListener, { capture: true })
+        );
+      }
     });
 
     return () => {
