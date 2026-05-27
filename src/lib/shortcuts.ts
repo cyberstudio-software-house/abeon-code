@@ -18,6 +18,7 @@ export const SHORTCUTS: ShortcutDef[] = [
 
 export const FIXED_SHORTCUTS = [
   { label: 'Akcja 1–9', description: 'Uruchamia akcję o podanym numerze', binding: 'mod+1…9' },
+  { label: 'Przełącz zakładki', description: 'Cyklicznie po ostatnio używanych (Shift = wstecz)', binding: 'ctrl+tab' },
 ];
 
 export function getBinding(id: ShortcutId, overrides: Record<string, string>): string {
@@ -65,6 +66,7 @@ export function formatBinding(binding: string): string {
   const parts = binding.split('+');
   return parts
     .map(p => {
+      if (p === 'ctrl') return IS_MAC ? '⌃' : 'Ctrl';
       if (p === 'mod') return IS_MAC ? '⌘' : 'Ctrl';
       if (p === 'shift') return IS_MAC ? '⇧' : 'Shift';
       if (p === 'alt') return IS_MAC ? '⌥' : 'Alt';
