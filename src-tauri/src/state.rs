@@ -12,6 +12,8 @@ pub struct AppState {
     pub pty: Arc<PtyManager>,
     pub shell_env: Mutex<Option<HashMap<String, String>>>,
     pub clipboard_images: Mutex<HashMap<String, Vec<PathBuf>>>,
+    /// Cached project usage keyed by project_id: (max session-file mtime seen, summary).
+    pub project_usage_cache: Mutex<HashMap<i64, (i64, crate::domain::UsageSummary)>>,
 }
 
 impl AppState {
@@ -22,6 +24,7 @@ impl AppState {
             pty: PtyManager::new(),
             shell_env: Mutex::new(None),
             clipboard_images: Mutex::new(HashMap::new()),
+            project_usage_cache: Mutex::new(HashMap::new()),
         }
     }
 }

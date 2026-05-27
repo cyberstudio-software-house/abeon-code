@@ -65,6 +65,8 @@ pub fn run() {
             commands::sessions::export_session,
             commands::sessions::rename_session,
             commands::sessions::generate_session_title,
+            commands::usage::session_usage,
+            commands::usage::project_usage,
             commands::settings::open_in_editor,
             commands::settings::list_available_editors,
             commands::settings::open_project_in_editor,
