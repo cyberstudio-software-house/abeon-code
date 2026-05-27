@@ -23,7 +23,7 @@ function TabPanel({ tab, visible }: { tab: Tab; visible: boolean }) {
   if (tab.kind === 'action') {
     return (
       <div className={`absolute inset-0 ${visible ? '' : 'invisible pointer-events-none'}`}>
-        <TerminalView projectId={tab.projectId} kind="action" actionId={tab.actionId} visible={visible} />
+        <TerminalView projectId={tab.projectId} kind="action" actionId={tab.actionId} tabId={tab.id} visible={visible} />
       </div>
     );
   }

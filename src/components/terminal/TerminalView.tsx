@@ -13,6 +13,7 @@ type Props = {
   kind: 'claude' | 'action' | 'shell';
   sessionId?: string;
   actionId?: number;
+  tabId?: string;
   visible?: boolean;
 };
 
@@ -61,7 +62,7 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
   };
 }
 
-export function TerminalView({ projectId, kind, sessionId, actionId, visible = true }: Props) {
+export function TerminalView({ projectId, kind, sessionId, actionId, tabId, visible = true }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const customModels = useStore(s => s.customModels);
   const skipPermissions = useStore(s => s.skipPermissions);
@@ -166,7 +167,9 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
         }
       });
       const offExit = await tauri.onPtyExit(id, (code) => {
-        if (!cancelled) term.write(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m\r\n`);
+        if (cancelled) return;
+        term.write(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m\r\n`);
+        if (kind === 'action' && tabId) useStore.getState().markActionExited(tabId, code);
       });
       unlistenRefs.current.push(offOut, offExit);
 

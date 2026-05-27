@@ -17,10 +17,21 @@ function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string
   );
 }
 
+type ActionTab = Extract<import('../../store/tabsSlice').Tab, { kind: 'action' }>;
+
+// 130 = SIGINT (Ctrl+C), 143 = SIGTERM — deliberate stops, not failures.
+const STOP_SIGNAL_CODES = new Set([130, 143]);
+
+function actionIconColor(tab: ActionTab): string {
+  if (tab.status === 'running') return 'text-success';
+  if (tab.exitCode && !STOP_SIGNAL_CODES.has(tab.exitCode)) return 'text-danger';
+  return 'text-muted';
+}
+
 function TabIcon({ tab }: { tab: import('../../store/tabsSlice').Tab }) {
   if (tab.kind === 'session') return <>{tab.mode === 'terminal' ? '›' : '◇'}</>;
   if (tab.kind === 'terminal') return <>$</>;
-  return <>▶</>;
+  return <span className={actionIconColor(tab)}>▶</span>;
 }
 
 export function TabBar() {

@@ -2,7 +2,7 @@ import type { StateCreator } from 'zustand';
 
 export type Tab =
   | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal' }
-  | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited' }
+  | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number }
   | { kind: 'terminal'; id: string; projectId: number; title: string };
 
 export type TabsSlice = {
@@ -17,6 +17,7 @@ export type TabsSlice = {
   renameTab: (id: string, title: string) => void;
   linkNewSession: (tabId: string, realSessionId: string) => void;
   upsertActionTab: (tab: Extract<Tab, { kind: 'action' }>) => void;
+  markActionExited: (tabId: string, exitCode: number) => void;
 };
 
 const sessionTabId = (sessionId: string) => `session:${sessionId}`;
@@ -73,4 +74,9 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
       set({ tabs: [...get().tabs, tab], activeTabId: tab.id });
     }
   },
+  markActionExited: (tabId, exitCode) => set({
+    tabs: get().tabs.map(t =>
+      t.id === tabId && t.kind === 'action' ? { ...t, status: 'exited', exitCode } : t
+    ),
+  }),
 });
