@@ -45,6 +45,7 @@ pub fn run() {
             commands::pty::save_clipboard_image,
             commands::pty::read_clipboard_image,
             commands::pty::read_clipboard_text,
+            commands::pty::write_clipboard_text,
             commands::actions::list_actions,
             commands::actions::detect_scripts,
             commands::actions::add_action,

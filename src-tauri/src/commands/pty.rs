@@ -248,6 +248,15 @@ pub fn read_clipboard_image(
 }
 
 #[tauri::command]
+pub fn write_clipboard_text(text: String) -> AppResult<()> {
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| AppError::Other(format!("clipboard: {e}")))?;
+    clipboard.set_text(text)
+        .map_err(|e| AppError::Other(format!("clipboard: {e}")))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn read_clipboard_text() -> AppResult<Option<String>> {
     let mut clipboard = arboard::Clipboard::new()
         .map_err(|e| AppError::Other(format!("clipboard: {e}")))?;

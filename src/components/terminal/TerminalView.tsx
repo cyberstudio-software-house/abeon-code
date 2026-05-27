@@ -119,6 +119,18 @@ export function TerminalView({ projectId, kind, sessionId, actionId, visible = t
       if (isModClick(event)) openUrl(uri);
     }));
     term.open(container);
+    term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      if (e.type === 'keydown' && e.ctrlKey && e.shiftKey && e.key === 'C') {
+        const selection = term.getSelection();
+        if (selection) {
+          tauri.writeClipboardText(selection).catch(err =>
+            console.warn('[copy] write_clipboard_text failed:', err)
+          );
+        }
+        return false;
+      }
+      return true;
+    });
     term.registerLinkProvider(createFilePathProvider(term, projectPathRef));
     fit.fit();
     if (visibleRef.current) term.focus();
