@@ -9,10 +9,12 @@ use crate::domain::{HistoryBlock, SessionActivity};
 use crate::error::AppResult;
 use crate::sessions::parser::parse_line;
 use crate::sessions::activity::compute_activity;
+use crate::sessions::usage::UsageAccumulator;
 
 struct OpenSession {
     path: PathBuf,
     last_offset: u64,
+    usage: UsageAccumulator,
 }
 
 pub struct SessionWatchers {
@@ -33,8 +35,18 @@ impl SessionWatchers {
     pub fn open(self: &Arc<Self>, app: AppHandle, session_id: &str, path: PathBuf) -> AppResult<()> {
         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         {
+            let mut acc = UsageAccumulator::default();
+            if let Ok(file) = std::fs::File::open(&path) {
+                use std::io::{BufRead, BufReader};
+                for line in BufReader::new(file).lines().map_while(Result::ok) {
+                    if line.trim().is_empty() { continue; }
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                        acc.add_line(&v);
+                    }
+                }
+            }
             let mut s = self.sessions.lock();
-            s.insert(session_id.to_string(), OpenSession { path: path.clone(), last_offset: size });
+            s.insert(session_id.to_string(), OpenSession { path: path.clone(), last_offset: size, usage: acc });
         }
         let mut w = self.watcher.lock();
         if w.is_none() {
@@ -68,6 +80,7 @@ impl SessionWatchers {
         let mut block_updates: Vec<(String, Vec<HistoryBlock>)> = Vec::new();
         let mut title_updates: Vec<(String, String)> = Vec::new();
         let mut activity_inputs: Vec<(String, PathBuf)> = Vec::new();
+        let mut usage_updates: Vec<(String, crate::domain::UsageSummary)> = Vec::new();
 
         for (sid, sess) in sessions.iter_mut() {
             if sess.path != changed { continue; }
@@ -79,8 +92,11 @@ impl SessionWatchers {
                 activity_inputs.push((sid.clone(), sess.path.clone()));
                 continue;
             }
-            let tail = read_tail(&sess.path, sess.last_offset, new_size);
+            let prev_offset = sess.last_offset;
+            let path = sess.path.clone();
+            let tail = read_tail(&path, prev_offset, new_size, &mut sess.usage);
             sess.last_offset = new_size;
+            usage_updates.push((sid.clone(), sess.usage.finalize()));
             if !tail.blocks.is_empty() {
                 block_updates.push((sid.clone(), tail.blocks));
             }
@@ -96,6 +112,9 @@ impl SessionWatchers {
         }
         for (sid, title) in title_updates {
             let _ = app.emit(&format!("session:{sid}:title"), serde_json::json!({ "title": title }));
+        }
+        for (sid, summary) in usage_updates {
+            let _ = app.emit(&format!("session:{sid}:usage"), &summary);
         }
 
         let now = std::time::SystemTime::now()
@@ -125,7 +144,7 @@ struct TailResult {
     title: Option<String>,
 }
 
-fn read_tail(path: &Path, from: u64, to: u64) -> TailResult {
+fn read_tail(path: &Path, from: u64, to: u64, usage: &mut UsageAccumulator) -> TailResult {
     use std::io::{Read, Seek, SeekFrom};
     let empty = TailResult { blocks: vec![], title: None };
     let mut f = match std::fs::File::open(path) { Ok(f) => f, Err(_) => return empty };
@@ -145,6 +164,7 @@ fn read_tail(path: &Path, from: u64, to: u64) -> TailResult {
                     }
                 }
             }
+            usage.add_line(&v);
         }
         if let Ok(bs) = parse_line(line) {
             blocks.extend(bs);
