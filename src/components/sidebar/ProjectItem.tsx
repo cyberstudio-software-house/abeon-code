@@ -57,6 +57,18 @@ export function ProjectItem({ project }: Props) {
             >
               <Icon name="terminal" className="w-3 h-3" strokeWidth={2} />
             </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                tauri.openProjectInEditor(project.path).catch(err =>
+                  console.warn('[editor] open failed:', err)
+                );
+              }}
+              className="flex items-center gap-1 px-1.5 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors rounded"
+              title="Open in editor"
+            >
+              <Icon name="code" className="w-3 h-3" strokeWidth={2} />
+            </button>
           </div>
           <SessionList projectId={project.id} />
         </div>

@@ -139,6 +139,55 @@ const EDITORS: &[(&str, &[&str])] = &[
     ("zed", &[]),
 ];
 
+const KNOWN_EDITORS: &[&str] = &[
+    "code", "cursor", "zed", "subl", "idea", "webstorm", "nvim", "vim",
+];
+
+#[tauri::command]
+pub fn list_available_editors() -> Vec<crate::domain::EditorInfo> {
+    KNOWN_EDITORS.iter()
+        .filter_map(|name| which(name).map(|path| crate::domain::EditorInfo {
+            name: name.to_string(),
+            path,
+        }))
+        .collect()
+}
+
+#[tauri::command]
+pub async fn open_project_in_editor(
+    state: State<'_, AppState>,
+    project_path: String,
+) -> Result<(), String> {
+    let editor = {
+        let conn = state.db.get().map_err(|e| e.to_string())?;
+        settings_repo::get(&conn, "editorPath")
+            .map_err(|e| e.to_string())?
+            .filter(|s| !s.is_empty())
+    };
+
+    if let Some(ed) = editor {
+        let mut cmd = tokio::process::Command::new(&ed);
+        cmd.arg(&project_path);
+        match cmd.status().await {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(status) => return Err(format!("{ed} exited with {status}")),
+            Err(e) => return Err(format!("Failed to run {ed}: {e}")),
+        }
+    }
+
+    for &name in KNOWN_EDITORS.iter().take(5) {
+        if which(name).is_none() { continue; }
+        let mut cmd = tokio::process::Command::new(name);
+        cmd.arg(&project_path);
+        match cmd.status().await {
+            Ok(status) if status.success() => return Ok(()),
+            _ => continue,
+        }
+    }
+
+    Err("No editor found".into())
+}
+
 #[tauri::command]
 pub async fn open_in_editor(
     project_path: String,

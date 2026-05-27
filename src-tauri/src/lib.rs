@@ -66,6 +66,8 @@ pub fn run() {
             commands::sessions::rename_session,
             commands::sessions::generate_session_title,
             commands::settings::open_in_editor,
+            commands::settings::list_available_editors,
+            commands::settings::open_project_in_editor,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

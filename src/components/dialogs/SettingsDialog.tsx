@@ -5,7 +5,7 @@ import { Icon } from '../shared/Icon';
 import { BUILTIN_MODELS, type EffortLevel } from '../../lib/models';
 import type { ThemeMode } from '../../styles/theme';
 import { tauri } from '../../lib/tauri';
-import type { ShellInfo } from '../../types';
+import type { ShellInfo, EditorInfo } from '../../types';
 import {
   SHORTCUTS, FIXED_SHORTCUTS, getBinding, formatBinding, eventToBinding,
   type ShortcutId,
@@ -94,28 +94,34 @@ function GeneralTab() {
   const setSkipPermissions = useStore(s => s.setSkipPermissions);
   const shellPath = useStore(s => s.shellPath);
   const setShellPath = useStore(s => s.setShellPath);
+  const editorPath = useStore(s => s.editorPath);
+  const setEditorPath = useStore(s => s.setEditorPath);
   const historyViewMode = useStore(s => s.historyViewMode);
   const setHistoryViewMode = useStore(s => s.setHistoryViewMode);
   const [shells, setShells] = useState<ShellInfo[]>([]);
+  const [editors, setEditors] = useState<EditorInfo[]>([]);
   const [detectedName, setDetectedName] = useState<string | null>(null);
   const [customMode, setCustomMode] = useState(false);
+  const [editorCustomMode, setEditorCustomMode] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [list, detected] = await Promise.all([
+        const [list, detected, editorList] = await Promise.all([
           tauri.listAvailableShells(),
           tauri.detectDefaultShell(),
+          tauri.listAvailableEditors(),
         ]);
         if (cancelled) return;
         setShells(list);
+        setEditors(editorList);
         if (detected) {
           const match = list.find(s => s.path === detected || s.name === detected);
           setDetectedName(match?.name ?? detected);
         }
       } catch (err) {
-        console.error('[settings] failed to load shells', err);
+        console.error('[settings] failed to load shells/editors', err);
       }
     })();
     return () => { cancelled = true; };
@@ -123,6 +129,8 @@ function GeneralTab() {
 
   const isCustom = shellPath !== '' && !shells.some(s => s.name === shellPath || s.path === shellPath);
   const showCustom = isCustom || customMode;
+  const isEditorCustom = editorPath !== '' && !editors.some(s => s.name === editorPath || s.path === editorPath);
+  const showEditorCustom = isEditorCustom || editorCustomMode;
 
   const pickProjectsBase = async () => {
     const sel = await open({
@@ -233,6 +241,45 @@ function GeneralTab() {
             ? <>Wykryto: <code className="font-mono text-fg-secondary">{detectedName}</code>. </>
             : null}
           Dotyczy tylko interaktywnych terminali (tab Shell).
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">
+          Domyślny edytor
+        </label>
+        <select
+          value={showEditorCustom ? '__custom__' : editorPath}
+          onChange={e => {
+            const v = e.target.value;
+            if (v === '__custom__') {
+              setEditorCustomMode(true);
+            } else {
+              setEditorCustomMode(false);
+              setEditorPath(v);
+            }
+          }}
+          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
+        >
+          <option value="">Auto (pierwszy wykryty)</option>
+          {editors.map(s => (
+            <option key={s.path} value={s.name}>{s.name} ({s.path})</option>
+          ))}
+          <option value="__custom__">Inny…</option>
+        </select>
+        {showEditorCustom && (
+          <input
+            value={editorPath}
+            onChange={e => setEditorPath(e.target.value)}
+            placeholder="/usr/bin/code"
+            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] font-mono mt-2"
+          />
+        )}
+        <p className="text-[11px] text-muted mt-2">
+          {editors.length > 0
+            ? <>Wykryto: {editors.map(s => s.name).join(', ')}. </>
+            : null}
+          Edytor używany do otwierania projektów z panelu bocznego.
         </p>
       </div>
 

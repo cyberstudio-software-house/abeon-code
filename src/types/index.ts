@@ -13,6 +13,7 @@ export type { GitFile } from './GitFile';
 export type { GitStatus } from './GitStatus';
 export type { GitUser } from './GitUser';
 export type { ShellInfo } from './ShellInfo';
+export type { EditorInfo } from './EditorInfo';
 export type { GitRepo } from './GitRepo';
 export type { DiffResult } from './DiffResult';
 export type { DiffHunk } from './DiffHunk';

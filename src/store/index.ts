@@ -37,6 +37,7 @@ type Persisted = {
   skipPermissions?: boolean;
   sortMode?: 'manual' | 'alpha' | 'activity';
   shellPath?: string;
+  editorPath?: string;
   shortcutOverrides?: Record<string, string>;
   historyViewMode?: 'communication' | 'full';
 };
@@ -47,6 +48,7 @@ const PERSISTED_KEYS = [
   'projectsBasePath', 'skipPermissions',
   'sortMode',
   'shellPath',
+  'editorPath',
   'shortcutOverrides',
   'historyViewMode',
 ] as const satisfies readonly (keyof Persisted)[];
@@ -69,6 +71,7 @@ function pickPersistedFields(state: AppState): Persisted {
     skipPermissions: state.skipPermissions,
     sortMode: state.sortMode,
     shellPath: state.shellPath,
+    editorPath: state.editorPath,
     shortcutOverrides: state.shortcutOverrides,
     historyViewMode: state.historyViewMode,
   };
@@ -136,6 +139,7 @@ function applyPersistedToState(p: Persisted) {
     patch.sortMode = p.sortMode;
   }
   if (typeof p.shellPath === 'string') patch.shellPath = p.shellPath;
+  if (typeof p.editorPath === 'string') patch.editorPath = p.editorPath;
   if (p.shortcutOverrides && typeof p.shortcutOverrides === 'object') {
     patch.shortcutOverrides = p.shortcutOverrides as Record<string, string>;
   }

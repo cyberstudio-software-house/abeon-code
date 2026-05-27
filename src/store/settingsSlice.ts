@@ -19,6 +19,7 @@ export type SettingsSlice = {
   skipPermissions: boolean;
   sortMode: SortMode;
   shellPath: string;
+  editorPath: string;
   shortcutOverrides: Record<string, string>;
   historyViewMode: HistoryViewMode;
   settingsOpen: boolean;
@@ -36,6 +37,7 @@ export type SettingsSlice = {
   setSkipPermissions: (v: boolean) => void;
   setSortMode: (mode: SortMode) => void;
   setShellPath: (path: string) => void;
+  setEditorPath: (path: string) => void;
   setShortcutOverride: (id: string, binding: string) => void;
   resetShortcutOverrides: () => void;
   setHistoryViewMode: (mode: HistoryViewMode) => void;
@@ -56,6 +58,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   skipPermissions: false,
   sortMode: 'manual',
   shellPath: '',
+  editorPath: '',
   shortcutOverrides: {},
   historyViewMode: 'full',
   settingsOpen: false,
@@ -74,6 +77,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   setSkipPermissions: (skipPermissions) => set({ skipPermissions }),
   setSortMode: (sortMode) => set({ sortMode }),
   setShellPath: (shellPath) => set({ shellPath }),
+  setEditorPath: (editorPath) => set({ editorPath }),
   setShortcutOverride: (id, binding) =>
     set({ shortcutOverrides: { ...get().shortcutOverrides, [id]: binding } }),
   resetShortcutOverrides: () => set({ shortcutOverrides: {} }),
