@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult } from '../types';
+import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary } from '../types';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -32,6 +32,12 @@ export const tauri = {
     listen<{ activity: SessionActivity }>(`session:${sessionId}:activity`, e => cb(e.payload.activity)),
   onSessionTitle: (sessionId: string, cb: (title: string) => void): Promise<UnlistenFn> =>
     listen<{ title: string }>(`session:${sessionId}:title`, e => cb(e.payload.title)),
+  sessionUsage: (projectId: number, sessionId: string) =>
+    invoke<UsageSummary>('session_usage', { projectId, sessionId }),
+  projectUsage: (projectId: number) =>
+    invoke<UsageSummary>('project_usage', { projectId }),
+  onSessionUsage: (sessionId: string, cb: (usage: UsageSummary) => void): Promise<UnlistenFn> =>
+    listen<UsageSummary>(`session:${sessionId}:usage`, e => cb(e.payload)),
   spawnPty: (projectId: number, kind: PtyKindClient, cols: number, rows: number) =>
     invoke<string>('spawn_pty', { projectId, kind, cols, rows }),
   ptyWrite: (ptyId: string, data: string) => invoke<void>('pty_write', { ptyId, data }),

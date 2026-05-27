@@ -18,3 +18,6 @@ export type { GitRepo } from './GitRepo';
 export type { DiffResult } from './DiffResult';
 export type { DiffHunk } from './DiffHunk';
 export type { DiffLine } from './DiffLine';
+export type { TokenTotals } from './TokenTotals';
+export type { ModelUsage } from './ModelUsage';
+export type { UsageSummary } from './UsageSummary';
