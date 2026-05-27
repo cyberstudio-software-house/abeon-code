@@ -3,6 +3,7 @@ import { Sidebar } from '../sidebar/Sidebar';
 import { CenterPanel } from '../center/CenterPanel';
 import { RightPanel } from '../right/RightPanel';
 import { TitleBar } from './TitleBar';
+import { TabSwitcher } from '../center/TabSwitcher';
 import { useStore } from '../../store';
 import { matchesShortcut } from '../../lib/shortcuts';
 
@@ -145,6 +146,7 @@ export function AppShell() {
           </>
         )}
       </div>
+      <TabSwitcher />
     </div>
   );
 }
