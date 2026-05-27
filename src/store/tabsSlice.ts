@@ -8,6 +8,7 @@ export type Tab =
 export type TabsSlice = {
   tabs: Tab[];
   activeTabId: string | null;
+  mruOrder: string[];
   openSessionTab: (projectId: number, sessionId: string, title: string) => void;
   openNewSessionTab: (projectId: number) => void;
   openNewTerminalTab: (projectId: number) => void;
@@ -22,16 +23,20 @@ export type TabsSlice = {
 
 const sessionTabId = (sessionId: string) => `session:${sessionId}`;
 
+const moveToFront = (order: string[], id: string) => [id, ...order.filter(x => x !== id)];
+
 export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
   tabs: [],
   activeTabId: null,
+  mruOrder: [],
   openSessionTab: (projectId, sessionId, title) => {
     const id = sessionTabId(sessionId);
     const existing = get().tabs.find(t => t.id === id || (t.kind === 'session' && t.linkedSessionId === sessionId));
-    if (existing) { set({ activeTabId: existing.id }); return; }
+    if (existing) { set({ activeTabId: existing.id, mruOrder: moveToFront(get().mruOrder, existing.id) }); return; }
     set({
       tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title, mode: 'history' }],
       activeTabId: id,
+      mruOrder: moveToFront(get().mruOrder, id),
     });
   },
   openNewSessionTab: (projectId) => {
@@ -40,6 +45,7 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
     set({
       tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title: 'New session', mode: 'terminal' }],
       activeTabId: id,
+      mruOrder: moveToFront(get().mruOrder, id),
     });
   },
   openNewTerminalTab: (projectId) => {
@@ -47,6 +53,7 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
     set({
       tabs: [...get().tabs, { kind: 'terminal', id, projectId, title: 'Terminal' }],
       activeTabId: id,
+      mruOrder: moveToFront(get().mruOrder, id),
     });
   },
   setSessionMode: (tabId, mode) => set({
@@ -54,10 +61,11 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
   }),
   closeTab: (id) => {
     const tabs = get().tabs.filter(t => t.id !== id);
+    const mruOrder = get().mruOrder.filter(x => x !== id);
     const activeTabId = get().activeTabId === id ? (tabs[tabs.length - 1]?.id ?? null) : get().activeTabId;
-    set({ tabs, activeTabId });
+    set({ tabs, activeTabId, mruOrder });
   },
-  setActive: (id) => set({ activeTabId: id }),
+  setActive: (id) => set({ activeTabId: id, mruOrder: moveToFront(get().mruOrder, id) }),
   renameTab: (id, title) => set({
     tabs: get().tabs.map(t => t.id === id ? { ...t, title } : t),
   }),
@@ -68,10 +76,11 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
   }),
   upsertActionTab: (tab) => {
     const existing = get().tabs.find(t => t.id === tab.id);
+    const mruOrder = moveToFront(get().mruOrder, tab.id);
     if (existing) {
-      set({ tabs: get().tabs.map(t => t.id === tab.id ? tab : t), activeTabId: tab.id });
+      set({ tabs: get().tabs.map(t => t.id === tab.id ? tab : t), activeTabId: tab.id, mruOrder });
     } else {
-      set({ tabs: [...get().tabs, tab], activeTabId: tab.id });
+      set({ tabs: [...get().tabs, tab], activeTabId: tab.id, mruOrder });
     }
   },
   markActionExited: (tabId, exitCode) => set({
