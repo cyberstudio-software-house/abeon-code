@@ -5,6 +5,7 @@ pub mod git;
 pub mod shell;
 pub mod editor;
 pub mod usage;
+pub mod model;
 
 pub use project::*;
 pub use action::*;
@@ -13,3 +14,4 @@ pub use git::*;
 pub use shell::*;
 pub use editor::*;
 pub use usage::*;
+pub use model::*;
