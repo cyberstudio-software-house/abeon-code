@@ -44,6 +44,15 @@ mod tests {
     }
 
     #[test]
+    fn resolves_opus_4_8() {
+        let p = price_for("claude-opus-4-8").unwrap();
+        assert_eq!(p.input, 15.0);
+        assert_eq!(p.output, 75.0);
+        let p1m = price_for("claude-opus-4-8[1m]").unwrap();
+        assert_eq!(p1m.output, 75.0);
+    }
+
+    #[test]
     fn unknown_model_is_none() {
         assert!(price_for("gpt-4o").is_none());
         assert!(price_for("").is_none());
