@@ -1,12 +1,16 @@
 import { useStore } from '../../store';
-import { APP_NAME } from '../../lib/windowTitle';
+import { formatHeaderTitle } from '../../lib/windowTitle';
 
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 
 export function TitleBar() {
   const tabs = useStore(s => s.tabs);
   const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
-  const headerTitle = (activeTabTitle ?? '').trim() || APP_NAME;
+  const activeProjectName = useStore(s => {
+    const tab = s.tabs.find(t => t.id === s.activeTabId);
+    return tab ? (s.projects.find(p => p.id === tab.projectId)?.name ?? null) : null;
+  });
+  const headerTitle = formatHeaderTitle(activeTabTitle, activeProjectName);
   const activeSessions = tabs.filter(t => (t.kind === 'session' && t.mode === 'terminal') || t.kind === 'terminal').length;
 
   return (

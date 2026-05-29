@@ -1,4 +1,4 @@
-export const APP_NAME = 'AbeonCode';
+const APP_NAME = 'AbeonCode';
 const MAX_TITLE_LENGTH = 40;
 
 /**
@@ -7,11 +7,22 @@ const MAX_TITLE_LENGTH = 40;
  * Otherwise: "<title> — AbeonCode", with the title truncated to
  * MAX_TITLE_LENGTH chars + "…" when it is longer.
  */
-export function formatWindowTitle(tabTitle: string | null): string {
+function withProject(projectName: string | null | undefined, body: string): string {
+  const project = projectName?.trim();
+  return project ? `${project} :: ${body}` : body;
+}
+
+export function formatWindowTitle(tabTitle: string | null, projectName?: string | null): string {
   const trimmed = tabTitle?.trim() ?? '';
   if (!trimmed) return APP_NAME;
   const title = trimmed.length > MAX_TITLE_LENGTH
     ? `${trimmed.slice(0, MAX_TITLE_LENGTH)}…`
     : trimmed;
-  return `${title} — ${APP_NAME}`;
+  return `${withProject(projectName, title)} — ${APP_NAME}`;
+}
+
+export function formatHeaderTitle(tabTitle: string | null, projectName?: string | null): string {
+  const trimmed = tabTitle?.trim() ?? '';
+  if (!trimmed) return APP_NAME;
+  return withProject(projectName, trimmed);
 }

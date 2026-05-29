@@ -75,6 +75,10 @@ export function AppShell() {
   const activeTabId = useStore(s => s.activeTabId);
   const hasActiveProject = tabs.some(t => t.id === activeTabId);
   const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
+  const activeProjectName = useStore(s => {
+    const tab = s.tabs.find(t => t.id === s.activeTabId);
+    return tab ? (s.projects.find(p => p.id === tab.projectId)?.name ?? null) : null;
+  });
   const startActivityPolling = useStore(s => s.startActivityPolling);
   const stopActivityPolling = useStore(s => s.stopActivityPolling);
 
@@ -84,8 +88,8 @@ export function AppShell() {
   }, [startActivityPolling, stopActivityPolling]);
 
   useEffect(() => {
-    void tauri.setWindowTitle(formatWindowTitle(activeTabTitle));
-  }, [activeTabTitle]);
+    void tauri.setWindowTitle(formatWindowTitle(activeTabTitle, activeProjectName));
+  }, [activeTabTitle, activeProjectName]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
