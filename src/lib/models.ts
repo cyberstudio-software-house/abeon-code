@@ -1,3 +1,5 @@
+import type { DetectedModel } from '../types/DetectedModel';
+
 export type EffortLevel = 'low' | 'medium' | 'high';
 
 export type BuiltinModel = {
@@ -49,4 +51,54 @@ export function getModelDisplayLabel(
   }
   const custom = customModels.find(m => m.id === modelId);
   return custom?.label ?? modelId;
+}
+
+export type DetectedSuggestion = { modelId: string; label: string };
+
+type Version = { family: string; major: number; minor: number };
+
+function parseVersion(modelId: string): Version | null {
+  const m = /^claude-(opus|sonnet|haiku)-(\d+)-(\d+)/.exec(modelId);
+  if (!m) return null;
+  return { family: m[1], major: Number(m[2]), minor: Number(m[3]) };
+}
+
+function isNewer(a: Version, b: Version): boolean {
+  return a.major > b.major || (a.major === b.major && a.minor > b.minor);
+}
+
+function suggestionLabel(modelId: string, v: Version): string {
+  const fam = v.family.charAt(0).toUpperCase() + v.family.slice(1);
+  const ctx = modelId.includes('[1m]') ? ' (1M)' : '';
+  return `Claude ${fam} ${v.major}.${v.minor}${ctx}`;
+}
+
+export function detectUnknownModels(
+  detected: DetectedModel[],
+  customModels: CustomModel[],
+): DetectedSuggestion[] {
+  const known = new Set<string>([
+    ...BUILTIN_MODELS.map(m => m.modelId),
+    ...customModels.map(m => m.modelId),
+  ]);
+
+  const newest: Record<string, Version> = {};
+  for (const m of BUILTIN_MODELS) {
+    const v = parseVersion(m.modelId);
+    if (!v) continue;
+    if (!newest[v.family] || isNewer(v, newest[v.family])) newest[v.family] = v;
+  }
+
+  const out: DetectedSuggestion[] = [];
+  const seen = new Set<string>();
+  for (const item of detected) {
+    if (known.has(item.modelId) || seen.has(item.modelId)) continue;
+    const v = parseVersion(item.modelId);
+    if (!v) continue;
+    const ref = newest[v.family];
+    if (ref && !isNewer(v, ref)) continue;
+    seen.add(item.modelId);
+    out.push({ modelId: item.modelId, label: suggestionLabel(item.modelId, v) });
+  }
+  return out;
 }
