@@ -59,6 +59,7 @@ fn build_models(tokens: Vec<String>, source: &str) -> Vec<DetectedModel> {
         let Some((clean, family)) = normalize_alias(&tok) else { continue; };
         let mut variants = vec![clean.clone()];
         if family == "opus" {
+            // Opus models expose a 1M-context variant; the CLI appends `[1m]` at runtime.
             variants.push(format!("{clean}[1m]"));
         }
         for v in variants {
@@ -72,10 +73,6 @@ fn build_models(tokens: Vec<String>, source: &str) -> Vec<DetectedModel> {
         }
     }
     out
-}
-
-fn detect_from_bytes(bytes: &[u8]) -> Vec<DetectedModel> {
-    build_models(scan_aliases(bytes), "binary")
 }
 
 /// Resolve the `claude` binary the same way the PTYs do: search the chosen
@@ -143,11 +140,25 @@ fn detect_from_sessions() -> Vec<DetectedModel> {
 }
 
 /// Best-effort model discovery. Never errors: returns `[]` when nothing is found.
+/// Result is cached in `AppState` (the CLI binary is large); pass `force: true`
+/// to bypass the cache and re-scan.
 #[tauri::command]
-pub fn detect_models(state: State<AppState>) -> Vec<DetectedModel> {
-    if let Some(path) = locate_claude(&state) {
+pub fn detect_models(state: State<AppState>, force: Option<bool>) -> Vec<DetectedModel> {
+    if force != Some(true) {
+        if let Some(cached) = state.detected_models.lock().clone() {
+            return cached;
+        }
+    }
+    let result = scan_models(&state);
+    *state.detected_models.lock() = Some(result.clone());
+    result
+}
+
+/// Run the actual scan: CLI binary first, session JSONL fallback.
+fn scan_models(state: &AppState) -> Vec<DetectedModel> {
+    if let Some(path) = locate_claude(state) {
         if let Ok(bytes) = std::fs::read(&path) {
-            let models = detect_from_bytes(&bytes);
+            let models = build_models(scan_aliases(&bytes), "binary");
             if !models.is_empty() {
                 return models;
             }
@@ -185,6 +196,12 @@ mod tests {
         assert_eq!(normalize_alias("claude-opus-4"), None);
         assert_eq!(normalize_alias("claude-opus-4-0"), None);
         assert_eq!(normalize_alias("claude-gpt-4-1"), None);
+    }
+
+    #[test]
+    fn scan_handles_empty_and_binary_noise() {
+        assert!(scan_aliases(b"").is_empty());
+        assert!(scan_aliases(&[0u8; 64]).is_empty());
     }
 
     #[test]

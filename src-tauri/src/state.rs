@@ -14,6 +14,8 @@ pub struct AppState {
     pub clipboard_images: Mutex<HashMap<String, Vec<PathBuf>>>,
     /// Cached project usage keyed by project_id: (max session-file mtime seen, summary).
     pub project_usage_cache: Mutex<HashMap<i64, (i64, crate::domain::UsageSummary)>>,
+    /// Cached result of `detect_models`; populated on first call, bypassed by `force`.
+    pub detected_models: Mutex<Option<Vec<crate::domain::DetectedModel>>>,
 }
 
 impl AppState {
@@ -25,6 +27,7 @@ impl AppState {
             shell_env: Mutex::new(None),
             clipboard_images: Mutex::new(HashMap::new()),
             project_usage_cache: Mutex::new(HashMap::new()),
+            detected_models: Mutex::new(None),
         }
     }
 }
