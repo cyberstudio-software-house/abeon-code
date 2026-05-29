@@ -56,6 +56,30 @@ describe('tabsSlice mruOrder', () => {
     expect(useStore.getState().mruOrder).toEqual(['t2']);
   });
 
+  it('openNewSessionTab creates a fresh tab with a real (non-placeholder) session id', () => {
+    useStore.setState({ tabs: [], activeTabId: null, mruOrder: [] });
+    useStore.getState().openNewSessionTab(7);
+    const tab = useStore.getState().tabs[0];
+    expect(tab.kind).toBe('session');
+    if (tab.kind !== 'session') throw new Error('expected session tab');
+    expect(tab.sessionId.startsWith('new-')).toBe(false);
+    expect(tab.fresh).toBe(true);
+    expect(tab.mode).toBe('terminal');
+    expect(tab.id).toBe(`session:${tab.sessionId}`);
+    expect(tab.sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  });
+
+  it('setSessionMode clears the fresh flag so re-entering terminal resumes (not re-creates)', () => {
+    useStore.setState({
+      tabs: [{ kind: 'session', id: 'session:uuid-x', projectId: 1, sessionId: 'uuid-x', title: 'New session', mode: 'terminal', fresh: true }],
+    });
+    useStore.getState().setSessionMode('session:uuid-x', 'history');
+    const tab = useStore.getState().tabs[0];
+    if (tab.kind !== 'session') throw new Error('expected session tab');
+    expect(tab.mode).toBe('history');
+    expect(tab.fresh).toBe(false);
+  });
+
   it('upsertActionTab promotes the action tab to the front', () => {
     useStore.setState({ mruOrder: ['t1'] });
     useStore.getState().upsertActionTab({

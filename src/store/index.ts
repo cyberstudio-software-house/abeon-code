@@ -182,15 +182,25 @@ type PersistedTabs = {
   activeTabId: string | null;
 };
 
+// Drops malformed entries and orphaned `new-` placeholders that were never linked
+// to a real session — those point at no file on disk and would render as an error tab.
+export function sanitizeRestoredTabs(tabs: PersistedTab[]): PersistedTab[] {
+  return tabs.filter(
+    (t): t is PersistedTab =>
+      t.kind === 'session'
+      && typeof t.id === 'string'
+      && typeof t.sessionId === 'string'
+      && !(t.sessionId.startsWith('new-') && !t.linkedSessionId),
+  );
+}
+
 function loadTabsFromLocalStorage(): PersistedTabs | null {
   try {
     const raw = localStorage.getItem(TABS_PERSIST_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedTabs;
     if (!Array.isArray(parsed.tabs)) return null;
-    const tabs = parsed.tabs.filter(
-      (t): t is PersistedTab => t.kind === 'session' && typeof t.id === 'string' && typeof t.sessionId === 'string',
-    );
+    const tabs = sanitizeRestoredTabs(parsed.tabs);
     const activeTabId = tabs.some(t => t.id === parsed.activeTabId)
       ? parsed.activeTabId
       : (tabs[tabs.length - 1]?.id ?? null);

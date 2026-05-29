@@ -18,12 +18,43 @@ pub enum PtyKind {
         model: Option<String>,
         #[serde(default)]
         skip_permissions: bool,
+        #[serde(default)]
+        fresh: bool,
     },
     Action {
         #[ts(type = "number")]
         action_id: i64,
     },
     Shell,
+}
+
+// A fresh session forces its id up-front via `--session-id` so the tab's id equals the
+// real session id from the start (no placeholder linking). Resuming uses `--resume`.
+fn build_claude_command(
+    session_id: Option<&str>,
+    model: Option<&str>,
+    skip_permissions: bool,
+    fresh: bool,
+) -> String {
+    let mut cmd = String::from("claude");
+    match session_id {
+        Some(id) if fresh => {
+            cmd.push_str(&format!(" --session-id {id}"));
+            if let Some(m) = model {
+                cmd.push_str(&format!(" --model {m}"));
+            }
+        }
+        Some(id) => cmd.push_str(&format!(" --resume {id}")),
+        None => {
+            if let Some(m) = model {
+                cmd.push_str(&format!(" --model {m}"));
+            }
+        }
+    }
+    if skip_permissions {
+        cmd.push_str(" --dangerously-skip-permissions");
+    }
+    cmd
 }
 
 #[tauri::command]
@@ -40,15 +71,13 @@ pub fn spawn_pty(
     let mut cwd = std::path::PathBuf::from(&proj.path);
 
     let (program, args_owned) = match &kind {
-        PtyKind::Claude { session_id, model, skip_permissions } => {
-            let mut cmd = match (session_id, model) {
-                (Some(id), _) => format!("claude --resume {id}"),
-                (None, Some(m)) => format!("claude --model {m}"),
-                (None, None) => "claude".to_string(),
-            };
-            if *skip_permissions {
-                cmd.push_str(" --dangerously-skip-permissions");
-            }
+        PtyKind::Claude { session_id, model, skip_permissions, fresh } => {
+            let cmd = build_claude_command(
+                session_id.as_deref(),
+                model.as_deref(),
+                *skip_permissions,
+                *fresh,
+            );
             (
                 "bash".to_string(),
                 vec!["-c".to_string(), cmd],
@@ -270,6 +299,46 @@ pub fn read_clipboard_text() -> AppResult<Option<String>> {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn claude_command_fresh_uses_session_id() {
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), None, false, true),
+            "claude --session-id uuid-1"
+        );
+    }
+
+    #[test]
+    fn claude_command_fresh_with_model() {
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), Some("opus"), false, true),
+            "claude --session-id uuid-1 --model opus"
+        );
+    }
+
+    #[test]
+    fn claude_command_resume_ignores_model() {
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), Some("opus"), false, false),
+            "claude --resume uuid-1"
+        );
+    }
+
+    #[test]
+    fn claude_command_no_id_with_model() {
+        assert_eq!(
+            build_claude_command(None, Some("opus"), false, false),
+            "claude --model opus"
+        );
+    }
+
+    #[test]
+    fn claude_command_skip_permissions_appended_last() {
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), None, true, true),
+            "claude --session-id uuid-1 --dangerously-skip-permissions"
+        );
+    }
 
     #[test]
     fn save_clipboard_image_creates_file() {

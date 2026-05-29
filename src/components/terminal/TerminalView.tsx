@@ -12,6 +12,7 @@ type Props = {
   projectId: number;
   kind: 'claude' | 'action' | 'shell';
   sessionId?: string;
+  fresh?: boolean;
   actionId?: number;
   tabId?: string;
   visible?: boolean;
@@ -62,7 +63,7 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
   };
 }
 
-export function TerminalView({ projectId, kind, sessionId, actionId, tabId, visible = true }: Props) {
+export function TerminalView({ projectId, kind, sessionId, fresh, actionId, tabId, visible = true }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const customModels = useStore(s => s.customModels);
   const skipPermissions = useStore(s => s.skipPermissions);
@@ -140,13 +141,13 @@ export function TerminalView({ projectId, kind, sessionId, actionId, tabId, visi
 
     const cols = term.cols;
     const rows = term.rows;
-    const isResume = kind === 'claude' && !!sessionId;
+    const isResume = kind === 'claude' && !!sessionId && !fresh;
     const cliModel = !isResume && kind === 'claude'
       ? getCliModelString(defaultModelId, customModels)
       : undefined;
     const ptyKind: PtyKindClient =
       kind === 'claude'
-        ? { kind: 'claude', ...(sessionId ? { session_id: sessionId } : {}), ...(cliModel ? { model: cliModel } : {}), ...(skipPermissions ? { skip_permissions: true } : {}) }
+        ? { kind: 'claude', ...(sessionId ? { session_id: sessionId } : {}), ...(cliModel ? { model: cliModel } : {}), ...(fresh ? { fresh: true } : {}), ...(skipPermissions ? { skip_permissions: true } : {}) }
         : kind === 'action'
           ? { kind: 'action', action_id: actionId! }
           : { kind: 'shell' };
@@ -232,7 +233,7 @@ export function TerminalView({ projectId, kind, sessionId, actionId, tabId, visi
       // React removes the DOM container; PTY is killed; listeners detached.
       // xterm internal state will be GC'd with the Terminal object.
     };
-  }, [projectId, kind, sessionId, actionId]);
+  }, [projectId, kind, sessionId, fresh, actionId]);
 
   useEffect(() => {
     if (!visible || !termRef.current || !fitRef.current) return;

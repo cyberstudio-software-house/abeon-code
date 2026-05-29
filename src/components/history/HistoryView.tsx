@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { tauri } from '../../lib/tauri';
+import { formatTauriError } from '../../lib/errors';
 import { useStore } from '../../store';
 import type { HistoryViewMode } from '../../store/settingsSlice';
 import type { SessionHistory, HistoryBlock } from '../../types';
@@ -24,7 +25,7 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
   useEffect(() => {
     tauri.readSessionHistory(projectId, sessionId)
       .then(setData)
-      .catch(e => setError(e instanceof Error ? e.message : String(e)));
+      .catch(e => setError(formatTauriError(e)));
   }, [projectId, sessionId]);
 
   const renameTab = useStore(s => s.renameTab);

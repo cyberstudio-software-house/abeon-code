@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand';
 
 export type Tab =
-  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal' }
+  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean }
   | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number }
   | { kind: 'terminal'; id: string; projectId: number; title: string };
 
@@ -40,10 +40,10 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
     });
   },
   openNewSessionTab: (projectId) => {
-    const sessionId = `new-${crypto.randomUUID()}`;
+    const sessionId = crypto.randomUUID();
     const id = sessionTabId(sessionId);
     set({
-      tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title: 'New session', mode: 'terminal' }],
+      tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title: 'New session', mode: 'terminal', fresh: true }],
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
     });
@@ -57,7 +57,7 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
     });
   },
   setSessionMode: (tabId, mode) => set({
-    tabs: get().tabs.map(t => t.id === tabId && t.kind === 'session' ? { ...t, mode } : t),
+    tabs: get().tabs.map(t => t.id === tabId && t.kind === 'session' ? { ...t, mode, fresh: false } : t),
   }),
   closeTab: (id) => {
     const tabs = get().tabs.filter(t => t.id !== id);
