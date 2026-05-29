@@ -6,6 +6,8 @@ import { TitleBar } from './TitleBar';
 import { TabSwitcher } from '../center/TabSwitcher';
 import { useStore } from '../../store';
 import { matchesShortcut } from '../../lib/shortcuts';
+import { tauri } from '../../lib/tauri';
+import { formatWindowTitle } from '../../lib/windowTitle';
 
 const LEFT_MIN = 200;
 const LEFT_MAX = 420;
@@ -72,6 +74,7 @@ export function AppShell() {
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
   const hasActiveProject = tabs.some(t => t.id === activeTabId);
+  const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
   const startActivityPolling = useStore(s => s.startActivityPolling);
   const stopActivityPolling = useStore(s => s.stopActivityPolling);
 
@@ -79,6 +82,10 @@ export function AppShell() {
     startActivityPolling();
     return () => stopActivityPolling();
   }, [startActivityPolling, stopActivityPolling]);
+
+  useEffect(() => {
+    void tauri.setWindowTitle(formatWindowTitle(activeTabTitle));
+  }, [activeTabTitle]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

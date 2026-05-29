@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel } from '../types';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
@@ -94,4 +95,5 @@ export const tauri = {
   listAvailableEditors: () => invoke<EditorInfo[]>('list_available_editors'),
   openProjectInEditor: (projectPath: string) =>
     invoke<void>('open_project_in_editor', { projectPath }),
+  setWindowTitle: (title: string) => getCurrentWindow().setTitle(title),
 };
