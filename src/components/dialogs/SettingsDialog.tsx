@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useStore } from '../../store';
 import { Icon } from '../shared/Icon';
-import { BUILTIN_MODELS, type EffortLevel } from '../../lib/models';
+import { BUILTIN_MODELS, detectUnknownModels, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
+import type { DetectedModel } from '../../types/DetectedModel';
 import type { ThemeMode } from '../../styles/theme';
 import { tauri } from '../../lib/tauri';
 import type { ShellInfo, EditorInfo } from '../../types';
@@ -354,6 +355,21 @@ function ModelsTab() {
   const [newLabel, setNewLabel] = useState('');
   const [newModelId, setNewModelId] = useState('');
 
+  const [detected, setDetected] = useState<DetectedModel[]>([]);
+  const refreshDetected = useCallback((force?: boolean) => {
+    tauri.detectModels(force).then(setDetected).catch(() => setDetected([]));
+  }, []);
+  useEffect(() => { refreshDetected(); }, [refreshDetected]);
+  const suggestions = useMemo<DetectedSuggestion[]>(
+    () => detectUnknownModels(detected, customModels),
+    [detected, customModels],
+  );
+
+  const promoteSuggestion = (s: DetectedSuggestion) => {
+    const id = `custom-${crypto.randomUUID().slice(0, 8)}`;
+    addCustomModel({ id, modelId: s.modelId, label: s.label });
+  };
+
   const submitCustom = () => {
     const label = newLabel.trim();
     const modelId = newModelId.trim();
@@ -415,6 +431,42 @@ function ModelsTab() {
                   aria-label="Usuń model"
                 >
                   <Icon name="trash" className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {suggestions.length > 0 && (
+        <>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-[10px] text-muted uppercase tracking-wider">
+              Wykryte modele
+            </label>
+            <button
+              onClick={() => refreshDetected(true)}
+              className="text-[11px] text-muted hover:text-fg transition-colors"
+            >
+              Odśwież
+            </button>
+          </div>
+          <p className="text-[11px] text-muted mb-2">
+            Nowsze modele wykryte w Claude Code, których nie ma jeszcze na liście.
+          </p>
+          <div className="space-y-0.5 mb-4">
+            {suggestions.map(s => (
+              <div key={s.modelId} className="flex items-center gap-2 py-1.5 px-2">
+                <div className="flex-1">
+                  <span className="text-[13px]">{s.label}</span>
+                  <span className="text-[11px] text-muted ml-2 font-mono">{s.modelId}</span>
+                </div>
+                <button
+                  onClick={() => promoteSuggestion(s)}
+                  className="flex items-center gap-1 text-[12px] text-muted hover:text-fg transition-colors"
+                >
+                  <Icon name="plus" className="w-3 h-3" />
+                  Dodaj
                 </button>
               </div>
             ))}
