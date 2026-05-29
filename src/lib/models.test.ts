@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { BUILTIN_MODELS, getCliModelString, getModelDisplayLabel, detectUnknownModels } from './models';
-import type { DetectedModel } from '../types/DetectedModel';
+import type { DetectedModel } from '../types';
 
 describe('Opus 4.8 builtin', () => {
   it('exposes 200k and 1M variants', () => {

@@ -4,10 +4,9 @@ import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
 import { Icon } from '../shared/Icon';
 import { BUILTIN_MODELS, detectUnknownModels, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
-import type { DetectedModel } from '../../types/DetectedModel';
 import type { ThemeMode } from '../../styles/theme';
 import { tauri } from '../../lib/tauri';
-import type { ShellInfo, EditorInfo } from '../../types';
+import type { ShellInfo, EditorInfo, DetectedModel } from '../../types';
 import {
   SHORTCUTS, FIXED_SHORTCUTS, getBinding, formatBinding, eventToBinding,
   type ShortcutId,

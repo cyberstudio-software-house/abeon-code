@@ -1,4 +1,4 @@
-import type { DetectedModel } from '../types/DetectedModel';
+import type { DetectedModel } from '../types';
 
 export type EffortLevel = 'low' | 'medium' | 'high';
 
