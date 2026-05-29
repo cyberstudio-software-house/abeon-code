@@ -15,6 +15,8 @@ export type CustomModel = {
 };
 
 export const BUILTIN_MODELS: BuiltinModel[] = [
+  { id: 'opus-4.8-200k', modelId: 'claude-opus-4-8', label: 'Claude Opus 4.8', context: '200k', supportsEffort: true },
+  { id: 'opus-4.8-1m', modelId: 'claude-opus-4-8[1m]', label: 'Claude Opus 4.8', context: '1M', supportsEffort: true },
   { id: 'opus-4.7-200k', modelId: 'claude-opus-4-7', label: 'Claude Opus 4.7', context: '200k', supportsEffort: true },
   { id: 'opus-4.7-1m', modelId: 'claude-opus-4-7[1m]', label: 'Claude Opus 4.7', context: '1M', supportsEffort: true },
   { id: 'opus-4.6-200k', modelId: 'claude-opus-4-6', label: 'Claude Opus 4.6', context: '200k', supportsEffort: true },
