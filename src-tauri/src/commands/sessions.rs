@@ -1,8 +1,9 @@
 use std::panic;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
-use crate::domain::{SessionMeta, SessionHistory};
+use crate::domain::{Project, SessionMeta, SessionHistory};
 use crate::error::{AppError, AppResult};
+use crate::sessions::encoding::encode_project_path;
 use crate::sessions::reader;
 use crate::sessions::reader::session_file;
 use crate::state::AppState;
@@ -11,6 +12,13 @@ use crate::db::{projects_repo, session_titles_repo};
 fn claude_root() -> AppResult<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home".into()))?;
     Ok(home.join(".claude").join("projects"))
+}
+
+/// Resolves the project's session directory under `~/.claude/projects/` by deriving the
+/// encoded name from the project's real path — `claude_dir` stored in the DB is not trusted,
+/// so a stale value can never point the reader at the wrong (or a nonexistent) directory.
+fn session_dir(proj: &Project) -> AppResult<PathBuf> {
+    Ok(claude_root()?.join(encode_project_path(Path::new(&proj.path))))
 }
 
 fn catch<T, F: FnOnce() -> AppResult<T> + panic::UnwindSafe>(f: F) -> AppResult<T> {
@@ -34,7 +42,7 @@ pub fn list_sessions(
 ) -> AppResult<Vec<SessionMeta>> {
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
-    let dir = claude_root()?.join(&proj.claude_dir);
+    let dir = session_dir(&proj)?;
     let mut sessions = catch(move || reader::list_sessions(project_id, &dir, limit, offset))?;
     let titles = session_titles_repo::get_all(&c, project_id);
     for s in &mut sessions {
@@ -55,7 +63,7 @@ pub fn read_session_history(
 ) -> AppResult<SessionHistory> {
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
-    let dir = claude_root()?.join(&proj.claude_dir);
+    let dir = session_dir(&proj)?;
     let sid = session_id.clone();
     let mut history = catch(move || reader::read_history(project_id, &dir, &sid, limit, before_uuid.as_deref()))?;
     if let Some(t) = session_titles_repo::get(&c, project_id, &session_id) {
@@ -73,7 +81,7 @@ pub fn open_session_watch(
 ) -> AppResult<()> {
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
-    let dir = claude_root()?.join(&proj.claude_dir);
+    let dir = session_dir(&proj)?;
     let path = session_file(&dir, &session_id);
     state.session_watchers.open(app, &session_id, path)
 }
@@ -91,7 +99,7 @@ pub fn count_sessions(
 ) -> AppResult<usize> {
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
-    let dir = claude_root()?.join(&proj.claude_dir);
+    let dir = session_dir(&proj)?;
     if !dir.exists() { return Ok(0); }
     let count = std::fs::read_dir(&dir)?
         .filter_map(|e| e.ok())
@@ -109,7 +117,7 @@ pub fn export_session(
 ) -> AppResult<String> {
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
-    let dir = claude_root()?.join(&proj.claude_dir);
+    let dir = session_dir(&proj)?;
     catch(move || {
         let history = reader::read_history(project_id, &dir, &session_id, None, None)?;
         match format.as_str() {
@@ -138,12 +146,12 @@ pub async fn generate_session_title(
     session_id: String,
     model: Option<String>,
 ) -> AppResult<String> {
-    let (proj_path, claude_dir) = {
+    let (proj_path, dir) = {
         let c = state.db.get()?;
         let proj = projects_repo::get(&c, project_id)?;
-        (proj.path.clone(), claude_root()?.join(&proj.claude_dir))
+        (proj.path.clone(), session_dir(&proj)?)
     };
-    let path = reader::session_file(&claude_dir, &session_id);
+    let path = reader::session_file(&dir, &session_id);
 
     let first = reader::first_user_prompt(&path)?
         .ok_or_else(|| AppError::Other("Sesja nie zawiera promptu użytkownika".into()))?;
