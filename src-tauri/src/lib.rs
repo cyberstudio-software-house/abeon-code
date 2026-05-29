@@ -67,6 +67,7 @@ pub fn run() {
             commands::sessions::generate_session_title,
             commands::usage::session_usage,
             commands::usage::project_usage,
+            commands::models::detect_models,
             commands::settings::open_in_editor,
             commands::settings::list_available_editors,
             commands::settings::open_project_in_editor,
