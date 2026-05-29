@@ -53,4 +53,9 @@ describe('detectUnknownModels', () => {
     const out = detectUnknownModels([d('claude-opus-4-9', 'opus')], custom);
     expect(out).toEqual([]);
   });
+
+  it('drops models from an unrecognized family', () => {
+    const out = detectUnknownModels([d('claude-newmodel-5-0', 'newmodel')], []);
+    expect(out).toEqual([]);
+  });
 });
