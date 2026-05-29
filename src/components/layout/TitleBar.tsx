@@ -1,9 +1,12 @@
 import { useStore } from '../../store';
+import { APP_NAME } from '../../lib/windowTitle';
 
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 
 export function TitleBar() {
   const tabs = useStore(s => s.tabs);
+  const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
+  const headerTitle = (activeTabTitle ?? '').trim() || APP_NAME;
   const activeSessions = tabs.filter(t => (t.kind === 'session' && t.mode === 'terminal') || t.kind === 'terminal').length;
 
   return (
@@ -12,8 +15,8 @@ export function TitleBar() {
       className="flex items-center h-9 bg-bg border-b border-border select-none shrink-0"
       style={{ paddingLeft: IS_MAC ? 78 : 16, paddingRight: 16 }}
     >
-      <span className="font-mono text-[11px] text-muted tracking-wide">
-        claude code · sessions
+      <span className="font-mono text-[11px] text-muted tracking-wide truncate max-w-[40ch]">
+        {headerTitle}
       </span>
 
       <div className="flex-1" />
