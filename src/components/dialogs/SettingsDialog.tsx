@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
 import { Icon } from '../shared/Icon';
 import { BUILTIN_MODELS, detectUnknownModels, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
@@ -344,7 +345,7 @@ function ModelsTab() {
   const defaultModelId = useStore(s => s.defaultModelId);
   const titleGenModelId = useStore(s => s.titleGenModelId);
   const modelEfforts = useStore(s => s.modelEfforts);
-  const customModels = useStore(s => s.customModels);
+  const customModels = useStore(useShallow(s => s.customModels));
   const setDefaultModel = useStore(s => s.setDefaultModel);
   const setTitleGenModel = useStore(s => s.setTitleGenModel);
   const setModelEffort = useStore(s => s.setModelEffort);
