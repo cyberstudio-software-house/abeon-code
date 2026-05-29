@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary } from '../types';
+import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel } from '../types';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -36,6 +36,8 @@ export const tauri = {
     invoke<UsageSummary>('session_usage', { projectId, sessionId }),
   projectUsage: (projectId: number) =>
     invoke<UsageSummary>('project_usage', { projectId }),
+  detectModels: (force?: boolean) =>
+    invoke<DetectedModel[]>('detect_models', { force }),
   onSessionUsage: (sessionId: string, cb: (usage: UsageSummary) => void): Promise<UnlistenFn> =>
     listen<UsageSummary>(`session:${sessionId}:usage`, e => cb(e.payload)),
   spawnPty: (projectId: number, kind: PtyKindClient, cols: number, rows: number) =>

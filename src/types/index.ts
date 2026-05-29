@@ -9,6 +9,7 @@ export type { HistoryBlock } from './HistoryBlock';
 export type { SessionHistory } from './SessionHistory';
 export type { PtyKind } from './PtyKind';
 export type { DetectedScript } from './DetectedScript';
+export type { DetectedModel } from './DetectedModel';
 export type { GitFile } from './GitFile';
 export type { GitStatus } from './GitStatus';
 export type { GitUser } from './GitUser';
