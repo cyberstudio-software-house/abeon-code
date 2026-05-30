@@ -45,9 +45,9 @@ impl PtyActuator for AppPtyActuator {
     }
 }
 
-pub fn cmd_channel(device_id: &str) -> String { format!("cmd:{device_id}") }
-pub fn result_channel(device_id: &str) -> String { format!("dev:{device_id}") }
-pub fn session_channel(session_id: &str) -> String { format!("sess:{session_id}") }
+pub fn cmd_channel(device_id: &str) -> String { format!("abeon-cloud-cmd:{device_id}") }
+pub fn result_channel(device_id: &str) -> String { format!("abeon-cloud-dev:{device_id}") }
+pub fn session_channel(session_id: &str) -> String { format!("abeon-cloud-sess:{session_id}") }
 
 fn encode_bus_event(event: SessionBusEvent) -> (String, serde_json::Value) {
     match event {
@@ -251,7 +251,7 @@ mod tests {
 
         let published = client.published();
         assert_eq!(published.len(), 1);
-        assert_eq!(published[0].0, "dev:dev-1");
+        assert_eq!(published[0].0, "abeon-cloud-dev:dev-1");
         assert_eq!(published[0].1["type"], "cmdResult");
         assert_eq!(published[0].1["ok"], true);
 
@@ -278,7 +278,7 @@ mod tests {
 
         let published = client.published();
         assert_eq!(published.len(), 1);
-        assert_eq!(published[0].0, "sess:s1");
+        assert_eq!(published[0].0, "abeon-cloud-sess:s1");
         assert_eq!(published[0].1["type"], "sessionTitle");
         assert_eq!(published[0].1["title"], "Hello");
 

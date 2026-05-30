@@ -207,9 +207,9 @@ mod tests {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as usize;
         let token = crate::remote::token::mint_connection_token(&secret, "live-smoke-device", now, 3600).unwrap();
 
-        let conn = TungsteniteCentrifugoClient::connect(&url, &token, "cmd:live-smoke-device", None).await
+        let conn = TungsteniteCentrifugoClient::connect(&url, &token, "abeon-cloud-cmd:live-smoke-device", None).await
             .expect("connect to live centrifugo");
-        conn.client.publish("sess:live-smoke", serde_json::json!({ "type": "smoke", "ts": now })).await.unwrap();
+        conn.client.publish("abeon-cloud-sess:live-smoke", serde_json::json!({ "type": "smoke", "ts": now })).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(800)).await;
         eprintln!("live smoke: connected and published (check above for any 'centrifugo error' lines)");
     }
