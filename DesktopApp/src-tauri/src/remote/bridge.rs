@@ -1,4 +1,9 @@
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc};
+
 use crate::error::AppResult;
+use crate::remote::bus::SessionBusEvent;
+use crate::remote::client::CentrifugoClient;
 use crate::remote::dispatch::{command_to_action, PtyAction};
 use crate::remote::protocol::{RemoteEnvelope, RemoteEvent};
 use crate::remote::registry::SessionPtyRegistry;
@@ -13,19 +18,44 @@ pub trait PtyActuator: Send + Sync {
     fn spawn_resume(&self, session_id: &str, project_id: i64) -> AppResult<String>;
 }
 
+pub fn cmd_channel(device_id: &str) -> String { format!("cmd:{device_id}") }
+pub fn result_channel(device_id: &str) -> String { format!("dev:{device_id}") }
+pub fn session_channel(session_id: &str) -> String { format!("sess:{session_id}") }
+
+fn encode_bus_event(event: SessionBusEvent) -> (String, serde_json::Value) {
+    match event {
+        SessionBusEvent::Append { session_id, blocks } => (
+            session_channel(&session_id),
+            serde_json::json!({ "type": "sessionAppend", "sessionId": session_id, "blocks": blocks }),
+        ),
+        SessionBusEvent::Activity { session_id, activity } => (
+            session_channel(&session_id),
+            serde_json::json!({ "type": "sessionActivity", "sessionId": session_id, "activity": activity }),
+        ),
+        SessionBusEvent::Title { session_id, title } => (
+            session_channel(&session_id),
+            serde_json::json!({ "type": "sessionTitle", "sessionId": session_id, "title": title }),
+        ),
+        SessionBusEvent::Usage { session_id, summary } => (
+            session_channel(&session_id),
+            serde_json::json!({ "type": "sessionUsage", "sessionId": session_id, "summary": summary }),
+        ),
+    }
+}
+
 /// Translates inbound remote commands into PTY effects and acknowledgements.
 pub struct RemoteBridge {
-    registry: SessionPtyRegistry,
+    registry: Arc<SessionPtyRegistry>,
     allow_spawn: bool,
 }
 
 impl RemoteBridge {
-    pub fn new(registry: SessionPtyRegistry, allow_spawn: bool) -> Self {
+    pub fn new(registry: Arc<SessionPtyRegistry>, allow_spawn: bool) -> Self {
         Self { registry, allow_spawn }
     }
 
     pub fn registry(&self) -> &SessionPtyRegistry {
-        &self.registry
+        self.registry.as_ref()
     }
 
     /// Resolve one command to its effect, run it, and return the ack event.
@@ -49,6 +79,46 @@ impl RemoteBridge {
                 Ok(())
             }
             PtyAction::Reject { reason } => Err(reason),
+        }
+    }
+
+    /// Pump inbound commands and outbound session events until the inbound channel
+    /// closes. Commands are handled via `handle_envelope` and their `cmdResult` is
+    /// published to `result_channel(device_id)`; session-bus events are forwarded
+    /// to `session_channel(session_id)`.
+    pub async fn run(
+        self: Arc<Self>,
+        device_id: String,
+        mut inbound: mpsc::Receiver<RemoteEnvelope>,
+        mut bus: broadcast::Receiver<SessionBusEvent>,
+        client: Arc<dyn CentrifugoClient>,
+        actuator: Arc<dyn PtyActuator>,
+    ) {
+        let results = result_channel(&device_id);
+        loop {
+            tokio::select! {
+                maybe_env = inbound.recv() => {
+                    match maybe_env {
+                        Some(env) => {
+                            let ev = self.handle_envelope(env, actuator.as_ref());
+                            if let Ok(data) = serde_json::to_value(&ev) {
+                                let _ = client.publish(&results, data).await;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                ev = bus.recv() => {
+                    match ev {
+                        Ok(event) => {
+                            let (channel, data) = encode_bus_event(event);
+                            let _ = client.publish(&channel, data).await;
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => break,
+                    }
+                }
+            }
         }
     }
 }
@@ -90,7 +160,7 @@ mod tests {
         let reg = SessionPtyRegistry::new();
         reg.bind("s1", "pty-a");
         let act = FakePtyActuator::default();
-        let bridge = RemoteBridge::new(reg, false);
+        let bridge = RemoteBridge::new(std::sync::Arc::new(reg), false);
 
         let ev = bridge.handle_envelope(envelope("c1", RemoteCommand::SendPrompt { session_id: "s1".into(), text: "hi".into() }), &act);
 
@@ -100,7 +170,7 @@ mod tests {
 
     #[test]
     fn unknown_session_acks_error_and_does_nothing() {
-        let bridge = RemoteBridge::new(SessionPtyRegistry::new(), false);
+        let bridge = RemoteBridge::new(std::sync::Arc::new(SessionPtyRegistry::new()), false);
         let act = FakePtyActuator::default();
 
         let ev = bridge.handle_envelope(envelope("c2", RemoteCommand::StopSession { session_id: "ghost".into() }), &act);
@@ -117,7 +187,7 @@ mod tests {
 
     #[test]
     fn resume_disabled_acks_error() {
-        let bridge = RemoteBridge::new(SessionPtyRegistry::new(), false);
+        let bridge = RemoteBridge::new(std::sync::Arc::new(SessionPtyRegistry::new()), false);
         let act = FakePtyActuator::default();
         let ev = bridge.handle_envelope(envelope("c3", RemoteCommand::ResumeSession { session_id: "s1".into(), project_id: 7 }), &act);
         assert!(matches!(ev, RemoteEvent::CmdResult { ok: false, .. }));
@@ -126,12 +196,67 @@ mod tests {
 
     #[test]
     fn resume_enabled_spawns_and_binds_registry() {
-        let bridge = RemoteBridge::new(SessionPtyRegistry::new(), true);
+        let bridge = RemoteBridge::new(std::sync::Arc::new(SessionPtyRegistry::new()), true);
         let act = FakePtyActuator::default();
         let ev = bridge.handle_envelope(envelope("c4", RemoteCommand::ResumeSession { session_id: "s1".into(), project_id: 7 }), &act);
 
         assert_eq!(ev, RemoteEvent::CmdResult { command_id: "c4".into(), ok: true, error: None });
         assert_eq!(act.spawns.lock().clone(), vec![("s1".to_string(), 7)]);
         assert_eq!(bridge.registry().pty_for("s1"), Some("pty-for-s1".to_string()));
+    }
+
+    #[tokio::test]
+    async fn run_publishes_cmd_result_for_inbound_command() {
+        use crate::remote::client::FakeCentrifugoClient;
+        let reg = SessionPtyRegistry::new();
+        reg.bind("s1", "pty-a");
+        let bridge = std::sync::Arc::new(RemoteBridge::new(std::sync::Arc::new(reg), false));
+        let client = std::sync::Arc::new(FakeCentrifugoClient::new());
+        let actuator: std::sync::Arc<dyn PtyActuator> = std::sync::Arc::new(FakePtyActuator::default());
+
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        let bus = crate::remote::bus::RemoteEventBus::new();
+        let client_for_run = client.clone();
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator));
+
+        tx.send(RemoteEnvelope { command_id: "c1".into(), command: crate::remote::protocol::RemoteCommand::SendPrompt { session_id: "s1".into(), text: "hi".into() } }).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let published = client.published();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0, "dev:dev-1");
+        assert_eq!(published[0].1["type"], "cmdResult");
+        assert_eq!(published[0].1["ok"], true);
+
+        drop(tx); // close inbound → loop ends
+        let _ = handle.await;
+        // keep `bus` alive until here so the broadcast branch stays pending
+        drop(bus);
+    }
+
+    #[tokio::test]
+    async fn run_forwards_bus_event_to_session_channel() {
+        use crate::remote::client::FakeCentrifugoClient;
+        let bridge = std::sync::Arc::new(RemoteBridge::new(std::sync::Arc::new(SessionPtyRegistry::new()), false));
+        let client = std::sync::Arc::new(FakeCentrifugoClient::new());
+        let actuator: std::sync::Arc<dyn PtyActuator> = std::sync::Arc::new(FakePtyActuator::default());
+
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        let bus = crate::remote::bus::RemoteEventBus::new();
+        let client_for_run = client.clone();
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator));
+
+        bus.publish(crate::remote::bus::SessionBusEvent::Title { session_id: "s1".into(), title: "Hello".into() });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let published = client.published();
+        assert_eq!(published.len(), 1);
+        assert_eq!(published[0].0, "sess:s1");
+        assert_eq!(published[0].1["type"], "sessionTitle");
+        assert_eq!(published[0].1["title"], "Hello");
+
+        drop(tx);
+        let _ = handle.await;
+        drop(bus);
     }
 }
