@@ -77,6 +77,7 @@ pub fn run() {
             commands::settings::open_in_editor,
             commands::settings::list_available_editors,
             commands::settings::open_project_in_editor,
+            commands::remote::remote_pair_start,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
