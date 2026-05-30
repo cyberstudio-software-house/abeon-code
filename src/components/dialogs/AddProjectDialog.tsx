@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { tauri } from '../../lib/tauri';
+import { formatTauriError } from '../../lib/errors';
 import { useStore } from '../../store';
 import type { DetectedScript } from '../../types';
 
@@ -51,7 +52,7 @@ export function AddProjectDialog({ onClose }: Props) {
       }
       onClose();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(formatTauriError(e));
     }
   };
 
