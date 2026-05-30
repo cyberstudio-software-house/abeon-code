@@ -3,9 +3,21 @@
 version = 4
 
 [[package]]
+name = "abeon-remote-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "jsonwebtoken",
+ "serde",
+ "thiserror 2.0.18",
+ "ts-rs",
+]
+
+[[package]]
 name = "abeoncode"
 version = "0.1.2"
 dependencies = [
+ "abeon-remote-core",
  "anyhow",
  "arboard",
  "async-trait",

@@ -45,9 +45,7 @@ impl PtyActuator for AppPtyActuator {
     }
 }
 
-pub fn cmd_channel(device_id: &str) -> String { format!("abeon-cloud-cmd:{device_id}") }
-pub fn result_channel(device_id: &str) -> String { format!("abeon-cloud-dev:{device_id}") }
-pub fn session_channel(session_id: &str) -> String { format!("abeon-cloud-sess:{session_id}") }
+pub use abeon_remote_core::channels::{cmd_channel, result_channel, session_channel};
 
 fn encode_bus_event(event: SessionBusEvent) -> (String, serde_json::Value) {
     match event {
