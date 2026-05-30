@@ -73,6 +73,15 @@ pub fn spawn_pty(
 
     let (program, args_owned) = match &kind {
         PtyKind::Claude { session_id, model, skip_permissions, fresh } => {
+            // Untrusted in the remote-bridge path (session_id can originate from a
+            // mobile `resumeSession`). Validate before it reaches `bash -c` so the
+            // shell can never reinterpret it; the allowlist also blocks flag smuggling.
+            if let Some(id) = session_id {
+                crate::validation::validate_session_id(id)?;
+            }
+            if let Some(m) = model {
+                crate::validation::validate_model(m)?;
+            }
             let cmd = build_claude_command(
                 session_id.as_deref(),
                 model.as_deref(),

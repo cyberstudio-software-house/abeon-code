@@ -82,7 +82,7 @@ pub fn open_session_watch(
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
     let dir = session_dir(&proj)?;
-    let path = session_file(&dir, &session_id);
+    let path = session_file(&dir, &session_id)?;
     state.session_watchers.open(app, &session_id, path)
 }
 
@@ -151,7 +151,7 @@ pub async fn generate_session_title(
         let proj = projects_repo::get(&c, project_id)?;
         (proj.path.clone(), session_dir(&proj)?)
     };
-    let path = reader::session_file(&dir, &session_id);
+    let path = reader::session_file(&dir, &session_id)?;
 
     let first = reader::first_user_prompt(&path)?
         .ok_or_else(|| AppError::Other("Sesja nie zawiera promptu użytkownika".into()))?;

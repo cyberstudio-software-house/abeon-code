@@ -7,6 +7,8 @@ pub enum AppError {
     NotFound(String),
     #[error("invalid path {path}: {reason}")]
     InvalidPath { path: String, reason: String },
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
     #[error("claude project directory missing: {path}")]
     ClaudeDirMissing { path: String },
     #[error("parse error in {file} line {line}: {message}")]
@@ -37,6 +39,7 @@ impl Serialize for AppError {
         let code = match self {
             AppError::NotFound(_) => "not_found",
             AppError::InvalidPath { .. } => "invalid_path",
+            AppError::InvalidInput(_) => "invalid_input",
             AppError::ClaudeDirMissing { .. } => "claude_dir_missing",
             AppError::Parse { .. } => "parse",
             AppError::Pty(_) => "pty",

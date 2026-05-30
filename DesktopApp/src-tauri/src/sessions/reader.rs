@@ -16,8 +16,13 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-pub fn session_file(claude_dir: &Path, session_id: &str) -> PathBuf {
-    claude_dir.join(format!("{session_id}.jsonl"))
+/// Build the path to a session's JSONL file. Validates `session_id` first so an
+/// untrusted id (e.g. one arriving from the remote bridge) cannot traverse out
+/// of `claude_dir` — the allowlist forbids `/` and `.`, so `..`/absolute paths
+/// are rejected before any `join`.
+pub fn session_file(claude_dir: &Path, session_id: &str) -> AppResult<PathBuf> {
+    crate::validation::validate_session_id(session_id)?;
+    Ok(claude_dir.join(format!("{session_id}.jsonl")))
 }
 
 pub fn first_user_prompt(path: &Path) -> AppResult<Option<String>> {
@@ -160,7 +165,7 @@ pub fn read_history(
     limit: Option<usize>,
     before_uuid: Option<&str>,
 ) -> AppResult<SessionHistory> {
-    let path = session_file(claude_dir, session_id);
+    let path = session_file(claude_dir, session_id)?;
     let limit = limit.unwrap_or(DEFAULT_PAGE).min(500);
 
     let file_meta = path.metadata()?;
