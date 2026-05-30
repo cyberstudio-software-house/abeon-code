@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { PairingDialog } from './PairingDialog';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
@@ -99,6 +100,13 @@ function GeneralTab() {
   const setEditorPath = useStore(s => s.setEditorPath);
   const historyViewMode = useStore(s => s.historyViewMode);
   const setHistoryViewMode = useStore(s => s.setHistoryViewMode);
+  const remoteBridgeEnabled = useStore(s => s.remoteBridgeEnabled);
+  const setRemoteBridgeEnabled = useStore(s => s.setRemoteBridgeEnabled);
+  const allowRemoteSpawn = useStore(s => s.allowRemoteSpawn);
+  const setAllowRemoteSpawn = useStore(s => s.setAllowRemoteSpawn);
+  const cloudServiceUrl = useStore(s => s.cloudServiceUrl);
+  const setCloudServiceUrl = useStore(s => s.setCloudServiceUrl);
+  const [pairingOpen, setPairingOpen] = useState(false);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [editors, setEditors] = useState<EditorInfo[]>([]);
   const [detectedName, setDetectedName] = useState<string | null>(null);
@@ -336,6 +344,57 @@ function GeneralTab() {
           „Pełny" zawiera też narzędzia, hooki i zdarzenia systemowe.
         </p>
       </div>
+
+      <div>
+        <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
+          AbeonCloud (zdalne sterowanie)
+        </label>
+        <label className="flex items-start gap-3 cursor-pointer py-1.5 px-2 hover:bg-bg-elev-2">
+          <input
+            type="checkbox"
+            checked={remoteBridgeEnabled}
+            onChange={e => setRemoteBridgeEnabled(e.target.checked)}
+            className="accent-accent mt-0.5"
+          />
+          <div>
+            <span className="text-[13px]">Włącz zdalny most</span>
+            <p className="text-[11px] text-muted mt-0.5">
+              Wymaga restartu aplikacji.
+            </p>
+          </div>
+        </label>
+        <label className="flex items-start gap-3 cursor-pointer py-1.5 px-2 hover:bg-bg-elev-2">
+          <input
+            type="checkbox"
+            checked={allowRemoteSpawn}
+            onChange={e => setAllowRemoteSpawn(e.target.checked)}
+            className="accent-accent mt-0.5"
+          />
+          <div>
+            <span className="text-[13px]">Zezwól na zdalne wznawianie sesji</span>
+          </div>
+        </label>
+        <div className="mt-2">
+          <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">
+            Adres CloudService
+          </label>
+          <input
+            type="text"
+            value={cloudServiceUrl}
+            onChange={e => setCloudServiceUrl(e.target.value)}
+            placeholder="https://cloud.k8s.abeon.app"
+            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] font-mono placeholder:text-muted/60"
+          />
+        </div>
+        <button
+          onClick={() => setPairingOpen(true)}
+          className="mt-3 px-3 py-1.5 bg-fg text-bg text-[12px] font-medium"
+        >
+          Sparuj telefon
+        </button>
+      </div>
+
+      {pairingOpen && <PairingDialog onClose={() => setPairingOpen(false)} />}
     </div>
   );
 }

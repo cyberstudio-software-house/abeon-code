@@ -6,6 +6,8 @@ import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBloc
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
 // in tagged enums).
+export type PairCode = { code: string; expiresInSecs: number };
+
 export type PtyKindClient =
   | { kind: 'claude'; session_id?: string; model?: string; skip_permissions?: boolean; fresh?: boolean }
   | { kind: 'action'; action_id: number }
@@ -96,4 +98,5 @@ export const tauri = {
   openProjectInEditor: (projectPath: string) =>
     invoke<void>('open_project_in_editor', { projectPath }),
   setWindowTitle: (title: string) => getCurrentWindow().setTitle(title),
+  remotePairStart: () => invoke<PairCode>('remote_pair_start'),
 };
