@@ -1,18 +1,49 @@
-# CloudService (planned)
+# CloudService
 
-Small backend service for AbeonCloud. Responsibilities:
+Auth/pairing + command-authorization microservice for AbeonCloud. Mints Centrifugo
+JWTs, pairs phones to desktops, and is the single server-side checkpoint that
+publishes authorized commands to `abeon-cloud-cmd:<deviceId>`.
 
-- **Device pairing** — exchange a one-time pairing code (shown by the desktop) for
-  a long-lived device credential.
-- **Centrifugo JWT minting** — issue short-lived connection + subscription tokens
-  scoped to the owner's channels (`sess:`, `dev:`, `cmd:`).
-- **Command authorization** — the single server-side checkpoint for upstream
-  commands: validate, then publish to the desktop's `cmd:<device>` channel via the
-  Centrifugo server API. This is where multi-tenant RBAC will later live.
+See the design: `../docs/superpowers/specs/2026-05-30-abeoncloud-cloudservice-design.md`.
 
-Downstream events (desktop → mobile) bypass this service and go directly through
-Centrifugo; only upstream commands are gated here.
+## Endpoints
 
-See `docs/superpowers/specs/2026-05-30-abeoncloud-remote-bridge-design.md`.
+| Method | Path             | Auth            | Purpose                                  |
+|--------|------------------|-----------------|------------------------------------------|
+| POST   | `/v1/devices`    | none            | Desktop first-boot registration          |
+| POST   | `/v1/token`      | device or phone | Mint a short-lived Centrifugo connection JWT |
+| POST   | `/v1/pair/start` | device          | Mint a one-time pairing code (QR)        |
+| POST   | `/v1/pair/claim` | none            | Phone redeems a code → phone token       |
+| POST   | `/v1/command`    | phone           | Validate + presence-gate + publish a command |
+| GET    | `/healthz`       | none            | Liveness                                 |
+| GET    | `/readyz`        | none            | Readiness (DB ping)                      |
 
-Status: not started — directory scaffolded for the upcoming sub-project.
+## Configuration (env)
+
+| Var | Required | Default | Notes |
+|-----|----------|---------|-------|
+| `DATABASE_URL` | yes | — | MariaDB DSN `mysql://user:pass@host/db` |
+| `CENTRIFUGO_TOKEN_SECRET` | yes | — | HS256 secret for minting JWTs |
+| `CENTRIFUGO_API_KEY` | yes | — | Centrifugo server-API key |
+| `CENTRIFUGO_API_URL` | yes | — | In-cluster Centrifugo HTTP base, e.g. `http://centrifugo-websocket.cs-app-cust1004-tools:8000` |
+| `BIND_ADDR` | no | `0.0.0.0:8080` | listen address |
+| `TOKEN_TTL_SECS` | no | `3600` | JWT lifetime |
+| `PAIRING_TTL_SECS` | no | `300` | pairing-code lifetime |
+
+## Develop / test
+
+```bash
+cargo build  --manifest-path CloudService/Cargo.toml
+cargo test   --manifest-path CloudService/Cargo.toml          # unit + integration (fakes; no DB/network)
+
+# MariaDB-backed store test (needs a live DB):
+TEST_DATABASE_URL=mysql://user:pass@127.0.0.1/cloudservice_test \
+  cargo test --manifest-path CloudService/Cargo.toml mysql -- --ignored --nocapture
+```
+
+## Docker
+
+```bash
+# build context is the repo root (path-dependency on ../crates/abeon-remote-core)
+docker build -f CloudService/Dockerfile -t cloudservice:dev .
+```
