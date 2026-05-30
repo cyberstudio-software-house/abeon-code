@@ -5,11 +5,13 @@ use parking_lot::Mutex;
 use crate::db::DbPool;
 use crate::sessions::watcher::SessionWatchers;
 use crate::pty::PtyManager;
+use crate::remote::registry::SessionPtyRegistry;
 
 pub struct AppState {
     pub db: DbPool,
     pub session_watchers: Arc<SessionWatchers>,
     pub pty: Arc<PtyManager>,
+    pub session_pty: Arc<SessionPtyRegistry>,
     pub shell_env: Mutex<Option<HashMap<String, String>>>,
     pub clipboard_images: Mutex<HashMap<String, Vec<PathBuf>>>,
     /// Cached project usage keyed by project_id: (max session-file mtime seen, summary).
@@ -24,6 +26,7 @@ impl AppState {
             db,
             session_watchers: SessionWatchers::new(),
             pty: PtyManager::new(),
+            session_pty: Arc::new(SessionPtyRegistry::new()),
             shell_env: Mutex::new(None),
             clipboard_images: Mutex::new(HashMap::new()),
             project_usage_cache: Mutex::new(HashMap::new()),
@@ -66,5 +69,12 @@ mod tests {
             assert!(removed.is_some());
             assert!(map.get(&pty_id).is_none());
         }
+    }
+
+    #[test]
+    fn session_pty_registry_is_present_and_usable() {
+        let state = test_state();
+        state.session_pty.bind("sess-1", "pty-a");
+        assert_eq!(state.session_pty.pty_for("sess-1"), Some("pty-a".to_string()));
     }
 }
