@@ -8,3 +8,4 @@ pub mod bridge;
 pub mod token;
 pub mod ws_client;
 pub mod startup;
+pub mod cloud_client;
