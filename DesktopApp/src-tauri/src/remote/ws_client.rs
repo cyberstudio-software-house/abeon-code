@@ -74,6 +74,9 @@ impl TungsteniteCentrifugoClient {
                                 let _ = in_tx.send(env).await;
                             }
                         }
+                        Frame::Ack { id, error: Some(e) } => {
+                            eprintln!("centrifugo error (id {id}): code={} message={} temporary={}", e.code, e.message, e.temporary);
+                        }
                         _ => {}
                     }
                 }
@@ -180,5 +183,24 @@ mod tests {
             .unwrap();
 
         server_task.await.unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires CENTRIFUGO_TOKEN_SECRET env and network to the live server"]
+    async fn live_centrifugo_smoke() {
+        let secret = match std::env::var("CENTRIFUGO_TOKEN_SECRET") {
+            Ok(s) if !s.is_empty() => s,
+            _ => { eprintln!("SKIP: CENTRIFUGO_TOKEN_SECRET not set"); return; }
+        };
+        let url = std::env::var("CENTRIFUGO_WS_URL")
+            .unwrap_or_else(|_| "wss://ws.k8s.abeon.app/connection/websocket".to_string());
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as usize;
+        let token = crate::remote::token::mint_connection_token(&secret, "live-smoke-device", now, 3600).unwrap();
+
+        let conn = TungsteniteCentrifugoClient::connect(&url, &token, "cmd:live-smoke-device", None).await
+            .expect("connect to live centrifugo");
+        conn.client.publish("sess:live-smoke", serde_json::json!({ "type": "smoke", "ts": now })).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        eprintln!("live smoke: connected and published (check above for any 'centrifugo error' lines)");
     }
 }
