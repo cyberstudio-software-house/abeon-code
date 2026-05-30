@@ -15,7 +15,7 @@ Repo is a **monorepo**:
 | Dir | What | Status |
 |-----|------|--------|
 | `DesktopApp/` | Tauri 2 + React 19 desktop app (the bridge lives here) | **done, live-validated** |
-| `CloudService/` | Auth/pairing + command-authorization microservice | **not started (#3)** |
+| `CloudService/` | Auth/pairing + command-authorization microservice | **in progress (#3) — backend + desktop wiring landed** |
 | `MobileApp/` | React Native / Expo client | **not started (#4)** |
 | `docs/superpowers/` | Specs, plans, research (project-wide) | — |
 
@@ -112,6 +112,14 @@ process spawn (`resumeSession`) additionally requires the `allowRemoteSpawn` set
 ## Remaining work — how to start each
 
 ### #3 CloudService (recommended next)
+
+> **Update (2026-05-30):** CloudService backend (axum + MariaDB + Centrifugo
+> server API) and the desktop integration (register-on-boot, token via `/v1/token`,
+> pairing dialog) are implemented per
+> `docs/superpowers/plans/2026-05-30-cloudservice-{1,2,3}-*.md`. Remaining: deploy
+> the image to k8s (secrets + ConfigMap + Ingress in the k8s repo), confirm the
+> Centrifugo `api_key` + `presence: true` on `abeon-cloud-cmd`, and build the MobileApp (#4).
+
 A small backend (language open; Rust/axum or Node both fine). Responsibilities:
 - **Device pairing**: desktop shows a one-time code/QR → mobile exchanges it for a
   long-lived device credential.
