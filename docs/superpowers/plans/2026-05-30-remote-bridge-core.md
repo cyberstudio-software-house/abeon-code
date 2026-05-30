@@ -10,6 +10,8 @@
 
 **Scope note:** This is sub-project #2a of the AbeonCloud remote bridge (see `docs/superpowers/specs/2026-05-30-abeoncloud-remote-bridge-design.md`). Plan 2b adds the event bus tap, the async run-loop, the real WebSocket client, and the `allowRemoteSpawn` setting wiring.
 
+**Follow-up carried into 2b (from 2a code review):** The registry is unbound only in `pty_kill`. When a Claude process exits on its own, the `pty:{id}:exit` path (`src-tauri/src/pty/handle.rs`) must also call `state.session_pty.unbind_pty(&pty_id)` to avoid a stale `sessionId → ptyId` entry. Deferred to 2b deliberately: the exit signal is most cleanly consumed where the bridge already subscribes to exit events, and `PtyHandle`'s exit thread has only an `AppHandle`, not `AppState`. The leak is non-harmful in 2a (writes/kills to a dead pty id are handled gracefully and a rebind overwrites the entry).
+
 ---
 
 ## File Structure
