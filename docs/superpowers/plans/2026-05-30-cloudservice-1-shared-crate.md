@@ -23,11 +23,13 @@
 - Create: `crates/abeon-remote-core/Cargo.toml`
 - Create: `crates/abeon-remote-core/src/lib.rs` — module declarations
 - Create: `crates/abeon-remote-core/src/protocol.rs` — moved `RemoteCommand`/`RemoteEnvelope`/`RemoteEvent` + tests
+- Create: `crates/abeon-remote-core/src/channels.rs` — moved `cmd_channel`/`result_channel`/`session_channel` + test
 - Create: `crates/abeon-remote-core/src/token.rs` — moved minting fns + tests
 - Create: `crates/abeon-remote-core/src/validation.rs` — moved allowlists + new `ValidationError` + tests
 - Modify: `DesktopApp/src-tauri/Cargo.toml` — add the path dependency
 - Modify: `DesktopApp/src-tauri/src/remote/protocol.rs` — becomes `pub use` facade
 - Modify: `DesktopApp/src-tauri/src/remote/token.rs` — becomes `pub use` facade
+- Modify: `DesktopApp/src-tauri/src/remote/bridge.rs` — channel helpers become a `pub use` re-export
 - Modify: `DesktopApp/src-tauri/src/validation.rs` — becomes adapter facade (maps `ValidationError` → `AppError::InvalidInput`)
 - Modify: `DesktopApp/CLAUDE.md` — update the ts-rs regeneration note
 
@@ -69,6 +71,7 @@ serde_json = "1"
 //! Centrifugo JWT minting, and the network-input validation allowlists.
 //! Depended on by both the desktop bridge and CloudService so the two cannot drift.
 
+pub mod channels;
 pub mod protocol;
 pub mod token;
 pub mod validation;
@@ -76,7 +79,7 @@ pub mod validation;
 
 - [ ] **Step 3: Add empty module files so the crate compiles**
 
-Create `crates/abeon-remote-core/src/protocol.rs`, `src/token.rs`, `src/validation.rs` each containing a single placeholder line:
+Create `crates/abeon-remote-core/src/channels.rs`, `src/protocol.rs`, `src/token.rs`, `src/validation.rs` each containing a single placeholder line:
 
 ```rust
 // filled in by the next tasks
@@ -341,7 +344,7 @@ git commit -m "feat(remote-core): add Centrifugo HS256 token minting"
 
 ---
 
-### Task 4: Move `protocol` into the crate and retarget ts-rs export
+### Task 4: Move `protocol` + channel helpers into the crate, retarget ts-rs export
 
 **Files:**
 - Modify: `crates/abeon-remote-core/src/protocol.rs`
@@ -454,11 +457,47 @@ Then confirm the TS files were (re)written to the desktop, unchanged:
 Run: `git status --short DesktopApp/src/types/`
 Expected: no changes (the regenerated files are byte-identical to the committed ones — the contract did not change, only its source location).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Write `crates/abeon-remote-core/src/channels.rs`**
+
+These are the Centrifugo channel-name builders. They currently live as three `pub fn`s in `DesktopApp/src-tauri/src/remote/bridge.rs:48-50`; moving them here gives the desktop bridge and CloudService one shared definition of the `abeon-cloud-*` prefixes. Replace the placeholder contents with:
+
+```rust
+//! Centrifugo channel-name builders, shared so the desktop bridge (which
+//! subscribes to `cmd` and publishes to `dev`/`sess`) and CloudService (which
+//! publishes to `cmd`) cannot disagree on the `abeon-cloud-*` prefixes.
+
+/// Up: authorized commands. Published by CloudService, subscribed by the desktop.
+pub fn cmd_channel(device_id: &str) -> String { format!("abeon-cloud-cmd:{device_id}") }
+
+/// Down: command results / device presence. Published by the desktop.
+pub fn result_channel(device_id: &str) -> String { format!("abeon-cloud-dev:{device_id}") }
+
+/// Down: per-session mirror events. Published by the desktop.
+pub fn session_channel(session_id: &str) -> String { format!("abeon-cloud-sess:{session_id}") }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_prefixes_are_stable() {
+        assert_eq!(cmd_channel("d1"), "abeon-cloud-cmd:d1");
+        assert_eq!(result_channel("d1"), "abeon-cloud-dev:d1");
+        assert_eq!(session_channel("s1"), "abeon-cloud-sess:s1");
+    }
+}
+```
+
+- [ ] **Step 4: Run the channel tests**
+
+Run: `cargo test --manifest-path crates/abeon-remote-core/Cargo.toml channels`
+Expected: 1 test passes.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add crates/abeon-remote-core/src/protocol.rs
-git commit -m "feat(remote-core): add RemoteCommand/Envelope/Event protocol with ts-rs export"
+git add crates/abeon-remote-core/src/protocol.rs crates/abeon-remote-core/src/channels.rs
+git commit -m "feat(remote-core): add protocol types (ts-rs) and Centrifugo channel helpers"
 ```
 
 ---
@@ -539,22 +578,38 @@ mod tests {
 }
 ```
 
-- [ ] **Step 5: Build and run the full desktop Rust suite**
+- [ ] **Step 5: Re-export the channel helpers in `bridge.rs`**
+
+In `DesktopApp/src-tauri/src/remote/bridge.rs`, find the three channel functions (around lines 48-50):
+
+```rust
+pub fn cmd_channel(device_id: &str) -> String { format!("abeon-cloud-cmd:{device_id}") }
+pub fn result_channel(device_id: &str) -> String { format!("abeon-cloud-dev:{device_id}") }
+pub fn session_channel(session_id: &str) -> String { format!("abeon-cloud-sess:{session_id}") }
+```
+
+Replace those three lines with a single re-export so the names and call sites (and the existing `"abeon-cloud-dev:..."` / `"abeon-cloud-sess:..."` assertions in this file's tests) are unchanged:
+
+```rust
+pub use abeon_remote_core::channels::{cmd_channel, result_channel, session_channel};
+```
+
+- [ ] **Step 6: Build and run the full desktop Rust suite**
 
 Run: `npm --prefix DesktopApp run test:rust`
 Expected: all 183 existing tests still pass (now including the crate via the path dep; the 2 new facade tests bring the desktop count up accordingly). No compile errors.
 
-- [ ] **Step 6: Run the frontend type-check (the generated TS must still satisfy `tsc`)**
+- [ ] **Step 7: Run the frontend type-check (the generated TS must still satisfy `tsc`)**
 
 Run: `npm --prefix DesktopApp run lint`
 Expected: zero errors.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add DesktopApp/src-tauri/Cargo.toml DesktopApp/src-tauri/src/remote/protocol.rs \
         DesktopApp/src-tauri/src/remote/token.rs DesktopApp/src-tauri/src/validation.rs \
-        DesktopApp/src-tauri/Cargo.lock
+        DesktopApp/src-tauri/src/remote/bridge.rs DesktopApp/src-tauri/Cargo.lock
 git commit -m "refactor(remote): consume abeon-remote-core from the desktop via facades"
 ```
 
@@ -592,7 +647,8 @@ git commit -m "docs(desktop): note remote-contract ts-rs regeneration moved to a
 
 **Spec coverage (against the design's "Shared crate (anti-drift)" section):**
 - Standalone crate, path dependency, no mega-workspace → Tasks 1 & 5. ✓
-- `protocol` / `validation` / `token` moved → Tasks 2, 3, 4. ✓
+- `protocol` / `validation` / `token` / `channels` moved → Tasks 2, 3, 4. ✓
+- Channel-name helpers shared (CloudService publishes to the exact channel the desktop subscribes) → Task 4 Step 3 + Task 5 Step 5. ✓
 - Facades preserve call sites → Task 5 (covers `commands/pty.rs`, `sessions/reader.rs`, `remote/startup.rs`, `remote/ws_client.rs`, and the 6 `remote/` protocol consumers via `pub use`). ✓
 - ts-rs `export_to` retargeted, TS still lands in `DesktopApp/src/types/` → Task 4 Step 1 + Step 2 verification. ✓
 - `AppError` stays desktop-side; crate uses `ValidationError` → Task 2 + Task 5 Step 4. ✓
