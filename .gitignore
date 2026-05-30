@@ -1,8 +1,9 @@
 node_modules/
 dist/
 .vite/
-src-tauri/target/
-src-tauri/gen/
+target/
+**/src-tauri/gen/
+*.tsbuildinfo
 .DS_Store
 *.log
 .env
