@@ -35,6 +35,9 @@ type Persisted = {
   customModels?: CustomModelLite[];
   projectsBasePath?: string;
   skipPermissions?: boolean;
+  remoteBridgeEnabled?: boolean;
+  allowRemoteSpawn?: boolean;
+  cloudServiceUrl?: string;
   sortMode?: 'manual' | 'alpha' | 'activity';
   shellPath?: string;
   editorPath?: string;
@@ -46,6 +49,7 @@ const PERSISTED_KEYS = [
   'theme', 'leftWidth', 'rightWidth', 'displayName',
   'defaultModelId', 'titleGenModelId', 'modelEfforts', 'customModels',
   'projectsBasePath', 'skipPermissions',
+  'remoteBridgeEnabled', 'allowRemoteSpawn', 'cloudServiceUrl',
   'sortMode',
   'shellPath',
   'editorPath',
@@ -69,6 +73,9 @@ function pickPersistedFields(state: AppState): Persisted {
     customModels: state.customModels,
     projectsBasePath: state.projectsBasePath,
     skipPermissions: state.skipPermissions,
+    remoteBridgeEnabled: state.remoteBridgeEnabled,
+    allowRemoteSpawn: state.allowRemoteSpawn,
+    cloudServiceUrl: state.cloudServiceUrl,
     sortMode: state.sortMode,
     shellPath: state.shellPath,
     editorPath: state.editorPath,
@@ -84,6 +91,8 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'rightWidth':
       return String(value as number);
     case 'skipPermissions':
+    case 'remoteBridgeEnabled':
+    case 'allowRemoteSpawn':
       return value ? 'true' : 'false';
     case 'modelEfforts':
     case 'customModels':
@@ -102,6 +111,8 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
     case 'rightWidth':
       return clamp(Number(raw), 220, 480);
     case 'skipPermissions':
+    case 'remoteBridgeEnabled':
+    case 'allowRemoteSpawn':
       return raw === 'true';
     case 'modelEfforts':
     case 'customModels':
@@ -135,6 +146,9 @@ function applyPersistedToState(p: Persisted) {
   if (p.customModels) patch.customModels = p.customModels as AppState['customModels'];
   if (p.projectsBasePath) patch.projectsBasePath = p.projectsBasePath;
   if (p.skipPermissions !== undefined) patch.skipPermissions = p.skipPermissions;
+  if (p.remoteBridgeEnabled !== undefined) patch.remoteBridgeEnabled = p.remoteBridgeEnabled;
+  if (p.allowRemoteSpawn !== undefined) patch.allowRemoteSpawn = p.allowRemoteSpawn;
+  if (typeof p.cloudServiceUrl === 'string') patch.cloudServiceUrl = p.cloudServiceUrl;
   if (p.sortMode === 'manual' || p.sortMode === 'alpha' || p.sortMode === 'activity') {
     patch.sortMode = p.sortMode;
   }

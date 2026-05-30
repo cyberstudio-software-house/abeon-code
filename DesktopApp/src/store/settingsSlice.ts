@@ -17,6 +17,9 @@ export type SettingsSlice = {
   customModels: CustomModel[];
   projectsBasePath: string;
   skipPermissions: boolean;
+  remoteBridgeEnabled: boolean;
+  allowRemoteSpawn: boolean;
+  cloudServiceUrl: string;
   sortMode: SortMode;
   shellPath: string;
   editorPath: string;
@@ -35,6 +38,9 @@ export type SettingsSlice = {
   removeCustomModel: (id: string) => void;
   setProjectsBasePath: (path: string) => void;
   setSkipPermissions: (v: boolean) => void;
+  setRemoteBridgeEnabled: (v: boolean) => void;
+  setAllowRemoteSpawn: (v: boolean) => void;
+  setCloudServiceUrl: (url: string) => void;
   setSortMode: (mode: SortMode) => void;
   setShellPath: (path: string) => void;
   setEditorPath: (path: string) => void;
@@ -56,6 +62,9 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   customModels: [],
   projectsBasePath: '',
   skipPermissions: false,
+  remoteBridgeEnabled: false,
+  allowRemoteSpawn: false,
+  cloudServiceUrl: '',
   sortMode: 'manual',
   shellPath: '',
   editorPath: '',
@@ -75,6 +84,9 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
     set({ customModels: [...get().customModels, model] }),
   setProjectsBasePath: (projectsBasePath) => set({ projectsBasePath }),
   setSkipPermissions: (skipPermissions) => set({ skipPermissions }),
+  setRemoteBridgeEnabled: (remoteBridgeEnabled) => set({ remoteBridgeEnabled }),
+  setAllowRemoteSpawn: (allowRemoteSpawn) => set({ allowRemoteSpawn }),
+  setCloudServiceUrl: (cloudServiceUrl) => set({ cloudServiceUrl }),
   setSortMode: (sortMode) => set({ sortMode }),
   setShellPath: (shellPath) => set({ shellPath }),
   setEditorPath: (editorPath) => set({ editorPath }),
