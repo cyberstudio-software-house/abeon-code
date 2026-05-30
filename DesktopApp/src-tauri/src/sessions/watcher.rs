@@ -7,6 +7,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher as _, Event, EventKind};
 use tauri::{AppHandle, Emitter};
 use crate::domain::{HistoryBlock, SessionActivity};
 use crate::error::AppResult;
+use crate::remote::bus::{RemoteEventBus, SessionBusEvent};
 use crate::sessions::parser::parse_line;
 use crate::sessions::activity::compute_activity;
 use crate::sessions::usage::UsageAccumulator;
@@ -21,6 +22,7 @@ pub struct SessionWatchers {
     sessions: Mutex<HashMap<String, OpenSession>>,
     watcher: Mutex<Option<RecommendedWatcher>>,
     last_activity: Mutex<HashMap<String, SessionActivity>>,
+    bus: Mutex<Option<RemoteEventBus>>,
 }
 
 impl SessionWatchers {
@@ -29,6 +31,7 @@ impl SessionWatchers {
             sessions: Mutex::new(HashMap::new()),
             watcher: Mutex::new(None),
             last_activity: Mutex::new(HashMap::new()),
+            bus: Mutex::new(None),
         })
     }
 
@@ -70,6 +73,10 @@ impl SessionWatchers {
         Ok(())
     }
 
+    pub fn set_bus(&self, bus: RemoteEventBus) {
+        *self.bus.lock() = Some(bus);
+    }
+
     pub fn close(&self, session_id: &str) {
         self.sessions.lock().remove(session_id);
         self.last_activity.lock().remove(session_id);
@@ -107,14 +114,25 @@ impl SessionWatchers {
         }
         drop(sessions);
 
+        let bus = self.bus.lock().clone();
         for (sid, blocks) in block_updates {
-            let _ = app.emit(&format!("session:{sid}:append"), serde_json::json!({ "blocks": blocks }));
+            let blocks_json = serde_json::json!({ "blocks": blocks });
+            let _ = app.emit(&format!("session:{sid}:append"), &blocks_json);
+            if let Some(b) = &bus {
+                b.publish(SessionBusEvent::Append { session_id: sid, blocks: blocks_json });
+            }
         }
         for (sid, title) in title_updates {
-            let _ = app.emit(&format!("session:{sid}:title"), serde_json::json!({ "title": title }));
+            let _ = app.emit(&format!("session:{sid}:title"), serde_json::json!({ "title": title.clone() }));
+            if let Some(b) = &bus {
+                b.publish(SessionBusEvent::Title { session_id: sid, title });
+            }
         }
         for (sid, summary) in usage_updates {
             let _ = app.emit(&format!("session:{sid}:usage"), &summary);
+            if let Some(b) = &bus {
+                b.publish(SessionBusEvent::Usage { session_id: sid, summary: serde_json::to_value(&summary).unwrap_or_default() });
+            }
         }
 
         let now = std::time::SystemTime::now()
@@ -127,10 +145,11 @@ impl SessionWatchers {
             let changed_state = last.get(&sid).copied() != Some(new_activity);
             if changed_state {
                 last.insert(sid.clone(), new_activity);
-                let _ = app.emit(
-                    &format!("session:{sid}:activity"),
-                    serde_json::json!({ "activity": new_activity }),
-                );
+                let activity_json = serde_json::json!({ "activity": new_activity });
+                let _ = app.emit(&format!("session:{sid}:activity"), &activity_json);
+                if let Some(b) = &bus {
+                    b.publish(SessionBusEvent::Activity { session_id: sid.clone(), activity: serde_json::to_value(new_activity).unwrap_or_default() });
+                }
             }
         }
         drop(last);

@@ -3,3 +3,4 @@ pub mod registry;
 pub mod dispatch;
 pub mod wire;
 pub mod client;
+pub mod bus;
