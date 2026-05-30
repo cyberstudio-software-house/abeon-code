@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::db::{projects_repo, actions_repo};
+use crate::remote::dispatch::session_to_bind;
 
 #[derive(Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/")]
@@ -118,7 +119,11 @@ pub fn spawn_pty(
     let args_ref: Vec<&str> = args_owned.iter().map(|s| s.as_str()).collect();
     let shell = crate::commands::settings::resolve_shell(&c);
     let env = crate::commands::settings::ensure_shell_env(&state, &shell);
-    state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows, &env)
+    let pty_id = state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows, &env)?;
+    if let Some(session_id) = session_to_bind(&kind) {
+        state.session_pty.bind(&session_id, &pty_id);
+    }
+    Ok(pty_id)
 }
 
 #[tauri::command]
@@ -145,6 +150,7 @@ fn cleanup_clipboard_images(state: &AppState, pty_id: &str) {
 #[tauri::command]
 pub fn pty_kill(state: State<AppState>, pty_id: String) -> AppResult<()> {
     cleanup_clipboard_images(&state, &pty_id);
+    state.session_pty.unbind_pty(&pty_id);
     state.pty.kill(&pty_id)
 }
 
