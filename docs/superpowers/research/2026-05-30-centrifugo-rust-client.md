@@ -603,10 +603,7 @@ Ran the gated `live_centrifugo_smoke` test with the real HMAC secret. Findings:
 - **`subscribe cmd:<id>` and `publish sess:<id>`: both return `code 102 "unknown channel"`.** This is NOT a permission issue — it means the `cmd` and `sess` (and `dev`) **namespaces are not yet defined** on the Centrifugo server. Open questions #1/#2 are therefore moot until the namespaces exist.
 - **TLS:** rustls 0.23 needs an explicit crypto provider; we install `ring` once in `ws_client::ensure_crypto_provider` (and pin `rustls` with `default-features = false, features=["ring"]` to avoid pulling `aws-lc-rs`/cmake).
 
-**Server-side action required (CloudService / infra), before the bridge is usable end-to-end:** define Centrifugo namespaces:
-- `cmd` — `allow_subscribe_for_client` (or token-gated subscribe) so the desktop can receive commands.
-- `sess` and `dev` — `allow_publish_for_subscriber: true` so the desktop can publish events/results.
-Then re-run the live smoke test; it should publish without error.
+**RESOLVED (2026-05-30):** the deployed Centrifugo (`cs-app-cust1004-tools`) now defines namespaces `abeon-cloud-cmd` (`allow_subscribe_for_client`), `abeon-cloud-sess` and `abeon-cloud-dev` (`allow_subscribe_for_client` + `allow_publish_for_client`, since the desktop publishes without subscribing). Channels in code are prefixed accordingly (`remote::bridge::{cmd,result,session}_channel`). After applying the ConfigMap + restarting the `centrifugo-websocket` deployment, the live smoke test connects, subscribes, and publishes with **no errors** — the bridge is validated end-to-end against the real server. Config lives in `k8s/.../cust1004-tools/centrifugo/centrifugo-config.yaml`.
 
 ## 7. Open Questions
 
