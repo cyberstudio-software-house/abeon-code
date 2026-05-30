@@ -351,14 +351,14 @@ git commit -m "feat(remote-core): add Centrifugo HS256 token minting"
 
 - [ ] **Step 1: Write the full module (note the changed `export_to` path)**
 
-Replace the placeholder contents of `crates/abeon-remote-core/src/protocol.rs` with the following. The ONLY change from the desktop original is `export_to = "../../DesktopApp/src/types/"` (three occurrences), because the crate manifest dir is `crates/abeon-remote-core/`:
+Replace the placeholder contents of `crates/abeon-remote-core/src/protocol.rs` with the following. The ONLY change from the desktop original is `export_to = "../../../DesktopApp/src/types/"` (three occurrences). NOTE the path is `../../../` (three levels), verified empirically with ts-rs 11.1 to land at repo-root `DesktopApp/src/types/`; `../../` lands one level too deep at `crates/DesktopApp/src/types/`. The Step 2 byte-identical check below is what guarantees the path is correct — do not trust the arithmetic, trust that gate:
 
 ```rust
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../DesktopApp/src/types/")]
+#[ts(export, export_to = "../../../DesktopApp/src/types/")]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
 pub enum RemoteCommand {
     SendPrompt {
@@ -382,7 +382,7 @@ pub enum RemoteCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../DesktopApp/src/types/")]
+#[ts(export, export_to = "../../../DesktopApp/src/types/")]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteEnvelope {
     pub command_id: String,
@@ -390,7 +390,7 @@ pub struct RemoteEnvelope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../DesktopApp/src/types/")]
+#[ts(export, export_to = "../../../DesktopApp/src/types/")]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
 pub enum RemoteEvent {
     CmdResult {
@@ -454,8 +454,8 @@ Expected: all tests pass (protocol 4 + token 3 + validation 6, plus ts-rs `expor
 
 Then confirm the TS files were (re)written to the desktop, unchanged:
 
-Run: `git status --short DesktopApp/src/types/`
-Expected: no changes (the regenerated files are byte-identical to the committed ones — the contract did not change, only its source location).
+Run: `git status --short DesktopApp/src/types/` AND `ls crates/DesktopApp 2>/dev/null`.
+Expected: the first is empty (regenerated files byte-identical to committed — contract unchanged, only its source location moved) AND the second prints nothing (NO stray `crates/DesktopApp/` directory). A stray `crates/DesktopApp/` means the `export_to` path is wrong (ts-rs wrote there instead of the real `DesktopApp/src/types/`); checking only `git status DesktopApp/src/types/` gives a FALSE pass because the real files are simply left untouched. Both conditions must hold.
 
 - [ ] **Step 3: Write `crates/abeon-remote-core/src/channels.rs`**
 

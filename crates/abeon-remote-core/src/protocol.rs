@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../DesktopApp/src/types/")]
+#[ts(export, export_to = "../../../DesktopApp/src/types/")]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
 pub enum RemoteCommand {
     SendPrompt {
@@ -26,7 +26,7 @@ pub enum RemoteCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../DesktopApp/src/types/")]
+#[ts(export, export_to = "../../../DesktopApp/src/types/")]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteEnvelope {
     pub command_id: String,
@@ -34,7 +34,7 @@ pub struct RemoteEnvelope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../DesktopApp/src/types/")]
+#[ts(export, export_to = "../../../DesktopApp/src/types/")]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
 pub enum RemoteEvent {
     CmdResult {
