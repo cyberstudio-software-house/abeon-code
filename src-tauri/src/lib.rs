@@ -7,6 +7,7 @@ pub mod state;
 pub mod commands;
 pub mod detectors;
 pub mod git;
+pub mod remote;
 
 use state::AppState;
 
