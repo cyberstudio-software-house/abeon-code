@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cloudservice
+  namespace: cs-app-cust1004-tools
+  annotations:
+    # TLS/issuer annotations follow the cluster's existing convention — align
+    # with the Centrifugo ingress in the k8s repo before applying.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - cloud.k8s.abeon.app
+      secretName: cloudservice-tls
+  rules:
+    - host: cloud.k8s.abeon.app
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cloudservice
+                port:
+                  number: 80

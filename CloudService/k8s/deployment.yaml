@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudservice
+  namespace: cs-app-cust1004-tools
+  labels:
+    app: cloudservice
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      app: cloudservice
+  template:
+    metadata:
+      labels:
+        app: cloudservice
+    spec:
+      containers:
+        - name: cloudservice
+          image: cloudservice:dev # replaced by CI with the pushed tag
+          ports:
+            - containerPort: 8080
+          env:
+            - name: BIND_ADDR
+              value: "0.0.0.0:8080"
+            - name: CENTRIFUGO_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: cloudservice-config
+                  key: CENTRIFUGO_API_URL
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: cloudservice-secrets
+                  key: DATABASE_URL
+            - name: CENTRIFUGO_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: cloudservice-secrets
+                  key: CENTRIFUGO_TOKEN_SECRET
+            - name: CENTRIFUGO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cloudservice-secrets
+                  key: CENTRIFUGO_API_KEY
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "32Mi"
+            limits:
+              cpu: "500m"
+              memory: "128Mi"
