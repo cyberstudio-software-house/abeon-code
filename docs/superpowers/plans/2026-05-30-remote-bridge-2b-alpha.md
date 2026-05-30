@@ -167,8 +167,12 @@ Insert above the `#[cfg(test)]` block in `wire.rs`:
 
 ```rust
 /// Encode a single Centrifugo command frame: `{"id":<id>,"<key>":<payload>}`.
+/// NOTE: built with `format!` (not `serde_json::json!`) because serde_json's
+/// default Map is a BTreeMap that sorts keys alphabetically — `json!` would emit
+/// `{"connect":...,"id":1}` and break the id-first wire shape the tests assert.
+/// `key` is always a controlled constant ("connect"/"subscribe"/"publish").
 pub fn encode_command(id: u32, key: &str, payload: serde_json::Value) -> String {
-    serde_json::json!({ "id": id, key: payload }).to_string()
+    format!(r#"{{"id":{},"{}":{}}}"#, id, key, payload)
 }
 
 /// Encode several commands into one newline-delimited frame.
