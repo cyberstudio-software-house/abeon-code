@@ -23,6 +23,7 @@ impl PtyHandle {
         cols: u16,
         rows: u16,
         env: &HashMap<String, String>,
+        on_exit: Option<std::sync::Arc<dyn Fn(String) + Send + Sync>>,
     ) -> AppResult<Self> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -74,6 +75,9 @@ impl PtyHandle {
                 &format!("pty:{id_for_exit}:exit"),
                 serde_json::json!({ "code": code }),
             );
+            if let Some(cb) = &on_exit {
+                cb(id_for_exit.clone());
+            }
         });
 
         Ok(PtyHandle {

@@ -11,10 +11,16 @@ use self::handle::PtyHandle;
 #[derive(Default)]
 pub struct PtyManager {
     inner: Mutex<HashMap<String, Arc<PtyHandle>>>,
+    #[allow(clippy::type_complexity)]
+    exit_hook: Mutex<Option<Arc<dyn Fn(String) + Send + Sync>>>,
 }
 
 impl PtyManager {
     pub fn new() -> Arc<Self> { Arc::new(Self::default()) }
+
+    pub fn set_exit_hook(&self, hook: Arc<dyn Fn(String) + Send + Sync>) {
+        *self.exit_hook.lock() = Some(hook);
+    }
 
     pub fn spawn(
         &self,
@@ -27,7 +33,8 @@ impl PtyManager {
         env: &HashMap<String, String>,
     ) -> AppResult<String> {
         let id = Uuid::new_v4().to_string();
-        let h = PtyHandle::spawn(app, id.clone(), program, args, cwd, cols, rows, env)?;
+        let hook = self.exit_hook.lock().clone();
+        let h = PtyHandle::spawn(app, id.clone(), program, args, cwd, cols, rows, env, hook)?;
         self.inner.lock().insert(id.clone(), Arc::new(h));
         Ok(id)
     }
