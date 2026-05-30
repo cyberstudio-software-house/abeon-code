@@ -1,0 +1,31 @@
+[package]
+name = "cloudservice"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "cloudservice"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cloudservice"
+path = "src/main.rs"
+
+[dependencies]
+abeon-remote-core = { path = "../crates/abeon-remote-core" }
+axum = "0.8"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tower = { version = "0.5", features = ["util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+async-trait = "0.1"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring-webpki", "mysql", "migrate", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+uuid = { version = "1", features = ["v4"] }
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
