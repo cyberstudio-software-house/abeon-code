@@ -9,6 +9,15 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::remote::protocol::RemoteEnvelope;
 use crate::remote::wire::{encode_command, parse_frame, Frame, PONG};
 
+/// rustls 0.23 requires an explicit process-wide crypto provider. The
+/// `rustls-tls-webpki-roots` feature does not pick one, so install ring once.
+static CRYPTO_INIT: std::sync::Once = std::sync::Once::new();
+fn ensure_crypto_provider() {
+    CRYPTO_INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 pub struct TungsteniteCentrifugoClient {
     out_tx: mpsc::Sender<String>,
     next_id: AtomicU32,
@@ -26,6 +35,7 @@ impl TungsteniteCentrifugoClient {
         command_channel: &str,
         sub_token: Option<&str>,
     ) -> anyhow::Result<CentrifugoConnection> {
+        ensure_crypto_provider();
         let (ws_stream, _) = tokio_tungstenite::connect_async(url).await?;
         let (mut sink, stream) = ws_stream.split();
 

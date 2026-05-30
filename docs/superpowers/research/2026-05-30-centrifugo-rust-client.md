@@ -595,6 +595,19 @@ Backoff values aligned with centrifuge-js defaults: base 500 ms, max 20 s, full 
 
 ---
 
+## 7a. Live test results (2026-05-30, against `wss://ws.k8s.abeon.app`)
+
+Ran the gated `live_centrifugo_smoke` test with the real HMAC secret. Findings:
+
+- **Connect + JWT auth: works.** The HS256 connection token (minted via `remote::token`) is accepted — no error on the `connect` reply.
+- **`subscribe cmd:<id>` and `publish sess:<id>`: both return `code 102 "unknown channel"`.** This is NOT a permission issue — it means the `cmd` and `sess` (and `dev`) **namespaces are not yet defined** on the Centrifugo server. Open questions #1/#2 are therefore moot until the namespaces exist.
+- **TLS:** rustls 0.23 needs an explicit crypto provider; we install `ring` once in `ws_client::ensure_crypto_provider` (and pin `rustls` with `default-features = false, features=["ring"]` to avoid pulling `aws-lc-rs`/cmake).
+
+**Server-side action required (CloudService / infra), before the bridge is usable end-to-end:** define Centrifugo namespaces:
+- `cmd` — `allow_subscribe_for_client` (or token-gated subscribe) so the desktop can receive commands.
+- `sess` and `dev` — `allow_publish_for_subscriber: true` so the desktop can publish events/results.
+Then re-run the live smoke test; it should publish without error.
+
 ## 7. Open Questions
 
 1. **Channel access model for `cmd:<device>` and `sess:<id>`.** Do these use private channels (require subscription token per channel), or are they public channels protected only by the connection JWT? This determines whether `subscribe` needs a per-channel token and whether the CloudService must mint subscription tokens, not just connection tokens. *Blocker for the subscribe command implementation.*
