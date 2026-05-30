@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppResult;
 use crate::remote::bus::SessionBusEvent;
@@ -7,6 +8,7 @@ use crate::remote::client::CentrifugoClient;
 use crate::remote::dispatch::{command_to_action, PtyAction};
 use crate::remote::protocol::{RemoteEnvelope, RemoteEvent};
 use crate::remote::registry::SessionPtyRegistry;
+use crate::state::AppState;
 
 /// Side-effecting PTY operations the bridge needs. Isolated as a trait so the
 /// command handler is testable without spawning real processes. The production
@@ -16,6 +18,31 @@ pub trait PtyActuator: Send + Sync {
     fn kill(&self, pty_id: &str) -> AppResult<()>;
     /// Spawn `claude --resume <session_id>` for `project_id`; returns the new pty id.
     fn spawn_resume(&self, session_id: &str, project_id: i64) -> AppResult<String>;
+}
+
+/// Production `PtyActuator` backed by the live app: writes/kills via `PtyManager`
+/// and resume-spawns via `commands::pty::spawn_claude_resume`. Holds an `AppHandle`
+/// to reach managed `AppState` from the bridge's async task.
+pub struct AppPtyActuator {
+    app: AppHandle,
+}
+
+impl AppPtyActuator {
+    pub fn new(app: AppHandle) -> Self { Self { app } }
+}
+
+impl PtyActuator for AppPtyActuator {
+    fn write(&self, pty_id: &str, bytes: &[u8]) -> AppResult<()> {
+        self.app.state::<AppState>().pty.write(pty_id, bytes)
+    }
+    fn kill(&self, pty_id: &str) -> AppResult<()> {
+        let state = self.app.state::<AppState>();
+        state.session_pty.unbind_pty(pty_id);
+        state.pty.kill(pty_id)
+    }
+    fn spawn_resume(&self, session_id: &str, project_id: i64) -> AppResult<String> {
+        crate::commands::pty::spawn_claude_resume(&self.app, project_id, session_id)
+    }
 }
 
 pub fn cmd_channel(device_id: &str) -> String { format!("cmd:{device_id}") }

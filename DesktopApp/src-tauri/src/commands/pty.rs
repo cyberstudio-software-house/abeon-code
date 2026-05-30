@@ -58,6 +58,26 @@ fn build_claude_command(
     cmd
 }
 
+/// Spawn `claude --resume <session_id>` for a project, outside a Tauri command
+/// (used by the remote bridge actuator). Mirrors spawn_pty's Claude path:
+/// `bash -c "claude --resume <id>"` with env pre-loaded from the chosen shell.
+pub(crate) fn spawn_claude_resume(
+    app: &tauri::AppHandle,
+    project_id: i64,
+    session_id: &str,
+) -> crate::error::AppResult<String> {
+    use tauri::Manager;
+    crate::validation::validate_session_id(session_id)?;
+    let state = app.state::<AppState>();
+    let c = state.db.get()?;
+    let proj = crate::db::projects_repo::get(&c, project_id)?;
+    let cwd = std::path::PathBuf::from(&proj.path);
+    let cmd = build_claude_command(Some(session_id), None, false, false);
+    let shell = crate::commands::settings::resolve_shell(&c);
+    let env = crate::commands::settings::ensure_shell_env(&state, &shell);
+    state.pty.spawn(app.clone(), "bash", &["-c", &cmd], &cwd, 80, 24, &env)
+}
+
 #[tauri::command]
 pub fn spawn_pty(
     app: AppHandle,
