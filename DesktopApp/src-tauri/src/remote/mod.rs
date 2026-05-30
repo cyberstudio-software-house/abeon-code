@@ -4,3 +4,4 @@ pub mod dispatch;
 pub mod wire;
 pub mod client;
 pub mod bus;
+pub mod bridge;
