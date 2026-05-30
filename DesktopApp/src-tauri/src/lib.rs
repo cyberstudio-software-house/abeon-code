@@ -29,6 +29,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .manage(app_state)
+        .setup(|app| {
+            crate::remote::startup::init_remote_bridge(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             commands::projects::list_projects,
