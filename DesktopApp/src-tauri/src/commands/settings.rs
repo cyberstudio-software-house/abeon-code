@@ -81,6 +81,12 @@ pub fn list_available_shells() -> Vec<ShellInfo> {
 // Fallback chain: settings.shellPath -> $SHELL -> "bash".
 // An empty string in settings is treated as "not set" and falls through to $SHELL.
 // A DB error reading settings is logged and treated as "not set".
+/// Whether the remote bridge may spawn a process for a mobile `resumeSession`.
+/// Defaults to false (most sensitive remote op; opt-in).
+pub fn allow_remote_spawn(conn: &rusqlite::Connection) -> bool {
+    matches!(settings_repo::get(conn, "allowRemoteSpawn"), Ok(Some(ref v)) if v == "true")
+}
+
 pub fn resolve_shell(conn: &rusqlite::Connection) -> String {
     match settings_repo::get(conn, "shellPath") {
         Ok(Some(s)) if !s.is_empty() => return s,
@@ -379,5 +385,33 @@ mod resolve_tests {
         std::fs::write(&fake, "").unwrap();
         std::env::set_var("SHELL", &fake);
         assert_eq!(resolve_shell(&conn), fake.to_string_lossy().to_string());
+    }
+}
+
+#[cfg(test)]
+mod allow_remote_spawn_tests {
+    use super::*;
+    use crate::db::{init_pool, DbPool};
+    use tempfile::NamedTempFile;
+
+    fn fresh_pool() -> DbPool {
+        let f = NamedTempFile::new().unwrap();
+        let path = f.path().to_path_buf();
+        std::mem::forget(f);
+        init_pool(&path).unwrap()
+    }
+
+    #[test]
+    fn allow_remote_spawn_defaults_false_and_reads_true() {
+        let pool = fresh_pool();
+        let conn = pool.get().unwrap();
+
+        assert!(!allow_remote_spawn(&conn));
+
+        settings_repo::set(&conn, "allowRemoteSpawn", "true").unwrap();
+        assert!(allow_remote_spawn(&conn));
+
+        settings_repo::set(&conn, "allowRemoteSpawn", "false").unwrap();
+        assert!(!allow_remote_spawn(&conn));
     }
 }
