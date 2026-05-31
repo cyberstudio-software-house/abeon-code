@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use crate::state::AppState;
 use crate::remote::bus::RemoteEventBus;
-use crate::remote::bridge::{RemoteBridge, AppPtyActuator, PtyActuator, cmd_channel};
+use crate::remote::bridge::{RemoteBridge, AppPtyActuator, AppRosterProvider, PtyActuator, RosterProvider, cmd_channel};
 use crate::remote::ws_client::TungsteniteCentrifugoClient;
 use crate::remote::token::mint_connection_token;
 use crate::remote::cloud_client::CloudClient;
@@ -57,8 +57,9 @@ pub fn init_remote_bridge(app: AppHandle) {
             Err(e) => { eprintln!("remote bridge: connect failed: {e}"); return; }
         };
         let bridge = Arc::new(RemoteBridge::new(registry, allow_spawn));
-        let actuator: Arc<dyn PtyActuator> = Arc::new(AppPtyActuator::new(app_for_actuator));
-        bridge.run(device_id, conn.inbound, bus_rx, conn.client, actuator, cloud, device_secret).await;
+        let actuator: Arc<dyn PtyActuator> = Arc::new(AppPtyActuator::new(app_for_actuator.clone()));
+        let roster: Arc<dyn RosterProvider> = Arc::new(AppRosterProvider::new(app_for_actuator));
+        bridge.run(device_id, conn.inbound, bus_rx, conn.client, actuator, roster, cloud, device_secret).await;
         eprintln!("remote bridge: run-loop ended");
     });
 }
