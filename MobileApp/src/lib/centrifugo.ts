@@ -3,7 +3,7 @@ import { CENTRIFUGO_WS_URL } from '@/src/lib/config';
 import type { SessionEvent } from '@/src/types/SessionEvent';
 import type { RemoteEvent } from '@/src/types/RemoteEvent';
 
-const SESSION_TYPES = new Set(['sessionAppend', 'sessionActivity', 'sessionTitle', 'sessionUsage']);
+const SESSION_TYPES = new Set(['sessionAppend', 'sessionActivity', 'sessionTitle', 'sessionUsage', 'sessionRoster']);
 
 export function parseSessionEvent(data: unknown): SessionEvent | null {
   if (data && typeof data === 'object' && SESSION_TYPES.has((data as { type?: string }).type ?? '')) {
@@ -22,7 +22,11 @@ export function parseDeviceEvent(data: unknown): RemoteEvent | null {
 export interface CentrifugoHandles {
   client: Centrifuge;
   subscribeSession: (sessionId: string, onEvent: (e: SessionEvent) => void) => Subscription;
-  subscribeDevice: (deviceId: string, onEvent: (e: RemoteEvent) => void) => Subscription;
+  subscribeDevice: (
+    deviceId: string,
+    onCmdResult: (e: RemoteEvent) => void,
+    onSessionEvent: (e: SessionEvent) => void,
+  ) => Subscription;
   disconnect: () => void;
 }
 
@@ -50,9 +54,24 @@ export function createCentrifugo(getToken: () => Promise<string>): CentrifugoHan
     sub.subscribe();
     return sub;
   };
-  const subscribeDevice = (deviceId: string, onEvent: (e: RemoteEvent) => void) => {
+  const subscribeDevice = (
+    deviceId: string,
+    onCmdResult: (e: RemoteEvent) => void,
+    onSessionEvent: (e: SessionEvent) => void,
+  ) => {
     const sub = client.newSubscription(`abeon-cloud-dev:${deviceId}`);
-    sub.on('publication', (ctx) => { const e = parseDeviceEvent(ctx.data); if (e) onEvent(e); });
+    const route = (data: unknown) => {
+      const cmd = parseDeviceEvent(data);
+      if (cmd) { onCmdResult(cmd); return; }
+      const se = parseSessionEvent(data);
+      if (se) onSessionEvent(se);
+    };
+    sub.on('subscribed', (ctx) => {
+      if (!ctx.recovered) {
+        sub.history({ limit: 100 }).then((r) => { for (const p of r.publications) route(p.data); }).catch(() => {});
+      }
+    });
+    sub.on('publication', (ctx) => route(ctx.data));
     sub.subscribe();
     return sub;
   };

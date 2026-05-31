@@ -18,3 +18,9 @@ test('parses a cmdResult device event', () => {
   expect(parseDeviceEvent({ type: 'cmdResult', commandId: 'c1', ok: true }))
     .toEqual({ type: 'cmdResult', commandId: 'c1', ok: true });
 });
+
+test('parseSessionEvent accepts sessionRoster', () => {
+  const ev = parseSessionEvent({ type: 'sessionRoster', entries: [] });
+  expect(ev).not.toBeNull();
+  expect(ev!.type).toBe('sessionRoster');
+});
