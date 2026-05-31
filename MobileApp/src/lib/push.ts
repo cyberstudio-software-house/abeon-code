@@ -1,15 +1,19 @@
-import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { registerPushToken } from '@/src/lib/api';
 
-// Surface notifications while the app is foregrounded (the live stream also shows them).
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
-});
+// expo-notifications' remote-push API was removed from Expo Go (SDK 53+) — importing or
+// using it there THROWS at module load. So we feature-detect the runtime and lazy-load
+// the module only in a real (dev/preview/production) build. In Expo Go push is simply
+// disabled and the rest of the app loads normally.
+const PUSH_SUPPORTED = Constants.executionEnvironment !== 'storeClient';
+
+type NotificationsModule = typeof import('expo-notifications');
+function loadNotifications(): NotificationsModule {
+  return require('expo-notifications') as NotificationsModule;
+}
 
 // The EAS project id (from app config `extra.eas.projectId`, populated by `eas init`).
-// getExpoPushTokenAsync needs it on a real build — without it the token request fails on
-// device — so we resolve it explicitly rather than relying on an implicit default.
+// getExpoPushTokenAsync needs it on a real build, so we resolve it explicitly.
 function easProjectId(): string | undefined {
   return (
     Constants.expoConfig?.extra?.eas?.projectId ??
@@ -17,9 +21,20 @@ function easProjectId(): string | undefined {
   );
 }
 
+// Surface notifications while the app is foregrounded. Safe to call anywhere — a no-op
+// in Expo Go.
+export function initPushHandler(): void {
+  if (!PUSH_SUPPORTED) return;
+  loadNotifications().setNotificationHandler({
+    handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
+  });
+}
+
 // Requests OS permission, gets the Expo push token, registers it with CloudService.
-// Returns false if permission was denied (app still works while foregrounded).
+// Returns false if push is unsupported (Expo Go) or permission was denied.
 export async function registerForPush(phoneToken: string): Promise<boolean> {
+  if (!PUSH_SUPPORTED) return false;
+  const Notifications = loadNotifications();
   const { status } = await Notifications.requestPermissionsAsync();
   if (status !== 'granted') return false;
   const projectId = easProjectId();
@@ -28,4 +43,15 @@ export async function registerForPush(phoneToken: string): Promise<boolean> {
   );
   await registerPushToken(phoneToken, expoToken);
   return true;
+}
+
+// Registers a tap handler that deep-links to the session carried in the push `data`.
+// Returns a no-op remover in Expo Go.
+export function addPushResponseListener(onSession: (sessionId: string) => void): { remove: () => void } {
+  if (!PUSH_SUPPORTED) return { remove: () => {} };
+  const sub = loadNotifications().addNotificationResponseReceivedListener((resp) => {
+    const data = resp.notification.request.content.data as { sessionId?: string } | undefined;
+    if (data?.sessionId) onSession(data.sessionId);
+  });
+  return { remove: () => sub.remove() };
 }
