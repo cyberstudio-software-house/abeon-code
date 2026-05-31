@@ -1,15 +1,23 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tauri::{AppHandle, Manager};
 
+use crate::domain::session::SessionActivity;
 use crate::domain::session_event::SessionEvent;
 use crate::error::AppResult;
 use crate::remote::bus::SessionBusEvent;
 use crate::remote::client::CentrifugoClient;
+use crate::remote::cloud_client::CloudClient;
 use crate::remote::dispatch::{command_to_action, PtyAction};
 use crate::remote::protocol::{RemoteEnvelope, RemoteEvent};
 use crate::remote::registry::SessionPtyRegistry;
 use crate::state::AppState;
+
+/// Notify only on a transition INTO `WaitingUser` (not while it stays `WaitingUser`).
+pub fn should_notify(prev: Option<SessionActivity>, next: SessionActivity) -> bool {
+    next == SessionActivity::WaitingUser && prev != Some(SessionActivity::WaitingUser)
+}
 
 /// Side-effecting PTY operations the bridge needs. Isolated as a trait so the
 /// command handler is testable without spawning real processes. The production
@@ -112,8 +120,11 @@ impl RemoteBridge {
         mut bus: broadcast::Receiver<SessionBusEvent>,
         client: Arc<dyn CentrifugoClient>,
         actuator: Arc<dyn PtyActuator>,
+        cloud: Option<Arc<CloudClient>>,
+        device_secret: Option<String>,
     ) {
         let results = result_channel(&device_id);
+        let mut last_activity: HashMap<String, SessionActivity> = HashMap::new();
         loop {
             tokio::select! {
                 maybe_env = inbound.recv() => {
@@ -130,6 +141,19 @@ impl RemoteBridge {
                 ev = bus.recv() => {
                     match ev {
                         Ok(event) => {
+                            if let SessionBusEvent::Activity { ref session_id, activity } = event {
+                                let prev = last_activity.insert(session_id.clone(), activity);
+                                if should_notify(prev, activity) {
+                                    if let (Some(cloud), Some(secret)) = (cloud.as_ref(), device_secret.as_ref()) {
+                                        let cloud = cloud.clone();
+                                        let secret = secret.clone();
+                                        let sid = session_id.clone();
+                                        tokio::spawn(async move {
+                                            let _ = cloud.notify_permission(&secret, &sid).await;
+                                        });
+                                    }
+                                }
+                            }
                             let (channel, data) = encode_bus_event(event);
                             let _ = client.publish(&channel, data).await;
                         }
@@ -172,6 +196,18 @@ mod tests {
 
     fn envelope(id: &str, cmd: RemoteCommand) -> RemoteEnvelope {
         RemoteEnvelope { command_id: id.into(), command: cmd }
+    }
+
+    #[test]
+    fn should_notify_on_transition_into_waiting_user() {
+        assert!(should_notify(None, SessionActivity::WaitingUser));
+        assert!(should_notify(Some(SessionActivity::Running), SessionActivity::WaitingUser));
+    }
+
+    #[test]
+    fn should_not_notify_when_already_waiting_or_leaving() {
+        assert!(!should_notify(Some(SessionActivity::WaitingUser), SessionActivity::WaitingUser));
+        assert!(!should_notify(Some(SessionActivity::WaitingUser), SessionActivity::Running));
     }
 
     #[test]
@@ -236,7 +272,7 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         let bus = crate::remote::bus::RemoteEventBus::new();
         let client_for_run = client.clone();
-        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator));
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator, None, None));
 
         tx.send(RemoteEnvelope { command_id: "c1".into(), command: crate::remote::protocol::RemoteCommand::SendPrompt { session_id: "s1".into(), text: "hi".into() } }).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -263,7 +299,7 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         let bus = crate::remote::bus::RemoteEventBus::new();
         let client_for_run = client.clone();
-        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator));
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator, None, None));
 
         bus.publish(crate::remote::bus::SessionBusEvent::Title { session_id: "s1".into(), title: "Hello".into() });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

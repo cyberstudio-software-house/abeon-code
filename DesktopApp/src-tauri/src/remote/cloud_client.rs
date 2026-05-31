@@ -63,6 +63,18 @@ impl CloudClient {
         Ok(resp.token)
     }
 
+    /// Best-effort push notification: a session is waiting for the user.
+    pub async fn notify_permission(&self, device_secret: &str, session_id: &str) -> anyhow::Result<()> {
+        self.http
+            .post(self.url("/v1/notify"))
+            .bearer_auth(device_secret)
+            .json(&serde_json::json!({ "sessionId": session_id }))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
     /// Start pairing → a one-time code to display as text/QR.
     pub async fn pair_start(&self, device_secret: &str) -> anyhow::Result<PairCode> {
         let resp: PairCode = self

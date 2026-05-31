@@ -46,10 +46,11 @@ pub fn init_remote_bridge(app: AppHandle) {
     let db = state.db.clone();
 
     tauri::async_runtime::spawn(async move {
-        let (device_id, token) = match acquire_identity(&db, cloud_url, legacy_secret, &legacy_device_id).await {
-            Ok(v) => v,
-            Err(e) => { eprintln!("remote bridge: identity acquisition failed: {e}"); return; }
-        };
+        let Identity { device_id, token, cloud, device_secret } =
+            match acquire_identity(&db, cloud_url, legacy_secret, &legacy_device_id).await {
+                Ok(v) => v,
+                Err(e) => { eprintln!("remote bridge: identity acquisition failed: {e}"); return; }
+            };
 
         let conn = match TungsteniteCentrifugoClient::connect(&url, &token, &cmd_channel(&device_id), None).await {
             Ok(c) => c,
@@ -57,30 +58,49 @@ pub fn init_remote_bridge(app: AppHandle) {
         };
         let bridge = Arc::new(RemoteBridge::new(registry, allow_spawn));
         let actuator: Arc<dyn PtyActuator> = Arc::new(AppPtyActuator::new(app_for_actuator));
-        bridge.run(device_id, conn.inbound, bus_rx, conn.client, actuator).await;
+        bridge.run(device_id, conn.inbound, bus_rx, conn.client, actuator, cloud, device_secret).await;
         eprintln!("remote bridge: run-loop ended");
     });
 }
 
-/// Resolve `(deviceId, connectionToken)`. CloudService path: register once
-/// (persisting id+secret), then fetch a token. Legacy path: self-mint with the
-/// env secret and the locally-assigned device id.
+/// Acquired identity plus the optional CloudService handle used for push.
+/// On the legacy self-mint path `cloud`/`device_secret` are `None`, so push is skipped.
+struct Identity {
+    device_id: String,
+    token: String,
+    cloud: Option<Arc<CloudClient>>,
+    device_secret: Option<String>,
+}
+
+/// Resolve identity. CloudService path: register once (persisting id+secret), then
+/// fetch a token and keep the client+secret for push. Legacy path: self-mint with
+/// the env secret and the locally-assigned device id (no push handle).
 async fn acquire_identity(
     db: &DbPool,
     cloud_url: Option<String>,
     legacy_secret: Option<String>,
     legacy_device_id: &str,
-) -> anyhow::Result<(String, String)> {
+) -> anyhow::Result<Identity> {
     if let Some(base) = cloud_url {
-        let client = CloudClient::new(base);
-        let (device_id, device_secret) = ensure_registered(db, &client).await?;
+        let client = Arc::new(CloudClient::new(base));
+        let (device_id, device_secret) = ensure_registered(db, client.as_ref()).await?;
         let token = client.fetch_token(&device_secret).await?;
-        return Ok((device_id, token));
+        return Ok(Identity {
+            device_id,
+            token,
+            cloud: Some(client),
+            device_secret: Some(device_secret),
+        });
     }
     let secret = legacy_secret.expect("checked before spawn");
     let now = unix_now();
     let token = mint_connection_token(&secret, legacy_device_id, now, 3600)?;
-    Ok((legacy_device_id.to_string(), token))
+    Ok(Identity {
+        device_id: legacy_device_id.to_string(),
+        token,
+        cloud: None,
+        device_secret: None,
+    })
 }
 
 /// Read persisted `remoteDeviceId`/`remoteDeviceSecret`; if absent, register with
