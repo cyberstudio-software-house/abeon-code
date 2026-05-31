@@ -33,6 +33,8 @@ pub fn app(state: AppState) -> Router {
         .route("/v1/pair/start", post(routes::pairing::start))
         .route("/v1/pair/claim", post(routes::pairing::claim))
         .route("/v1/command", post(routes::command::publish))
+        .route("/v1/push-token", post(routes::push_token::register))
+        .route("/v1/notify", post(routes::notify::notify))
         .with_state(state)
 }
 

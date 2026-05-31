@@ -10,12 +10,16 @@ use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot`
 
 fn test_state(centrifugo: Arc<FakeCentrifugo>) -> AppState {
+    test_state_with_expo(centrifugo, Arc::new(FakeExpo::default()))
+}
+
+fn test_state_with_expo(centrifugo: Arc<FakeCentrifugo>, expo: Arc<FakeExpo>) -> AppState {
     AppState {
         devices: Arc::new(InMemoryDevices::default()),
         phones: Arc::new(InMemoryPhones::default()),
         pairing: Arc::new(InMemoryPairing::default()),
         centrifugo,
-        expo: Arc::new(FakeExpo::default()),
+        expo: expo as Arc<dyn cloudservice::expo::ExpoApi>,
         config: Arc::new(Config {
             bind_addr: "0.0.0.0:0".into(),
             database_url: "unused".into(),
@@ -133,4 +137,95 @@ async fn expired_or_unknown_code_is_bad_request() {
     let state = test_state(Arc::new(FakeCentrifugo::default()));
     let (s, _) = json_request(state, "POST", "/v1/pair/claim", None, json!({ "code": "ZZZZZZZZ" })).await;
     assert_eq!(s, StatusCode::BAD_REQUEST);
+}
+
+/// Helper: register a device, start pairing, claim it — returns (device_id, device_secret, phone_token).
+async fn setup_pair(state: AppState) -> (String, String, String) {
+    let (_, body) = json_request(state.clone(), "POST", "/v1/devices", None, json!({})).await;
+    let device_secret = body["deviceSecret"].as_str().unwrap().to_string();
+    let device_id = body["deviceId"].as_str().unwrap().to_string();
+    let (_, body) = json_request(state.clone(), "POST", "/v1/pair/start", Some(&device_secret), json!({})).await;
+    let code = body["code"].as_str().unwrap().to_string();
+    let (_, body) = json_request(state.clone(), "POST", "/v1/pair/claim", None, json!({ "code": code })).await;
+    let phone_token = body["phoneToken"].as_str().unwrap().to_string();
+    (device_id, device_secret, phone_token)
+}
+
+#[tokio::test]
+async fn push_token_registers_and_is_looked_up() {
+    let expo = Arc::new(FakeExpo::default());
+    let state = test_state_with_expo(Arc::new(FakeCentrifugo::default()), expo.clone());
+
+    let (device_id, _device_secret, phone_token) = setup_pair(state.clone()).await;
+
+    // Register Expo push token via phone-authenticated endpoint.
+    let (s, _) = json_request(
+        state.clone(),
+        "POST",
+        "/v1/push-token",
+        Some(&phone_token),
+        json!({ "expoToken": "ExponentPushToken[x]" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    // Assert stored token is retrievable.
+    let stored = state.phones.expo_push_token_for_device(&device_id).await.unwrap();
+    assert_eq!(stored, Some("ExponentPushToken[x]".to_string()));
+}
+
+#[tokio::test]
+async fn notify_sends_push_to_registered_token() {
+    let expo = Arc::new(FakeExpo::default());
+    let state = test_state_with_expo(Arc::new(FakeCentrifugo::default()), expo.clone());
+
+    let (_device_id, device_secret, phone_token) = setup_pair(state.clone()).await;
+
+    // Phone registers its Expo token.
+    json_request(
+        state.clone(),
+        "POST",
+        "/v1/push-token",
+        Some(&phone_token),
+        json!({ "expoToken": "ExponentPushToken[abc]" }),
+    )
+    .await;
+
+    // Desktop triggers a notify.
+    let (s, _) = json_request(
+        state.clone(),
+        "POST",
+        "/v1/notify",
+        Some(&device_secret),
+        json!({ "sessionId": "s1" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let sent = expo.sent.lock().unwrap();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, "ExponentPushToken[abc]");
+    assert_eq!(sent[0].3["sessionId"], "s1");
+}
+
+#[tokio::test]
+async fn notify_without_token_is_noop() {
+    let expo = Arc::new(FakeExpo::default());
+    let state = test_state_with_expo(Arc::new(FakeCentrifugo::default()), expo.clone());
+
+    let (_device_id, device_secret, _phone_token) = setup_pair(state.clone()).await;
+
+    // Desktop triggers notify without any push token registered.
+    let (s, _) = json_request(
+        state.clone(),
+        "POST",
+        "/v1/notify",
+        Some(&device_secret),
+        json!({ "sessionId": "s1" }),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+
+    let sent = expo.sent.lock().unwrap();
+    assert!(sent.is_empty());
 }
