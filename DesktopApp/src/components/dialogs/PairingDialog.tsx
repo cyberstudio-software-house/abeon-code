@@ -2,6 +2,17 @@ import { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { tauri, type PairCode } from '../../lib/tauri';
 
+// Tauri command errors reject with the serialized `AppError` shape `{ code, message }`
+// (see src-tauri/src/error.rs). `String(e)` on that object yields "[object Object]",
+// so pull out the human-readable message, with fallbacks for plain Error/string.
+function errorText(e: unknown): string {
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object' && 'message' in e) {
+    return String((e as { message: unknown }).message);
+  }
+  return 'Nie udało się wygenerować kodu parowania.';
+}
+
 export function PairingDialog({ onClose }: { onClose: () => void }) {
   const [pair, setPair] = useState<PairCode | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -13,7 +24,7 @@ export function PairingDialog({ onClose }: { onClose: () => void }) {
     try {
       setPair(await tauri.remotePairStart());
     } catch (e) {
-      setError(String(e));
+      setError(errorText(e));
     } finally {
       setLoading(false);
     }
