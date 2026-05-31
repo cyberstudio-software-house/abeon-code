@@ -3,6 +3,14 @@ import * as SecureStore from 'expo-secure-store';
 export interface Credentials { phoneToken: string; deviceId: string; }
 const PHONE_TOKEN = 'abeoncloud.phoneToken';
 const DEVICE_ID = 'abeoncloud.deviceId';
+const SERVER_URL = 'abeoncloud.cloudServiceUrl';
+
+export async function saveServerUrl(url: string): Promise<void> {
+  await SecureStore.setItemAsync(SERVER_URL, url);
+}
+export async function loadServerUrl(): Promise<string | null> {
+  return SecureStore.getItemAsync(SERVER_URL);
+}
 
 export async function saveCredentials(c: Credentials): Promise<void> {
   await SecureStore.setItemAsync(PHONE_TOKEN, c.phoneToken);

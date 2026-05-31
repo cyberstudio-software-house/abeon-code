@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, useColorScheme } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TextInput, useColorScheme } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import { useStore } from '@/src/store';
 import { extractCode } from '@/src/lib/pairing';
 import { claimPairing } from '@/src/lib/api';
 import { registerForPush } from '@/src/lib/push';
+import { getCloudServiceUrl, setCloudServiceUrl } from '@/src/lib/config';
+import { saveServerUrl } from '@/src/lib/secure';
 import { resolveTokens } from '@/src/theme/tokens';
 
 function errorText(e: unknown): string {
@@ -24,6 +26,14 @@ export default function Pair() {
   const locked = useRef(false);
   const [status, setStatus] = useState<'scanning' | 'claiming' | 'error'>('scanning');
   const [error, setError] = useState<string | null>(null);
+  const [url, setUrl] = useState(getCloudServiceUrl());
+  const [urlSaved, setUrlSaved] = useState(false);
+
+  async function saveUrl() {
+    setCloudServiceUrl(url);
+    await saveServerUrl(url.trim());
+    setUrlSaved(true);
+  }
 
   function handleScan(data: string) {
     if (locked.current) return;
@@ -69,7 +79,26 @@ export default function Pair() {
         onBarcodeScanned={status === 'scanning' ? ({ data }: { data: string }) => handleScan(data) : undefined}
       />
       <View style={styles.hint}>
-        {status === 'scanning' && <Text style={styles.hintText}>Zeskanuj kod QR z aplikacji desktopowej</Text>}
+        {status === 'scanning' && (
+          <>
+            <Text style={styles.hintText}>Zeskanuj kod QR z aplikacji desktopowej</Text>
+            <View style={styles.urlBox}>
+              <TextInput
+                value={url}
+                onChangeText={(v) => { setUrl(v); setUrlSaved(false); }}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                placeholder="http://192.168.0.174:18080"
+                placeholderTextColor="rgba(255,255,255,0.5)"
+                style={styles.urlInput}
+              />
+              <Pressable onPress={() => void saveUrl()} style={[styles.retryBtn, { backgroundColor: t.accent, marginTop: 8 }]}>
+                <Text style={{ color: t.accentFg, fontWeight: '600' }}>{urlSaved ? 'Zapisano adres ✓' : 'Zapisz adres CloudService'}</Text>
+              </Pressable>
+            </View>
+          </>
+        )}
         {status === 'claiming' && <Text style={styles.hintText}>Parowanie…</Text>}
         {status === 'error' && (
           <View style={styles.errorBox}>
@@ -90,4 +119,6 @@ const styles = StyleSheet.create({
   hintText: { color: '#fff', fontWeight: '600', textAlign: 'center' },
   errorBox: { alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', padding: 16, borderRadius: 12 },
   retryBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 10 },
+  urlBox: { marginTop: 12, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', padding: 12, borderRadius: 12, alignSelf: 'stretch' },
+  urlInput: { alignSelf: 'stretch', color: '#fff', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', borderRadius: 10, padding: 10 },
 });

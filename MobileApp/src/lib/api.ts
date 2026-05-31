@@ -1,4 +1,4 @@
-import { CLOUD_SERVICE_URL } from '@/src/lib/config';
+import { getCloudServiceUrl } from '@/src/lib/config';
 import type { RemoteEnvelope } from '@/src/types/RemoteEnvelope';
 
 export class ApiError extends Error {
@@ -6,7 +6,7 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<T> {
-  const res = await fetch(`${CLOUD_SERVICE_URL}${path}`, {
+  const res = await fetch(`${getCloudServiceUrl()}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   });
