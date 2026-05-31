@@ -16,7 +16,7 @@ Repo is a **monorepo**:
 |-----|------|--------|
 | `DesktopApp/` | Tauri 2 + React 19 desktop app (the bridge lives here) | **done, live-validated** |
 | `CloudService/` | Auth/pairing + command-authorization microservice | **implemented (#3) — only k8s deploy pending** |
-| `MobileApp/` | React Native / Expo client (Expo SDK 56, managed) | **in progress (#4) — spec + Plan 1 (Foundation) merged; Plans 2–3 written, not yet built** |
+| `MobileApp/` | React Native / Expo client (Expo SDK 56, managed) | **MVP feature-complete (#4) — spec + Plans 1–3 implemented and merged; only EAS build/store + device QA remain** |
 | `crates/abeon-remote-core/` | Shared Rust contract crate (protocol/validation/token/channels) | **done — used by desktop + CloudService** |
 | `docs/superpowers/` | Specs, plans, research (project-wide) | — |
 
@@ -48,13 +48,21 @@ security hardening.
 > **Update (2026-05-31): #4 MobileApp design + Foundation landed.** Three HTML design
 > mockups were produced (`MobileApp/design/`); direction **v2 "Ewolucja marki"** was
 > chosen. The full design spec is in `docs/superpowers/specs/2026-05-31-abeoncloud-mobileapp-design.md`.
-> It is split into three plans: **Plan 1 (Foundation) is implemented and merged** —
-> Expo SDK 56 managed app (expo-router + Zustand), v2 theme tokens + brand fonts, the
-> CloudService REST client, expo-secure-store credentials, the Zustand auth slice, the
-> auth-gated tab shell, the QR pairing screen, and the shared contract types generated
-> by ts-rs into `MobileApp/src/types/` (identical to the desktop, desktop export
-> untouched). 17 jest tests + tsc clean. **Plans 2 (Sessions & control) and 3 (Push)
-> are written but NOT yet built** — see `docs/superpowers/plans/2026-05-31-mobileapp-{1,2,3}-*.md`.
+> It is split into three plans, **all now implemented and merged to `main`**
+> (`docs/superpowers/plans/2026-05-31-mobileapp-{1,2,3}-*.md`):
+> - **Plan 1 (Foundation):** Expo SDK 56 managed app (expo-router + Zustand), v2 theme +
+>   fonts, CloudService REST client, expo-secure-store creds, auth slice, auth-gated tab
+>   shell, QR pairing, shared contract types via ts-rs into `MobileApp/src/types/`.
+> - **Plan 2 (Sessions & control):** typed `SessionEvent` in the contract (reusing
+>   HistoryBlock/SessionActivity/UsageSummary; double-wrap fixed), `centrifuge` subscribe
+>   + parse, sessions/connection slices, session list + live history + commands
+>   (prompt/approve/deny/stop/resume), reconnect/resync via Centrifugo history.
+> - **Plan 3 (Push):** CloudService `expo_push_token` storage + `ExpoApi` client +
+>   `/v1/push-token` & `/v1/notify`; desktop notify hook on `WaitingUser` (best-effort,
+>   deduped); mobile Expo-token registration + deep-link on tap.
+>
+> Tests green across the board: MobileApp 35 jest + tsc clean, CloudService 15, Desktop 178.
+> Remaining for #4: EAS build + store submission + on-device QA (no more core code).
 > Read `MobileApp/CLAUDE.md` before working there (Node 22, `jest-expo/web` preset,
 > jest pinned 30.4.0, the ts-rs `export_to_string` mechanism — all hard-won).
 
@@ -173,13 +181,13 @@ the spec `docs/superpowers/specs/2026-05-31-abeoncloud-mobileapp-design.md`): Ex
 **Plans (`docs/superpowers/plans/2026-05-31-mobileapp-{1,2,3}-*.md`):**
 - **Plan 1 — Foundation: DONE (merged).** Scaffold, theme, contract export, REST client,
   secure-store, auth slice, auth gate + tab shell, QR pairing.
-- **Plan 2 — Sessions & control: WRITTEN, not built.** Promote the per-session mirror
-  events into a typed `SessionEvent` enum in `abeon-remote-core` (reusing the existing
-  `HistoryBlock` / `SessionActivity` / `UsageSummary` TS types), the `centrifuge`
-  subscribe + parse layer, session list, live history, the command actions
-  (prompt/approve/deny/stop/resume), and reconnect/resync via Centrifugo history.
-- **Plan 3 — Push: WRITTEN, not built.** Mobile push registration + CloudService
-  `/v1/push-token` & `/v1/notify` + an `ExpoApi` client + the desktop notify hook.
+- **Plan 2 — Sessions & control: DONE (merged).** Typed `SessionEvent` (defined in the
+  desktop `domain/session_event.rs`, reusing `HistoryBlock`/`SessionActivity`/`UsageSummary`,
+  double-wrap fixed, exported to both apps' `src/types/`), `centrifuge` subscribe + parse,
+  sessions/connection slices, session list + live history + commands, reconnect/resync.
+- **Plan 3 — Push: DONE (merged).** CloudService push-token storage + `ExpoApi` +
+  `/v1/push-token` & `/v1/notify`; desktop notify hook on `WaitingUser` (best-effort,
+  deduped); mobile Expo-token registration + deep-link on tap.
 
 **The API it consumes is fixed** (see `CloudService/README.md`):
 - `POST /v1/pair/claim {code}` → `{ phoneToken, deviceId }`; `POST /v1/token`
