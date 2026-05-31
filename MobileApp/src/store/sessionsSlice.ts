@@ -9,6 +9,8 @@ export interface Session {
   title: string | null;
   activity: SessionActivity | null;
   usage: UsageSummary | null;
+  projectId: number | null;
+  projectName: string | null;
   lastEventAt: number;
 }
 
@@ -20,7 +22,7 @@ export interface SessionsSlice {
 }
 
 function upsert(map: Map<string, Session>, id: string): Session {
-  return map.get(id) ?? { id, title: null, activity: null, usage: null, lastEventAt: 0 };
+  return map.get(id) ?? { id, title: null, activity: null, usage: null, projectId: null, projectName: null, lastEventAt: 0 };
 }
 
 export const createSessionsSlice: StateCreator<SessionsSlice, [], [], SessionsSlice> = (set, get) => ({
@@ -28,6 +30,22 @@ export const createSessionsSlice: StateCreator<SessionsSlice, [], [], SessionsSl
   history: new Map(),
   resetSessions: () => set({ sessions: new Map(), history: new Map() }),
   applySessionEvent: (e) => {
+    if (e.type === 'sessionRoster') {
+      const sessions = new Map(get().sessions);
+      for (const entry of e.entries) {
+        const prev = upsert(sessions, entry.sessionId);
+        sessions.set(entry.sessionId, {
+          ...prev,
+          title: entry.title,
+          activity: entry.activity,
+          projectId: entry.projectId,
+          projectName: entry.projectName,
+          lastEventAt: entry.lastModified,
+        });
+      }
+      set({ sessions });
+      return;
+    }
     const sessions = new Map(get().sessions);
     const history = new Map(get().history);
     const s: Session = { ...upsert(sessions, e.sessionId), lastEventAt: Date.now() };
