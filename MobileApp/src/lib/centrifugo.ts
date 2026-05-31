@@ -26,11 +26,26 @@ export interface CentrifugoHandles {
   disconnect: () => void;
 }
 
+export function applyHistoryPage(
+  publications: Array<{ data?: unknown }>,
+  onEvent: (e: SessionEvent) => void,
+): void {
+  for (const pub of publications) {
+    const e = parseSessionEvent(pub?.data);
+    if (e) onEvent(e);
+  }
+}
+
 // getToken is called by centrifuge whenever it needs a (fresh) connection JWT.
 export function createCentrifugo(getToken: () => Promise<string>): CentrifugoHandles {
   const client = new Centrifuge(CENTRIFUGO_WS_URL, { getToken: async () => getToken() });
   const subscribeSession = (sessionId: string, onEvent: (e: SessionEvent) => void) => {
     const sub = client.newSubscription(`abeon-cloud-sess:${sessionId}`);
+    sub.on('subscribed', (ctx) => {
+      if (!ctx.recovered) {
+        sub.history({ limit: 100 }).then((r) => applyHistoryPage(r.publications, onEvent)).catch(() => {});
+      }
+    });
     sub.on('publication', (ctx) => { const e = parseSessionEvent(ctx.data); if (e) onEvent(e); });
     sub.subscribe();
     return sub;

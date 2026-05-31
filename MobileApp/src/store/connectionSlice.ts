@@ -21,6 +21,9 @@ export const createConnectionSlice: StateCreator<Deps, [], [], ConnectionSlice> 
     if (!phoneToken || !deviceId || handles) return;
     const getToken = async () => (await fetchToken(phoneToken)).token;
     const h = createCentrifugo(getToken);
+    h.client.on('connecting', () => set({ connectionStatus: 'connecting' }));
+    h.client.on('connected', () => set({ connectionStatus: 'connected' }));
+    h.client.on('disconnected', () => set({ connectionStatus: 'disconnected' }));
     h.subscribeDevice(deviceId, () => { /* cmdResult acks; wired to UI feedback later */ });
     set({ handles: h, connectionStatus: 'connecting' });
   },

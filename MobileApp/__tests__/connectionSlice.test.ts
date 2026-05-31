@@ -1,6 +1,6 @@
 jest.mock('@/src/lib/secure', () => ({ saveCredentials: jest.fn(async () => {}), loadCredentials: jest.fn(async () => null), clearCredentials: jest.fn(async () => {}) }));
 jest.mock('@/src/lib/api', () => ({ fetchToken: jest.fn(async () => ({ token: 'jwt_1', expiresInSecs: 3600 })) }));
-const mockHandles = { client: {}, subscribeSession: jest.fn(), subscribeDevice: jest.fn(), disconnect: jest.fn() };
+const mockHandles = { client: { on: jest.fn() }, subscribeSession: jest.fn(), subscribeDevice: jest.fn(), disconnect: jest.fn() };
 jest.mock('@/src/lib/centrifugo', () => ({ createCentrifugo: jest.fn(() => mockHandles) }));
 
 import { createStore } from '@/src/store';
