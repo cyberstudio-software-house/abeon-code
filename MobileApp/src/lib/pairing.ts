@@ -1,8 +1,9 @@
 import { claimPairing, type PairClaim } from '@/src/lib/api';
 
-// Desktop encodes the pairing code as `abeoncloud://pair?code=XXXX` (or a bare code).
-// Codes are uppercase letters/digits and a dash, per the CloudService generator.
-const CODE_RE = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/;
+// Desktop encodes the pairing code in the QR (bare code, or `abeoncloud://pair?code=…`).
+// CloudService `generate_pairing_code` emits 8 chars from a no-ambiguous alphabet
+// (23456789 + A–Z minus I/L/O), no dash. Match exactly that.
+const CODE_RE = /^[2-9A-HJKMNP-Z]{8}$/;
 
 export function extractCode(payload: string): string | null {
   const m = payload.match(/[?&]code=([^&]+)/);
