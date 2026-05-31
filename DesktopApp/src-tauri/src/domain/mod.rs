@@ -6,6 +6,7 @@ pub mod shell;
 pub mod editor;
 pub mod usage;
 pub mod model;
+pub mod session_event;
 
 pub use project::*;
 pub use action::*;

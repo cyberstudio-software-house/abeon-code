@@ -116,10 +116,10 @@ impl SessionWatchers {
 
         let bus = self.bus.lock().clone();
         for (sid, blocks) in block_updates {
-            let blocks_json = serde_json::json!({ "blocks": blocks });
+            let blocks_json = serde_json::json!({ "blocks": &blocks });
             let _ = app.emit(&format!("session:{sid}:append"), &blocks_json);
             if let Some(b) = &bus {
-                b.publish(SessionBusEvent::Append { session_id: sid, blocks: blocks_json });
+                b.publish(SessionBusEvent::Append { session_id: sid, blocks });
             }
         }
         for (sid, title) in title_updates {
@@ -131,7 +131,7 @@ impl SessionWatchers {
         for (sid, summary) in usage_updates {
             let _ = app.emit(&format!("session:{sid}:usage"), &summary);
             if let Some(b) = &bus {
-                b.publish(SessionBusEvent::Usage { session_id: sid, summary: serde_json::to_value(&summary).unwrap_or_default() });
+                b.publish(SessionBusEvent::Usage { session_id: sid, summary });
             }
         }
 
@@ -148,7 +148,7 @@ impl SessionWatchers {
                 let activity_json = serde_json::json!({ "activity": new_activity });
                 let _ = app.emit(&format!("session:{sid}:activity"), &activity_json);
                 if let Some(b) = &bus {
-                    b.publish(SessionBusEvent::Activity { session_id: sid.clone(), activity: serde_json::to_value(new_activity).unwrap_or_default() });
+                    b.publish(SessionBusEvent::Activity { session_id: sid.clone(), activity: new_activity });
                 }
             }
         }

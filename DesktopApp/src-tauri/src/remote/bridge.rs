@@ -2,6 +2,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tauri::{AppHandle, Manager};
 
+use crate::domain::session_event::SessionEvent;
 use crate::error::AppResult;
 use crate::remote::bus::SessionBusEvent;
 use crate::remote::client::CentrifugoClient;
@@ -48,24 +49,17 @@ impl PtyActuator for AppPtyActuator {
 pub use abeon_remote_core::channels::{cmd_channel, result_channel, session_channel};
 
 fn encode_bus_event(event: SessionBusEvent) -> (String, serde_json::Value) {
-    match event {
-        SessionBusEvent::Append { session_id, blocks } => (
-            session_channel(&session_id),
-            serde_json::json!({ "type": "sessionAppend", "sessionId": session_id, "blocks": blocks }),
-        ),
-        SessionBusEvent::Activity { session_id, activity } => (
-            session_channel(&session_id),
-            serde_json::json!({ "type": "sessionActivity", "sessionId": session_id, "activity": activity }),
-        ),
-        SessionBusEvent::Title { session_id, title } => (
-            session_channel(&session_id),
-            serde_json::json!({ "type": "sessionTitle", "sessionId": session_id, "title": title }),
-        ),
-        SessionBusEvent::Usage { session_id, summary } => (
-            session_channel(&session_id),
-            serde_json::json!({ "type": "sessionUsage", "sessionId": session_id, "summary": summary }),
-        ),
-    }
+    let (session_id, ev) = match event {
+        SessionBusEvent::Append { session_id, blocks } =>
+            (session_id.clone(), SessionEvent::SessionAppend { session_id, blocks }),
+        SessionBusEvent::Activity { session_id, activity } =>
+            (session_id.clone(), SessionEvent::SessionActivity { session_id, activity }),
+        SessionBusEvent::Title { session_id, title } =>
+            (session_id.clone(), SessionEvent::SessionTitle { session_id, title }),
+        SessionBusEvent::Usage { session_id, summary } =>
+            (session_id.clone(), SessionEvent::SessionUsage { session_id, summary }),
+    };
+    (session_channel(&session_id), serde_json::to_value(ev).expect("SessionEvent serializes"))
 }
 
 /// Translates inbound remote commands into PTY effects and acknowledgements.
