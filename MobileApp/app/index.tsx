@@ -1,9 +1,8 @@
-import { View, Text } from 'react-native';
+import { Redirect } from 'expo-router';
+import { useStore } from '@/src/store';
+import { redirectTarget } from '@/src/lib/nav';
 
 export default function Index() {
-  return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-      <Text>AbeonCloud</Text>
-    </View>
-  );
+  const status = useStore((s) => s.status);
+  return <Redirect href={redirectTarget(status)} />;
 }
