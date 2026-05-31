@@ -63,6 +63,7 @@ pub async fn claim(
         token_hash: sha256_hex(&phone_token),
         created_at: now_unix(),
         last_used_at: None,
+        expo_push_token: None,
     };
     state.phones.create(&token).await?;
     Ok(Json(PairClaimResponse { phone_token, device_id: row.device_id }))

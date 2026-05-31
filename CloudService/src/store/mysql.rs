@@ -67,14 +67,15 @@ impl DeviceStore for MysqlStore {
 impl PhoneTokenStore for MysqlStore {
     async fn create(&self, t: &PhoneToken) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO phone_tokens (id, device_id, token_hash, created_at, last_used_at) \
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO phone_tokens (id, device_id, token_hash, created_at, last_used_at, expo_push_token) \
+             VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&t.id)
         .bind(&t.device_id)
         .bind(&t.token_hash)
         .bind(t.created_at)
         .bind(t.last_used_at)
+        .bind(&t.expo_push_token)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -82,7 +83,7 @@ impl PhoneTokenStore for MysqlStore {
 
     async fn find_by_hash(&self, hash: &str) -> anyhow::Result<Option<PhoneToken>> {
         let row = sqlx::query(
-            "SELECT id, device_id, token_hash, created_at, last_used_at \
+            "SELECT id, device_id, token_hash, created_at, last_used_at, expo_push_token \
              FROM phone_tokens WHERE token_hash = ?",
         )
         .bind(hash)
@@ -94,7 +95,29 @@ impl PhoneTokenStore for MysqlStore {
             token_hash: r.get("token_hash"),
             created_at: r.get("created_at"),
             last_used_at: r.get("last_used_at"),
+            expo_push_token: r.get("expo_push_token"),
         }))
+    }
+
+    async fn set_expo_push_token(&self, phone_id: &str, expo_token: &str) -> anyhow::Result<()> {
+        sqlx::query("UPDATE phone_tokens SET expo_push_token = ? WHERE id = ?")
+            .bind(expo_token)
+            .bind(phone_id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    async fn expo_push_token_for_device(&self, device_id: &str) -> anyhow::Result<Option<String>> {
+        let row = sqlx::query(
+            "SELECT expo_push_token FROM phone_tokens \
+             WHERE device_id = ? AND expo_push_token IS NOT NULL \
+             ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(device_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|r| r.get("expo_push_token")))
     }
 }
 

@@ -20,6 +20,7 @@ pub struct PhoneToken {
     pub token_hash: String,
     pub created_at: i64,
     pub last_used_at: Option<i64>,
+    pub expo_push_token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +44,8 @@ pub trait DeviceStore: Send + Sync {
 pub trait PhoneTokenStore: Send + Sync {
     async fn create(&self, token: &PhoneToken) -> anyhow::Result<()>;
     async fn find_by_hash(&self, hash: &str) -> anyhow::Result<Option<PhoneToken>>;
+    async fn set_expo_push_token(&self, phone_id: &str, expo_token: &str) -> anyhow::Result<()>;
+    async fn expo_push_token_for_device(&self, device_id: &str) -> anyhow::Result<Option<String>>;
 }
 
 #[async_trait]
@@ -89,6 +92,23 @@ impl PhoneTokenStore for InMemoryPhones {
     }
     async fn find_by_hash(&self, hash: &str) -> anyhow::Result<Option<PhoneToken>> {
         Ok(self.0.lock().unwrap().iter().find(|t| t.token_hash == hash).cloned())
+    }
+    async fn set_expo_push_token(&self, phone_id: &str, expo_token: &str) -> anyhow::Result<()> {
+        let mut tokens = self.0.lock().unwrap();
+        if let Some(t) = tokens.iter_mut().find(|t| t.id == phone_id) {
+            t.expo_push_token = Some(expo_token.to_string());
+        }
+        Ok(())
+    }
+    async fn expo_push_token_for_device(&self, device_id: &str) -> anyhow::Result<Option<String>> {
+        let tokens = self.0.lock().unwrap();
+        // Most-recent (created_at desc) token for this device_id that has expo_push_token set.
+        let result = tokens
+            .iter()
+            .filter(|t| t.device_id == device_id && t.expo_push_token.is_some())
+            .max_by_key(|t| t.created_at)
+            .and_then(|t| t.expo_push_token.clone());
+        Ok(result)
     }
 }
 
@@ -145,5 +165,31 @@ mod tests {
         store.create(&code2).await.unwrap();
         assert_eq!(store.take("h2", 150).await.unwrap(), Some(code2)); // valid
         assert_eq!(store.take("h2", 150).await.unwrap(), None);        // single-use
+    }
+
+    #[tokio::test]
+    async fn expo_push_token_set_and_lookup() {
+        let store = InMemoryPhones::default();
+        let token = PhoneToken {
+            id: "phone-1".into(),
+            device_id: "dev-1".into(),
+            token_hash: "hash-abc".into(),
+            created_at: 1000,
+            last_used_at: None,
+            expo_push_token: None,
+        };
+        store.create(&token).await.unwrap();
+
+        store.set_expo_push_token("phone-1", "ExponentPushToken[x]").await.unwrap();
+
+        let result = store.expo_push_token_for_device("dev-1").await.unwrap();
+        assert_eq!(result, Some("ExponentPushToken[x]".to_string()));
+    }
+
+    #[tokio::test]
+    async fn expo_push_token_for_unknown_device_returns_none() {
+        let store = InMemoryPhones::default();
+        let result = store.expo_push_token_for_device("nonexistent-device").await.unwrap();
+        assert_eq!(result, None);
     }
 }
