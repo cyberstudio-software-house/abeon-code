@@ -15,6 +15,8 @@ See the design: `../docs/superpowers/specs/2026-05-30-abeoncloud-cloudservice-de
 | POST   | `/v1/pair/start` | device          | Mint a one-time pairing code (QR)        |
 | POST   | `/v1/pair/claim` | none            | Phone redeems a code → phone token       |
 | POST   | `/v1/command`    | phone           | Validate + presence-gate + publish a command |
+| POST   | `/v1/push-token` | phone           | Register the phone's Expo push token     |
+| POST   | `/v1/notify`     | device          | Trigger a push to the paired phone (best-effort) |
 | GET    | `/healthz`       | none            | Liveness                                 |
 | GET    | `/readyz`        | none            | Readiness (DB ping)                      |
 
@@ -29,6 +31,13 @@ See the design: `../docs/superpowers/specs/2026-05-30-abeoncloud-cloudservice-de
 | `BIND_ADDR` | no | `0.0.0.0:8080` | listen address |
 | `TOKEN_TTL_SECS` | no | `3600` | JWT lifetime |
 | `PAIRING_TTL_SECS` | no | `300` | pairing-code lifetime |
+| `EXPO_PUSH_URL` | no | `https://exp.host` | Expo Push API base for `/v1/notify`. No API key needed for Expo-managed push tokens. Override only for a proxy/self-host. |
+
+> **Push (`/v1/notify`)** is best-effort and triggered by the desktop when a session enters
+> the "waiting for user" state (`SessionActivity::WaitingUser` — there is no permission-specific
+> signal; the push reads as "a session is waiting for you", de-duplicated per transition). It
+> needs no new secret. For k8s, add `EXPO_PUSH_URL` to the `cloudservice-config` ConfigMap only
+> if overriding the default.
 
 ## Develop / test
 
