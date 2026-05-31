@@ -193,9 +193,20 @@ session reconcile from history rather than assuming a continuous stream.
 
 ## Contract type sharing
 
-`crates/abeon-remote-core` adds `MobileApp/src/types/` as a second ts-rs `export_to`
-target (the desktop already targets `DesktopApp/src/types/`). MVP commands/events reuse:
-`RemoteCommand.ts`, `RemoteEnvelope.ts`, `RemoteEvent.ts`. Regeneration is the existing
+`crates/abeon-remote-core` exports the contract into `MobileApp/src/types/` as a second
+ts-rs target. Because `export_to` is single-target per type, this is done via an
+`export_all_to(...)` call in a crate test (the desktop keeps its attribute target). MVP
+commands/events reuse: `RemoteCommand.ts`, `RemoteEnvelope.ts`, `RemoteEvent.ts`.
+
+> **Note (from code reading):** only `RemoteEvent::cmdResult` is a typed contract value.
+> The **session mirror events** (`sessionAppend`/`sessionActivity`/`sessionTitle`/
+> `sessionUsage`) are currently published as **ad-hoc JSON** by the desktop bridge
+> (`encode_bus_event`), not as ts-rs types. Plan 2 resolves this — preferred direction:
+> promote them into the `abeon-remote-core` contract as a typed `SessionEvent` enum so
+> mobile consumes them typed and the desktop publishes typed JSON. The mobile data flow
+> below assumes that typing lands in Plan 2.
+
+Regeneration is the existing
 `cargo test --manifest-path crates/abeon-remote-core/Cargo.toml`; after regen, verify
 both type dirs are updated and no stray dirs appear (the ts-rs path-depth gotcha from
 onboarding). A thin hand-written `lib/api.ts` wraps the CloudService REST calls; a
