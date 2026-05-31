@@ -18,11 +18,14 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@react-native/jest-preset": "^0.85.3",
     "@testing-library/react-native": "^13.3.3",
     "@types/jest": "^30.0.0",
     "@types/react": "~19.2.2",
-    "jest": "^30.4.2",
+    "babel-preset-expo": "^56.0.14",
+    "jest": "30.4.0",
     "jest-expo": "^56.0.4",
+    "react-test-renderer": "19.2.3",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -32,6 +35,20 @@
     "web": "expo start --web",
     "lint": "tsc --noEmit",
     "test": "jest"
+  },
+  "overrides": {
+    "jest": "30.4.0",
+    "jest-cli": "30.4.0",
+    "jest-config": "30.4.0",
+    "jest-runner": "30.4.0",
+    "jest-runtime": "30.4.0",
+    "jest-mock": "30.4.0",
+    "jest-snapshot": "30.4.0",
+    "jest-circus": "30.4.0",
+    "jest-environment-node": "30.4.0",
+    "@jest/core": "30.4.0",
+    "@jest/transform": "30.4.0",
+    "expect": "30.4.0"
   },
   "private": true
 }
