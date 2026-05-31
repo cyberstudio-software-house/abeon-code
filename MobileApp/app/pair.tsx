@@ -31,6 +31,7 @@ export default function Pair() {
         onBarcodeScanned={busy ? undefined : ({ data }: { data: string }) => {
           setBusy(true);
           claimScannedCode(data, async (c) => { await pair(c); router.replace('/(tabs)/sessions'); })
+            .then((claimed) => { if (!claimed) setBusy(false); })
             .catch(() => setBusy(false));
         }}
       />

@@ -10,8 +10,12 @@ export function extractCode(payload: string): string | null {
   return CODE_RE.test(candidate) ? candidate : null;
 }
 
-export async function claimScannedCode(payload: string, onPaired: (c: PairClaim) => void): Promise<void> {
+// Returns true if the payload held a valid code and a claim was made, false if the
+// payload was ignored. The caller uses this to re-arm a scanner that would otherwise
+// stay disarmed after scanning an unrelated QR.
+export async function claimScannedCode(payload: string, onPaired: (c: PairClaim) => void): Promise<boolean> {
   const code = extractCode(payload);
-  if (!code) return;
+  if (!code) return false;
   onPaired(await claimPairing(code));
+  return true;
 }
