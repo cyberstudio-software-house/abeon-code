@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc};
 use tauri::{AppHandle, Manager};
 
+use crate::domain::roster::RosterEntry;
 use crate::domain::session::SessionActivity;
 use crate::domain::session_event::SessionEvent;
 use crate::error::AppResult;
@@ -27,6 +28,12 @@ pub trait PtyActuator: Send + Sync {
     fn kill(&self, pty_id: &str) -> AppResult<()>;
     /// Spawn `claude --resume <session_id>` for `project_id`; returns the new pty id.
     fn spawn_resume(&self, session_id: &str, project_id: i64) -> AppResult<String>;
+}
+
+/// Supplies the current session roster for RequestRoster + the startup snapshot.
+/// Isolated as a trait so the run loop is testable without a DB.
+pub trait RosterProvider: Send + Sync {
+    fn snapshot(&self) -> Vec<RosterEntry>;
 }
 
 /// Production `PtyActuator` backed by the live app: writes/kills via `PtyManager`
@@ -54,10 +61,28 @@ impl PtyActuator for AppPtyActuator {
     }
 }
 
+/// Production `RosterProvider` backed by the live app: reads a pooled connection
+/// from `AppState` and enumerates the roster via `commands::sessions::roster_snapshot`.
+pub struct AppRosterProvider {
+    app: AppHandle,
+}
+
+impl AppRosterProvider {
+    pub fn new(app: AppHandle) -> Self { Self { app } }
+}
+
+impl RosterProvider for AppRosterProvider {
+    fn snapshot(&self) -> Vec<RosterEntry> {
+        let state = self.app.state::<AppState>();
+        let conn = match state.db.get() { Ok(c) => c, Err(_) => return Vec::new() };
+        crate::commands::sessions::roster_snapshot(&conn).unwrap_or_default()
+    }
+}
+
 pub use abeon_remote_core::channels::{cmd_channel, result_channel, session_channel};
 
-fn encode_bus_event(event: SessionBusEvent) -> (String, serde_json::Value) {
-    let (session_id, ev) = match event {
+fn encode_bus_event(event: &SessionBusEvent) -> (String, serde_json::Value) {
+    let (session_id, ev) = match event.clone() {
         SessionBusEvent::Append { session_id, blocks } =>
             (session_id.clone(), SessionEvent::SessionAppend { session_id, blocks }),
         SessionBusEvent::Activity { session_id, activity } =>
@@ -68,6 +93,19 @@ fn encode_bus_event(event: SessionBusEvent) -> (String, serde_json::Value) {
             (session_id.clone(), SessionEvent::SessionUsage { session_id, summary }),
     };
     (session_channel(&session_id), serde_json::to_value(ev).expect("SessionEvent serializes"))
+}
+
+fn encode_roster(entries: Vec<RosterEntry>) -> serde_json::Value {
+    serde_json::to_value(SessionEvent::SessionRoster { entries }).expect("SessionRoster serializes")
+}
+
+/// Returns Some(value) for the lightweight metadata events that should ALSO be
+/// mirrored to the device channel; None for Append (too heavy — per-session only).
+fn device_mirror(event: &SessionBusEvent) -> Option<serde_json::Value> {
+    match event {
+        SessionBusEvent::Append { .. } => None,
+        other => Some(encode_bus_event(other).1),
+    }
 }
 
 /// Translates inbound remote commands into PTY effects and acknowledgements.
@@ -112,7 +150,9 @@ impl RemoteBridge {
     /// Pump inbound commands and outbound session events until the inbound channel
     /// closes. Commands are handled via `handle_envelope` and their `cmdResult` is
     /// published to `result_channel(device_id)`; session-bus events are forwarded
-    /// to `session_channel(session_id)`.
+    /// to `session_channel(session_id)`. A `SessionRoster` snapshot is published to
+    /// the device channel on startup and again in answer to `RequestRoster`, and
+    /// lightweight metadata bus events are mirrored to the device channel.
     pub async fn run(
         self: Arc<Self>,
         device_id: String,
@@ -120,19 +160,29 @@ impl RemoteBridge {
         mut bus: broadcast::Receiver<SessionBusEvent>,
         client: Arc<dyn CentrifugoClient>,
         actuator: Arc<dyn PtyActuator>,
+        roster: Arc<dyn RosterProvider>,
         cloud: Option<Arc<CloudClient>>,
         device_secret: Option<String>,
     ) {
-        let results = result_channel(&device_id);
+        let dev_channel = result_channel(&device_id);
+        let _ = client.publish(&dev_channel, encode_roster(roster.snapshot())).await;
         let mut last_activity: HashMap<String, SessionActivity> = HashMap::new();
         loop {
             tokio::select! {
                 maybe_env = inbound.recv() => {
                     match maybe_env {
                         Some(env) => {
-                            let ev = self.handle_envelope(env, actuator.as_ref());
-                            if let Ok(data) = serde_json::to_value(&ev) {
-                                let _ = client.publish(&results, data).await;
+                            if matches!(env.command, crate::remote::protocol::RemoteCommand::RequestRoster) {
+                                let _ = client.publish(&dev_channel, encode_roster(roster.snapshot())).await;
+                                let ack = RemoteEvent::CmdResult { command_id: env.command_id, ok: true, error: None };
+                                if let Ok(data) = serde_json::to_value(&ack) {
+                                    let _ = client.publish(&dev_channel, data).await;
+                                }
+                            } else {
+                                let ev = self.handle_envelope(env, actuator.as_ref());
+                                if let Ok(data) = serde_json::to_value(&ev) {
+                                    let _ = client.publish(&dev_channel, data).await;
+                                }
                             }
                         }
                         None => break,
@@ -154,8 +204,11 @@ impl RemoteBridge {
                                     }
                                 }
                             }
-                            let (channel, data) = encode_bus_event(event);
+                            let (channel, data) = encode_bus_event(&event);
                             let _ = client.publish(&channel, data).await;
+                            if let Some(mirror) = device_mirror(&event) {
+                                let _ = client.publish(&dev_channel, mirror).await;
+                            }
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => continue,
                         Err(broadcast::error::RecvError::Closed) => break,
@@ -192,6 +245,15 @@ mod tests {
             self.spawns.lock().push((session_id.into(), project_id));
             Ok(format!("pty-for-{session_id}"))
         }
+    }
+
+    #[derive(Default)]
+    struct FakeRosterProvider {
+        entries: Vec<RosterEntry>,
+    }
+
+    impl RosterProvider for FakeRosterProvider {
+        fn snapshot(&self) -> Vec<RosterEntry> { self.entries.clone() }
     }
 
     fn envelope(id: &str, cmd: RemoteCommand) -> RemoteEnvelope {
@@ -269,19 +331,19 @@ mod tests {
         let client = std::sync::Arc::new(FakeCentrifugoClient::new());
         let actuator: std::sync::Arc<dyn PtyActuator> = std::sync::Arc::new(FakePtyActuator::default());
 
+        let roster: std::sync::Arc<dyn RosterProvider> = std::sync::Arc::new(FakeRosterProvider::default());
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         let bus = crate::remote::bus::RemoteEventBus::new();
         let client_for_run = client.clone();
-        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator, None, None));
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator, roster, None, None));
 
         tx.send(RemoteEnvelope { command_id: "c1".into(), command: crate::remote::protocol::RemoteCommand::SendPrompt { session_id: "s1".into(), text: "hi".into() } }).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let published = client.published();
-        assert_eq!(published.len(), 1);
-        assert_eq!(published[0].0, "abeon-cloud-dev:dev-1");
-        assert_eq!(published[0].1["type"], "cmdResult");
-        assert_eq!(published[0].1["ok"], true);
+        // [0] = startup sessionRoster snapshot, [1] = cmdResult for the inbound command.
+        assert!(published.iter().any(|(ch, d)| ch == "abeon-cloud-dev:dev-1" && d["type"] == "sessionRoster"));
+        assert!(published.iter().any(|(ch, d)| ch == "abeon-cloud-dev:dev-1" && d["type"] == "cmdResult" && d["ok"] == true));
 
         drop(tx); // close inbound → loop ends
         let _ = handle.await;
@@ -296,22 +358,66 @@ mod tests {
         let client = std::sync::Arc::new(FakeCentrifugoClient::new());
         let actuator: std::sync::Arc<dyn PtyActuator> = std::sync::Arc::new(FakePtyActuator::default());
 
+        let roster: std::sync::Arc<dyn RosterProvider> = std::sync::Arc::new(FakeRosterProvider::default());
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         let bus = crate::remote::bus::RemoteEventBus::new();
         let client_for_run = client.clone();
-        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator, None, None));
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator, roster, None, None));
 
         bus.publish(crate::remote::bus::SessionBusEvent::Title { session_id: "s1".into(), title: "Hello".into() });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let published = client.published();
-        assert_eq!(published.len(), 1);
-        assert_eq!(published[0].0, "abeon-cloud-sess:s1");
-        assert_eq!(published[0].1["type"], "sessionTitle");
-        assert_eq!(published[0].1["title"], "Hello");
+        // The startup sessionRoster snapshot is also published to the device channel.
+        assert!(published.iter().any(|(ch, d)| ch == "abeon-cloud-sess:s1" && d["type"] == "sessionTitle" && d["title"] == "Hello"));
+        assert!(published.iter().any(|(ch, d)| ch == "abeon-cloud-dev:dev-1" && d["type"] == "sessionTitle" && d["title"] == "Hello"));
 
         drop(tx);
         let _ = handle.await;
         drop(bus);
+    }
+
+    #[tokio::test]
+    async fn request_roster_publishes_snapshot_and_ack() {
+        use crate::remote::client::FakeCentrifugoClient;
+        use crate::remote::protocol::RemoteCommand;
+        let bridge = std::sync::Arc::new(RemoteBridge::new(std::sync::Arc::new(SessionPtyRegistry::new()), false));
+        let client = std::sync::Arc::new(FakeCentrifugoClient::new());
+        let actuator: std::sync::Arc<dyn PtyActuator> = std::sync::Arc::new(FakePtyActuator::default());
+        let roster: std::sync::Arc<dyn RosterProvider> = std::sync::Arc::new(FakeRosterProvider {
+            entries: vec![RosterEntry { session_id: "s1".into(), project_id: 1, project_name: "p".into(), title: "t".into(), activity: crate::domain::session::SessionActivity::Idle, last_modified: 1 }],
+        });
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        let bus = crate::remote::bus::RemoteEventBus::new();
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client.clone(), actuator, roster, None, None));
+
+        tx.send(RemoteEnvelope { command_id: "c1".into(), command: RemoteCommand::RequestRoster }).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let pubs = client.published();
+        // [0] = startup snapshot, [1] = requested snapshot, [2] = cmdResult ack
+        assert!(pubs.iter().any(|(ch, d)| ch == "abeon-cloud-dev:dev-1" && d["type"] == "sessionRoster" && d["entries"][0]["sessionId"] == "s1"));
+        assert!(pubs.iter().any(|(ch, d)| ch == "abeon-cloud-dev:dev-1" && d["type"] == "cmdResult" && d["ok"] == true));
+        drop(tx); let _ = handle.await; drop(bus);
+    }
+
+    #[tokio::test]
+    async fn activity_bus_event_is_mirrored_to_device_channel() {
+        use crate::remote::client::FakeCentrifugoClient;
+        let bridge = std::sync::Arc::new(RemoteBridge::new(std::sync::Arc::new(SessionPtyRegistry::new()), false));
+        let client = std::sync::Arc::new(FakeCentrifugoClient::new());
+        let actuator: std::sync::Arc<dyn PtyActuator> = std::sync::Arc::new(FakePtyActuator::default());
+        let roster: std::sync::Arc<dyn RosterProvider> = std::sync::Arc::new(FakeRosterProvider::default());
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        let bus = crate::remote::bus::RemoteEventBus::new();
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client.clone(), actuator, roster, None, None));
+
+        bus.publish(crate::remote::bus::SessionBusEvent::Activity { session_id: "s1".into(), activity: crate::domain::session::SessionActivity::WaitingUser });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let pubs = client.published();
+        assert!(pubs.iter().any(|(ch, d)| ch == "abeon-cloud-sess:s1" && d["type"] == "sessionActivity"));
+        assert!(pubs.iter().any(|(ch, d)| ch == "abeon-cloud-dev:dev-1" && d["type"] == "sessionActivity"));
+        drop(tx); let _ = handle.await; drop(bus);
     }
 }
