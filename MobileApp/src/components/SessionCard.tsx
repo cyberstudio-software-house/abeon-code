@@ -41,17 +41,13 @@ export function SessionCard({ session, onPress, onApprove, onDeny }: SessionCard
     ? session.usage.tokens.input + session.usage.tokens.output
     : null;
 
-  const cardBg = isWaiting
-    ? t.bgElev
-    : t.bgElev;
-
   return (
     <Pressable
       onPress={onPress}
       style={[
         styles.card,
         {
-          backgroundColor: cardBg,
+          backgroundColor: t.bgElev,
           borderColor: isWaiting ? t.accent : t.border,
           borderWidth: isWaiting ? 1.5 : 1,
         },

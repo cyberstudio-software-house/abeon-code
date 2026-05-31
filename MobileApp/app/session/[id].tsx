@@ -14,8 +14,11 @@ export default function SessionScreen() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
   const t = resolveTokens(scheme);
 
-  // Subscribe to the session channel on mount
+  // Subscribe to the session channel on mount. connect() is idempotent and
+  // synchronously creates the handles, so deep-linking straight here (without the
+  // sessions tab having mounted) still opens a working subscription.
   useEffect(() => {
+    useStore.getState().connect();
     const h = useStore.getState().handles;
     const sub = h?.subscribeSession(id, useStore.getState().applySessionEvent);
     return () => { sub?.unsubscribe(); };
