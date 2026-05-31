@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AbeonCloud Mobile · Kierunki designu</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Geist',system-ui,sans-serif;background:
+    radial-gradient(900px 500px at 12% -8%,#efe1c8,transparent 55%),
+    radial-gradient(800px 480px at 105% 10%,#e7dcc6,transparent 50%),#efe9de;
+    color:#201d18;min-height:100vh;padding:64px 28px 90px;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1100px;margin:0 auto}
+  .eyebrow{font-family:'Geist Mono',monospace;font-size:12px;letter-spacing:.24em;text-transform:uppercase;color:#b07c2e;font-weight:500}
+  h1{font-size:clamp(32px,5vw,50px);font-weight:600;letter-spacing:-.025em;margin:10px 0 10px}
+  .lead{color:#5f5a50;max-width:64ch;font-size:16px;line-height:1.6}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin-top:44px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  a.card{display:block;text-decoration:none;color:inherit;background:#fffdf9;border:1px solid #e7e0d3;border-radius:22px;padding:24px;
+    box-shadow:0 1px 1px rgba(60,40,10,.04),0 10px 30px -12px rgba(80,55,15,.18);transition:transform .18s ease,box-shadow .18s ease}
+  a.card:hover{transform:translateY(-4px);box-shadow:0 1px 1px rgba(60,40,10,.04),0 22px 44px -16px rgba(80,55,15,.3)}
+  .num{font-family:'Geist Mono',monospace;font-size:12px;color:#b07c2e;font-weight:600;letter-spacing:.1em}
+  .swatch{display:flex;gap:6px;margin:16px 0}
+  .swatch i{width:26px;height:26px;border-radius:8px;border:1px solid rgba(0,0,0,.06)}
+  .card h2{font-size:22px;font-weight:600;letter-spacing:-.01em;margin-bottom:6px}
+  .card p{color:#5f5a50;font-size:14px;line-height:1.55}
+  .go{margin-top:16px;font-family:'Geist Mono',monospace;font-size:12px;color:#b07c2e;font-weight:600;letter-spacing:.06em}
+  .note{margin-top:42px;font-size:13px;color:#897f70;font-family:'Geist Mono',monospace;letter-spacing:.02em}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="eyebrow">AbeonCloud Mobile · #4</div>
+    <h1>Trzy kierunki designu</h1>
+    <p class="lead">Ten sam zestaw ekranów (lista sesji + live history) w trybie jasnym i ciemnym, na spektrum od wiernej kopii desktopa po śmiały redesign. Wybierz kierunek — potem przechodzimy do planowania technicznego.</p>
+
+    <div class="grid">
+      <a class="card" href="./v1-faithful.html">
+        <div class="num">01 / 03</div>
+        <div class="swatch"><i style="background:#faf8f5"></i><i style="background:#b78640"></i><i style="background:#1a1a1a"></i><i style="background:#c14a3d"></i></div>
+        <h2>Wierna siostra</h2>
+        <p>DNA desktopa 1:1 — ciepły papier, złoto, Geist. Spokojny, edytorski, natychmiast znajomy.</p>
+        <div class="go">Otwórz →</div>
+      </a>
+
+      <a class="card" href="./v2-evolution.html">
+        <div class="num">02 / 03</div>
+        <div class="swatch"><i style="background:#f7f3ec"></i><i style="background:#b07c2e"></i><i style="background:#d6a44c"></i><i style="background:#201d18"></i></div>
+        <h2>Ewolucja marki</h2>
+        <p>Złote DNA jako appka premium — serif Fraunces, warstwowa głębia, dolna nawigacja, pływający pasek.</p>
+        <div class="go">Otwórz →</div>
+      </a>
+
+      <a class="card" href="./v3-bold.html">
+        <div class="num">03 / 03</div>
+        <div class="swatch"><i style="background:#0d0c0a"></i><i style="background:#e6b057"></i><i style="background:#6cd05e"></i><i style="background:#ef7063"></i></div>
+        <h2>Command Deck</h2>
+        <p>Śmiały terminal-native pulpit operatora — monospace, narożne wsporniki, alarmowy modal zgody.</p>
+        <div class="go">Otwórz →</div>
+      </a>
+    </div>
+
+    <div class="note">// Każdy plik jest samodzielny — otwórz bezpośrednio w przeglądarce.</div>
+  </div>
+</body>
+</html>

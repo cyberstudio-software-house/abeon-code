@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AbeonCloud Mobile · v1 — Wierna siostra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     v1 — "Wierna siostra"
+     Brand DNA of the desktop AbeonCode: warm paper, gold accent,
+     Geist + Geist Mono, terracotta danger. Calm, editorial, refined.
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --gold: #b78640;
+    --paper: #faf8f5;
+    --ink: #1a1a1a;
+    --font: 'Geist', system-ui, sans-serif;
+    --mono: 'Geist Mono', ui-monospace, monospace;
+  }
+
+  /* Light token set */
+  .phone--light {
+    --bg: #faf8f5; --bg-elev: #ffffff; --bg-elev-2: #f2f0ed;
+    --fg: #1a1a1a; --fg-2: #52504a; --muted: #94918a;
+    --border: #e8e6e1; --accent: #b78640; --accent-fg: #ffffff;
+    --danger: #c14a3d; --success: #3f9d44; --warn: #d99a2b;
+    --accent-soft: #f3e9d6; --danger-soft: #f7e4e1; --success-soft: #e3f1e1;
+    --shadow: 0 1px 2px rgba(26,26,26,.04), 0 8px 24px rgba(26,26,26,.06);
+  }
+  /* Dark token set (mirrors DesktopApp globals.css dark theme) */
+  .phone--dark {
+    --bg: #121210; --bg-elev: #1a1917; --bg-elev-2: #232220;
+    --fg: #e8e6e1; --fg-2: #a8a59e; --muted: #6b6860;
+    --border: #2e2d2a; --accent: #d4a04e; --accent-fg: #121210;
+    --danger: #ec6a5e; --success: #61c454; --warn: #f4be4f;
+    --accent-soft: #2c2519; --danger-soft: #321f1c; --success-soft: #1c2a1b;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 32px rgba(0,0,0,.5);
+  }
+
+  body {
+    font-family: var(--font);
+    background:
+      radial-gradient(1200px 600px at 15% -5%, #f0eadf, transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, #efe7d8, transparent 55%),
+      #f4f1ec;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    padding: 56px 28px 80px;
+    min-height: 100vh;
+  }
+
+  /* ---------- page header ---------- */
+  .masthead { max-width: 1180px; margin: 0 auto 48px; }
+  .masthead .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .22em;
+    text-transform: uppercase; color: var(--gold); font-weight: 600;
+  }
+  .masthead h1 {
+    font-size: clamp(30px, 5vw, 46px); font-weight: 600; letter-spacing: -.025em;
+    margin: 10px 0 6px; color: #1a1a1a;
+  }
+  .masthead h1 b { color: var(--gold); font-weight: 600; }
+  .masthead p { color: #6b675f; max-width: 60ch; font-size: 16px; line-height: 1.55; }
+  .masthead .rule { height: 1px; background: linear-gradient(90deg, var(--gold), transparent); margin-top: 28px; }
+
+  /* ---------- stage / phone grid ---------- */
+  .stage {
+    max-width: 1180px; margin: 0 auto; display: grid;
+    grid-template-columns: repeat(2, 1fr); gap: 28px 56px;
+  }
+  .theme-col { display: flex; flex-direction: column; gap: 22px; }
+  .theme-col__label {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .15em;
+    text-transform: uppercase; color: #8a857c; display: flex; align-items: center; gap: 10px;
+  }
+  .theme-col__label::after { content: ''; flex: 1; height: 1px; background: #ddd6cb; }
+  .phones { display: flex; gap: 24px; flex-wrap: wrap; }
+
+  /* ---------- the phone shell ---------- */
+  .phone {
+    width: 300px; height: 640px; border-radius: 44px; position: relative;
+    background: var(--bg); color: var(--fg); overflow: hidden;
+    box-shadow:
+      0 0 0 11px #1c1b19, 0 0 0 13px #2c2a27,
+      0 30px 60px -20px rgba(40,30,10,.45);
+    display: flex; flex-direction: column;
+  }
+  .phone__island {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    width: 92px; height: 26px; background: #000; border-radius: 16px; z-index: 30;
+  }
+  .statusbar {
+    height: 46px; flex: none; display: flex; align-items: flex-end; justify-content: space-between;
+    padding: 0 24px 6px; font-size: 13px; font-weight: 600; font-feature-settings: "tnum";
+    color: var(--fg);
+  }
+  .statusbar .glyphs { display: flex; gap: 6px; align-items: center; font-size: 11px; }
+
+  /* ---------- app header ---------- */
+  .appbar {
+    flex: none; padding: 6px 18px 14px; border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .appbar__top { display: flex; align-items: center; justify-content: space-between; }
+  .brand { display: flex; align-items: center; gap: 9px; }
+  .brand__mark {
+    width: 28px; height: 28px; border-radius: 9px; flex: none;
+    background: linear-gradient(145deg, var(--accent), #9c6f2f);
+    display: grid; place-items: center; color: var(--accent-fg);
+    font-family: var(--mono); font-weight: 700; font-size: 15px;
+    box-shadow: 0 2px 6px rgba(120,80,20,.35);
+  }
+  .brand__name { font-weight: 600; font-size: 15px; letter-spacing: -.01em; }
+  .brand__name span { color: var(--accent); }
+  .icon-btn {
+    width: 32px; height: 32px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--bg-elev); color: var(--fg-2); display: grid; place-items: center; font-size: 15px;
+  }
+  .screen-title { margin-top: 14px; display: flex; align-items: baseline; justify-content: space-between; }
+  .screen-title h2 { font-size: 21px; font-weight: 600; letter-spacing: -.02em; }
+  .screen-title .count {
+    font-family: var(--mono); font-size: 12px; color: var(--muted);
+    background: var(--bg-elev-2); padding: 3px 9px; border-radius: 99px;
+  }
+
+  /* ---------- scroll body ---------- */
+  .body { flex: 1; overflow: hidden; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+
+  /* ---------- session card ---------- */
+  .card {
+    background: var(--bg-elev); border: 1px solid var(--border); border-radius: 18px;
+    padding: 14px; box-shadow: var(--shadow); position: relative;
+  }
+  .card.is-waiting { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+  .card__head { display: flex; align-items: flex-start; gap: 10px; }
+  .dot { width: 9px; height: 9px; border-radius: 99px; margin-top: 5px; flex: none; }
+  .dot--work { background: var(--success); box-shadow: 0 0 0 4px var(--success-soft); }
+  .dot--wait { background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  .dot--idle { background: var(--muted); }
+  .card__title { font-weight: 600; font-size: 15px; line-height: 1.25; letter-spacing: -.01em; }
+  .card__path { font-family: var(--mono); font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+  .card__meta { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .tag {
+    font-family: var(--mono); font-size: 11px; padding: 3px 8px; border-radius: 7px;
+    background: var(--bg-elev-2); color: var(--fg-2); display: inline-flex; align-items: center; gap: 5px;
+  }
+  .tag--model { color: var(--accent); background: var(--accent-soft); }
+  .card__time { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+  .status-pill {
+    font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 99px;
+  }
+  .status-pill--wait { color: var(--accent); background: var(--accent-soft); }
+  .card__cta {
+    margin-top: 12px; display: flex; gap: 8px;
+  }
+  .mini-btn {
+    flex: 1; font-size: 12.5px; font-weight: 600; padding: 8px; border-radius: 10px; border: none;
+    font-family: var(--font);
+  }
+  .mini-btn--approve { background: var(--accent); color: var(--accent-fg); }
+  .mini-btn--deny { background: var(--bg-elev-2); color: var(--fg-2); border: 1px solid var(--border); }
+
+  /* ---------- live history ---------- */
+  .turn { display: flex; flex-direction: column; gap: 5px; }
+  .turn__who {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--muted); display: flex; align-items: center; gap: 6px;
+  }
+  .turn__who b { color: var(--accent); font-weight: 600; }
+  .bubble {
+    border-radius: 14px; padding: 11px 13px; font-size: 13.5px; line-height: 1.5;
+  }
+  .bubble--user { background: var(--accent-soft); color: var(--fg); align-self: flex-end; max-width: 86%; border-bottom-right-radius: 5px; }
+  .bubble--ai { background: var(--bg-elev); border: 1px solid var(--border); color: var(--fg); }
+  .bubble--ai code, .codeblock { font-family: var(--mono); }
+  .codeblock {
+    background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 10px;
+    padding: 9px 11px; font-size: 11.5px; line-height: 1.5; margin-top: 8px; color: var(--fg-2);
+    overflow: hidden; white-space: pre;
+  }
+  .codeblock .add { color: var(--success); }
+  .codeblock .del { color: var(--danger); }
+  .toolcall {
+    font-family: var(--mono); font-size: 11.5px; color: var(--fg-2); margin-top: 8px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .toolcall .ic { color: var(--accent); }
+  .working {
+    display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--fg-2);
+    font-style: italic; padding: 2px 2px;
+  }
+  .working .pulse {
+    width: 8px; height: 8px; border-radius: 99px; background: var(--success);
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{ opacity:.3; transform: scale(.8);} 50%{ opacity:1; transform: scale(1.2);} }
+
+  /* ---------- permission prompt (the decisive moment) ---------- */
+  .perm {
+    border: 1.5px solid var(--accent); background: var(--accent-soft);
+    border-radius: 16px; padding: 13px; box-shadow: var(--shadow);
+  }
+  .perm__label {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600; display: flex; align-items: center; gap: 6px;
+  }
+  .perm__cmd {
+    font-family: var(--mono); font-size: 12.5px; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; margin: 9px 0 11px;
+  }
+  .perm__actions { display: flex; gap: 9px; }
+  .btn { flex: 1; font-family: var(--font); font-weight: 600; font-size: 13.5px; padding: 11px; border-radius: 12px; border: none; }
+  .btn--approve { background: var(--accent); color: var(--accent-fg); box-shadow: 0 4px 12px -2px color-mix(in srgb, var(--accent) 60%, transparent); }
+  .btn--deny { background: var(--bg-elev); color: var(--danger); border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border)); }
+
+  /* ---------- command bar ---------- */
+  .cmdbar {
+    flex: none; border-top: 1px solid var(--border); background: var(--bg-elev);
+    padding: 11px 14px 16px; display: flex; flex-direction: column; gap: 9px;
+  }
+  .cmdbar__input {
+    display: flex; align-items: center; gap: 9px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 14px; padding: 9px 12px;
+  }
+  .cmdbar__input span { color: var(--muted); font-size: 13.5px; flex: 1; }
+  .cmdbar__send {
+    width: 34px; height: 34px; border-radius: 11px; background: var(--accent); color: var(--accent-fg);
+    display: grid; place-items: center; font-size: 16px;
+  }
+  .cmdbar__quick { display: flex; gap: 7px; }
+  .chip {
+    font-size: 11.5px; font-weight: 600; padding: 6px 11px; border-radius: 99px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--fg-2); display: inline-flex; align-items: center; gap: 5px;
+  }
+  .chip--stop { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+
+  .caption {
+    text-align: center; font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+    text-transform: uppercase; color: #9a958b; margin-top: 4px;
+  }
+  .scroll-fade { position: relative; }
+</style>
+</head>
+<body>
+  <header class="masthead">
+    <div class="eyebrow">AbeonCloud Mobile · Kierunek 01 / 03</div>
+    <h1>Wierna <b>siostra</b></h1>
+    <p>DNA desktopowego AbeonCode przeniesione 1:1 na telefon: ciepły papier, złoty akcent, krój Geist, terakotowy kolor decyzji. Spokojny, edytorski charakter — telefon czuje się jak ta sama aplikacja, tylko w kieszeni.</p>
+    <div class="rule"></div>
+  </header>
+
+  <div class="stage">
+    <!-- ================= LIGHT ================= -->
+    <div class="theme-col">
+      <div class="theme-col__label">Tryb jasny</div>
+      <div class="phones">
+
+        <!-- LIGHT · session list -->
+        <div class="phone phone--light">
+          <div class="phone__island"></div>
+          <div class="statusbar"><span>9:41</span><span class="glyphs">􀙇 􀛨 􀛪</span></div>
+          <div class="appbar">
+            <div class="appbar__top">
+              <div class="brand">
+                <div class="brand__mark">A</div>
+                <div class="brand__name">Abeon<span>Cloud</span></div>
+              </div>
+              <div class="icon-btn">⌕</div>
+            </div>
+            <div class="screen-title"><h2>Sesje</h2><span class="count">4 aktywne</span></div>
+          </div>
+          <div class="body">
+            <div class="card is-waiting">
+              <div class="card__head">
+                <div class="dot dot--wait"></div>
+                <div style="flex:1">
+                  <div class="card__title">Refaktor modułu płatności</div>
+                  <div class="card__path">abeon4 / payments</div>
+                </div>
+                <span class="status-pill status-pill--wait">Czeka na zgodę</span>
+              </div>
+              <div class="card__meta">
+                <span class="tag tag--model">Opus 4.8</span>
+                <span class="tag">142k tok</span>
+                <span class="card__time">2 min temu</span>
+              </div>
+              <div class="card__cta">
+                <button class="mini-btn mini-btn--approve">Zatwierdź</button>
+                <button class="mini-btn mini-btn--deny">Odrzuć</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card__head">
+                <div class="dot dot--work"></div>
+                <div style="flex:1">
+                  <div class="card__title">Naprawa testów e2e</div>
+                  <div class="card__path">abeon4 / web</div>
+                </div>
+              </div>
+              <div class="card__meta">
+                <span class="tag tag--model">Sonnet 4.6</span>
+                <span class="tag">38k tok</span>
+                <span class="card__time">teraz</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card__head">
+                <div class="dot dot--idle"></div>
+                <div style="flex:1">
+                  <div class="card__title">Migracja plików do OCS</div>
+                  <div class="card__path">laravel-shop</div>
+                </div>
+              </div>
+              <div class="card__meta">
+                <span class="tag tag--model">Opus 4.8</span>
+                <span class="tag">211k tok</span>
+                <span class="card__time">18 min temu</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- LIGHT · live history -->
+        <div class="phone phone--light">
+          <div class="phone__island"></div>
+          <div class="statusbar"><span>9:41</span><span class="glyphs">􀙇 􀛨 􀛪</span></div>
+          <div class="appbar">
+            <div class="appbar__top">
+              <div class="brand">
+                <div class="icon-btn" style="width:30px;height:30px">‹</div>
+                <div class="brand__name" style="font-size:14px">Refaktor płatności</div>
+              </div>
+              <div class="icon-btn">⋯</div>
+            </div>
+            <div class="screen-title">
+              <span class="working"><span class="pulse"></span>Claude pracuje…</span>
+              <span class="count">Opus 4.8</span>
+            </div>
+          </div>
+          <div class="body" style="gap:14px">
+            <div class="turn">
+              <div class="turn__who"><b>Ty</b></div>
+              <div class="bubble bubble--user">Dodaj walidację kwoty przelewu i zaokrąglij do 2 miejsc.</div>
+            </div>
+            <div class="turn">
+              <div class="turn__who"><b>Claude</b> · asystent</div>
+              <div class="bubble bubble--ai">
+                Dodaję regułę walidacji i pomocnik zaokrąglania w <code>PaymentService</code>.
+                <div class="toolcall"><span class="ic">✎</span> Edytuję <b>PaymentService.php</b></div>
+                <div class="codeblock"><span class="add">+ $amount = round($amount, 2);</span>
+<span class="add">+ if ($amount &lt;= 0) throw new …</span></div>
+              </div>
+            </div>
+            <div class="perm">
+              <div class="perm__label">⚠ Prośba o zgodę</div>
+              <div style="font-size:13px;line-height:1.45;color:var(--fg)">Claude chce uruchomić migrację bazy:</div>
+              <div class="perm__cmd">$ php artisan migrate</div>
+              <div class="perm__actions">
+                <button class="btn btn--approve">Zatwierdź</button>
+                <button class="btn btn--deny">Odrzuć</button>
+              </div>
+            </div>
+          </div>
+          <div class="cmdbar">
+            <div class="cmdbar__input">
+              <span>Napisz polecenie…</span>
+              <div class="cmdbar__send">↑</div>
+            </div>
+            <div class="cmdbar__quick">
+              <span class="chip chip--stop">■ Zatrzymaj</span>
+              <span class="chip">↻ Wznów</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Lista sesji · Live history</div>
+    </div>
+
+    <!-- ================= DARK ================= -->
+    <div class="theme-col">
+      <div class="theme-col__label">Tryb ciemny</div>
+      <div class="phones">
+
+        <!-- DARK · session list -->
+        <div class="phone phone--dark">
+          <div class="phone__island"></div>
+          <div class="statusbar"><span>9:41</span><span class="glyphs">􀙇 􀛨 􀛪</span></div>
+          <div class="appbar">
+            <div class="appbar__top">
+              <div class="brand">
+                <div class="brand__mark">A</div>
+                <div class="brand__name">Abeon<span>Cloud</span></div>
+              </div>
+              <div class="icon-btn">⌕</div>
+            </div>
+            <div class="screen-title"><h2>Sesje</h2><span class="count">4 aktywne</span></div>
+          </div>
+          <div class="body">
+            <div class="card is-waiting">
+              <div class="card__head">
+                <div class="dot dot--wait"></div>
+                <div style="flex:1">
+                  <div class="card__title">Refaktor modułu płatności</div>
+                  <div class="card__path">abeon4 / payments</div>
+                </div>
+                <span class="status-pill status-pill--wait">Czeka na zgodę</span>
+              </div>
+              <div class="card__meta">
+                <span class="tag tag--model">Opus 4.8</span>
+                <span class="tag">142k tok</span>
+                <span class="card__time">2 min temu</span>
+              </div>
+              <div class="card__cta">
+                <button class="mini-btn mini-btn--approve">Zatwierdź</button>
+                <button class="mini-btn mini-btn--deny">Odrzuć</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card__head">
+                <div class="dot dot--work"></div>
+                <div style="flex:1">
+                  <div class="card__title">Naprawa testów e2e</div>
+                  <div class="card__path">abeon4 / web</div>
+                </div>
+              </div>
+              <div class="card__meta">
+                <span class="tag tag--model">Sonnet 4.6</span>
+                <span class="tag">38k tok</span>
+                <span class="card__time">teraz</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card__head">
+                <div class="dot dot--idle"></div>
+                <div style="flex:1">
+                  <div class="card__title">Migracja plików do OCS</div>
+                  <div class="card__path">laravel-shop</div>
+                </div>
+              </div>
+              <div class="card__meta">
+                <span class="tag tag--model">Opus 4.8</span>
+                <span class="tag">211k tok</span>
+                <span class="card__time">18 min temu</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DARK · live history -->
+        <div class="phone phone--dark">
+          <div class="phone__island"></div>
+          <div class="statusbar"><span>9:41</span><span class="glyphs">􀙇 􀛨 􀛪</span></div>
+          <div class="appbar">
+            <div class="appbar__top">
+              <div class="brand">
+                <div class="icon-btn" style="width:30px;height:30px">‹</div>
+                <div class="brand__name" style="font-size:14px">Refaktor płatności</div>
+              </div>
+              <div class="icon-btn">⋯</div>
+            </div>
+            <div class="screen-title">
+              <span class="working"><span class="pulse"></span>Claude pracuje…</span>
+              <span class="count">Opus 4.8</span>
+            </div>
+          </div>
+          <div class="body" style="gap:14px">
+            <div class="turn">
+              <div class="turn__who"><b>Ty</b></div>
+              <div class="bubble bubble--user">Dodaj walidację kwoty przelewu i zaokrąglij do 2 miejsc.</div>
+            </div>
+            <div class="turn">
+              <div class="turn__who"><b>Claude</b> · asystent</div>
+              <div class="bubble bubble--ai">
+                Dodaję regułę walidacji i pomocnik zaokrąglania w <code>PaymentService</code>.
+                <div class="toolcall"><span class="ic">✎</span> Edytuję <b>PaymentService.php</b></div>
+                <div class="codeblock"><span class="add">+ $amount = round($amount, 2);</span>
+<span class="add">+ if ($amount &lt;= 0) throw new …</span></div>
+              </div>
+            </div>
+            <div class="perm">
+              <div class="perm__label">⚠ Prośba o zgodę</div>
+              <div style="font-size:13px;line-height:1.45;color:var(--fg)">Claude chce uruchomić migrację bazy:</div>
+              <div class="perm__cmd">$ php artisan migrate</div>
+              <div class="perm__actions">
+                <button class="btn btn--approve">Zatwierdź</button>
+                <button class="btn btn--deny">Odrzuć</button>
+              </div>
+            </div>
+          </div>
+          <div class="cmdbar">
+            <div class="cmdbar__input">
+              <span>Napisz polecenie…</span>
+              <div class="cmdbar__send">↑</div>
+            </div>
+            <div class="cmdbar__quick">
+              <span class="chip chip--stop">■ Zatrzymaj</span>
+              <span class="chip">↻ Wznów</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="caption">Lista sesji · Live history</div>
+    </div>
+  </div>
+</body>
+</html>
