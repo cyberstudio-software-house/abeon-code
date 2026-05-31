@@ -22,7 +22,10 @@ export const createConnectionSlice: StateCreator<Deps, [], [], ConnectionSlice> 
     if (!phoneToken || !deviceId || handles) return;
     const getToken = async () => (await fetchToken(phoneToken)).token;
     const h = createCentrifugo(getToken);
-    const requestRoster = () => { void dispatchCommand(phoneToken, { type: 'requestRoster' }); };
+    // Desktop offline at connect → command 409 (presence gate). The spec treats this
+    // as routine: keep the (history-backfilled) list and re-request on the next
+    // `connected`. Swallow the rejection so it isn't an unhandled-promise warning.
+    const requestRoster = () => { dispatchCommand(phoneToken, { type: 'requestRoster' }).catch(() => {}); };
     h.client.on('connecting', () => set({ connectionStatus: 'connecting' }));
     h.client.on('connected', () => { set({ connectionStatus: 'connected' }); requestRoster(); });
     h.client.on('disconnected', () => set({ connectionStatus: 'disconnected' }));
