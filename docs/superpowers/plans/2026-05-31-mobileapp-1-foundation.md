@@ -6,7 +6,13 @@
 
 **Architecture:** expo-router (file-based nav) + Zustand (slice store, like DesktopApp). A thin `lib/api.ts` wraps the fixed CloudService REST endpoints; `lib/secure.ts` wraps `expo-secure-store`. The Rust contract crate (`crates/abeon-remote-core`) gains a second ts-rs export target so `RemoteCommand`/`RemoteEnvelope`/`RemoteEvent` land in the mobile app too. This plan stops at "paired + token fetched"; live Centrifugo subscriptions and session UI are Plan 2.
 
-**Tech Stack:** Expo SDK (managed) · expo-router · Zustand · expo-camera · expo-secure-store · TypeScript · Jest + @testing-library/react-native · ts-rs 11 (Rust).
+**Tech Stack:** Expo SDK 56 (managed) · expo-router · Zustand · expo-camera · expo-secure-store · TypeScript · Jest + @testing-library/react-native · ts-rs 11 (Rust).
+
+> **Environment notes (learned during Task 1 — already applied):**
+> - Use **Node 22** via nvm (`export PATH="$HOME/.nvm/versions/node/v22.22.2/bin:$PATH"`) for every npm/npx/node command; the default shell node is v18 and too old.
+> - Jest is pinned to **30.4.0** with an `overrides` block: the registry's jest 30.4.2 is inconsistent (jest-mock only goes to 30.4.1 → `clearMocksOnScope` crash).
+> - Jest uses the **`jest-expo/web`** preset, NOT the default native preset (the native preset loads SDK 56's winter runtime whose lazy globals trip jest 30's between-tests require guard). `jest.config.js` also maps the `@/` path alias via `moduleNameMapper`.
+> - Keep test targets as **pure logic** where practical so they don't import the RN/expo-router runtime.
 
 > **Scope note / findings from code reading (carry into Plan 2):**
 > 1. **Session mirror events are untyped JSON**, not ts-rs types. Only `RemoteEvent::cmdResult` is typed. The desktop bridge publishes ad-hoc `{ "type": "sessionAppend"|"sessionActivity"|"sessionTitle"|"sessionUsage", ... }` to `abeon-cloud-sess:<id>` (see `DesktopApp/src-tauri/src/remote/bridge.rs::encode_bus_event`). Plan 2 must decide: hand-write TS types for these four events, or promote them into the `abeon-remote-core` contract as a typed `SessionEvent` enum (recommended). This plan only exports the three already-typed contract types.
@@ -585,13 +591,15 @@ git commit -m "feat(mobile): add Zustand auth slice (pair/unpair/hydrate)"
 
 **Files:**
 - Modify: `MobileApp/app/_layout.tsx`, `MobileApp/app/index.tsx`
-- Create: `MobileApp/app/(tabs)/_layout.tsx`, `MobileApp/app/(tabs)/sessions.tsx`, `MobileApp/app/(tabs)/activity.tsx`, `MobileApp/app/(tabs)/settings.tsx`, `MobileApp/__tests__/index.test.tsx`
+- Create: `MobileApp/src/lib/nav.ts`, `MobileApp/app/(tabs)/_layout.tsx`, `MobileApp/app/(tabs)/sessions.tsx`, `MobileApp/app/(tabs)/activity.tsx`, `MobileApp/app/(tabs)/settings.tsx`, `MobileApp/__tests__/nav.test.ts`
+
+> **Note:** `redirectTarget` lives in a **pure module** `src/lib/nav.ts` (not in `app/index.tsx`) so its test never imports the expo-router runtime — keeping the test pure under the `jest-expo/web` preset.
 
 - [ ] **Step 1: Write the failing test (redirect logic)**
 
-`MobileApp/__tests__/index.test.tsx`:
-```tsx
-import { redirectTarget } from '@/app/index';
+`MobileApp/__tests__/nav.test.ts`:
+```ts
+import { redirectTarget } from '@/src/lib/nav';
 
 test('paired users go to the sessions tab', () => {
   expect(redirectTarget('paired')).toBe('/(tabs)/sessions');
@@ -603,19 +611,23 @@ test('unpaired users go to pairing', () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd MobileApp && npx jest index`
-Expected: FAIL — `redirectTarget` is not exported.
+Run: `cd MobileApp && npx jest nav`
+Expected: FAIL — cannot find module `@/src/lib/nav`.
 
-- [ ] **Step 3: Implement index with an exported, testable target helper**
+- [ ] **Step 3: Implement the pure helper, then use it in index**
+
+`MobileApp/src/lib/nav.ts`:
+```ts
+export function redirectTarget(status: 'paired' | 'unpaired'): string {
+  return status === 'paired' ? '/(tabs)/sessions' : '/pair';
+}
+```
 
 `MobileApp/app/index.tsx`:
 ```tsx
 import { Redirect } from 'expo-router';
 import { useStore } from '@/src/store';
-
-export function redirectTarget(status: 'paired' | 'unpaired'): string {
-  return status === 'paired' ? '/(tabs)/sessions' : '/pair';
-}
+import { redirectTarget } from '@/src/lib/nav';
 
 export default function Index() {
   const status = useStore((s) => s.status);
@@ -699,7 +711,7 @@ Expected: lint exits 0; all jest specs PASS.
 
 ```bash
 cd /home/pszweda/projects/cyberstudio/AbeonCode
-git add MobileApp/app MobileApp/__tests__/index.test.tsx
+git add MobileApp/app MobileApp/src/lib/nav.ts MobileApp/__tests__/nav.test.ts
 git commit -m "feat(mobile): add auth-gated routing and bottom tab shell"
 ```
 
