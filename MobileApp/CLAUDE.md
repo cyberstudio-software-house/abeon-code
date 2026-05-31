@@ -66,3 +66,10 @@ Regenerate contract types (from repo root, needs cargo):
 ```bash
 cargo test --manifest-path crates/abeon-remote-core/Cargo.toml
 ```
+
+## EAS (build / push)
+
+- `eas.json` defines `development` / `preview` / `production` build profiles (managed, `appVersionSource: remote`).
+- The EAS **projectId** lives in `app.json` `extra.eas.projectId` (`cb3ebb61-…`). `src/lib/push.ts` reads it via `expo-constants` and passes it to `getExpoPushTokenAsync` — **required for push tokens on a real build** (the no-arg call fails on device).
+- Building/submitting needs an interactive `eas login` (run yourself: `! eas login`, then `! eas build --profile preview`). Push only works end-to-end on a real device build (Expo Go can't receive the production push reliably) with the CloudService `/v1/notify` reachable.
+
