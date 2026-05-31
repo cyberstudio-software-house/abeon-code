@@ -31,3 +31,10 @@ export function sendCommand(phoneToken: string, envelope: RemoteEnvelope): Promi
     body: JSON.stringify(envelope),
   });
 }
+export function registerPushToken(phoneToken: string, expoToken: string): Promise<unknown> {
+  return request('/v1/push-token', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${phoneToken}` },
+    body: JSON.stringify({ expoToken }),
+  });
+}

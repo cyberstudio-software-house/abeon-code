@@ -1,4 +1,4 @@
-import { claimPairing, fetchToken, sendCommand } from '@/src/lib/api';
+import { claimPairing, fetchToken, sendCommand, registerPushToken } from '@/src/lib/api';
 import type { RemoteEnvelope } from '@/src/types/RemoteEnvelope';
 
 const okJson = (body: unknown, status = 200) =>
@@ -36,4 +36,13 @@ test('sendCommand posts the envelope with Bearer auth', async () => {
 test('a non-2xx response throws ApiError with the status', async () => {
   global.fetch = jest.fn(() => okJson({ error: 'invalid or expired pairing code' }, 400)) as unknown as typeof fetch;
   await expect(claimPairing('bad')).rejects.toMatchObject({ status: 400 });
+});
+
+test('registerPushToken posts the expo token with Bearer auth', async () => {
+  global.fetch = jest.fn(() => okJson({})) as unknown as typeof fetch;
+  await registerPushToken('pt_1', 'ExponentPushToken[x]');
+  const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+  expect(url).toContain('/v1/push-token');
+  expect(init.headers.Authorization).toBe('Bearer pt_1');
+  expect(JSON.parse(init.body)).toEqual({ expoToken: 'ExponentPushToken[x]' });
 });

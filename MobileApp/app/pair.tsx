@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import { useStore } from '@/src/store';
 import { claimScannedCode } from '@/src/lib/pairing';
 import { resolveTokens } from '@/src/theme/tokens';
+import { registerForPush } from '@/src/lib/push';
 
 export default function Pair() {
   const t = resolveTokens(useColorScheme() === 'dark' ? 'dark' : 'light');
@@ -30,7 +31,7 @@ export default function Pair() {
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
         onBarcodeScanned={busy ? undefined : ({ data }: { data: string }) => {
           setBusy(true);
-          claimScannedCode(data, async (c) => { await pair(c); router.replace('/(tabs)/sessions'); })
+          claimScannedCode(data, async (c) => { await pair(c); void registerForPush(c.phoneToken); router.replace('/(tabs)/sessions'); })
             .then((claimed) => { if (!claimed) setBusy(false); })
             .catch(() => setBusy(false));
         }}
