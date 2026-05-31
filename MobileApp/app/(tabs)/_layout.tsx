@@ -1,6 +1,9 @@
 import { Tabs } from 'expo-router';
 import { View, type ColorValue } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+// Import the Ionicons subpath directly, NOT the `@expo/vector-icons` barrel: the barrel
+// pulls in every icon family lazily (incl. FontAwesome6, whose vendor glyphmap is missing
+// in this version) and breaks the Metro bundle. The subpath loads only Ionicons.
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { resolveTokens } from '@/src/theme/tokens';
 import { useColorScheme } from 'react-native';
 import { ConnectionBanner } from '@/src/components/ConnectionBanner';
