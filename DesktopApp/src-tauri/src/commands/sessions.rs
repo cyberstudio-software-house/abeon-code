@@ -8,6 +8,9 @@ use crate::sessions::reader;
 use crate::sessions::reader::session_file;
 use crate::state::AppState;
 use crate::db::{projects_repo, session_titles_repo};
+use crate::domain::roster::RosterEntry;
+
+const ROSTER_SESSIONS_PER_PROJECT: usize = 30;
 
 fn claude_root() -> AppResult<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home".into()))?;
@@ -233,4 +236,55 @@ fn render_markdown(h: &SessionHistory) -> String {
         }
     }
     out
+}
+
+/// Build a roster of the most-recent sessions across all projects. Used by the
+/// remote bridge to answer RequestRoster. Failures for a single project are skipped
+/// (a missing claude dir must not sink the whole roster).
+pub fn roster_snapshot(conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>) -> AppResult<Vec<RosterEntry>> {
+    let mut out = Vec::new();
+    for proj in projects_repo::list(conn)? {
+        let dir = match session_dir(&proj) { Ok(d) => d, Err(_) => continue };
+        let project_id = proj.id;
+        let project_name = proj.name.clone();
+        let mut sessions = match catch(move || reader::list_sessions(project_id, &dir, ROSTER_SESSIONS_PER_PROJECT, 0)) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let titles = session_titles_repo::get_all(conn, project_id);
+        for s in &mut sessions {
+            if let Some(t) = titles.get(&s.id) { s.title = t.clone(); }
+            out.push(RosterEntry {
+                session_id: s.id.clone(),
+                project_id,
+                project_name: project_name.clone(),
+                title: s.title.clone(),
+                activity: s.activity,
+                last_modified: s.last_modified,
+            });
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod roster_tests {
+    use super::*;
+    use crate::db::init_pool;
+    use tempfile::NamedTempFile;
+
+    fn pool() -> crate::db::DbPool {
+        let f = NamedTempFile::new().unwrap();
+        let path = f.path().to_path_buf();
+        std::mem::forget(f);
+        init_pool(&path).unwrap()
+    }
+
+    #[test]
+    fn roster_snapshot_empty_db_is_empty() {
+        let p = pool();
+        let c = p.get().unwrap();
+        let entries = roster_snapshot(&c).unwrap();
+        assert!(entries.is_empty());
+    }
 }
