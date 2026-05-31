@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "abeon-mobile",
-    "slug": "abeon-mobile",
+    "slug": "abeoncode",
     "scheme": "abeoncloud",
     "version": "1.0.0",
     "orientation": "portrait",
