@@ -23,6 +23,8 @@ pub enum RemoteCommand {
         #[ts(type = "number")]
         project_id: i64,
     },
+    /// Mobile asks the desktop to publish a full SessionRoster snapshot.
+    RequestRoster,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

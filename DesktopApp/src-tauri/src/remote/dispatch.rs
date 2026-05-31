@@ -64,6 +64,9 @@ pub fn command_to_action(
                 PtyAction::Reject { reason: "remote spawn disabled".into() }
             }
         }
+        RemoteCommand::RequestRoster => {
+            PtyAction::Reject { reason: "requestRoster has no pty effect".into() }
+        }
     }
 }
 

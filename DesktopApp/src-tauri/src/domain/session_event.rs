@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use crate::domain::session::{HistoryBlock, SessionActivity};
 use crate::domain::usage::UsageSummary;
+use crate::domain::roster::RosterEntry;
 
 /// The per-session mirror events the bridge publishes to `abeon-cloud-sess:<id>`.
 /// Typed so the mobile app consumes them safely. Wire format is camelCase, `type`-tagged.
@@ -13,6 +14,7 @@ pub enum SessionEvent {
     SessionActivity { session_id: String, activity: SessionActivity },
     SessionTitle { session_id: String, title: String },
     SessionUsage { session_id: String, summary: UsageSummary },
+    SessionRoster { entries: Vec<RosterEntry> },
 }
 
 #[cfg(test)]
@@ -39,6 +41,27 @@ mod tests {
     }
 
     #[test]
+    fn session_roster_wire_is_flat_entries() {
+        use crate::domain::roster::RosterEntry;
+        use crate::domain::session::SessionActivity;
+        let ev = SessionEvent::SessionRoster {
+            entries: vec![RosterEntry {
+                session_id: "s1".into(),
+                project_id: 7,
+                project_name: "demo".into(),
+                title: "Hello".into(),
+                activity: SessionActivity::Idle,
+                last_modified: 123,
+            }],
+        };
+        let json = serde_json::to_value(&ev).unwrap();
+        assert_eq!(json["type"], "sessionRoster");
+        assert!(json["entries"].is_array());
+        assert_eq!(json["entries"][0]["sessionId"], "s1");
+        assert_eq!(json["entries"][0]["projectName"], "demo");
+    }
+
+    #[test]
     fn export_session_event_to_mobile_app() {
         use ts_rs::TS;
         use crate::domain::session::{HistoryBlock, SessionActivity};
@@ -52,6 +75,7 @@ mod tests {
             ("UsageSummary", UsageSummary::export_to_string().unwrap()),
             ("TokenTotals", TokenTotals::export_to_string().unwrap()),
             ("ModelUsage", ModelUsage::export_to_string().unwrap()),
+            ("RosterEntry", crate::domain::roster::RosterEntry::export_to_string().unwrap()),
         ] {
             std::fs::write(dir.join(format!("{name}.ts")), body).unwrap();
         }

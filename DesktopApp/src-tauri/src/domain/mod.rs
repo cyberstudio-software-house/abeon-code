@@ -7,6 +7,7 @@ pub mod editor;
 pub mod usage;
 pub mod model;
 pub mod session_event;
+pub mod roster;
 
 pub use project::*;
 pub use action::*;
