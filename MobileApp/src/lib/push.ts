@@ -31,18 +31,29 @@ export function initPushHandler(): void {
 }
 
 // Requests OS permission, gets the Expo push token, registers it with CloudService.
-// Returns false if push is unsupported (Expo Go) or permission was denied.
+// Returns false if push is unsupported (Expo Go), permission was denied, or token
+// acquisition failed. Push is a best-effort enhancement (Plan 3) — pairing and sessions
+// must work without it — so every failure is swallowed here rather than propagated. On a
+// real Android build getExpoPushTokenAsync throws unless FCM (`googleServicesFile`) is
+// configured; callers use `void registerForPush(...)`, so an unhandled rejection here
+// would surface as a runtime error and look like a crash. Keep it contained.
 export async function registerForPush(phoneToken: string): Promise<boolean> {
   if (!PUSH_SUPPORTED) return false;
-  const Notifications = loadNotifications();
-  const { status } = await Notifications.requestPermissionsAsync();
-  if (status !== 'granted') return false;
-  const projectId = easProjectId();
-  const { data: expoToken } = await Notifications.getExpoPushTokenAsync(
-    projectId ? { projectId } : undefined,
-  );
-  await registerPushToken(phoneToken, expoToken);
-  return true;
+  try {
+    const Notifications = loadNotifications();
+    const { status } = await Notifications.requestPermissionsAsync();
+    if (status !== 'granted') return false;
+    const projectId = easProjectId();
+    const { data: expoToken } = await Notifications.getExpoPushTokenAsync(
+      projectId ? { projectId } : undefined,
+    );
+    await registerPushToken(phoneToken, expoToken);
+    return true;
+  } catch (e) {
+    // FCM not configured, network error, etc. — log and continue without push.
+    console.warn('[push] registration skipped:', e);
+    return false;
+  }
 }
 
 // Registers a tap handler that deep-links to the session carried in the push `data`.
