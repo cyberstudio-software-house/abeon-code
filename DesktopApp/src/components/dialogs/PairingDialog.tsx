@@ -4,13 +4,19 @@ import { tauri, type PairCode } from '../../lib/tauri';
 
 // Tauri command errors reject with the serialized `AppError` shape `{ code, message }`
 // (see src-tauri/src/error.rs). `String(e)` on that object yields "[object Object]",
-// so pull out the human-readable message, with fallbacks for plain Error/string.
+// so read `code`/`message` and turn the common failures into actionable Polish hints.
 function errorText(e: unknown): string {
-  if (typeof e === 'string') return e;
-  if (e && typeof e === 'object' && 'message' in e) {
-    return String((e as { message: unknown }).message);
+  const obj = e && typeof e === 'object' ? (e as { code?: unknown; message?: unknown }) : null;
+  const code = obj && typeof obj.code === 'string' ? obj.code : '';
+  const message = obj && typeof obj.message === 'string' ? obj.message : typeof e === 'string' ? e : '';
+
+  if (code === 'invalid_input' && message.includes('cloudServiceUrl')) {
+    return 'Najpierw ustaw adres CloudService w Ustawieniach (sekcja AbeonCloud), potem spróbuj ponownie.';
   }
-  return 'Nie udało się wygenerować kodu parowania.';
+  if (code === 'other') {
+    return `Nie udało się połączyć z CloudService: ${message}. Sprawdź, czy usługa działa pod skonfigurowanym adresem.`;
+  }
+  return message || 'Nie udało się wygenerować kodu parowania.';
 }
 
 export function PairingDialog({ onClose }: { onClose: () => void }) {
