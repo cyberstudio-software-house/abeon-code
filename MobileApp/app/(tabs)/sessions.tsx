@@ -1,11 +1,11 @@
 import { useEffect, useMemo } from 'react';
-import { View, Text, FlatList, StyleSheet, useColorScheme } from 'react-native';
+import { View, Text, SectionList, StyleSheet, useColorScheme } from 'react-native';
 import { router } from 'expo-router';
 import { useStore } from '@/src/store';
 import { resolveTokens } from '@/src/theme/tokens';
 import { SessionCard } from '@/src/components/SessionCard';
 import { dispatchCommand } from '@/src/lib/dispatch';
-import type { Session } from '@/src/store/sessionsSlice';
+import { groupByProject } from '@/src/lib/roster';
 
 export default function Sessions() {
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -19,10 +19,7 @@ export default function Sessions() {
   const sessions = useStore((s) => s.sessions);
   const phoneToken = useStore((s) => s.phoneToken);
 
-  const list = useMemo(
-    () => [...sessions.values()].sort((a, b) => b.lastEventAt - a.lastEventAt),
-    [sessions],
-  );
+  const sections = useMemo(() => groupByProject([...sessions.values()]), [sessions]);
 
   function handleApprove(sessionId: string) {
     if (!phoneToken) return;
@@ -36,10 +33,13 @@ export default function Sessions() {
 
   return (
     <View style={[styles.container, { backgroundColor: t.bg }]}>
-      <FlatList<Session>
-        data={list}
+      <SectionList
+        sections={sections}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
+        renderSectionHeader={({ section }) => (
+          <Text style={[styles.sectionHeader, { color: t.muted }]}>{section.title}</Text>
+        )}
         renderItem={({ item }) => (
           <SessionCard
             session={item}
@@ -63,6 +63,14 @@ const styles = StyleSheet.create({
   listContent: {
     padding: 16,
     flexGrow: 1,
+  },
+  sectionHeader: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 12,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   emptyText: {
     textAlign: 'center',
