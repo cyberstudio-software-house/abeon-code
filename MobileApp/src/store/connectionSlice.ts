@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand';
 import { fetchToken } from '@/src/lib/api';
 import { createCentrifugo, type CentrifugoHandles } from '@/src/lib/centrifugo';
+import { dispatchCommand } from '@/src/lib/dispatch';
 import type { AuthSlice } from '@/src/store/authSlice';
 import type { SessionsSlice } from '@/src/store/sessionsSlice';
 
@@ -21,10 +22,15 @@ export const createConnectionSlice: StateCreator<Deps, [], [], ConnectionSlice> 
     if (!phoneToken || !deviceId || handles) return;
     const getToken = async () => (await fetchToken(phoneToken)).token;
     const h = createCentrifugo(getToken);
+    const requestRoster = () => { void dispatchCommand(phoneToken, { type: 'requestRoster' }); };
     h.client.on('connecting', () => set({ connectionStatus: 'connecting' }));
-    h.client.on('connected', () => set({ connectionStatus: 'connected' }));
+    h.client.on('connected', () => { set({ connectionStatus: 'connected' }); requestRoster(); });
     h.client.on('disconnected', () => set({ connectionStatus: 'disconnected' }));
-    h.subscribeDevice(deviceId, () => { /* cmdResult acks; wired to UI feedback later */ });
+    h.subscribeDevice(
+      deviceId,
+      () => { /* cmdResult acks; wired to UI feedback later */ },
+      (e) => get().applySessionEvent(e),
+    );
     set({ handles: h, connectionStatus: 'connecting' });
   },
   disconnect: () => {

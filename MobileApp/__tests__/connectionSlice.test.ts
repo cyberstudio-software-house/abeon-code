@@ -17,7 +17,7 @@ test('connect() requires a paired token and opens centrifuge', async () => {
   const getToken = (createCentrifugo as jest.Mock).mock.calls[0][0];
   expect(await getToken()).toBe('jwt_1');
   expect(fetchToken).toHaveBeenCalledWith('pt_1');
-  expect(mockHandles.subscribeDevice).toHaveBeenCalledWith('dev_1', expect.any(Function));
+  expect(mockHandles.subscribeDevice).toHaveBeenCalledWith('dev_1', expect.any(Function), expect.any(Function));
 });
 
 test('connect() is a no-op when unpaired', () => {
