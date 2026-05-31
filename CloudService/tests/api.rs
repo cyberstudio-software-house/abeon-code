@@ -2,6 +2,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use cloudservice::centrifugo::FakeCentrifugo;
 use cloudservice::config::Config;
+use cloudservice::expo::FakeExpo;
 use cloudservice::store::{InMemoryDevices, InMemoryPairing, InMemoryPhones};
 use cloudservice::{app, AppState};
 use serde_json::{json, Value};
@@ -14,6 +15,7 @@ fn test_state(centrifugo: Arc<FakeCentrifugo>) -> AppState {
         phones: Arc::new(InMemoryPhones::default()),
         pairing: Arc::new(InMemoryPairing::default()),
         centrifugo,
+        expo: Arc::new(FakeExpo::default()),
         config: Arc::new(Config {
             bind_addr: "0.0.0.0:0".into(),
             database_url: "unused".into(),
@@ -22,6 +24,7 @@ fn test_state(centrifugo: Arc<FakeCentrifugo>) -> AppState {
             centrifugo_api_url: "http://unused".into(),
             token_ttl_secs: 3600,
             pairing_ttl_secs: 300,
+            expo_push_url: "http://unused-expo".into(),
         }),
     }
 }

@@ -3,6 +3,7 @@ pub mod centrifugo;
 pub mod config;
 pub mod crypto;
 pub mod error;
+pub mod expo;
 pub mod routes;
 pub mod store;
 
@@ -18,6 +19,7 @@ pub struct AppState {
     pub phones: Arc<dyn store::PhoneTokenStore>,
     pub pairing: Arc<dyn store::PairingStore>,
     pub centrifugo: Arc<dyn centrifugo::CentrifugoApi>,
+    pub expo: Arc<dyn expo::ExpoApi>,
     pub config: Arc<config::Config>,
 }
 
@@ -50,11 +52,13 @@ pub async fn build_state(config: config::Config) -> anyhow::Result<AppState> {
         config.centrifugo_api_url.clone(),
         config.centrifugo_api_key.clone(),
     ));
+    let expo = Arc::new(expo::HttpExpo::new(config.expo_push_url.clone()));
     Ok(AppState {
         devices: store.clone(),
         phones: store.clone(),
         pairing: store,
         centrifugo,
+        expo,
         config: Arc::new(config),
     })
 }

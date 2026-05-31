@@ -10,6 +10,7 @@ pub struct Config {
     pub centrifugo_api_url: String,
     pub token_ttl_secs: i64,
     pub pairing_ttl_secs: i64,
+    pub expo_push_url: String,
 }
 
 impl Config {
@@ -26,6 +27,7 @@ impl Config {
             centrifugo_api_url: req("CENTRIFUGO_API_URL")?,
             token_ttl_secs: env::var("TOKEN_TTL_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(3600),
             pairing_ttl_secs: env::var("PAIRING_TTL_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(300),
+            expo_push_url: env::var("EXPO_PUSH_URL").unwrap_or_else(|_| "https://exp.host".into()),
         })
     }
 }
