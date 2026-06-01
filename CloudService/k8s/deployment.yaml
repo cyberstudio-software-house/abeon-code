@@ -19,7 +19,10 @@ spec:
     spec:
       containers:
         - name: cloudservice
-          image: cloudservice:dev # replaced by CI with the pushed tag
+          # Pushed by bitbucket-pipelines.yml as :1.0.<build> and :latest. For reproducible
+          # rollouts pin a versioned tag (e.g. :1.0.42) instead of :latest at deploy time.
+          image: docker.io/cyberstudioinc/abeoncode-cloudservice:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           env:

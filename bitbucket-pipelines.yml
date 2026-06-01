@@ -1,0 +1,48 @@
+# CI for the AbeonCode monorepo.
+#
+# Builds the CloudService Docker image and pushes it to Docker Hub on every push to `main`
+# that touches the service or the shared contract crate. The image is self-contained
+# (multi-stage build → distroless runtime that runs the service); see CloudService/Dockerfile.
+#
+# Required Bitbucket repository variables (Repository settings → Pipelines → Variables):
+#   DOCKERHUB_USERNAME — Docker Hub user/org with push rights to the image repo
+#   DOCKERHUB_PASSWORD — Docker Hub ACCESS TOKEN (not the account password); mark as "Secured"
+#
+# The deploy to k8s (namespace cs-app-cust1004-tools) is intentionally NOT part of this
+# pipeline — it stops at pushing the image, per the agreed scope.
+
+image: atlassian/default-image:4
+
+definitions:
+  services:
+    docker:
+      # The Rust release build runs inside the docker-in-docker daemon, so give it room.
+      # Raise toward 7128 (only possible on a 2x step) if the cargo build OOMs.
+      memory: 3072
+
+pipelines:
+  branches:
+    main:
+      - step:
+          name: Build & push CloudService image
+          size: 2x # Rust release build: more CPU/RAM to keep build times sane and avoid OOM.
+          services:
+            - docker
+          caches:
+            - docker
+          condition:
+            changesets:
+              includePaths:
+                # Only build when the service or the shared contract crate changed —
+                # MobileApp-/DesktopApp-only pushes must not trigger this.
+                - "CloudService/**"
+                - "crates/**"
+          script:
+            - export IMAGE="cyberstudioinc/abeoncode-cloudservice"
+            - export TAG="1.0.${BITBUCKET_BUILD_NUMBER}"
+            # Build context = repo root so the shared crates/ is in scope (see CloudService/Dockerfile).
+            - docker build -f CloudService/Dockerfile -t "${IMAGE}:${TAG}" -t "${IMAGE}:latest" .
+            - echo "${DOCKERHUB_PASSWORD}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
+            - docker push "${IMAGE}:${TAG}"
+            - docker push "${IMAGE}:latest"
+            - echo "Pushed ${IMAGE}:${TAG} (and :latest)"
