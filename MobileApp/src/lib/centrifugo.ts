@@ -43,23 +43,32 @@ export function applyHistoryPage(
 // getToken is called by centrifuge whenever it needs a (fresh) connection JWT.
 export function createCentrifugo(getToken: () => Promise<string>): CentrifugoHandles {
   const client = new Centrifuge(CENTRIFUGO_WS_URL, { getToken: async () => getToken() });
-  const subscribeSession = (sessionId: string, onEvent: (e: SessionEvent) => void) => {
-    const sub = client.newSubscription(`abeon-cloud-sess:${sessionId}`);
-    sub.on('subscribed', (ctx) => {
-      if (!ctx.recovered) {
-        sub.history({ limit: 100 }).then((r) => applyHistoryPage(r.publications, onEvent)).catch(() => {});
-      }
-    });
-    sub.on('publication', (ctx) => { const e = parseSessionEvent(ctx.data); if (e) onEvent(e); });
+  // centrifuge throws if newSubscription is called for a channel that already has a
+  // subscription (e.g. re-entering a session screen, or React StrictMode's double mount).
+  // Reuse the existing one and only wire handlers the first time it is created.
+  const ensureSub = (channel: string, wire: (s: Subscription) => void): Subscription => {
+    const existing = client.getSubscription(channel);
+    if (existing) { existing.subscribe(); return existing; }
+    const sub = client.newSubscription(channel);
+    wire(sub);
     sub.subscribe();
     return sub;
   };
+  const subscribeSession = (sessionId: string, onEvent: (e: SessionEvent) => void) =>
+    ensureSub(`abeon-cloud-sess:${sessionId}`, (sub) => {
+      sub.on('subscribed', (ctx) => {
+        if (!ctx.recovered) {
+          sub.history({ limit: 100 }).then((r) => applyHistoryPage(r.publications, onEvent)).catch(() => {});
+        }
+      });
+      sub.on('publication', (ctx) => { const e = parseSessionEvent(ctx.data); if (e) onEvent(e); });
+    });
   const subscribeDevice = (
     deviceId: string,
     onCmdResult: (e: RemoteEvent) => void,
     onSessionEvent: (e: SessionEvent) => void,
-  ) => {
-    const sub = client.newSubscription(`abeon-cloud-dev:${deviceId}`);
+  ) =>
+    ensureSub(`abeon-cloud-dev:${deviceId}`, (sub) => {
     const route = (data: unknown) => {
       const cmd = parseDeviceEvent(data);
       if (cmd) { onCmdResult(cmd); return; }
@@ -72,9 +81,7 @@ export function createCentrifugo(getToken: () => Promise<string>): CentrifugoHan
       }
     });
     sub.on('publication', (ctx) => route(ctx.data));
-    sub.subscribe();
-    return sub;
-  };
+    });
   client.connect();
   return { client, subscribeSession, subscribeDevice, disconnect: () => client.disconnect() };
 }
