@@ -15,6 +15,11 @@ use crate::remote::protocol::{RemoteEnvelope, RemoteEvent};
 use crate::remote::registry::SessionPtyRegistry;
 use crate::state::AppState;
 
+/// How often the bridge re-publishes the full roster snapshot to the device channel, so
+/// a phone connecting to an already-running desktop populates its list within one interval
+/// without needing the command path (RequestRoster) or Centrifugo channel history.
+const ROSTER_REPUBLISH_SECS: u64 = 25;
+
 /// Notify only on a transition INTO `WaitingUser` (not while it stays `WaitingUser`).
 pub fn should_notify(prev: Option<SessionActivity>, next: SessionActivity) -> bool {
     next == SessionActivity::WaitingUser && prev != Some(SessionActivity::WaitingUser)
@@ -166,9 +171,18 @@ impl RemoteBridge {
     ) {
         let dev_channel = result_channel(&device_id);
         let _ = client.publish(&dev_channel, encode_roster(roster.snapshot())).await;
+        // Re-publish the roster periodically so a phone connecting to an already-running
+        // desktop populates within one interval, independent of the command path or
+        // channel history. The interval's first tick is immediate — consume it here since
+        // the startup snapshot above already covered t=0.
+        let mut roster_tick = tokio::time::interval(std::time::Duration::from_secs(ROSTER_REPUBLISH_SECS));
+        roster_tick.tick().await;
         let mut last_activity: HashMap<String, SessionActivity> = HashMap::new();
         loop {
             tokio::select! {
+                _ = roster_tick.tick() => {
+                    let _ = client.publish(&dev_channel, encode_roster(roster.snapshot())).await;
+                }
                 maybe_env = inbound.recv() => {
                     match maybe_env {
                         Some(env) => {
