@@ -14,14 +14,15 @@ pub struct CommandResponse {
     pub published: bool,
 }
 
-/// Every `RemoteCommand` variant carries a `session_id`.
-fn command_session_id(c: &RemoteCommand) -> &str {
+/// Session-scoped commands carry a `session_id`; `RequestRoster` is device-scoped (None).
+fn command_session_id(c: &RemoteCommand) -> Option<&str> {
     match c {
         RemoteCommand::SendPrompt { session_id, .. }
         | RemoteCommand::ApprovePermission { session_id }
         | RemoteCommand::DenyPermission { session_id }
         | RemoteCommand::StopSession { session_id }
-        | RemoteCommand::ResumeSession { session_id, .. } => session_id,
+        | RemoteCommand::ResumeSession { session_id, .. } => Some(session_id),
+        RemoteCommand::RequestRoster => None,
     }
 }
 
@@ -32,9 +33,12 @@ pub async fn publish(
     PhoneAuth(phone): PhoneAuth,
     Json(envelope): Json<RemoteEnvelope>,
 ) -> AppResult<(StatusCode, Json<CommandResponse>)> {
-    // Trust boundary: same allowlist the desktop enforces on the session id.
-    validate_session_id(command_session_id(&envelope.command))
-        .map_err(|e| AppError::BadRequest(e.0))?;
+    // Trust boundary: same allowlist the desktop enforces on the session id. RequestRoster
+    // is device-scoped (no session) so there is nothing to validate — it still goes through
+    // the presence gate and is published to the device's command channel below.
+    if let Some(session_id) = command_session_id(&envelope.command) {
+        validate_session_id(session_id).map_err(|e| AppError::BadRequest(e.0))?;
+    }
 
     let channel = cmd_channel(&phone.device_id);
 
