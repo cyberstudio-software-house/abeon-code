@@ -3,6 +3,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useFonts, Fraunces_600SemiBold } from '@expo-google-fonts/fraunces';
 import { Geist_400Regular, Geist_600SemiBold } from '@expo-google-fonts/geist';
 import { GeistMono_500Medium } from '@expo-google-fonts/geist-mono';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useStore } from '@/src/store';
 import { registerForPush, initPushHandler, addPushResponseListener } from '@/src/lib/push';
 import { loadServerUrl } from '@/src/lib/secure';
@@ -30,5 +31,9 @@ export default function RootLayout() {
     return () => sub.remove();
   }, [router]);
   if (!fontsLoaded || !hydrated) return null;
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <SafeAreaProvider>
+      <Stack screenOptions={{ headerShown: false }} />
+    </SafeAreaProvider>
+  );
 }

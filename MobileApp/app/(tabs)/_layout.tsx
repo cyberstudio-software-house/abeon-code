@@ -1,5 +1,6 @@
 import { Tabs } from 'expo-router';
-import { View, type ColorValue } from 'react-native';
+import { type ColorValue } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 // Import the Ionicons subpath directly, NOT the `@expo/vector-icons` barrel: the barrel
 // pulls in every icon family lazily (incl. FontAwesome6, whose vendor glyphmap is missing
 // in this version) and breaks the Metro bundle. The subpath loads only Ionicons.
@@ -20,14 +21,16 @@ function tabIcon(active: IoniconName, inactive: IoniconName) {
 
 export default function TabsLayout() {
   const t = resolveTokens(useColorScheme() === 'dark' ? 'dark' : 'light');
+  // Top edge only: pushes the banner + screen content below the status bar / notch. The
+  // bottom inset is handled by the tab bar itself (React Navigation).
   return (
-    <View style={{ flex: 1 }}>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: t.bg }}>
       <ConnectionBanner />
       <Tabs screenOptions={{ headerShown: false, tabBarActiveTintColor: t.accent, tabBarInactiveTintColor: t.muted, tabBarStyle: { backgroundColor: t.bgElev, borderTopColor: t.border } }}>
         <Tabs.Screen name="sessions" options={{ title: 'Sesje', tabBarIcon: tabIcon('albums', 'albums-outline') }} />
         <Tabs.Screen name="activity" options={{ title: 'Aktywność', tabBarIcon: tabIcon('flash', 'flash-outline') }} />
         <Tabs.Screen name="settings" options={{ title: 'Ustawienia', tabBarIcon: tabIcon('settings', 'settings-outline') }} />
       </Tabs>
-    </View>
+    </SafeAreaView>
   );
 }

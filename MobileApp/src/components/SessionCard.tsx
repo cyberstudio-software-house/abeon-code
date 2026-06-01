@@ -35,6 +35,9 @@ export function SessionCard({ session, onPress, onApprove, onDeny }: SessionCard
   const t = resolveTokens(scheme);
 
   const isWaiting = session.activity === 'waitingUser';
+  // Active = not idle: gets a bright card + a colored spine. Idle is dimmed so the few
+  // sessions you actually care about stand out at a glance.
+  const isActive = session.activity != null && session.activity !== 'idle';
   const dotColor = glowColor(session.activity, t);
 
   const totalTokens = session.usage
@@ -47,9 +50,12 @@ export function SessionCard({ session, onPress, onApprove, onDeny }: SessionCard
       style={[
         styles.card,
         {
-          backgroundColor: t.bgElev,
+          backgroundColor: isActive ? t.bgElev2 : t.bgElev,
           borderColor: isWaiting ? t.accent : t.border,
           borderWidth: isWaiting ? 1.5 : 1,
+          borderLeftColor: isActive ? dotColor : t.border,
+          borderLeftWidth: isActive ? 4 : 1,
+          opacity: isActive ? 1 : 0.55,
         },
       ]}
     >
