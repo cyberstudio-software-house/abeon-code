@@ -8,6 +8,6 @@ export type ActionTone = 'idle' | 'running' | 'error' | 'stopped';
 export function actionTone(r: RunningAction | undefined): ActionTone {
   if (!r) return 'idle';
   if (r.status === 'running') return 'running';
-  if (r.exitCode == null || !STOP_SIGNAL_CODES.has(r.exitCode)) return 'error';
+  if (r.exitCode != null && r.exitCode !== 0 && !STOP_SIGNAL_CODES.has(r.exitCode)) return 'error';
   return 'stopped';
 }
