@@ -6,6 +6,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import '@xterm/xterm/css/xterm.css';
 import { tauri, type PtyKindClient } from '../../lib/tauri';
 import { useStore } from '../../store';
+import { processManager } from '../../lib/processManager';
 import { getCliModelString } from '../../lib/models';
 
 type Props = {
@@ -63,7 +64,7 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
   };
 }
 
-export function TerminalView({ projectId, kind, sessionId, fresh, actionId, tabId, visible = true }: Props) {
+export function TerminalView({ projectId, kind, sessionId, fresh, actionId, visible = true }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const customModels = useStore(s => s.customModels);
   const skipPermissions = useStore(s => s.skipPermissions);
@@ -153,6 +154,7 @@ export function TerminalView({ projectId, kind, sessionId, fresh, actionId, tabI
           : { kind: 'shell' };
 
     let cancelled = false;
+    if (kind !== 'action') {
     tauri.spawnPty(projectId, ptyKind, cols, rows).then(async (id) => {
       if (cancelled) {
         tauri.ptyKill(id).catch(() => {});
@@ -170,7 +172,6 @@ export function TerminalView({ projectId, kind, sessionId, fresh, actionId, tabI
       const offExit = await tauri.onPtyExit(id, (code) => {
         if (cancelled) return;
         term.write(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m\r\n`);
-        if (kind === 'action' && tabId) useStore.getState().markActionExited(tabId, code);
       });
       unlistenRefs.current.push(offOut, offExit);
 
@@ -220,6 +221,7 @@ export function TerminalView({ projectId, kind, sessionId, fresh, actionId, tabI
         );
       }
     });
+    }
 
     return () => {
       cancelled = true;
@@ -234,6 +236,33 @@ export function TerminalView({ projectId, kind, sessionId, fresh, actionId, tabI
       // xterm internal state will be GC'd with the Terminal object.
     };
   }, [projectId, kind, sessionId, fresh, actionId]);
+
+  const actionPtyId = useStore(s =>
+    kind === 'action' && actionId != null ? s.runningActions[actionId]?.ptyId : undefined
+  );
+
+  useEffect(() => {
+    if (kind !== 'action' || actionId == null) return;
+    const term = termRef.current;
+    if (!term || !actionPtyId) return;
+
+    term.reset();
+    const sink = {
+      write: (bytes: Uint8Array) => {
+        if (visibleRef.current) term.write(bytes);
+        else pendingWrites.current.push(bytes);
+      },
+    };
+    const detach = processManager.attach(actionId, sink);
+    const offData = term.onData((d) => {
+      const enc = btoa(unescape(encodeURIComponent(d)));
+      processManager.write(actionId, enc);
+    });
+    const offResize = term.onResize(({ cols, rows }) => processManager.resize(actionId, cols, rows));
+    processManager.resize(actionId, term.cols, term.rows);
+
+    return () => { detach(); offData.dispose(); offResize.dispose(); };
+  }, [kind, actionId, actionPtyId]);
 
   useEffect(() => {
     if (!visible || !termRef.current || !fitRef.current) return;
