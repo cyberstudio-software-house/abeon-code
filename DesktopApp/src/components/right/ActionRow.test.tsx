@@ -44,7 +44,7 @@ describe('ActionRow', () => {
     seed({ 1: { actionId: 1, ptyId: 'p', status: 'running' } });
     render(<ActionRow action={action} index={0} onChanged={() => {}} />);
     fireEvent.click(screen.getByTitle('Pokaż output'));
-    expect(h.upsert).toHaveBeenCalled();
+    expect(h.upsert).toHaveBeenCalledWith(expect.objectContaining({ actionId: 1, status: 'running' }));
     fireEvent.click(screen.getByTitle('Zatrzymaj'));
     expect(h.stop).toHaveBeenCalledWith(1);
   });
@@ -55,5 +55,13 @@ describe('ActionRow', () => {
     fireEvent.click(screen.getByTitle('Uruchom ponownie'));
     expect(h.dismiss).toHaveBeenCalledWith(1);
     expect(h.start).toHaveBeenCalledWith(7, action);
+  });
+
+  it('clears an exited action (dismiss + close tab)', () => {
+    seed({ 1: { actionId: 1, ptyId: 'p', status: 'exited', exitCode: 0 } });
+    render(<ActionRow action={action} index={0} onChanged={() => {}} />);
+    fireEvent.click(screen.getByTitle('Wyczyść'));
+    expect(h.dismiss).toHaveBeenCalledWith(1);
+    expect(h.closeTab).toHaveBeenCalledWith('action:1');
   });
 });

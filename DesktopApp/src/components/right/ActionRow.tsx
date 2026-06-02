@@ -15,7 +15,7 @@ const STOP_SIGNAL_CODES = new Set([130, 143]);
 function statusColor(r: RunningAction | undefined): string {
   if (!r) return 'text-fg-secondary';
   if (r.status === 'running') return 'text-success';
-  if (r.exitCode != null && !STOP_SIGNAL_CODES.has(r.exitCode)) return 'text-danger';
+  if (r.exitCode == null || !STOP_SIGNAL_CODES.has(r.exitCode)) return 'text-danger';
   return 'text-muted';
 }
 
