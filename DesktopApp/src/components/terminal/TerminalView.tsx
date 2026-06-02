@@ -247,6 +247,7 @@ export function TerminalView({ projectId, kind, sessionId, fresh, actionId, visi
     if (!term || !actionPtyId) return;
 
     term.reset();
+    pendingWrites.current = [];
     const sink = {
       write: (bytes: Uint8Array) => {
         if (visibleRef.current) term.write(bytes);
