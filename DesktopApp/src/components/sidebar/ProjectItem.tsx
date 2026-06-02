@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import type { Project } from '../../types';
 import { SessionList } from './SessionList';
+import { ProjectActionsMenu } from './ProjectActionsMenu';
 import { Icon } from '../shared/Icon';
 import { tauri } from '../../lib/tauri';
 
@@ -13,10 +14,24 @@ export function ProjectItem({ project }: Props) {
   const openNew = useStore(s => s.openNewSessionTab);
   const openTerminal = useStore(s => s.openNewTerminalTab);
   const [count, setCount] = useState<number | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const actions = useStore(s => s.actionsByProject[project.id]);
+  const runningActions = useStore(s => s.runningActions);
+  const hasActive = (actions ?? []).some(a => runningActions[a.id]);
 
   useEffect(() => {
     tauri.countSessions(project.id).then(setCount).catch(() => {});
   }, [project.id]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [menuOpen]);
 
   return (
     <li className="py-0.5">
@@ -69,6 +84,23 @@ export function ProjectItem({ project }: Props) {
             >
               <Icon name="code" className="w-3 h-3" strokeWidth={2} />
             </button>
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuOpen(o => !o); }}
+                className="relative flex items-center gap-1 px-1.5 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors rounded"
+                title="Akcje"
+              >
+                <Icon name="layers" className="w-3 h-3" strokeWidth={2} />
+                {hasActive && (
+                  <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-success" />
+                )}
+              </button>
+              {menuOpen && (
+                <div className="absolute right-0 z-20 mt-1 w-56 max-h-72 overflow-y-auto rounded-md border border-border bg-bg shadow-lg">
+                  <ProjectActionsMenu projectId={project.id} onClose={() => setMenuOpen(false)} />
+                </div>
+              )}
+            </div>
           </div>
           <SessionList projectId={project.id} />
         </div>
