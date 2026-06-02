@@ -6,8 +6,11 @@ import { selectSessionActivity } from '../../store/sessionsSlice';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { groupTabsByProject, getGroupColor } from '../../lib/tabGrouping';
+import { processManager } from '../../lib/processManager';
+import type { RunningAction } from '../../store/actionsSlice';
+import { actionTone } from '../../lib/actionStatus';
 
-function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
+export function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
   const activity = useStore(selectSessionActivity(tabId, sessionId));
   return (
     <span
@@ -17,21 +20,21 @@ function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string
   );
 }
 
-type ActionTab = Extract<import('../../store/tabsSlice').Tab, { kind: 'action' }>;
+const ACTION_TONE_TEXT: Record<string, string> = {
+  idle: 'text-muted',
+  running: 'text-success',
+  error: 'text-danger',
+  stopped: 'text-muted',
+};
 
-// 130 = SIGINT (Ctrl+C), 143 = SIGTERM — deliberate stops, not failures.
-const STOP_SIGNAL_CODES = new Set([130, 143]);
-
-function actionIconColor(tab: ActionTab): string {
-  if (tab.status === 'running') return 'text-success';
-  if (tab.exitCode && !STOP_SIGNAL_CODES.has(tab.exitCode)) return 'text-danger';
-  return 'text-muted';
+function actionIconColor(r: RunningAction | undefined): string {
+  return ACTION_TONE_TEXT[actionTone(r)];
 }
 
-function TabIcon({ tab }: { tab: import('../../store/tabsSlice').Tab }) {
+function TabIcon({ tab, actionColor }: { tab: import('../../store/tabsSlice').Tab; actionColor?: string }) {
   if (tab.kind === 'session') return <>{tab.mode === 'terminal' ? '›' : '◇'}</>;
   if (tab.kind === 'terminal') return <>$</>;
-  return <span className={actionIconColor(tab)}>▶</span>;
+  return <span className={actionColor ?? 'text-muted'}>▶</span>;
 }
 
 export function TabBar() {
@@ -41,6 +44,7 @@ export function TabBar() {
   const closeTab = useStore(s => s.closeTab);
   const renameTab = useStore(s => s.renameTab);
   const projects = useStore(useShallow(s => s.projects));
+  const runningActions = useStore(s => s.runningActions);
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
@@ -93,12 +97,20 @@ export function TabBar() {
 
   const isActiveProcess = (id: string) => {
     const t = tabs.find(x => x.id === id);
-    return !!t && ((t.kind === 'session' && t.mode === 'terminal') || t.kind === 'action' || t.kind === 'terminal');
+    if (!t) return false;
+    if (t.kind === 'action') return runningActions[t.actionId]?.status === 'running';
+    return (t.kind === 'session' && t.mode === 'terminal') || t.kind === 'terminal';
+  };
+
+  const doClose = (id: string) => {
+    const t = tabs.find(x => x.id === id);
+    if (t?.kind === 'action') processManager.dismiss(t.actionId);
+    closeTab(id);
   };
 
   const closeWithGuard = (id: string) => {
     if (isActiveProcess(id)) setPendingClose(id);
-    else closeTab(id);
+    else doClose(id);
   };
 
   const requestClose = (e: React.MouseEvent, id: string) => {
@@ -145,7 +157,7 @@ export function TabBar() {
     >
       {t.kind === 'session' && <TabActivityDot tabId={t.id} sessionId={t.sessionId} />}
       <span className="mr-1.5 text-muted">
-        <TabIcon tab={t} />
+        <TabIcon tab={t} actionColor={t.kind === 'action' ? actionIconColor(runningActions[t.actionId]) : undefined} />
       </span>
       {editingId === t.id ? (
         <input
@@ -240,7 +252,7 @@ export function TabBar() {
           title="Zamknąć aktywny tab?"
           message="W tym tabie działa aktywny proces. Zamknięcie zakończy go."
           onCancel={() => setPendingClose(null)}
-          onConfirm={() => { closeTab(pendingClose); setPendingClose(null); }}
+          onConfirm={() => { doClose(pendingClose); setPendingClose(null); }}
         />
       )}
     </>

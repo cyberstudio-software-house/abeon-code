@@ -18,7 +18,6 @@ export type TabsSlice = {
   renameTab: (id: string, title: string) => void;
   linkNewSession: (tabId: string, realSessionId: string) => void;
   upsertActionTab: (tab: Extract<Tab, { kind: 'action' }>) => void;
-  markActionExited: (tabId: string, exitCode: number) => void;
 };
 
 const sessionTabId = (sessionId: string) => `session:${sessionId}`;
@@ -83,9 +82,4 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
       set({ tabs: [...get().tabs, tab], activeTabId: tab.id, mruOrder });
     }
   },
-  markActionExited: (tabId, exitCode) => set({
-    tabs: get().tabs.map(t =>
-      t.id === tabId && t.kind === 'action' ? { ...t, status: 'exited', exitCode } : t
-    ),
-  }),
 });
