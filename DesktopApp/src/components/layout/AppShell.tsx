@@ -7,6 +7,7 @@ import { TabSwitcher } from '../center/TabSwitcher';
 import { useStore } from '../../store';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { tauri } from '../../lib/tauri';
+import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
 
 const LEFT_MIN = 200;
@@ -118,10 +119,7 @@ export function AppShell() {
         if (!action) return;
         e.preventDefault();
         e.stopPropagation();
-        state.upsertActionTab({
-          kind: 'action', id: `action:${action.id}`, projectId: action.projectId,
-          actionId: action.id, title: action.label, status: 'running',
-        });
+        processManager.start(projectId, action);
       }
     };
     document.addEventListener('keydown', onKey, { capture: true });
