@@ -3,6 +3,7 @@ import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { groupTabsByProject, getGroupColor } from '../../lib/tabGrouping';
 import { orderTabsByMru, wrapIndex } from '../../lib/tabSwitcher';
+import { TabActivityDot } from './TabBar';
 import type { Tab } from '../../store/tabsSlice';
 
 function SwitcherIcon({ tab }: { tab: Tab }) {
@@ -114,6 +115,7 @@ export function TabSwitcher() {
                   className={`flex items-center px-3 py-1 text-[12px] cursor-pointer select-none ${selected ? 'text-fg' : 'text-muted'}`}
                   style={selected ? { backgroundColor: `${getGroupColor(gi)}33` } : undefined}
                 >
+                  {t.kind === 'session' && <TabActivityDot tabId={t.id} sessionId={t.sessionId} />}
                   <span className="mr-2 text-muted"><SwitcherIcon tab={t} /></span>
                   <span className="truncate">{t.title}</span>
                 </div>

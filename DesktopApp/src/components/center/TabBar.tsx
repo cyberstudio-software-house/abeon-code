@@ -7,7 +7,7 @@ import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { groupTabsByProject, getGroupColor } from '../../lib/tabGrouping';
 
-function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
+export function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
   const activity = useStore(selectSessionActivity(tabId, sessionId));
   return (
     <span
