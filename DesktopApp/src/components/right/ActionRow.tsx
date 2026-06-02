@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../../store';
 import { processManager } from '../../lib/processManager';
 import type { Action } from '../../types';
-import type { RunningAction } from '../../store/actionsSlice';
+import { actionTone } from '../../lib/actionStatus';
 import { Icon } from '../shared/Icon';
 import { Kbd } from '../shared/Kbd';
 import { EditActionDialog } from '../dialogs/EditActionDialog';
@@ -10,18 +10,16 @@ import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 
 type Props = { action: Action; index: number; onChanged: () => void };
 
-const STOP_SIGNAL_CODES = new Set([130, 143]);
-
-function statusColor(r: RunningAction | undefined): string {
-  if (!r) return 'text-fg-secondary';
-  if (r.status === 'running') return 'text-success';
-  if (r.exitCode == null || !STOP_SIGNAL_CODES.has(r.exitCode)) return 'text-danger';
-  return 'text-muted';
-}
+const TONE_TEXT: Record<string, string> = {
+  idle: 'text-fg-secondary',
+  running: 'text-success',
+  error: 'text-danger',
+  stopped: 'text-muted',
+};
 
 export function ActionRow({ action, index, onChanged }: Props) {
   const tabId = `action:${action.id}`;
-  const running = useStore(s => s.runningActions[action.id]) as RunningAction | undefined;
+  const running = useStore(s => s.runningActions[action.id]);
   const upsertActionTab = useStore(s => s.upsertActionTab);
   const closeTab = useStore(s => s.closeTab);
   const removeAction = useStore(s => s.removeAction);
@@ -50,7 +48,7 @@ export function ActionRow({ action, index, onChanged }: Props) {
       <div className="group flex items-center gap-3 px-2 py-2 hover:bg-bg-elev text-[12px]">
         {running ? (
           <button onClick={showOutput} title="Pokaż output"
-            className={`shrink-0 ${statusColor(running)} hover:text-fg`}>
+            className={`shrink-0 ${TONE_TEXT[actionTone(running)]} hover:text-fg`}>
             <Icon name="eye" className="w-3.5 h-3.5" />
           </button>
         ) : (

@@ -56,4 +56,19 @@ describe('ProjectActionsMenu', () => {
     expect(h.dismiss).toHaveBeenCalledWith(1);
     expect(h.start).toHaveBeenCalledWith(7, actions[0]);
   });
+
+  it('stops a running action', () => {
+    seed({ 1: { actionId: 1, ptyId: 'p', status: 'running' } });
+    render(<ProjectActionsMenu projectId={7} onClose={() => {}} />);
+    fireEvent.click(screen.getByTitle('Zatrzymaj'));
+    expect(h.stop).toHaveBeenCalledWith(1);
+  });
+
+  it('clears an exited action (dismiss + close tab)', () => {
+    seed({ 1: { actionId: 1, ptyId: 'p', status: 'exited', exitCode: 0 } });
+    render(<ProjectActionsMenu projectId={7} onClose={() => {}} />);
+    fireEvent.click(screen.getByTitle('Wyczyść'));
+    expect(h.dismiss).toHaveBeenCalledWith(1);
+    expect(h.closeTab).toHaveBeenCalledWith('action:1');
+  });
 });

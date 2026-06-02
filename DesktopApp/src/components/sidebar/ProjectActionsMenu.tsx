@@ -3,15 +3,18 @@ import { useStore } from '../../store';
 import { processManager } from '../../lib/processManager';
 import type { Action } from '../../types';
 import type { RunningAction } from '../../store/actionsSlice';
+import { actionTone } from '../../lib/actionStatus';
 import { Icon } from '../shared/Icon';
 
-const STOP_SIGNAL_CODES = new Set([130, 143]);
+const TONE_DOT: Record<string, string> = {
+  idle: 'bg-transparent border border-border',
+  running: 'bg-success',
+  error: 'bg-danger',
+  stopped: 'bg-muted',
+};
 
 function dotClass(r: RunningAction | undefined): string {
-  if (!r) return 'bg-transparent border border-border';
-  if (r.status === 'running') return 'bg-success';
-  if (r.exitCode == null || !STOP_SIGNAL_CODES.has(r.exitCode)) return 'bg-danger';
-  return 'bg-muted';
+  return TONE_DOT[actionTone(r)];
 }
 
 type Props = { projectId: number; onClose: () => void };

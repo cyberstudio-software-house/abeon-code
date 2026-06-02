@@ -8,6 +8,7 @@ import { matchesShortcut } from '../../lib/shortcuts';
 import { groupTabsByProject, getGroupColor } from '../../lib/tabGrouping';
 import { processManager } from '../../lib/processManager';
 import type { RunningAction } from '../../store/actionsSlice';
+import { actionTone } from '../../lib/actionStatus';
 
 export function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
   const activity = useStore(selectSessionActivity(tabId, sessionId));
@@ -19,14 +20,15 @@ export function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId:
   );
 }
 
-// 130 = SIGINT (Ctrl+C), 143 = SIGTERM — deliberate stops, not failures.
-const STOP_SIGNAL_CODES = new Set([130, 143]);
+const ACTION_TONE_TEXT: Record<string, string> = {
+  idle: 'text-muted',
+  running: 'text-success',
+  error: 'text-danger',
+  stopped: 'text-muted',
+};
 
 function actionIconColor(r: RunningAction | undefined): string {
-  if (!r) return 'text-muted';
-  if (r.status === 'running') return 'text-success';
-  if (r.exitCode == null || !STOP_SIGNAL_CODES.has(r.exitCode)) return 'text-danger';
-  return 'text-muted';
+  return ACTION_TONE_TEXT[actionTone(r)];
 }
 
 function TabIcon({ tab, actionColor }: { tab: import('../../store/tabsSlice').Tab; actionColor?: string }) {
