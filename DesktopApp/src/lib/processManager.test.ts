@@ -50,13 +50,35 @@ describe('processManager', () => {
     expect(useStore.getState().runningActions[1]).toMatchObject({ status: 'exited', exitCode: 0 });
     const received: number[] = [];
     processManager.attach(1, { write: (b) => received.push(...b) });
-    expect(received.length).toBeGreaterThan(0);
+    const text = new TextDecoder().decode(new Uint8Array(received));
+    expect(text).toContain('[process exited with code 0]');
   });
 
   it('dismiss kills the pty and clears status', async () => {
     await processManager.start(7, action);
     processManager.dismiss(1);
     expect(tauri.ptyKill).toHaveBeenCalledWith('pty-1');
+    expect(useStore.getState().runningActions[1]).toBeUndefined();
+  });
+
+  it('tears down listeners if dismissed during start', async () => {
+    const offOut = vi.fn();
+    const offExit = vi.fn();
+    let resolveOut: (fn: () => void) => void = () => {};
+    (tauri.onPtyOutput as ReturnType<typeof vi.fn>).mockImplementation(
+      (_id: string, cb: (b: Uint8Array) => void) => { outCb = cb; return new Promise((r) => { resolveOut = r; }); }
+    );
+    (tauri.onPtyExit as ReturnType<typeof vi.fn>).mockResolvedValue(offExit);
+
+    const startPromise = processManager.start(7, action);
+    // flush microtasks so start() reaches the onPtyOutput await
+    await Promise.resolve();
+    await Promise.resolve();
+    processManager.dismiss(1);
+    resolveOut(offOut);
+    await startPromise;
+
+    expect(offOut).toHaveBeenCalled();
     expect(useStore.getState().runningActions[1]).toBeUndefined();
   });
 });

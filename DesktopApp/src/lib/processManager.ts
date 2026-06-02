@@ -38,6 +38,11 @@ export const processManager = {
       entry.subscribers.forEach((s) => s.write(marker));
       useStore.getState().setActionExited(action.id, code);
     });
+    if (procs.get(action.id) !== entry) {
+      offOut();
+      offExit();
+      return;
+    }
     entry.unlisten.push(offOut, offExit);
   },
 
