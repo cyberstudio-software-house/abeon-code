@@ -108,7 +108,10 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
       newSessions.push(s);
     }
     const freshById = new Map(fresh.map(s => [s.id, s]));
-    const refreshedExisting = current.items.map(s => freshById.get(s.id) ?? s);
+    const refreshedExisting = current.items.map(s => {
+      const freshMeta = freshById.get(s.id);
+      return freshMeta ? { ...s, activity: freshMeta.activity } : s;
+    });
     set({ sessionsByProject: {
       ...get().sessionsByProject,
       [projectId]: {
