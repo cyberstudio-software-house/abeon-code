@@ -18,8 +18,6 @@ export function DetachedSessionShell() {
   const rightWidth = useStore(s => s.rightWidth);
   const setRightWidth = useStore(s => s.setRightWidth);
   const loadProjects = useStore(s => s.loadProjects);
-  const startActivityPolling = useStore(s => s.startActivityPolling);
-  const stopActivityPolling = useStore(s => s.stopActivityPolling);
 
   const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
   const activeProjectName = useStore(s => {
@@ -30,11 +28,6 @@ export function DetachedSessionShell() {
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => { void loadProjects(); }, [loadProjects]);
-
-  useEffect(() => {
-    startActivityPolling();
-    return () => stopActivityPolling();
-  }, [startActivityPolling, stopActivityPolling]);
 
   useEffect(() => {
     void tauri.setWindowTitle(formatWindowTitle(activeTabTitle, activeProjectName));
