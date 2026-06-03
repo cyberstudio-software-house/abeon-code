@@ -9,6 +9,7 @@ import { groupTabsByProject, getGroupColor } from '../../lib/tabGrouping';
 import { processManager } from '../../lib/processManager';
 import type { RunningAction } from '../../store/actionsSlice';
 import { actionTone } from '../../lib/actionStatus';
+import { isTabLiveProcess } from '../../lib/tabProcess';
 
 export function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
   const activity = useStore(selectSessionActivity(tabId, sessionId));
@@ -97,9 +98,7 @@ export function TabBar() {
 
   const isActiveProcess = (id: string) => {
     const t = tabs.find(x => x.id === id);
-    if (!t) return false;
-    if (t.kind === 'action') return runningActions[t.actionId]?.status === 'running';
-    return (t.kind === 'session' && t.mode === 'terminal') || t.kind === 'terminal';
+    return t ? isTabLiveProcess(t, runningActions) : false;
   };
 
   const doClose = (id: string) => {
