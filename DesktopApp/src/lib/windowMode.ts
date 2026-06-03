@@ -14,7 +14,7 @@ export function parseWindowMode(search: string): WindowMode | null {
   const sessionId = q.get('sessionId');
   if (!projectIdRaw || !sessionId) return null;
   const projectId = Number(projectIdRaw);
-  if (!Number.isFinite(projectId)) return null;
+  if (!Number.isInteger(projectId)) return null;
   const linkedSessionId = q.get('linkedSessionId') ?? undefined;
   const title = q.get('title') ?? 'Sesja';
   const fresh = q.get('fresh') === 'true';

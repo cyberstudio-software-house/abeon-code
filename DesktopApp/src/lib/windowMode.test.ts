@@ -17,6 +17,10 @@ describe('parseWindowMode', () => {
     expect(parseWindowMode('?view=session&projectId=x&sessionId=abc')).toBeNull();
   });
 
+  it('returns null when projectId is not an integer', () => {
+    expect(parseWindowMode('?view=session&projectId=1.5&sessionId=abc')).toBeNull();
+  });
+
   it('parses a minimal session mode', () => {
     expect(parseWindowMode('?view=session&projectId=3&sessionId=abc&title=Hi&fresh=false')).toEqual({
       view: 'session', projectId: 3, sessionId: 'abc', title: 'Hi', fresh: false,
