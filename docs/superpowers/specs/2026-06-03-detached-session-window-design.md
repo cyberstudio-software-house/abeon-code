@@ -144,12 +144,22 @@ backend-side change — no new Rust code or commands.
   instead of creating a second one.
 - **Fresh unsaved session:** `fresh:true` + no `linkedSessionId` → detached window
   spawns a fresh claude PTY (new conversation), same as the main window would.
-  Once claude writes a real session id, `linkNewSession` runs in the detached
-  window normally.
+  Note: the detached window does not run activity polling and does not call
+  `loadInitialSessions`, so `sessionsByProject` stays empty and `linkNewSession`
+  does not fire there — the seeded tab keeps its detach-time `sessionId`/title for
+  the window's lifetime. (This matches the main window's behaviour for tabs created
+  via `openNewSessionTab`, which mint a raw UUID with no `new-` prefix and are
+  therefore never re-linked either.)
 - **Main window closes while detached lives:** independent OS windows / processes;
   no coupling.
-- **Detached window reload:** URL params persist across reload, so it re-seeds the
-  same session correctly.
+- **Detached window reload (real session):** URL params persist across reload, so it
+  re-seeds and resumes the same session correctly.
+- **Detached window reload (fresh session) — known limitation:** because the detach
+  URL bakes in `fresh=true` with the original random `sessionId`, reloading a fresh
+  detached window spawns a brand-new conversation rather than resuming the one the
+  user started. This is a low-frequency edge (manual reload) and is accepted for now;
+  a future improvement could rewrite the window URL to the real session id once it is
+  known.
 
 ## Testing
 
