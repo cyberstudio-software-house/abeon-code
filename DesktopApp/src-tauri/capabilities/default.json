@@ -1,11 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Capability for app windows (main + detached session windows)",
+  "windows": ["main", "session-*"],
   "permissions": [
     "core:default",
     "core:window:allow-set-title",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "core:window:allow-get-all-windows",
+    "core:webview:allow-create-webview-window",
+    "core:webview:allow-get-all-webviews",
     "opener:default",
     "dialog:allow-open",
     "fs:allow-read-text-file",

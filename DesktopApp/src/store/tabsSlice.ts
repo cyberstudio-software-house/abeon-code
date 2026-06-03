@@ -1,4 +1,5 @@
 import type { StateCreator } from 'zustand';
+import type { WindowMode } from '../lib/windowMode';
 
 export type Tab =
   | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean }
@@ -21,6 +22,19 @@ export type TabsSlice = {
 };
 
 const sessionTabId = (sessionId: string) => `session:${sessionId}`;
+
+export function sessionTabFromMode(mode: WindowMode): Extract<Tab, { kind: 'session' }> {
+  return {
+    kind: 'session',
+    id: sessionTabId(mode.sessionId),
+    projectId: mode.projectId,
+    sessionId: mode.sessionId,
+    ...(mode.linkedSessionId ? { linkedSessionId: mode.linkedSessionId } : {}),
+    title: mode.title,
+    mode: 'terminal',
+    ...(mode.fresh ? { fresh: true } : {}),
+  };
+}
 
 const moveToFront = (order: string[], id: string) => [id, ...order.filter(x => x !== id)];
 

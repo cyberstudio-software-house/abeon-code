@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from './index';
+import { sessionTabFromMode } from './tabsSlice';
 
 describe('tabsSlice mruOrder', () => {
   beforeEach(() => {
@@ -86,5 +87,19 @@ describe('tabsSlice mruOrder', () => {
       kind: 'action', id: 'action:5', projectId: 1, actionId: 5, title: 'Build', status: 'running',
     });
     expect(useStore.getState().mruOrder[0]).toBe('action:5');
+  });
+});
+
+describe('sessionTabFromMode', () => {
+  it('builds a terminal-mode session tab for a real session', () => {
+    expect(sessionTabFromMode({ view: 'session', projectId: 2, sessionId: 'real-1', title: 'Hi', fresh: false })).toEqual({
+      kind: 'session', id: 'session:real-1', projectId: 2, sessionId: 'real-1', title: 'Hi', mode: 'terminal',
+    });
+  });
+
+  it('carries linkedSessionId and fresh flag', () => {
+    expect(sessionTabFromMode({ view: 'session', projectId: 2, sessionId: 'new-1', linkedSessionId: 'real-9', title: 'Hi', fresh: true })).toEqual({
+      kind: 'session', id: 'session:new-1', projectId: 2, sessionId: 'new-1', linkedSessionId: 'real-9', title: 'Hi', mode: 'terminal', fresh: true,
+    });
   });
 });

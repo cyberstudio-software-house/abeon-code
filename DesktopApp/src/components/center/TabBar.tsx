@@ -9,6 +9,10 @@ import { groupTabsByProject, getGroupColor } from '../../lib/tabGrouping';
 import { processManager } from '../../lib/processManager';
 import type { RunningAction } from '../../store/actionsSlice';
 import { actionTone } from '../../lib/actionStatus';
+import { isTabLiveProcess } from '../../lib/tabProcess';
+import { TabContextMenu } from './TabContextMenu';
+import { detachSessionTab } from '../../lib/detachSession';
+import type { Tab } from '../../store/tabsSlice';
 
 export function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
   const activity = useStore(selectSessionActivity(tabId, sessionId));
@@ -31,7 +35,7 @@ function actionIconColor(r: RunningAction | undefined): string {
   return ACTION_TONE_TEXT[actionTone(r)];
 }
 
-function TabIcon({ tab, actionColor }: { tab: import('../../store/tabsSlice').Tab; actionColor?: string }) {
+function TabIcon({ tab, actionColor }: { tab: Tab; actionColor?: string }) {
   if (tab.kind === 'session') return <>{tab.mode === 'terminal' ? '›' : '◇'}</>;
   if (tab.kind === 'terminal') return <>$</>;
   return <span className={actionColor ?? 'text-muted'}>▶</span>;
@@ -47,9 +51,11 @@ export function TabBar() {
   const runningActions = useStore(s => s.runningActions);
   const [pendingClose, setPendingClose] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [ctxMenu, setCtxMenu] = useState<{ tab: Tab; x: number; y: number } | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const inputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const ctxMenuRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
@@ -97,9 +103,7 @@ export function TabBar() {
 
   const isActiveProcess = (id: string) => {
     const t = tabs.find(x => x.id === id);
-    if (!t) return false;
-    if (t.kind === 'action') return runningActions[t.actionId]?.status === 'running';
-    return (t.kind === 'session' && t.mode === 'terminal') || t.kind === 'terminal';
+    return t ? isTabLiveProcess(t, runningActions) : false;
   };
 
   const doClose = (id: string) => {
@@ -131,13 +135,22 @@ export function TabBar() {
     return () => document.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [active, tabs, closeTab]);
 
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!ctxMenuRef.current?.contains(e.target as Node)) setCtxMenu(null);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [ctxMenu]);
+
   const commitRename = (id: string) => {
     const value = inputRef.current?.value.trim();
     if (value) renameTab(id, value);
     setEditingId(null);
   };
 
-  const renderTab = (t: import('../../store/tabsSlice').Tab) => (
+  const renderTab = (t: Tab) => (
     <div
       key={t.id}
       data-tab-id={t.id}
@@ -148,6 +161,10 @@ export function TabBar() {
           e.stopPropagation();
           closeWithGuard(t.id);
         }
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setCtxMenu({ tab: t, x: e.clientX, y: e.clientY });
       }}
       className={`group relative flex items-center px-3 py-1 text-[11px] border-x border-t cursor-pointer shrink-0 ${
         t.id === active
@@ -247,6 +264,21 @@ export function TabBar() {
           }`}
         >›</button>
       </div>
+      {ctxMenu && (
+        <div ref={ctxMenuRef} className="fixed z-50" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
+          <div className="w-48 rounded-md border border-border bg-bg shadow-lg">
+            <TabContextMenu
+              canDetach={ctxMenu.tab.kind === 'session'}
+              onDetach={() => {
+                if (ctxMenu.tab.kind === 'session') void detachSessionTab(ctxMenu.tab, closeTab);
+              }}
+              onRename={() => setEditingId(ctxMenu.tab.id)}
+              onClose={() => closeWithGuard(ctxMenu.tab.id)}
+              onCloseMenu={() => setCtxMenu(null)}
+            />
+          </div>
+        </div>
+      )}
       {pendingClose && (
         <ConfirmDialog
           title="Zamknąć aktywny tab?"
