@@ -11,6 +11,7 @@ export type ProjectsSlice = {
   loadActivity: () => Promise<void>;
   addProject: (name: string, path: string) => Promise<Project>;
   removeProject: (id: number) => Promise<void>;
+  updateProject: (id: number, patch: { name?: string; color?: string }) => Promise<void>;
   toggleProjectExpanded: (id: number) => void;
 };
 
@@ -41,6 +42,10 @@ export const createProjectsSlice: StateCreator<ProjectsSlice> = (set, get) => ({
   removeProject: async (id) => {
     await tauri.removeProject(id);
     set({ projects: get().projects.filter(p => p.id !== id) });
+  },
+  updateProject: async (id, patch) => {
+    const updated = await tauri.updateProject(id, patch);
+    set({ projects: get().projects.map(p => (p.id === id ? updated : p)) });
   },
   toggleProjectExpanded: (id) => {
     const next = new Set(get().expandedProjectIds);
