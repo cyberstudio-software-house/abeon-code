@@ -1,4 +1,5 @@
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { toast } from 'sonner';
 import type { Tab } from '../store/tabsSlice';
 import { buildSessionWindowUrl, sessionWindowLabel } from './windowMode';
 
@@ -34,6 +35,16 @@ export async function detachSessionTab(
     hiddenTitle: true,
   });
 
-  win.once('tauri://created', () => { closeTab(tab.id); });
-  win.once('tauri://error', (e) => { console.error('[detach] window create failed', e); });
+  let unlistenCreated: (() => void) | undefined;
+  let unlistenError: (() => void) | undefined;
+
+  unlistenCreated = await win.once('tauri://created', () => {
+    closeTab(tab.id);
+    unlistenError?.();
+  });
+  unlistenError = await win.once('tauri://error', (e) => {
+    console.error('[detach] window create failed', e);
+    toast.error('Nie udało się otworzyć okna sesji');
+    unlistenCreated?.();
+  });
 }
