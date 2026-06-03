@@ -55,6 +55,7 @@ export function TabBar() {
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const inputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const ctxMenuRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
@@ -136,7 +137,9 @@ export function TabBar() {
 
   useEffect(() => {
     if (!ctxMenu) return;
-    const onDocClick = () => setCtxMenu(null);
+    const onDocClick = (e: MouseEvent) => {
+      if (!ctxMenuRef.current?.contains(e.target as Node)) setCtxMenu(null);
+    };
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [ctxMenu]);
@@ -262,7 +265,7 @@ export function TabBar() {
         >›</button>
       </div>
       {ctxMenu && (
-        <div className="fixed z-50" style={{ left: ctxMenu.x, top: ctxMenu.y }} onMouseDown={(e) => e.stopPropagation()}>
+        <div ref={ctxMenuRef} className="fixed z-50" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
           <div className="w-48 rounded-md border border-border bg-bg shadow-lg">
             <TabContextMenu
               canDetach={ctxMenu.tab.kind === 'session'}
