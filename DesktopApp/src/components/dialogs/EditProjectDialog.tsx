@@ -36,7 +36,7 @@ export function EditProjectDialog({ project, onClose }: Props) {
               type="button"
               aria-label={`Kolor ${c}`}
               aria-pressed={color === c}
-              onClick={() => setColor(prev => (prev === c ? null : c))}
+              onClick={() => setColor(c)}
               className={`w-5 h-5 rounded-full transition-transform ${color === c ? 'ring-2 ring-offset-2 ring-offset-bg-elev ring-fg scale-110' : ''}`}
               style={{ backgroundColor: c }}
             />
