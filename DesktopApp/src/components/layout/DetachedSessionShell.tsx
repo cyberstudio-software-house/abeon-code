@@ -60,16 +60,19 @@ export function DetachedSessionShell() {
     if (state.activeTabId) {
       flushSync(() => state.closeTab(state.activeTabId!));
     }
-    void getCurrentWebviewWindow().close();
+    // destroy(), not close(): the user already confirmed. close() re-emits
+    // close-requested into this same guard, which can leave the window stuck
+    // open on Linux/wry. destroy() force-closes after the PTY is killed above.
+    void getCurrentWebviewWindow().destroy();
   };
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
       <TitleBar />
       <div className="flex flex-1 min-h-0">
-        <div className="flex-1 h-full min-w-0">
+        <main className="flex-1 h-full min-w-0 bg-bg flex flex-col">
           <TabContent />
-        </div>
+        </main>
         <DragHandle onDrag={onRightDrag} ariaLabel="Resize right panel" />
         <div style={{ width: rightWidth }} className="h-full flex-shrink-0">
           <RightPanel />

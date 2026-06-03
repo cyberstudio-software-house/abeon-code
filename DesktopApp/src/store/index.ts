@@ -8,6 +8,7 @@ import { createGitSlice, type GitSlice } from './gitSlice';
 import { tauri } from '../lib/tauri';
 import { parseWindowMode } from '../lib/windowMode';
 import { sessionTabFromMode } from './tabsSlice';
+import { applyTheme } from '../styles/theme';
 
 const windowMode = parseWindowMode(window.location.search);
 
@@ -249,6 +250,12 @@ function writeTabsToLocalStorage(state: AppState) {
 
 // --- Boot: sync hydrate from localStorage ---
 applyPersistedToState(loadFromLocalStorage());
+
+// Apply the theme synchronously before React mounts. ThemeProvider also does
+// this in an effect, but effects run child-first — a terminal that mounts on
+// the first render (the detached window seeds mode:'terminal') would construct
+// xterm and read data-theme before that effect ran, capturing the light fallback.
+applyTheme(useStore.getState().theme);
 
 // --- Boot: seed the single session in a detached window, else restore tabs ---
 if (windowMode) {
