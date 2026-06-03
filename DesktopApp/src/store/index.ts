@@ -6,6 +6,10 @@ import { createTabsSlice, type TabsSlice } from './tabsSlice';
 import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 import { createGitSlice, type GitSlice } from './gitSlice';
 import { tauri } from '../lib/tauri';
+import { parseWindowMode } from '../lib/windowMode';
+import { sessionTabFromMode } from './tabsSlice';
+
+const windowMode = parseWindowMode(window.location.search);
 
 export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice;
 
@@ -246,13 +250,18 @@ function writeTabsToLocalStorage(state: AppState) {
 // --- Boot: sync hydrate from localStorage ---
 applyPersistedToState(loadFromLocalStorage());
 
-// --- Boot: restore persisted tabs ---
-const savedTabs = loadTabsFromLocalStorage();
-if (savedTabs && savedTabs.tabs.length > 0) {
-  useStore.setState({
-    tabs: savedTabs.tabs.map(t => ({ ...t, mode: 'history' as const })),
-    activeTabId: savedTabs.activeTabId,
-  });
+// --- Boot: seed the single session in a detached window, else restore tabs ---
+if (windowMode) {
+  const tab = sessionTabFromMode(windowMode);
+  useStore.setState({ tabs: [tab], activeTabId: tab.id });
+} else {
+  const savedTabs = loadTabsFromLocalStorage();
+  if (savedTabs && savedTabs.tabs.length > 0) {
+    useStore.setState({
+      tabs: savedTabs.tabs.map(t => ({ ...t, mode: 'history' as const })),
+      activeTabId: savedTabs.activeTabId,
+    });
+  }
 }
 
 // --- prevSnapshot tracks last persisted state for diffing ---
@@ -262,6 +271,10 @@ let prevSnapshot: Persisted = pickPersistedFields(useStore.getState());
 let prevTabsJson = JSON.stringify(useStore.getState().tabs) + '|' + (useStore.getState().activeTabId ?? '');
 
 useStore.subscribe((state) => {
+  // Detached session windows are ephemeral consumers: never persist tabs or
+  // settings from here, or they would overwrite the main window's state.
+  if (windowMode) return;
+
   // Settings persistence
   const next = pickPersistedFields(state);
   const changed = diffKeys(prevSnapshot, next);
