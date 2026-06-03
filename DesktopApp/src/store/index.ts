@@ -378,4 +378,9 @@ async function bootstrapShellPath(): Promise<void> {
   }
 }
 
-void bootstrapShellPath();
+// Detached windows inherit settings from the synchronous localStorage load
+// above and must not run SQLite hydration (it writes to disk). The PTY shell
+// is resolved on the Rust side, so shell detection is unnecessary here.
+if (!windowMode) {
+  void bootstrapShellPath();
+}
