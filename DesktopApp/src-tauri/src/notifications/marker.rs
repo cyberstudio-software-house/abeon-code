@@ -34,7 +34,8 @@ impl AttentionWatcher {
 
     /// Start watching the marker directory. Creates it if missing.
     pub fn start(self: &Arc<Self>, app: AppHandle) {
-        if std::fs::create_dir_all(&self.dir).is_err() {
+        if let Err(e) = std::fs::create_dir_all(&self.dir) {
+            eprintln!("attention watcher: failed to create marker dir {:?}: {e}", self.dir);
             return;
         }
         let mut guard = self.watcher.lock();
@@ -67,6 +68,11 @@ impl AttentionWatcher {
             Ok(s) => s,
             Err(_) => return,
         };
+        // `cat >` fires Create (empty) before Modify (content); don't consume the
+        // empty file or the content arriving next would be lost.
+        if raw.trim().is_empty() {
+            return;
+        }
         let _ = std::fs::remove_file(path);
         if let Some(event) = parse_marker(&raw) {
             emit_attention(app, event);
