@@ -2,6 +2,7 @@ pub mod error;
 pub mod db;
 pub mod domain;
 pub mod sessions;
+pub mod notifications;
 pub mod pty;
 pub mod state;
 pub mod commands;
