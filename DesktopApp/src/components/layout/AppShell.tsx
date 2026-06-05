@@ -1,4 +1,7 @@
 import { useCallback, useEffect } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { isPermissionGranted, requestPermission, sendNotification, onAction } from '@tauri-apps/plugin-notification';
+import { type PluginListener } from '@tauri-apps/api/core';
 import { Sidebar } from '../sidebar/Sidebar';
 import { CenterPanel } from '../center/CenterPanel';
 import { RightPanel } from '../right/RightPanel';
@@ -7,8 +10,10 @@ import { TabSwitcher } from '../center/TabSwitcher';
 import { useStore } from '../../store';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { tauri } from '../../lib/tauri';
+import type { AttentionEvent } from '../../lib/tauri';
 import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
+import { shouldNotify } from '../../lib/attention';
 import { DragHandle, clamp } from './DragHandle';
 
 const LEFT_MIN = 200;
@@ -74,6 +79,81 @@ export function AppShell() {
     document.addEventListener('keydown', onKey, { capture: true });
     return () => document.removeEventListener('keydown', onKey, { capture: true });
   }, []);
+
+  useEffect(() => {
+    let unlistenEvent: (() => void) | null = null;
+    let unlistenAction: PluginListener | null = null;
+    let lastNotified: { sessionId: string; projectId: number; title: string } | null = null;
+
+    const resolveSession = (sessionId: string) => {
+      const state = useStore.getState();
+      for (const bucket of Object.values(state.sessionsByProject)) {
+        const found = bucket.items.find(s => s.id === sessionId);
+        if (found) return { projectId: found.projectId, title: found.title };
+      }
+      return null;
+    };
+
+    const focusSession = (target: { sessionId: string; projectId: number; title: string }) => {
+      const win = getCurrentWindow();
+      void win.unminimize().then(() => win.show()).then(() => win.setFocus());
+      useStore.getState().openSessionTab(target.projectId, target.sessionId, target.title);
+      useStore.getState().clearAttention(target.sessionId);
+    };
+
+    const handle = (e: AttentionEvent) => {
+      const state = useStore.getState();
+      const activeTab = state.tabs.find(t => t.id === state.activeTabId);
+      const activeSessionId = activeTab?.kind === 'session'
+        ? (activeTab.linkedSessionId ?? activeTab.sessionId)
+        : null;
+      const isActiveFocused = document.hasFocus() && activeSessionId === e.sessionId;
+
+      if (isActiveFocused) return;
+
+      state.markAttention(e.sessionId);
+
+      if (!shouldNotify({
+        enabled: state.notificationsEnabled,
+        trigger: state.notificationTrigger,
+        reason: e.reason,
+        isActiveFocused,
+      })) return;
+
+      const resolved = resolveSession(e.sessionId);
+      const title = resolved?.title ?? 'Sesja';
+      if (resolved) lastNotified = { sessionId: e.sessionId, projectId: resolved.projectId, title };
+
+      void (async () => {
+        let granted = await isPermissionGranted();
+        if (!granted) granted = (await requestPermission()) === 'granted';
+        if (!granted) return;
+        sendNotification({
+          title: 'AbeonCode — sesja czeka',
+          body: e.message ?? `„${title}" czeka na Twoją odpowiedź`,
+        });
+      })();
+    };
+
+    tauri.onSessionAttention(handle).then(fn => { unlistenEvent = fn; });
+    onAction(() => { if (lastNotified) focusSession(lastNotified); })
+      .then(fn => { unlistenAction = fn; })
+      .catch(() => { /* onAction unsupported on this platform — bell icon is the fallback */ });
+
+    return () => {
+      if (unlistenEvent) unlistenEvent();
+      if (unlistenAction) void unlistenAction.unregister();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!document.hasFocus()) return;
+    const state = useStore.getState();
+    const activeTab = state.tabs.find(t => t.id === state.activeTabId);
+    if (activeTab?.kind === 'session') {
+      state.clearAttention(activeTab.linkedSessionId ?? activeTab.sessionId);
+    }
+  }, [activeTabId]);
 
   const onLeftDrag = useCallback(
     (delta: number) => setLeftWidth(clamp(leftWidth + delta, LEFT_MIN, LEFT_MAX)),
