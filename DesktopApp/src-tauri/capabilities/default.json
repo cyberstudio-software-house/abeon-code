@@ -16,6 +16,9 @@
     "opener:default",
     "dialog:allow-open",
     "fs:allow-read-text-file",
-    "fs:allow-exists"
+    "fs:allow-exists",
+    "notification:default",
+    "core:window:allow-show",
+    "core:window:allow-unminimize"
   ]
 }
