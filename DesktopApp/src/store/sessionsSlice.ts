@@ -25,6 +25,9 @@ export type SessionsSlice = {
   loadMoreSessions: (projectId: number) => Promise<void>;
   renameSession: (projectId: number, sessionId: string, title: string) => Promise<void>;
   patchActivity: (sessionId: string, activity: SessionActivity) => void;
+  attentionSessions: Set<string>;
+  markAttention: (sessionId: string) => void;
+  clearAttention: (sessionId: string) => void;
   refreshActivity: (projectId: number) => Promise<void>;
   startActivityPolling: () => void;
   stopActivityPolling: () => void;
@@ -43,6 +46,21 @@ export const selectSessionActivity =
 
 export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], [], SessionsSlice> = (set, get) => ({
   sessionsByProject: {},
+  attentionSessions: new Set<string>(),
+  markAttention: (sessionId) => {
+    const cur = get().attentionSessions;
+    if (cur.has(sessionId)) return;
+    const next = new Set(cur);
+    next.add(sessionId);
+    set({ attentionSessions: next });
+  },
+  clearAttention: (sessionId) => {
+    const cur = get().attentionSessions;
+    if (!cur.has(sessionId)) return;
+    const next = new Set(cur);
+    next.delete(sessionId);
+    set({ attentionSessions: next });
+  },
   loadInitialSessions: async (projectId) => {
     const items = await tauri.listSessions(projectId, PAGE, 0);
     set({ sessionsByProject: {
@@ -77,6 +95,7 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
     get().renameTab(`session:${sessionId}`, title);
   },
   patchActivity: (sessionId, activity) => {
+    if (activity === 'running') get().clearAttention(sessionId);
     const current = get().sessionsByProject;
     let changed = false;
     const next: typeof current = {};
