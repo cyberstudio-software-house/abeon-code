@@ -12,6 +12,7 @@ pub mod remote;
 pub mod validation;
 
 use state::AppState;
+use tauri::Manager;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -33,6 +34,11 @@ pub fn run() {
         .manage(app_state)
         .setup(|app| {
             crate::remote::startup::init_remote_bridge(app.handle().clone());
+            if let Ok(dir) = crate::commands::notifications::markers_dir(app.handle()) {
+                let watcher = crate::notifications::marker::AttentionWatcher::new(dir);
+                watcher.start(app.handle().clone());
+                app.manage(watcher);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -80,6 +86,9 @@ pub fn run() {
             commands::settings::list_available_editors,
             commands::settings::open_project_in_editor,
             commands::remote::remote_pair_start,
+            commands::notifications::install_attention_hook,
+            commands::notifications::uninstall_attention_hook,
+            commands::notifications::attention_hook_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
