@@ -13,9 +13,22 @@ import { isTabLiveProcess } from '../../lib/tabProcess';
 import { TabContextMenu } from './TabContextMenu';
 import { detachSessionTab } from '../../lib/detachSession';
 import type { Tab } from '../../store/tabsSlice';
+import { Icon } from '../shared/Icon';
 
 export function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
   const activity = useStore(selectSessionActivity(tabId, sessionId));
+  const attention = useStore(s => {
+    const tab = s.tabs.find(t => t.id === tabId);
+    const realId = (tab?.kind === 'session' && tab.linkedSessionId) || sessionId;
+    return s.attentionSessions.has(realId);
+  });
+  if (attention) {
+    return (
+      <span className="mr-1.5 inline-flex" title="Czeka na Twoją odpowiedź">
+        <Icon name="bell" className="w-3 h-3 text-accent" aria-label="Czeka na Twoją odpowiedź" />
+      </span>
+    );
+  }
   return (
     <span
       className={`mr-1.5 w-[5px] h-[5px] rounded-full ${ACTIVITY_DOT[activity]}`}

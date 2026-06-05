@@ -147,6 +147,13 @@ impl SessionWatchers {
                 last.insert(sid.clone(), new_activity);
                 let activity_json = serde_json::json!({ "activity": new_activity });
                 let _ = app.emit(&format!("session:{sid}:activity"), &activity_json);
+                if matches!(new_activity, SessionActivity::WaitingUser | SessionActivity::WaitingTool) {
+                    crate::notifications::emit_attention(app, crate::notifications::AttentionEvent {
+                        session_id: sid.clone(),
+                        reason: "heuristic".to_string(),
+                        message: None,
+                    });
+                }
                 if let Some(b) = &bus {
                     b.publish(SessionBusEvent::Activity { session_id: sid.clone(), activity: new_activity });
                 }

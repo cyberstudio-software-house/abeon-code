@@ -8,6 +8,9 @@ import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBloc
 // in tagged enums).
 export type PairCode = { code: string; expiresInSecs: number };
 
+export type AttentionReason = 'hook' | 'heuristic';
+export type AttentionEvent = { sessionId: string; reason: AttentionReason; message: string | null };
+
 export type PtyKindClient =
   | { kind: 'claude'; session_id?: string; model?: string; skip_permissions?: boolean; fresh?: boolean }
   | { kind: 'action'; action_id: number }
@@ -99,4 +102,9 @@ export const tauri = {
     invoke<void>('open_project_in_editor', { projectPath }),
   setWindowTitle: (title: string) => getCurrentWindow().setTitle(title),
   remotePairStart: () => invoke<PairCode>('remote_pair_start'),
+  onSessionAttention: (cb: (e: AttentionEvent) => void): Promise<UnlistenFn> =>
+    listen<AttentionEvent>('session-attention', e => cb(e.payload)),
+  installAttentionHook: () => invoke<void>('install_attention_hook'),
+  uninstallAttentionHook: () => invoke<void>('uninstall_attention_hook'),
+  attentionHookStatus: () => invoke<boolean>('attention_hook_status'),
 };

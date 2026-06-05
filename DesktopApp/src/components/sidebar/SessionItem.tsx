@@ -3,6 +3,7 @@ import type { SessionMeta } from '../../types';
 import { formatRelative } from '../../lib/format';
 import { useStore } from '../../store';
 import { ACTIVITY_DOT, ACTIVITY_LABEL } from '../../lib/activity';
+import { Icon } from '../shared/Icon';
 
 type Props = { session: SessionMeta; active?: boolean; onClick: () => void };
 
@@ -10,6 +11,7 @@ export function SessionItem({ session, active, onClick }: Props) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const rename = useStore(s => s.renameSession);
+  const hasAttention = useStore(s => s.attentionSessions.has(session.id));
 
   const commitRename = () => {
     const value = inputRef.current?.value.trim();
@@ -25,10 +27,16 @@ export function SessionItem({ session, active, onClick }: Props) {
       className={`pr-2 py-1 text-[12px] cursor-pointer flex items-center gap-2 ${active ? 'bg-bg-elev text-fg' : 'text-fg hover:bg-bg-elev'}`}
       title={session.title}
     >
-      <span
-        className={`w-[5px] h-[5px] rounded-full shrink-0 ${ACTIVITY_DOT[session.activity]}`}
-        title={ACTIVITY_LABEL[session.activity]}
-      />
+      {hasAttention ? (
+        <span className="shrink-0 inline-flex" title="Czeka na Twoją odpowiedź">
+          <Icon name="bell" className="w-3 h-3 text-accent" aria-label="Czeka na Twoją odpowiedź" />
+        </span>
+      ) : (
+        <span
+          className={`w-[5px] h-[5px] rounded-full shrink-0 ${ACTIVITY_DOT[session.activity]}`}
+          title={ACTIVITY_LABEL[session.activity]}
+        />
+      )}
       {editing ? (
         <input
           ref={inputRef}

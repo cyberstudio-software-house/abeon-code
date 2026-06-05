@@ -48,6 +48,8 @@ type Persisted = {
   editorPath?: string;
   shortcutOverrides?: Record<string, string>;
   historyViewMode?: 'communication' | 'full';
+  notificationsEnabled?: boolean;
+  notificationTrigger?: 'turnEnd' | 'questionsOnly' | 'both';
 };
 
 const PERSISTED_KEYS = [
@@ -60,6 +62,8 @@ const PERSISTED_KEYS = [
   'editorPath',
   'shortcutOverrides',
   'historyViewMode',
+  'notificationsEnabled',
+  'notificationTrigger',
 ] as const satisfies readonly (keyof Persisted)[];
 
 type PersistedKey = typeof PERSISTED_KEYS[number];
@@ -86,6 +90,8 @@ function pickPersistedFields(state: AppState): Persisted {
     editorPath: state.editorPath,
     shortcutOverrides: state.shortcutOverrides,
     historyViewMode: state.historyViewMode,
+    notificationsEnabled: state.notificationsEnabled,
+    notificationTrigger: state.notificationTrigger,
   };
 }
 
@@ -98,6 +104,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'skipPermissions':
     case 'remoteBridgeEnabled':
     case 'allowRemoteSpawn':
+    case 'notificationsEnabled':
       return value ? 'true' : 'false';
     case 'modelEfforts':
     case 'customModels':
@@ -118,6 +125,7 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
     case 'skipPermissions':
     case 'remoteBridgeEnabled':
     case 'allowRemoteSpawn':
+    case 'notificationsEnabled':
       return raw === 'true';
     case 'modelEfforts':
     case 'customModels':
@@ -164,6 +172,10 @@ function applyPersistedToState(p: Persisted) {
   }
   if (p.historyViewMode === 'communication' || p.historyViewMode === 'full') {
     patch.historyViewMode = p.historyViewMode;
+  }
+  if (p.notificationsEnabled !== undefined) patch.notificationsEnabled = p.notificationsEnabled;
+  if (p.notificationTrigger === 'turnEnd' || p.notificationTrigger === 'questionsOnly' || p.notificationTrigger === 'both') {
+    patch.notificationTrigger = p.notificationTrigger;
   }
   if (Object.keys(patch).length > 0) useStore.setState(patch);
 }
