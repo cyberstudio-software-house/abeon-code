@@ -11,6 +11,7 @@ export function SessionItem({ session, active, onClick }: Props) {
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const rename = useStore(s => s.renameSession);
+  const hasAttention = useStore(s => s.attentionSessions.has(session.id));
 
   const commitRename = () => {
     const value = inputRef.current?.value.trim();
@@ -26,7 +27,7 @@ export function SessionItem({ session, active, onClick }: Props) {
       className={`pr-2 py-1 text-[12px] cursor-pointer flex items-center gap-2 ${active ? 'bg-bg-elev text-fg' : 'text-fg hover:bg-bg-elev'}`}
       title={session.title}
     >
-      {useStore(s => s.attentionSessions.has(session.id)) ? (
+      {hasAttention ? (
         <span className="shrink-0 inline-flex" title="Czeka na Twoją odpowiedź">
           <Icon name="bell" className="w-3 h-3 text-accent" aria-label="Czeka na Twoją odpowiedź" />
         </span>

@@ -6,7 +6,7 @@ const SENTINEL: &str = "# abeoncode-attention";
 fn hook_command(markers_dir: &Path) -> String {
     let dir = markers_dir.display();
     format!(
-        "mkdir -p '{dir}' && f=\"{dir}/$(date +%s%N)-$$\" && cat > \"$f\" && mv \"$f\" \"$f.json\" {SENTINEL}"
+        "mkdir -p '{dir}' && f=\"$(mktemp '{dir}/mkXXXXXX')\" && cat > \"$f\" && mv \"$f\" \"$f.json\" {SENTINEL}"
     )
 }
 
