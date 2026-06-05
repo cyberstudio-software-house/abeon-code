@@ -17,7 +17,7 @@ export const ACTIVITY_LABEL: Record<SessionActivity, string> = {
 
 export const ACTIVITY_ICON: Record<SessionActivity, IconName> = {
   running:     'spinner',
-  waitingUser: 'dot',
+  waitingUser: 'bell',
   waitingTool: 'pause',
   idle:        'dot',
 };
