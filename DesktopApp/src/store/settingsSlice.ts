@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { ThemeMode } from '../styles/theme';
 import type { EffortLevel, CustomModel } from '../lib/models';
 import { DEFAULT_MODEL_ID } from '../lib/models';
+import type { NotificationTrigger } from '../lib/attention';
 
 export type SortMode = 'manual' | 'alpha' | 'activity';
 export type HistoryViewMode = 'communication' | 'full';
@@ -25,6 +26,8 @@ export type SettingsSlice = {
   editorPath: string;
   shortcutOverrides: Record<string, string>;
   historyViewMode: HistoryViewMode;
+  notificationsEnabled: boolean;
+  notificationTrigger: NotificationTrigger;
   settingsOpen: boolean;
 
   setTheme: (t: ThemeMode) => void;
@@ -47,6 +50,8 @@ export type SettingsSlice = {
   setShortcutOverride: (id: string, binding: string) => void;
   resetShortcutOverrides: () => void;
   setHistoryViewMode: (mode: HistoryViewMode) => void;
+  setNotificationsEnabled: (v: boolean) => void;
+  setNotificationTrigger: (t: NotificationTrigger) => void;
   openSettings: () => void;
   closeSettings: () => void;
 };
@@ -70,6 +75,8 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   editorPath: '',
   shortcutOverrides: {},
   historyViewMode: 'full',
+  notificationsEnabled: true,
+  notificationTrigger: 'both',
   settingsOpen: false,
 
   setTheme: (theme) => set({ theme }),
@@ -94,6 +101,8 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
     set({ shortcutOverrides: { ...get().shortcutOverrides, [id]: binding } }),
   resetShortcutOverrides: () => set({ shortcutOverrides: {} }),
   setHistoryViewMode: (historyViewMode) => set({ historyViewMode }),
+  setNotificationsEnabled: (notificationsEnabled) => set({ notificationsEnabled }),
+  setNotificationTrigger: (notificationTrigger) => set({ notificationTrigger }),
   removeCustomModel: (id) => {
     const customModels = get().customModels.filter(m => m.id !== id);
     const defaultModelId = get().defaultModelId === id ? DEFAULT_MODEL_ID : get().defaultModelId;
