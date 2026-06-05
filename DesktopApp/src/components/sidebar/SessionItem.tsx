@@ -27,7 +27,9 @@ export function SessionItem({ session, active, onClick }: Props) {
       title={session.title}
     >
       {useStore(s => s.attentionSessions.has(session.id)) ? (
-        <Icon name="bell" className="w-3 h-3 shrink-0 text-accent" aria-label="Czeka na Twoją odpowiedź" />
+        <span className="shrink-0 inline-flex" title="Czeka na Twoją odpowiedź">
+          <Icon name="bell" className="w-3 h-3 text-accent" aria-label="Czeka na Twoją odpowiedź" />
+        </span>
       ) : (
         <span
           className={`w-[5px] h-[5px] rounded-full shrink-0 ${ACTIVITY_DOT[session.activity]}`}
