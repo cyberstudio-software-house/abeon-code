@@ -267,6 +267,28 @@ pub fn roster_snapshot(conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnecti
     Ok(out)
 }
 
+/// Read the most-recent history blocks (chronological, capped by the reader at 500)
+/// for a session, locating its project by scanning known projects for the matching
+/// session file. Used by the remote bridge to answer RequestHistory. Returns empty
+/// on any failure so a single bad project never sinks the backfill.
+pub fn history_blocks_for_session(
+    conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+    session_id: &str,
+) -> Vec<crate::domain::HistoryBlock> {
+    let projects = match projects_repo::list(conn) { Ok(p) => p, Err(_) => return Vec::new() };
+    for proj in projects {
+        let dir = match session_dir(&proj) { Ok(d) => d, Err(_) => continue };
+        let exists = reader::session_file(&dir, session_id).map(|p| p.exists()).unwrap_or(false);
+        if !exists { continue; }
+        let pid = proj.id;
+        let sid = session_id.to_string();
+        if let Ok(h) = catch(move || reader::read_history(pid, &dir, &sid, Some(500), None)) {
+            return h.blocks;
+        }
+    }
+    Vec::new()
+}
+
 #[cfg(test)]
 mod roster_tests {
     use super::*;
@@ -286,5 +308,13 @@ mod roster_tests {
         let c = p.get().unwrap();
         let entries = roster_snapshot(&c).unwrap();
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn history_blocks_for_unknown_session_is_empty() {
+        let p = pool();
+        let c = p.get().unwrap();
+        let blocks = history_blocks_for_session(&c, "no-such-session");
+        assert!(blocks.is_empty());
     }
 }

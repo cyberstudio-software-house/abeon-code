@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use crate::state::AppState;
 use crate::remote::bus::RemoteEventBus;
-use crate::remote::bridge::{RemoteBridge, AppPtyActuator, AppRosterProvider, PtyActuator, RosterProvider, cmd_channel};
+use crate::remote::bridge::{RemoteBridge, AppPtyActuator, AppRosterProvider, AppHistoryProvider, PtyActuator, RosterProvider, HistoryProvider, cmd_channel};
 use crate::remote::ws_client::TungsteniteCentrifugoClient;
 use crate::remote::token::mint_connection_token;
 use crate::remote::cloud_client::CloudClient;
@@ -58,8 +58,9 @@ pub fn init_remote_bridge(app: AppHandle) {
         };
         let bridge = Arc::new(RemoteBridge::new(registry, allow_spawn));
         let actuator: Arc<dyn PtyActuator> = Arc::new(AppPtyActuator::new(app_for_actuator.clone()));
-        let roster: Arc<dyn RosterProvider> = Arc::new(AppRosterProvider::new(app_for_actuator));
-        bridge.run(device_id, conn.inbound, bus_rx, conn.client, actuator, roster, cloud, device_secret).await;
+        let roster: Arc<dyn RosterProvider> = Arc::new(AppRosterProvider::new(app_for_actuator.clone()));
+        let history: Arc<dyn HistoryProvider> = Arc::new(AppHistoryProvider::new(app_for_actuator));
+        bridge.run(device_id, conn.inbound, bus_rx, conn.client, actuator, roster, history, cloud, device_secret).await;
         eprintln!("remote bridge: run-loop ended");
     });
 }
@@ -84,8 +85,21 @@ async fn acquire_identity(
 ) -> anyhow::Result<Identity> {
     if let Some(base) = cloud_url {
         let client = Arc::new(CloudClient::new(base));
-        let (device_id, device_secret) = ensure_registered(db, client.as_ref()).await?;
-        let token = client.fetch_token(&device_secret).await?;
+        // Register on first use; if the persisted secret is stale (401),
+        // re-register and retry once. The helper persists the fresh id+secret.
+        let token = crate::remote::identity::with_reregister_on_unauthorized(
+            db,
+            client.as_ref(),
+            |secret| {
+                let client = client.clone();
+                async move { client.fetch_token(&secret).await }
+            },
+        )
+        .await?;
+        let conn = db.get()?;
+        let device_id = crate::db::settings_repo::get(&conn, "remoteDeviceId")?.unwrap_or_default();
+        let device_secret = crate::db::settings_repo::get(&conn, "remoteDeviceSecret")?.unwrap_or_default();
+        drop(conn);
         return Ok(Identity {
             device_id,
             token,
@@ -102,26 +116,6 @@ async fn acquire_identity(
         cloud: None,
         device_secret: None,
     })
-}
-
-/// Read persisted `remoteDeviceId`/`remoteDeviceSecret`; if absent, register with
-/// CloudService and persist both. The secret is stored only locally (SQLite).
-async fn ensure_registered(db: &DbPool, client: &CloudClient) -> anyhow::Result<(String, String)> {
-    {
-        let conn = db.get()?;
-        let id = crate::db::settings_repo::get(&conn, "remoteDeviceId").ok().flatten();
-        let secret = crate::db::settings_repo::get(&conn, "remoteDeviceSecret").ok().flatten();
-        if let (Some(id), Some(secret)) = (id, secret) {
-            if !id.is_empty() && !secret.is_empty() {
-                return Ok((id, secret));
-            }
-        }
-    }
-    let (device_id, device_secret) = client.register().await?;
-    let conn = db.get()?;
-    crate::db::settings_repo::set(&conn, "remoteDeviceId", &device_id)?;
-    crate::db::settings_repo::set(&conn, "remoteDeviceSecret", &device_secret)?;
-    Ok((device_id, device_secret))
 }
 
 fn unix_now() -> usize {

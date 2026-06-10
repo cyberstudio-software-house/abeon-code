@@ -20,6 +20,10 @@ use crate::state::AppState;
 /// without needing the command path (RequestRoster) or Centrifugo channel history.
 const ROSTER_REPUBLISH_SECS: u64 = 25;
 
+/// How many history blocks per SessionAppend publish during a RequestHistory backfill.
+/// Keeps individual Centrifugo messages well under the server's max size.
+const HISTORY_CHUNK_BLOCKS: usize = 20;
+
 /// Notify only on a transition INTO `WaitingUser` (not while it stays `WaitingUser`).
 pub fn should_notify(prev: Option<SessionActivity>, next: SessionActivity) -> bool {
     next == SessionActivity::WaitingUser && prev != Some(SessionActivity::WaitingUser)
@@ -39,6 +43,12 @@ pub trait PtyActuator: Send + Sync {
 /// Isolated as a trait so the run loop is testable without a DB.
 pub trait RosterProvider: Send + Sync {
     fn snapshot(&self) -> Vec<RosterEntry>;
+}
+
+/// Supplies the full history blocks for a session, used to answer RequestHistory.
+/// Isolated as a trait so the run loop is testable without a DB/filesystem.
+pub trait HistoryProvider: Send + Sync {
+    fn history(&self, session_id: &str) -> Vec<crate::domain::session::HistoryBlock>;
 }
 
 /// Production `PtyActuator` backed by the live app: writes/kills via `PtyManager`
@@ -81,6 +91,24 @@ impl RosterProvider for AppRosterProvider {
         let state = self.app.state::<AppState>();
         let conn = match state.db.get() { Ok(c) => c, Err(_) => return Vec::new() };
         crate::commands::sessions::roster_snapshot(&conn).unwrap_or_default()
+    }
+}
+
+/// Production `HistoryProvider` backed by the live app: reads a pooled connection
+/// and resolves the session's blocks via `commands::sessions::history_blocks_for_session`.
+pub struct AppHistoryProvider {
+    app: AppHandle,
+}
+
+impl AppHistoryProvider {
+    pub fn new(app: AppHandle) -> Self { Self { app } }
+}
+
+impl HistoryProvider for AppHistoryProvider {
+    fn history(&self, session_id: &str) -> Vec<crate::domain::session::HistoryBlock> {
+        let state = self.app.state::<AppState>();
+        let conn = match state.db.get() { Ok(c) => c, Err(_) => return Vec::new() };
+        crate::commands::sessions::history_blocks_for_session(&conn, session_id)
     }
 }
 
@@ -166,6 +194,7 @@ impl RemoteBridge {
         client: Arc<dyn CentrifugoClient>,
         actuator: Arc<dyn PtyActuator>,
         roster: Arc<dyn RosterProvider>,
+        history: Arc<dyn HistoryProvider>,
         cloud: Option<Arc<CloudClient>>,
         device_secret: Option<String>,
     ) {
@@ -186,8 +215,25 @@ impl RemoteBridge {
                 maybe_env = inbound.recv() => {
                     match maybe_env {
                         Some(env) => {
-                            if matches!(env.command, crate::remote::protocol::RemoteCommand::RequestRoster) {
+                            use crate::remote::protocol::RemoteCommand as RC;
+                            if matches!(env.command, RC::RequestRoster) {
                                 let _ = client.publish(&dev_channel, encode_roster(roster.snapshot())).await;
+                                let ack = RemoteEvent::CmdResult { command_id: env.command_id, ok: true, error: None };
+                                if let Ok(data) = serde_json::to_value(&ack) {
+                                    let _ = client.publish(&dev_channel, data).await;
+                                }
+                            } else if let RC::RequestHistory { session_id } = env.command.clone() {
+                                let blocks = history.history(&session_id);
+                                let channel = session_channel(&session_id);
+                                for chunk in blocks.chunks(HISTORY_CHUNK_BLOCKS) {
+                                    let ev = SessionEvent::SessionAppend {
+                                        session_id: session_id.clone(),
+                                        blocks: chunk.to_vec(),
+                                    };
+                                    if let Ok(data) = serde_json::to_value(&ev) {
+                                        let _ = client.publish(&channel, data).await;
+                                    }
+                                }
                                 let ack = RemoteEvent::CmdResult { command_id: env.command_id, ok: true, error: None };
                                 if let Ok(data) = serde_json::to_value(&ack) {
                                     let _ = client.publish(&dev_channel, data).await;
@@ -270,6 +316,17 @@ mod tests {
         fn snapshot(&self) -> Vec<RosterEntry> { self.entries.clone() }
     }
 
+    #[derive(Default)]
+    struct FakeHistoryProvider {
+        blocks: Vec<crate::domain::session::HistoryBlock>,
+    }
+
+    impl HistoryProvider for FakeHistoryProvider {
+        fn history(&self, _session_id: &str) -> Vec<crate::domain::session::HistoryBlock> {
+            self.blocks.clone()
+        }
+    }
+
     fn envelope(id: &str, cmd: RemoteCommand) -> RemoteEnvelope {
         RemoteEnvelope { command_id: id.into(), command: cmd }
     }
@@ -349,7 +406,8 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         let bus = crate::remote::bus::RemoteEventBus::new();
         let client_for_run = client.clone();
-        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator, roster, None, None));
+        let history: std::sync::Arc<dyn HistoryProvider> = std::sync::Arc::new(FakeHistoryProvider::default());
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator, roster, history, None, None));
 
         tx.send(RemoteEnvelope { command_id: "c1".into(), command: crate::remote::protocol::RemoteCommand::SendPrompt { session_id: "s1".into(), text: "hi".into() } }).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -376,7 +434,8 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         let bus = crate::remote::bus::RemoteEventBus::new();
         let client_for_run = client.clone();
-        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator, roster, None, None));
+        let history: std::sync::Arc<dyn HistoryProvider> = std::sync::Arc::new(FakeHistoryProvider::default());
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client_for_run, actuator, roster, history, None, None));
 
         bus.publish(crate::remote::bus::SessionBusEvent::Title { session_id: "s1".into(), title: "Hello".into() });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -403,7 +462,8 @@ mod tests {
         });
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         let bus = crate::remote::bus::RemoteEventBus::new();
-        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client.clone(), actuator, roster, None, None));
+        let history: std::sync::Arc<dyn HistoryProvider> = std::sync::Arc::new(FakeHistoryProvider::default());
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client.clone(), actuator, roster, history, None, None));
 
         tx.send(RemoteEnvelope { command_id: "c1".into(), command: RemoteCommand::RequestRoster }).await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -424,7 +484,8 @@ mod tests {
         let roster: std::sync::Arc<dyn RosterProvider> = std::sync::Arc::new(FakeRosterProvider::default());
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         let bus = crate::remote::bus::RemoteEventBus::new();
-        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client.clone(), actuator, roster, None, None));
+        let history: std::sync::Arc<dyn HistoryProvider> = std::sync::Arc::new(FakeHistoryProvider::default());
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client.clone(), actuator, roster, history, None, None));
 
         bus.publish(crate::remote::bus::SessionBusEvent::Activity { session_id: "s1".into(), activity: crate::domain::session::SessionActivity::WaitingUser });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -432,6 +493,34 @@ mod tests {
         let pubs = client.published();
         assert!(pubs.iter().any(|(ch, d)| ch == "abeon-cloud-sess:s1" && d["type"] == "sessionActivity"));
         assert!(pubs.iter().any(|(ch, d)| ch == "abeon-cloud-dev:dev-1" && d["type"] == "sessionActivity"));
+        drop(tx); let _ = handle.await; drop(bus);
+    }
+
+    #[tokio::test]
+    async fn request_history_publishes_append_chunks_to_session_channel() {
+        use crate::remote::client::FakeCentrifugoClient;
+        use crate::remote::protocol::RemoteCommand;
+        use crate::domain::session::HistoryBlock;
+
+        let bridge = std::sync::Arc::new(RemoteBridge::new(std::sync::Arc::new(SessionPtyRegistry::new()), false));
+        let client = std::sync::Arc::new(FakeCentrifugoClient::new());
+        let actuator: std::sync::Arc<dyn PtyActuator> = std::sync::Arc::new(FakePtyActuator::default());
+        let roster: std::sync::Arc<dyn RosterProvider> = std::sync::Arc::new(FakeRosterProvider::default());
+        let history: std::sync::Arc<dyn HistoryProvider> = std::sync::Arc::new(FakeHistoryProvider {
+            blocks: vec![HistoryBlock::System {
+                uuid: "b1".into(), timestamp: 1, subtype: "info".into(), message: "hi".into(),
+            }],
+        });
+        let (tx, rx) = tokio::sync::mpsc::channel(8);
+        let bus = crate::remote::bus::RemoteEventBus::new();
+        let handle = tokio::spawn(bridge.run("dev-1".into(), rx, bus.subscribe(), client.clone(), actuator, roster, history, None, None));
+
+        tx.send(RemoteEnvelope { command_id: "c1".into(), command: RemoteCommand::RequestHistory { session_id: "s1".into() } }).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let pubs = client.published();
+        assert!(pubs.iter().any(|(ch, d)| ch == "abeon-cloud-sess:s1" && d["type"] == "sessionAppend"));
+        assert!(pubs.iter().any(|(ch, d)| ch == "abeon-cloud-dev:dev-1" && d["type"] == "cmdResult" && d["ok"] == true));
         drop(tx); let _ = handle.await; drop(bus);
     }
 }
