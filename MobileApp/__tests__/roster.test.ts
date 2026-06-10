@@ -7,9 +7,21 @@ const mk = (id: string, projectName: string | null, at: number, activity: Sessio
 
 test('groupByProject buckets by project and sorts rows desc by lastEventAt', () => {
   const groups = groupByProject([mk('a', 'P1', 1), mk('b', 'P1', 5), mk('c', null, 9)]);
-  expect(groups.map((g) => g.title)).toEqual(['Inne', 'P1']); // sections sorted by name, 'Inne' for null
+  expect(groups.map((g) => g.title)).toEqual(['Inne', 'P1']);
   const p1 = groups.find((g) => g.title === 'P1')!;
   expect(p1.data.map((s) => s.id)).toEqual(['b', 'a']);       // 5 before 1
+});
+
+describe('groupByProject ordering', () => {
+  it('orders projects by most-recent activity, newest first', () => {
+    const sessions = [
+      mk('a', 'Alpha', 100),
+      mk('b', 'Beta', 300),
+      mk('c', 'Gamma', 200),
+    ];
+    const sections = groupByProject(sessions);
+    expect(sections.map((s) => s.title)).toEqual(['Beta', 'Gamma', 'Alpha']);
+  });
 });
 
 test('isActiveSession is true for any non-idle activity, false for idle/null', () => {
