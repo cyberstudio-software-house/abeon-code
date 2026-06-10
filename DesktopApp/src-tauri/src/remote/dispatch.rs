@@ -17,6 +17,10 @@ pub enum PtyAction {
 pub const APPROVE_KEYS: &str = "\r";
 /// Key sequence sent to cancel/reject a permission prompt. `\x1b` is Esc.
 pub const DENY_KEYS: &str = "\x1b";
+/// Key sequence to accept a permission prompt with "and don't ask again":
+/// move down to the second option, then Enter. Assumes the standard 3-option
+/// Claude permission menu — see the spec's risk note.
+pub const APPROVE_ALWAYS_KEYS: &str = "\x1b[B\r";
 
 /// Resolve to a `Write` against the session's live PTY, or `Reject` if none.
 fn write_to_session(reg: &SessionPtyRegistry, session_id: &str, bytes: Vec<u8>) -> PtyAction {
@@ -50,6 +54,9 @@ pub fn command_to_action(
         RemoteCommand::ApprovePermission { session_id } => {
             write_to_session(reg, session_id, APPROVE_KEYS.as_bytes().to_vec())
         }
+        RemoteCommand::ApproveAlwaysPermission { session_id } => {
+            write_to_session(reg, session_id, APPROVE_ALWAYS_KEYS.as_bytes().to_vec())
+        }
         RemoteCommand::DenyPermission { session_id } => {
             write_to_session(reg, session_id, DENY_KEYS.as_bytes().to_vec())
         }
@@ -66,6 +73,9 @@ pub fn command_to_action(
         }
         RemoteCommand::RequestRoster => {
             PtyAction::Reject { reason: "requestRoster has no pty effect".into() }
+        }
+        RemoteCommand::RequestHistory { .. } => {
+            PtyAction::Reject { reason: "requestHistory has no pty effect".into() }
         }
     }
 }
@@ -144,6 +154,23 @@ mod tests {
             command_to_action(&cmd, &reg, true),
             PtyAction::Spawn { session_id: "s1".into(), project_id: 7 }
         );
+        assert!(matches!(command_to_action(&cmd, &reg, false), PtyAction::Reject { .. }));
+    }
+
+    #[test]
+    fn approve_always_writes_down_then_enter() {
+        let reg = reg_with("s1", "pty-a");
+        let cmd = RemoteCommand::ApproveAlwaysPermission { session_id: "s1".into() };
+        assert_eq!(
+            command_to_action(&cmd, &reg, false),
+            PtyAction::Write { pty_id: "pty-a".into(), bytes: APPROVE_ALWAYS_KEYS.as_bytes().to_vec() }
+        );
+    }
+
+    #[test]
+    fn request_history_has_no_pty_effect() {
+        let reg = reg_with("s1", "pty-a");
+        let cmd = RemoteCommand::RequestHistory { session_id: "s1".into() };
         assert!(matches!(command_to_action(&cmd, &reg, false), PtyAction::Reject { .. }));
     }
 
