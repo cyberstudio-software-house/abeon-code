@@ -25,6 +25,16 @@ pub enum RemoteCommand {
     },
     /// Mobile asks the desktop to publish a full SessionRoster snapshot.
     RequestRoster,
+    /// Mobile asks the desktop to publish a full SessionAppend backfill for one
+    /// session to its session channel (no Centrifugo retention required).
+    RequestHistory {
+        session_id: String,
+    },
+    /// Approve a permission prompt with "and don't ask again" — selects the
+    /// second menu option (down arrow + Enter) instead of the default.
+    ApproveAlwaysPermission {
+        session_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -89,6 +99,24 @@ mod tests {
         let json = serde_json::to_string(&cmd).unwrap();
         assert!(json.contains(r#""type":"resumeSession""#));
         assert!(json.contains(r#""projectId":7"#));
+    }
+
+    #[test]
+    fn request_history_round_trips() {
+        let cmd = RemoteCommand::RequestHistory { session_id: "s1".into() };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(json, r#"{"type":"requestHistory","sessionId":"s1"}"#);
+        let back: RemoteCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cmd);
+    }
+
+    #[test]
+    fn approve_always_round_trips() {
+        let cmd = RemoteCommand::ApproveAlwaysPermission { session_id: "s1".into() };
+        let json = serde_json::to_string(&cmd).unwrap();
+        assert_eq!(json, r#"{"type":"approveAlwaysPermission","sessionId":"s1"}"#);
+        let back: RemoteCommand = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, cmd);
     }
 
     #[test]
