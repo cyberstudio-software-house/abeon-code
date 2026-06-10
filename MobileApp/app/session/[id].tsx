@@ -10,6 +10,8 @@ import { CommandBar } from '@/src/components/CommandBar';
 import { dispatchCommand } from '@/src/lib/dispatch';
 import type { HistoryBlock } from '@/src/types/HistoryBlock';
 
+const EMPTY_BLOCKS: HistoryBlock[] = [];
+
 export default function SessionScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
@@ -29,8 +31,7 @@ export default function SessionScreen() {
 
   const title = useStore((s) => s.sessions.get(id)?.title ?? null);
   const activity = useStore((s) => s.sessions.get(id)?.activity ?? null);
-  const historyMap = useStore((s) => s.history);
-  const blocks = useMemo(() => historyMap.get(id) ?? [], [historyMap, id]);
+  const blocks = useStore((s) => s.history.get(id) ?? EMPTY_BLOCKS);
 
   const isPermission = activity === 'waitingTool';
 
