@@ -4,6 +4,7 @@ use crate::domain::SessionActivity;
 const TAIL_BYTES: u64 = 8 * 1024;
 const LIVE_WINDOW_MS: i64 = 5_000;
 const TOOL_STALL_MS: i64 = 30_000;
+const RUNNING_STALL_MS: i64 = 10 * 60 * 1000;
 const WAITING_DECAY_MS: i64 = 4 * 60 * 60 * 1000;
 const IDLE_HARD_CAP_MS: i64 = 24 * 60 * 60 * 1000;
 
@@ -27,8 +28,12 @@ pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
     let Some(last) = find_last_significant(&lines) else { return SessionActivity::Idle };
 
     let waiting = match last {
-        LastEvent::UserText => return SessionActivity::Running,
-        LastEvent::UserToolResult { is_error: false } => return SessionActivity::Running,
+        LastEvent::UserText | LastEvent::UserToolResult { is_error: false } => {
+            if age_ms > RUNNING_STALL_MS {
+                return SessionActivity::Idle;
+            }
+            return SessionActivity::Running;
+        }
         LastEvent::SessionAway => return SessionActivity::Idle,
         LastEvent::AssistantToolUseUnresolved => {
             if age_ms < TOOL_STALL_MS {
@@ -436,12 +441,38 @@ mod tests {
     }
 
     #[test]
-    fn user_text_after_5h_returns_running_not_decayed() {
+    fn user_text_after_5h_returns_idle_via_running_stall() {
         let td = TempDir::new().unwrap();
         let (p, mtime) = write_with_mtime(&td, "s.jsonl",
             r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"do it"}]}}"#);
         let five_hours = 5 * 60 * 60 * 1000;
-        assert_eq!(compute_activity(&p, mtime + five_hours), SessionActivity::Running);
+        assert_eq!(compute_activity(&p, mtime + five_hours), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn user_text_after_11min_returns_idle() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"do it"}]}}"#);
+        let eleven_min = 11 * 60 * 1000;
+        assert_eq!(compute_activity(&p, mtime + eleven_min), SessionActivity::Idle);
+    }
+
+    #[test]
+    fn user_text_at_exactly_stall_threshold_returns_running() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"do it"}]}}"#);
+        assert_eq!(compute_activity(&p, mtime + RUNNING_STALL_MS), SessionActivity::Running);
+    }
+
+    #[test]
+    fn user_tool_result_ok_after_11min_returns_idle() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]}}"#);
+        let eleven_min = 11 * 60 * 1000;
+        assert_eq!(compute_activity(&p, mtime + eleven_min), SessionActivity::Idle);
     }
 
     #[test]
