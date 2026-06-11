@@ -59,6 +59,11 @@ struct CachedMeta {
     git_branch: Option<String>,
 }
 
+fn title_cache() -> &'static Mutex<HashMap<PathBuf, (i64, Option<String>)>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, (i64, Option<String>)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 fn meta_cache() -> &'static Mutex<HashMap<PathBuf, CachedMeta>> {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedMeta>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -147,7 +152,7 @@ pub(crate) fn is_meta_codex_text(text: &str) -> bool {
         || t.starts_with("<turn_context>")
 }
 
-fn first_user_text(path: &Path) -> Option<String> {
+fn read_first_user_text(path: &Path) -> Option<String> {
     let reader = open_lines(path).ok()?;
     for (i, line) in reader.lines().map_while(Result::ok).enumerate() {
         if i >= META_SCAN_LIMIT { break; }
@@ -166,6 +171,18 @@ fn first_user_text(path: &Path) -> Option<String> {
         }
     }
     None
+}
+
+fn first_user_text(path: &Path) -> Option<String> {
+    let mtime = mtime_ms(path);
+    if let Some((cached_mtime, text)) = title_cache().lock().get(path) {
+        if *cached_mtime == mtime {
+            return text.clone();
+        }
+    }
+    let text = read_first_user_text(path);
+    title_cache().lock().insert(path.to_path_buf(), (mtime, text.clone()));
+    text
 }
 
 fn truncate(s: &str, max: usize) -> String {
@@ -280,6 +297,25 @@ mod tests {
         assert_eq!(m.provider, crate::domain::Provider::Codex);
         assert_eq!(m.title, "fix the login bug");
         assert_eq!(m.cwd.as_deref(), Some("/proj/match"));
+    }
+
+    #[test]
+    fn first_user_text_is_cached_until_mtime_changes() {
+        let td = TempDir::new().unwrap();
+        let content = format!(
+            "{}\n{}\n",
+            meta_line("cace7777-cace-cace-cace-cacecacecace", "/proj/c"),
+            r#"{"timestamp":"2026-06-11T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"first prompt"}]}}"#,
+        );
+        let p = write_rollout(td.path(), "11", "rollout-cace.jsonl", &content);
+
+        let list1 = list_for_cwd(td.path(), "/proj/c", 1, 50);
+        assert_eq!(list1[0].title, "first prompt");
+
+        let mtime_before = p.metadata().unwrap().modified().unwrap();
+        let list2 = list_for_cwd(td.path(), "/proj/c", 1, 50);
+        assert_eq!(list2[0].title, "first prompt");
+        assert_eq!(p.metadata().unwrap().modified().unwrap(), mtime_before);
     }
 
     #[test]
