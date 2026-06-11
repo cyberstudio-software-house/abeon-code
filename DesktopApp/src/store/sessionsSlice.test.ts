@@ -83,4 +83,47 @@ describe('refreshActivity', () => {
     await useStore.getState().refreshActivity(42);
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it('links new- tabs to sessions by provider, not position', async () => {
+    useStore.setState({
+      sessionsByProject: {
+        1: { items: [], hasMore: false },
+      },
+      tabs: [
+        {
+          kind: 'session',
+          id: 'session:new-codex',
+          projectId: 1,
+          sessionId: 'new-codex',
+          title: 'New session',
+          mode: 'terminal',
+          fresh: true,
+          provider: 'codex',
+        },
+        {
+          kind: 'session',
+          id: 'session:new-claude',
+          projectId: 1,
+          sessionId: 'new-claude',
+          title: 'New session',
+          mode: 'terminal',
+          fresh: true,
+        },
+      ],
+    });
+
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([
+      { ...fakeMeta('real-codex-id', 1, 'idle'), provider: 'codex', title: 'Codex session' },
+      { ...fakeMeta('real-claude-id', 1, 'idle'), provider: 'claude', title: 'Claude session' },
+    ]);
+
+    await useStore.getState().refreshActivity(1);
+
+    const tabs = useStore.getState().tabs;
+    const codexTab = tabs.find(t => t.id === 'session:new-codex');
+    const claudeTab = tabs.find(t => t.id === 'session:new-claude');
+
+    expect(codexTab?.kind === 'session' && codexTab.linkedSessionId).toBe('real-codex-id');
+    expect(claudeTab?.kind === 'session' && claudeTab.linkedSessionId).toBe('real-claude-id');
+  });
 });

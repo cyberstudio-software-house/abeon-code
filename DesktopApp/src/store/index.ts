@@ -6,6 +6,7 @@ import { createTabsSlice, type TabsSlice } from './tabsSlice';
 import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 import { createGitSlice, type GitSlice } from './gitSlice';
 import { tauri } from '../lib/tauri';
+import type { Provider } from '../types';
 
 export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice;
 
@@ -189,6 +190,7 @@ type PersistedTab = {
   sessionId: string;
   linkedSessionId?: string;
   title: string;
+  provider?: Provider;
 };
 
 type PersistedTabs = {
@@ -234,6 +236,7 @@ function writeTabsToLocalStorage(state: AppState) {
       sessionId: t.sessionId,
       ...(t.linkedSessionId ? { linkedSessionId: t.linkedSessionId } : {}),
       title: t.title,
+      ...(t.provider ? { provider: t.provider } : {}),
     }));
   const activeTabId = sessionTabs.some(t => t.id === state.activeTabId)
     ? state.activeTabId

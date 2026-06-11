@@ -10,7 +10,7 @@ export type TabsSlice = {
   tabs: Tab[];
   activeTabId: string | null;
   mruOrder: string[];
-  openSessionTab: (projectId: number, sessionId: string, title: string) => void;
+  openSessionTab: (projectId: number, sessionId: string, title: string, provider?: Provider) => void;
   openNewSessionTab: (projectId: number) => void;
   openNewTerminalTab: (projectId: number) => void;
   setSessionMode: (tabId: string, mode: 'history' | 'terminal') => void;
@@ -29,12 +29,12 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
   tabs: [],
   activeTabId: null,
   mruOrder: [],
-  openSessionTab: (projectId, sessionId, title) => {
+  openSessionTab: (projectId, sessionId, title, provider) => {
     const id = sessionTabId(sessionId);
     const existing = get().tabs.find(t => t.id === id || (t.kind === 'session' && t.linkedSessionId === sessionId));
     if (existing) { set({ activeTabId: existing.id, mruOrder: moveToFront(get().mruOrder, existing.id) }); return; }
     set({
-      tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title, mode: 'history' }],
+      tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title, mode: 'history', ...(provider ? { provider } : {}) }],
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
     });
