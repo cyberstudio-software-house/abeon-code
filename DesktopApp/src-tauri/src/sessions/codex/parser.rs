@@ -182,4 +182,48 @@ mod tests {
         assert!(matches!(&blocks[0], HistoryBlock::AssistantText { uuid, .. } if uuid == "cx-11-0"));
         assert!(matches!(&blocks[1], HistoryBlock::AssistantText { uuid, .. } if uuid == "cx-11-1"));
     }
+
+    fn real_lines() -> Vec<String> {
+        let s = include_str!("../../../tests/fixtures/codex-rollout-real.jsonl");
+        s.lines().filter(|l| !l.trim().is_empty()).map(String::from).collect()
+    }
+
+    #[test]
+    fn real_capture_developer_message_yields_no_blocks() {
+        assert!(parse_codex_line(2, &real_lines()[2]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn real_capture_environment_context_filtered() {
+        assert!(parse_codex_line(3, &real_lines()[3]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn real_capture_user_prompt_parses() {
+        let blocks = parse_codex_line(5, &real_lines()[5]).unwrap();
+        assert!(matches!(&blocks[0], HistoryBlock::UserText { text, .. } if text.starts_with("Run the command")));
+    }
+
+    #[test]
+    fn real_capture_empty_reasoning_yields_no_blocks() {
+        assert!(parse_codex_line(7, &real_lines()[7]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn real_capture_exec_command_tool_use() {
+        let blocks = parse_codex_line(8, &real_lines()[8]).unwrap();
+        assert!(matches!(&blocks[0], HistoryBlock::ToolUse { name, .. } if name == "exec_command"));
+    }
+
+    #[test]
+    fn real_capture_plain_string_output_is_tool_result() {
+        let blocks = parse_codex_line(9, &real_lines()[9]).unwrap();
+        assert!(matches!(&blocks[0], HistoryBlock::ToolResult { content, is_error: false, .. } if content.contains("Process exited with code 0")));
+    }
+
+    #[test]
+    fn real_capture_assistant_final_answer_parses() {
+        let blocks = parse_codex_line(12, &real_lines()[12]).unwrap();
+        assert!(matches!(&blocks[0], HistoryBlock::AssistantText { text, .. } if text == "done"));
+    }
 }

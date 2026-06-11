@@ -409,6 +409,21 @@ mod tests {
     }
 
     #[test]
+    fn real_capture_session_meta_parses() {
+        let td = TempDir::new().unwrap();
+        let content = include_str!("../../../tests/fixtures/codex-rollout-real.jsonl");
+        write_rollout(td.path(), "11", "rollout-real.jsonl", content);
+        let all = scan_sessions(td.path());
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].session_id, "019eb80e-c7eb-74a1-80f7-a26d9af4b0fb");
+        assert_eq!(all[0].cwd, "/tmp/codex-recon");
+
+        let list = list_for_cwd(td.path(), "/tmp/codex-recon", 1, 50);
+        assert_eq!(list.len(), 1);
+        assert!(list[0].title.starts_with("Run the command"));
+    }
+
+    #[test]
     fn physical_line_count_includes_empty_lines() {
         // File "A\n\nB\n": A at physical index 0, empty at 1, B at 2.
         // enumerate() in read_history counts all lines, so B gets line_no 2 → uuid "cx-2-…".

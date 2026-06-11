@@ -66,6 +66,7 @@ pub(crate) fn find_last_significant_codex(lines: &[String]) -> Option<LastEvent>
         match p.get("type").and_then(|t| t.as_str()).unwrap_or("") {
             "message" => {
                 let role = p.get("role").and_then(|r| r.as_str()).unwrap_or("");
+                if role != "user" && role != "assistant" { continue; }
                 let Some(arr) = p.get("content").and_then(|c| c.as_array()) else {
                     continue
                 };
@@ -154,6 +155,21 @@ mod tests {
     #[test]
     fn empty_is_none() {
         assert_eq!(last(&[]), None);
+    }
+
+    #[test]
+    fn developer_message_is_not_significant() {
+        let lines = [r#"{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"<permissions instructions>rules"}]}}"#];
+        assert_eq!(last(&lines), None);
+    }
+
+    #[test]
+    fn developer_message_after_assistant_does_not_mask_it() {
+        let lines = [
+            r#"{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"done"}]}}"#,
+            r#"{"type":"response_item","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"injected"}]}}"#,
+        ];
+        assert_eq!(last(&lines), Some(LastEvent::AssistantText));
     }
 
     #[test]
