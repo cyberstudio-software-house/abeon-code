@@ -149,6 +149,7 @@ fn meta_for_file_fast(project_id: i64, path: &Path) -> AppResult<SessionMeta> {
         message_count: approx_messages,
         last_modified, git_branch, cwd,
         activity: compute_activity(path, now_ms()),
+        provider: crate::domain::Provider::Claude,
     })
 }
 
@@ -245,6 +246,7 @@ pub fn read_history(
         message_count: line_count,
         last_modified, git_branch, cwd,
         activity: compute_activity(&path, now_ms()),
+        provider: crate::domain::Provider::Claude,
     };
 
     Ok(SessionHistory { meta, blocks, has_more_before })

@@ -13,6 +13,7 @@ function fakeMeta(id: string, projectId: number, activity: SessionMeta['activity
     gitBranch: null,
     cwd: null,
     activity,
+    provider: 'claude',
   };
 }
 

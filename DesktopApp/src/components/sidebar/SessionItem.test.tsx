@@ -13,6 +13,7 @@ function meta(activity: SessionMeta['activity']): SessionMeta {
     gitBranch: null,
     cwd: null,
     activity,
+    provider: 'claude',
   };
 }
 

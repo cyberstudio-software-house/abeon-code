@@ -5,6 +5,7 @@ export type { ActionInput } from './ActionInput';
 export type { ActionPatch } from './ActionPatch';
 export type { SessionMeta } from './SessionMeta';
 export type { SessionActivity } from './SessionActivity';
+export type { Provider } from './Provider';
 export type { HistoryBlock } from './HistoryBlock';
 export type { SessionHistory } from './SessionHistory';
 export type { PtyKind } from './PtyKind';
