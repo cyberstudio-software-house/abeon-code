@@ -1,5 +1,6 @@
 use std::path::Path;
 use crate::domain::SessionActivity;
+use crate::domain::Provider;
 
 const TAIL_BYTES: u64 = 8 * 1024;
 const LIVE_WINDOW_MS: i64 = 5_000;
@@ -8,6 +9,14 @@ const WAITING_DECAY_MS: i64 = 4 * 60 * 60 * 1000;
 const IDLE_HARD_CAP_MS: i64 = 24 * 60 * 60 * 1000;
 
 pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
+    compute_activity_with(find_last_significant, path, now_ms)
+}
+
+pub(crate) fn compute_activity_with(
+    extractor: fn(&[String]) -> Option<LastEvent>,
+    path: &Path,
+    now_ms: i64,
+) -> SessionActivity {
     let Ok(meta) = path.metadata() else { return SessionActivity::Idle };
     let Ok(mtime_st) = meta.modified() else { return SessionActivity::Idle };
     let mtime_ms = match mtime_st.duration_since(std::time::UNIX_EPOCH) {
@@ -24,7 +33,7 @@ pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
     }
 
     let Some(lines) = read_tail_lines(path) else { return SessionActivity::Idle };
-    let Some(last) = find_last_significant(&lines) else { return SessionActivity::Idle };
+    let Some(last) = extractor(&lines) else { return SessionActivity::Idle };
 
     let waiting = match last {
         LastEvent::UserText => return SessionActivity::Running,
@@ -48,7 +57,14 @@ pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
     }
 }
 
-fn read_tail_lines(path: &Path) -> Option<Vec<String>> {
+pub fn compute_activity_for(provider: Provider, path: &Path, now_ms: i64) -> SessionActivity {
+    match provider {
+        Provider::Claude => compute_activity_with(find_last_significant, path, now_ms),
+        Provider::Codex => compute_activity_with(find_last_significant, path, now_ms),
+    }
+}
+
+pub(crate) fn read_tail_lines(path: &Path) -> Option<Vec<String>> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path).ok()?;
     let len = f.metadata().ok()?.len();
@@ -66,7 +82,7 @@ fn read_tail_lines(path: &Path) -> Option<Vec<String>> {
 }
 
 #[derive(Debug, PartialEq)]
-enum LastEvent {
+pub(crate) enum LastEvent {
     UserText,
     UserToolResult { is_error: bool },
     AssistantText,
