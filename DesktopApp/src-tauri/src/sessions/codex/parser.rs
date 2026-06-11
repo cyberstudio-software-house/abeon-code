@@ -10,59 +10,61 @@ fn ts_ms(v: Option<&Value>) -> i64 {
 }
 
 /// Parses one rollout line into zero or more `HistoryBlock`s. Codex response
-/// items carry no per-item uuid, so blocks get a stable synthetic `cx-<line_no>`
-/// id (rollouts are append-only, so line numbers never shift).
+/// items carry no per-item uuid, so blocks get a stable synthetic `cx-<line_no>-<block_idx>`
+/// id (rollouts are append-only, so line numbers never shift, and block_idx within
+/// a line ensures uniqueness across multi-content messages).
 pub fn parse_codex_line(line_no: usize, line: &str) -> Result<Vec<HistoryBlock>, serde_json::Error> {
     let v: Value = serde_json::from_str(line)?;
     if v.get("type").and_then(|t| t.as_str()) != Some("response_item") {
         return Ok(vec![]);
     }
     let ts = ts_ms(v.get("timestamp"));
-    let uuid = format!("cx-{line_no}");
+    let uuid_base = format!("cx-{line_no}");
     let Some(p) = v.get("payload") else { return Ok(vec![]) };
     let item_type = p.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
     Ok(match item_type {
-        "message" => parse_message(p, &uuid, ts),
-        "reasoning" => parse_reasoning(p, &uuid, ts),
-        "function_call" | "custom_tool_call" => parse_tool_call(p, &uuid, ts),
-        "local_shell_call" => parse_local_shell_call(p, &uuid, ts),
-        "function_call_output" | "custom_tool_call_output" => parse_tool_output(p, &uuid, ts),
+        "message" => parse_message(p, &uuid_base, ts),
+        "reasoning" => parse_reasoning(p, &uuid_base, ts),
+        "function_call" | "custom_tool_call" => parse_tool_call(p, &uuid_base, ts),
+        "local_shell_call" => parse_local_shell_call(p, &uuid_base, ts),
+        "function_call_output" | "custom_tool_call_output" => parse_tool_output(p, &uuid_base, ts),
         _ => vec![],
     })
 }
 
-fn parse_message(p: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
+fn parse_message(p: &Value, uuid_base: &str, ts: i64) -> Vec<HistoryBlock> {
     let role = p.get("role").and_then(|r| r.as_str()).unwrap_or("");
     let Some(arr) = p.get("content").and_then(|c| c.as_array()) else { return vec![] };
     let mut out = Vec::new();
     for item in arr {
         let text = item.get("text").and_then(|t| t.as_str()).unwrap_or("");
         if text.is_empty() { continue; }
+        let uuid = format!("{uuid_base}-{}", out.len());
         match role {
             "user" => {
                 if !is_meta_codex_text(text) {
-                    out.push(HistoryBlock::UserText { uuid: uuid.into(), timestamp: ts, text: text.to_string() });
+                    out.push(HistoryBlock::UserText { uuid, timestamp: ts, text: text.to_string() });
                 }
             }
-            "assistant" => out.push(HistoryBlock::AssistantText { uuid: uuid.into(), timestamp: ts, text: text.to_string() }),
+            "assistant" => out.push(HistoryBlock::AssistantText { uuid, timestamp: ts, text: text.to_string() }),
             _ => {}
         }
     }
     out
 }
 
-fn parse_reasoning(p: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
+fn parse_reasoning(p: &Value, uuid_base: &str, ts: i64) -> Vec<HistoryBlock> {
     let Some(arr) = p.get("summary").and_then(|s| s.as_array()) else { return vec![] };
     let text: String = arr.iter()
         .filter_map(|i| i.get("text").and_then(|t| t.as_str()))
         .collect::<Vec<_>>()
         .join("\n");
     if text.is_empty() { return vec![] }
-    vec![HistoryBlock::AssistantThinking { uuid: uuid.into(), timestamp: ts, text }]
+    vec![HistoryBlock::AssistantThinking { uuid: format!("{uuid_base}-0"), timestamp: ts, text }]
 }
 
-fn parse_tool_call(p: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
+fn parse_tool_call(p: &Value, uuid_base: &str, ts: i64) -> Vec<HistoryBlock> {
     let name = p.get("name").and_then(|n| n.as_str()).unwrap_or("tool").to_string();
     let raw_input = p.get("arguments")
         .or_else(|| p.get("input"))
@@ -72,16 +74,16 @@ fn parse_tool_call(p: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
         })
         .unwrap_or(Value::Null);
     let input_summary = crate::sessions::parser::summarize_input(&raw_input);
-    vec![HistoryBlock::ToolUse { uuid: uuid.into(), timestamp: ts, name, input_summary, raw_input }]
+    vec![HistoryBlock::ToolUse { uuid: format!("{uuid_base}-0"), timestamp: ts, name, input_summary, raw_input }]
 }
 
-fn parse_local_shell_call(p: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
+fn parse_local_shell_call(p: &Value, uuid_base: &str, ts: i64) -> Vec<HistoryBlock> {
     let raw_input = p.get("action").cloned().unwrap_or(Value::Null);
     let input_summary = crate::sessions::parser::summarize_input(&raw_input);
-    vec![HistoryBlock::ToolUse { uuid: uuid.into(), timestamp: ts, name: "shell".into(), input_summary, raw_input }]
+    vec![HistoryBlock::ToolUse { uuid: format!("{uuid_base}-0"), timestamp: ts, name: "shell".into(), input_summary, raw_input }]
 }
 
-fn parse_tool_output(p: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
+fn parse_tool_output(p: &Value, uuid_base: &str, ts: i64) -> Vec<HistoryBlock> {
     let raw = p.get("output");
     let (content, is_error) = match raw {
         Some(Value::String(s)) => match serde_json::from_str::<Value>(s) {
@@ -95,7 +97,7 @@ fn parse_tool_output(p: &Value, uuid: &str, ts: i64) -> Vec<HistoryBlock> {
         Some(other) => (other.to_string(), false),
         None => (String::new(), false),
     };
-    vec![HistoryBlock::ToolResult { uuid: uuid.into(), timestamp: ts, content, is_error }]
+    vec![HistoryBlock::ToolResult { uuid: format!("{uuid_base}-0"), timestamp: ts, content, is_error }]
 }
 
 #[cfg(test)]
@@ -123,7 +125,7 @@ mod tests {
     fn parses_user_text_with_stable_uuid() {
         let blocks = parse_codex_line(2, &lines()[2]).unwrap();
         assert_eq!(blocks.len(), 1);
-        assert!(matches!(&blocks[0], HistoryBlock::UserText { text, uuid, .. } if text == "Hello" && uuid == "cx-2"));
+        assert!(matches!(&blocks[0], HistoryBlock::UserText { text, uuid, .. } if text == "Hello" && uuid == "cx-2-0"));
     }
 
     #[test]
@@ -155,5 +157,29 @@ mod tests {
         let line = r#"{"timestamp":"2026-06-11T10:00:05.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c","output":"{\"output\":\"boom\",\"metadata\":{\"exit_code\":1}}"}}"#;
         let blocks = parse_codex_line(0, line).unwrap();
         assert!(matches!(&blocks[0], HistoryBlock::ToolResult { is_error: true, .. }));
+    }
+
+    #[test]
+    fn parses_local_shell_call_as_shell_tool_use() {
+        let line = r#"{"timestamp":"2026-06-11T10:00:04.000Z","type":"response_item","payload":{"type":"local_shell_call","call_id":"c2","action":{"command":["cat","x"]}}}"#;
+        let blocks = parse_codex_line(9, line).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(matches!(&blocks[0], HistoryBlock::ToolUse { name, uuid, .. } if name == "shell" && uuid == "cx-9-0"));
+    }
+
+    #[test]
+    fn parses_custom_tool_call_output_as_tool_result() {
+        let line = r#"{"timestamp":"2026-06-11T10:00:05.000Z","type":"response_item","payload":{"type":"custom_tool_call_output","call_id":"c3","output":"plain text result"}}"#;
+        let blocks = parse_codex_line(10, line).unwrap();
+        assert!(matches!(&blocks[0], HistoryBlock::ToolResult { content, is_error: false, .. } if content == "plain text result"));
+    }
+
+    #[test]
+    fn multi_item_message_gets_unique_uuids() {
+        let line = r#"{"timestamp":"2026-06-11T10:00:06.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"part one"},{"type":"output_text","text":"part two"}]}}"#;
+        let blocks = parse_codex_line(11, line).unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert!(matches!(&blocks[0], HistoryBlock::AssistantText { uuid, .. } if uuid == "cx-11-0"));
+        assert!(matches!(&blocks[1], HistoryBlock::AssistantText { uuid, .. } if uuid == "cx-11-1"));
     }
 }
