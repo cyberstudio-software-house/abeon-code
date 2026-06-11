@@ -27,4 +27,13 @@ describe('sanitizeRestoredTabs', () => {
     ]);
     expect(out).toHaveLength(0);
   });
+
+  it('strips unknown provider but keeps the tab', () => {
+    const out = sanitizeRestoredTabs([
+      // @ts-expect-error deliberately invalid provider from old/corrupt localStorage
+      { kind: 'session', id: 'session:abc', projectId: 1, sessionId: 'abc', title: 'T', provider: 'future-provider' },
+    ]);
+    expect(out).toHaveLength(1);
+    expect(out[0].provider).toBeUndefined();
+  });
 });
