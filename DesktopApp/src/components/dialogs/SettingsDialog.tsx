@@ -726,7 +726,11 @@ function CodexModelsSection() {
     tauri.detectCodexModels().then(setDetected).catch(() => setDetected([]));
   }, []);
 
-  const options = Array.from(new Set([...detected, ...codexCustomModels]));
+  const options = Array.from(new Set([
+    ...detected,
+    ...codexCustomModels,
+    ...(codexModelId ? [codexModelId] : []),
+  ]));
 
   return (
     <div>
