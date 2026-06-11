@@ -20,7 +20,7 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: 'Systemowy' },
 ];
 
-type SettingsTab = 'general' | 'models' | 'shortcuts';
+type SettingsTab = 'general' | 'cli' | 'models' | 'shortcuts';
 
 const EFFORT_OPTIONS: { value: EffortLevel; label: string }[] = [
   { value: 'low', label: 'Niski' },
@@ -53,12 +53,14 @@ export function SettingsDialog() {
 
         <div className="flex gap-1 px-5 border-b border-border">
           <TabButton active={tab === 'general'} onClick={() => setTab('general')}>Ogólne</TabButton>
+          <TabButton active={tab === 'cli'} onClick={() => setTab('cli')}>CLI</TabButton>
           <TabButton active={tab === 'models'} onClick={() => setTab('models')}>Modele</TabButton>
           <TabButton active={tab === 'shortcuts'} onClick={() => setTab('shortcuts')}>Skróty</TabButton>
         </div>
 
         <div className="flex-1 min-h-0 overflow-auto p-5">
           {tab === 'general' && <GeneralTab />}
+          {tab === 'cli' && <CliTab />}
           {tab === 'models' && <ModelsTab />}
           {tab === 'shortcuts' && <ShortcutsTab />}
         </div>
@@ -128,6 +130,91 @@ function ProvidersSection() {
       <p className="text-[11px] text-muted mt-2">
         Gdy włączony jest więcej niż jeden dostawca, „New session" najpierw pyta, w którym CLI uruchomić sesję.
       </p>
+    </div>
+  );
+}
+
+function TitleGenSection() {
+  const enabledProviders = useStore(useShallow(s => s.enabledProviders));
+  const titleGenModelId = useStore(s => s.titleGenModelId);
+  const setTitleGenModel = useStore(s => s.setTitleGenModel);
+  const customModels = useStore(useShallow(s => s.customModels));
+  const codexTitleGenModelId = useStore(s => s.codexTitleGenModelId);
+  const setCodexTitleGenModel = useStore(s => s.setCodexTitleGenModel);
+  const codexCustomModels = useStore(useShallow(s => s.codexCustomModels));
+  const [detectedCodex, setDetectedCodex] = useState<string[]>([]);
+
+  useEffect(() => {
+    tauri.detectCodexModels().then(setDetectedCodex).catch(() => setDetectedCodex([]));
+  }, []);
+
+  const codexOptions = Array.from(new Set([...detectedCodex, ...codexCustomModels]));
+  const codexTitleGenInList = codexTitleGenModelId === '' || codexOptions.includes(codexTitleGenModelId);
+
+  return (
+    <div>
+      <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
+        Model do generowania tytułów
+      </label>
+      <p className="text-[11px] text-muted mb-3">
+        Używany przy ręcznym wywołaniu „Generuj tytuł sesji" (ikona ✨ w nagłówku sesji).
+        Zwykle wystarczy najszybszy/najtańszy model.
+      </p>
+
+      {enabledProviders.includes('claude') && (
+        <div className="mb-3">
+          <div className="flex items-center gap-2 mb-2">
+            <Icon name="claudeLogo" className="w-3.5 h-3.5" />
+            <span className="text-[12px] text-fg-secondary">Claude Code</span>
+          </div>
+          <select
+            value={titleGenModelId}
+            onChange={e => setTitleGenModel(e.target.value)}
+            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
+          >
+            {BUILTIN_MODELS.map(m => (
+              <option key={m.id} value={m.id}>
+                {m.label}{m.context ? ` (${m.context})` : ''}
+              </option>
+            ))}
+            {customModels.length > 0 && <option disabled>──────────</option>}
+            {customModels.map(m => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {enabledProviders.includes('codex') && (
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Icon name="openaiLogo" className="w-3.5 h-3.5" />
+            <span className="text-[12px] text-fg-secondary">Codex</span>
+          </div>
+          <select
+            value={codexTitleGenModelId}
+            onChange={e => setCodexTitleGenModel(e.target.value)}
+            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
+          >
+            <option value="">Auto (konfiguracja Codexa)</option>
+            {codexOptions.map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+            {!codexTitleGenInList && (
+              <option value={codexTitleGenModelId}>{codexTitleGenModelId}</option>
+            )}
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CliTab() {
+  return (
+    <div className="space-y-6">
+      <ProvidersSection />
+      <TitleGenSection />
     </div>
   );
 }
@@ -392,8 +479,6 @@ function GeneralTab() {
         </p>
       </div>
 
-      <ProvidersSection />
-
       <div>
         <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
           AbeonCloud (zdalne sterowanie)
@@ -448,13 +533,11 @@ function GeneralTab() {
   );
 }
 
-function ModelsTab() {
+function ClaudeModelsSection() {
   const defaultModelId = useStore(s => s.defaultModelId);
-  const titleGenModelId = useStore(s => s.titleGenModelId);
   const modelEfforts = useStore(s => s.modelEfforts);
   const customModels = useStore(useShallow(s => s.customModels));
   const setDefaultModel = useStore(s => s.setDefaultModel);
-  const setTitleGenModel = useStore(s => s.setTitleGenModel);
   const setModelEffort = useStore(s => s.setModelEffort);
   const addCustomModel = useStore(s => s.addCustomModel);
   const removeCustomModel = useStore(s => s.removeCustomModel);
@@ -491,9 +574,10 @@ function ModelsTab() {
 
   return (
     <div>
-      <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
-        Domyślny model
-      </label>
+      <div className="flex items-center gap-2 mb-2">
+        <Icon name="claudeLogo" className="w-3.5 h-3.5" />
+        <label className="block text-[10px] text-muted uppercase tracking-wider">Claude Code</label>
+      </div>
       <p className="text-[11px] text-muted mb-3">
         Model używany przy tworzeniu nowych sesji. Istniejące sesje zachowują swój model.
       </p>
@@ -582,31 +666,6 @@ function ModelsTab() {
         </>
       )}
 
-      <div className="border-t border-border pt-4 mb-4">
-        <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
-          Model do generowania tytułów
-        </label>
-        <p className="text-[11px] text-muted mb-2">
-          Używany przy ręcznym wywołaniu „Generuj tytuł sesji" (ikona ✨ w nagłówku sesji).
-          Zwykle wystarczy najszybszy/najtańszy model.
-        </p>
-        <select
-          value={titleGenModelId}
-          onChange={e => setTitleGenModel(e.target.value)}
-          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
-        >
-          {BUILTIN_MODELS.map(m => (
-            <option key={m.id} value={m.id}>
-              {m.label}{m.context ? ` (${m.context})` : ''}
-            </option>
-          ))}
-          {customModels.length > 0 && <option disabled>──────────</option>}
-          {customModels.map(m => (
-            <option key={m.id} value={m.id}>{m.label}</option>
-          ))}
-        </select>
-      </div>
-
       {adding ? (
         <div className="border border-border p-3 space-y-2">
           <label className="block text-[10px] text-muted uppercase tracking-wider">Nazwa</label>
@@ -650,6 +709,88 @@ function ModelsTab() {
           Dodaj własny model
         </button>
       )}
+    </div>
+  );
+}
+
+function CodexModelsSection() {
+  const codexModelId = useStore(s => s.codexModelId);
+  const setCodexModel = useStore(s => s.setCodexModel);
+  const codexCustomModels = useStore(useShallow(s => s.codexCustomModels));
+  const addCustom = useStore(s => s.addCodexCustomModel);
+  const removeCustom = useStore(s => s.removeCodexCustomModel);
+  const [detected, setDetected] = useState<string[]>([]);
+  const [newModel, setNewModel] = useState('');
+
+  useEffect(() => {
+    tauri.detectCodexModels().then(setDetected).catch(() => setDetected([]));
+  }, []);
+
+  const options = Array.from(new Set([...detected, ...codexCustomModels]));
+
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-2">
+        <Icon name="openaiLogo" className="w-3.5 h-3.5" />
+        <label className="block text-[10px] text-muted uppercase tracking-wider">Codex</label>
+      </div>
+      <p className="text-[11px] text-muted mb-3">
+        Model używany przy tworzeniu nowych sesji Codex. „Auto" pozostawia wybór konfiguracji Codexa.
+      </p>
+      <div className="space-y-0.5 mb-4">
+        <label className={`flex items-center gap-3 py-1.5 px-2 cursor-pointer ${codexModelId === '' ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}>
+          <input type="radio" name="codex-model" checked={codexModelId === ''} onChange={() => setCodexModel('')} className="accent-accent" />
+          <span className="text-[13px]">Auto (konfiguracja Codexa)</span>
+        </label>
+        {options.map(m => (
+          <div key={m} className="flex items-center gap-2">
+            <label className={`flex-1 flex items-center gap-3 py-1.5 px-2 cursor-pointer ${codexModelId === m ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}>
+              <input type="radio" name="codex-model" checked={codexModelId === m} onChange={() => setCodexModel(m)} className="accent-accent" />
+              <span className="text-[13px] font-mono">{m}</span>
+              {detected.includes(m) && !codexCustomModels.includes(m) && (
+                <span className="text-[10px] text-muted border border-border px-1.5 py-0.5 rounded">wykryty</span>
+              )}
+            </label>
+            {codexCustomModels.includes(m) && (
+              <button onClick={() => removeCustom(m)} className="text-muted hover:text-danger transition-colors p-1" aria-label="Usuń model">
+                <Icon name="trash" className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={newModel}
+          onChange={e => setNewModel(e.target.value)}
+          placeholder="np. gpt-5.5-codex"
+          className="flex-1 bg-bg border border-border px-3 py-1.5 text-[13px] font-mono placeholder:text-muted/60"
+          onKeyDown={e => { if (e.key === 'Enter') { addCustom(newModel); setNewModel(''); } }}
+        />
+        <button
+          onClick={() => { addCustom(newModel); setNewModel(''); }}
+          disabled={!newModel.trim()}
+          className="px-3 py-1.5 border border-border bg-bg-elev-2 text-[12px] text-fg-secondary hover:text-fg disabled:opacity-40 shrink-0"
+        >
+          Dodaj
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ModelsTab() {
+  const enabledProviders = useStore(useShallow(s => s.enabledProviders));
+  const showClaude = enabledProviders.includes('claude');
+  const showCodex = enabledProviders.includes('codex');
+
+  return (
+    <div>
+      {showClaude && <ClaudeModelsSection />}
+      {showClaude && showCodex && (
+        <div className="border-t border-border pt-4 mt-4" />
+      )}
+      {showCodex && <CodexModelsSection />}
     </div>
   );
 }
