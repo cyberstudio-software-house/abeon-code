@@ -1,7 +1,8 @@
 import type { StateCreator } from 'zustand';
+import type { Provider } from '../types';
 
 export type Tab =
-  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean }
+  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; provider?: Provider }
   | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number }
   | { kind: 'terminal'; id: string; projectId: number; title: string };
 

@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel } from '../types';
+import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider } from '../types';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -9,7 +9,7 @@ import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBloc
 export type PairCode = { code: string; expiresInSecs: number };
 
 export type PtyKindClient =
-  | { kind: 'claude'; session_id?: string; model?: string; skip_permissions?: boolean; fresh?: boolean }
+  | { kind: 'agent'; provider: Provider; session_id?: string; model?: string; skip_permissions?: boolean; fresh?: boolean }
   | { kind: 'action'; action_id: number }
   | { kind: 'shell' };
 

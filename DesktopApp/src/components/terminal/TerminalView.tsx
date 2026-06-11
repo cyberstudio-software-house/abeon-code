@@ -8,10 +8,12 @@ import { tauri, type PtyKindClient } from '../../lib/tauri';
 import { useStore } from '../../store';
 import { processManager } from '../../lib/processManager';
 import { getCliModelString } from '../../lib/models';
+import type { Provider } from '../../types';
 
 type Props = {
   projectId: number;
-  kind: 'claude' | 'action' | 'shell';
+  kind: 'agent' | 'action' | 'shell';
+  provider?: Provider;
   sessionId?: string;
   fresh?: boolean;
   actionId?: number;
@@ -64,7 +66,7 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
   };
 }
 
-export function TerminalView({ projectId, kind, sessionId, fresh, actionId, visible = true }: Props) {
+export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, visible = true }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const customModels = useStore(s => s.customModels);
   const skipPermissions = useStore(s => s.skipPermissions);
@@ -142,13 +144,21 @@ export function TerminalView({ projectId, kind, sessionId, fresh, actionId, visi
 
     const cols = term.cols;
     const rows = term.rows;
-    const isResume = kind === 'claude' && !!sessionId && !fresh;
-    const cliModel = !isResume && kind === 'claude'
+    const agentProvider = provider ?? 'claude';
+    const isResume = kind === 'agent' && !!sessionId && !fresh;
+    const cliModel = !isResume && kind === 'agent' && agentProvider === 'claude'
       ? getCliModelString(defaultModelId, customModels)
       : undefined;
     const ptyKind: PtyKindClient =
-      kind === 'claude'
-        ? { kind: 'claude', ...(sessionId ? { session_id: sessionId } : {}), ...(cliModel ? { model: cliModel } : {}), ...(fresh ? { fresh: true } : {}), ...(skipPermissions ? { skip_permissions: true } : {}) }
+      kind === 'agent'
+        ? {
+            kind: 'agent',
+            provider: agentProvider,
+            ...(sessionId ? { session_id: sessionId } : {}),
+            ...(agentProvider === 'claude' && cliModel ? { model: cliModel } : {}),
+            ...(fresh ? { fresh: true } : {}),
+            ...(skipPermissions ? { skip_permissions: true } : {}),
+          }
         : kind === 'action'
           ? { kind: 'action', action_id: actionId! }
           : { kind: 'shell' };
@@ -185,7 +195,7 @@ export function TerminalView({ projectId, kind, sessionId, fresh, actionId, visi
         tauri.ptyResize(id, cols, rows).catch(() => {});
       });
 
-      if (kind === 'claude') {
+      if (kind === 'agent') {
         const onKeyDown = async (e: KeyboardEvent) => {
           if (!((e.ctrlKey || e.metaKey) && e.key === 'v')) return;
           e.preventDefault();
@@ -235,7 +245,7 @@ export function TerminalView({ projectId, kind, sessionId, fresh, actionId, visi
       // React removes the DOM container; PTY is killed; listeners detached.
       // xterm internal state will be GC'd with the Terminal object.
     };
-  }, [projectId, kind, sessionId, fresh, actionId]);
+  }, [projectId, kind, provider, sessionId, fresh, actionId]);
 
   const actionPtyId = useStore(s =>
     kind === 'action' && actionId != null ? s.runningActions[actionId]?.ptyId : undefined
