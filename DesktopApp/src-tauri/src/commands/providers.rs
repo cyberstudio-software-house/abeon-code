@@ -13,6 +13,14 @@ pub struct ProviderInfo {
 }
 
 #[tauri::command]
+pub fn detect_codex_models() -> Vec<String> {
+    match crate::sessions::codex::reader::codex_root() {
+        Ok(root) => crate::sessions::codex::reader::detect_models(&root),
+        Err(_) => vec![],
+    }
+}
+
+#[tauri::command]
 pub fn detect_providers(state: State<AppState>) -> Vec<ProviderInfo> {
     [Provider::Claude, Provider::Codex]
         .into_iter()

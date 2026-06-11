@@ -100,4 +100,5 @@ export const tauri = {
   setWindowTitle: (title: string) => getCurrentWindow().setTitle(title),
   remotePairStart: () => invoke<PairCode>('remote_pair_start'),
   detectProviders: () => invoke<ProviderInfo[]>('detect_providers'),
+  detectCodexModels: () => invoke<string[]>('detect_codex_models'),
 };

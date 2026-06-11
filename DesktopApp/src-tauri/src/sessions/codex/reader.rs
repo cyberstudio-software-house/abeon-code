@@ -218,6 +218,26 @@ pub fn count_for_cwd(root: &Path, cwd: &str) -> usize {
     scan_sessions(root).into_iter().filter(|s| s.cwd == cwd).count()
 }
 
+const MODEL_SCAN_FILES: usize = 20;
+const MODEL_SCAN_LINES: usize = 80;
+
+pub fn detect_models(root: &Path) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for s in scan_sessions(root).into_iter().take(MODEL_SCAN_FILES) {
+        let Ok(reader) = open_lines(&s.path) else { continue };
+        for (i, line) in reader.lines().map_while(Result::ok).enumerate() {
+            if i >= MODEL_SCAN_LINES { break; }
+            let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+            if v.get("type").and_then(|t| t.as_str()) != Some("turn_context") { continue; }
+            let Some(m) = v.get("payload").and_then(|p| p.get("model")).and_then(|m| m.as_str()) else { continue };
+            if !out.iter().any(|x| x == m) {
+                out.push(m.to_string());
+            }
+        }
+    }
+    out
+}
+
 pub fn first_user_prompt(path: &Path) -> AppResult<Option<String>> {
     Ok(first_user_text(path))
 }
@@ -421,6 +441,33 @@ mod tests {
         let list = list_for_cwd(td.path(), "/tmp/codex-recon", 1, 50);
         assert_eq!(list.len(), 1);
         assert!(list[0].title.starts_with("Run the command"));
+    }
+
+    #[test]
+    fn detect_models_collects_turn_context_models_newest_first() {
+        let td = TempDir::new().unwrap();
+        let older = format!(
+            "{}\n{}\n",
+            meta_line("aaaa0001-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "/p1"),
+            r#"{"timestamp":"2026-06-10T10:00:01.000Z","type":"turn_context","payload":{"cwd":"/p1","model":"gpt-5.4"}}"#,
+        );
+        write_rollout(td.path(), "10", "rollout-old.jsonl", &older);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let newer = format!(
+            "{}\n{}\n{}\n",
+            meta_line("bbbb0002-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "/p2"),
+            r#"{"timestamp":"2026-06-11T10:00:01.000Z","type":"turn_context","payload":{"cwd":"/p2","model":"gpt-5.5"}}"#,
+            r#"{"timestamp":"2026-06-11T10:00:02.000Z","type":"turn_context","payload":{"cwd":"/p2","model":"gpt-5.5"}}"#,
+        );
+        write_rollout(td.path(), "11", "rollout-new.jsonl", &newer);
+
+        let models = detect_models(td.path());
+        assert_eq!(models, vec!["gpt-5.5".to_string(), "gpt-5.4".to_string()]);
+    }
+
+    #[test]
+    fn detect_models_empty_root() {
+        assert!(detect_models(std::path::Path::new("/nonexistent-codex-root")).is_empty());
     }
 
     #[test]

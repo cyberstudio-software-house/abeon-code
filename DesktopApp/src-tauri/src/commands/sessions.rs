@@ -183,6 +183,17 @@ pub fn rename_session(
     Ok(())
 }
 
+fn clean_title(raw: &str) -> String {
+    let first_line = raw.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+    first_line
+        .trim()
+        .trim_matches(|c: char| c == '"' || c == '\'' || c == '`')
+        .trim()
+        .chars()
+        .take(80)
+        .collect()
+}
+
 #[tauri::command]
 pub async fn generate_session_title(
     state: State<'_, AppState>,
@@ -222,36 +233,64 @@ pub async fn generate_session_title(
         User's first prompt:\n<<<\n{truncated}\n>>>"
     );
 
-    let mut cmd = tokio::process::Command::new("claude");
-    cmd.arg("-p").arg("--no-session-persistence").arg(&prompt);
-    if let Some(m) = &model {
-        if !m.is_empty() { cmd.arg("--model").arg(m); }
-    }
-    cmd.current_dir(&proj_path);
-    cmd.kill_on_drop(true);
+    match prov {
+        Provider::Claude => {
+            let mut cmd = tokio::process::Command::new("claude");
+            cmd.arg("-p").arg("--no-session-persistence").arg(&prompt);
+            if let Some(m) = &model {
+                if !m.is_empty() { cmd.arg("--model").arg(m); }
+            }
+            cmd.current_dir(&proj_path);
+            cmd.kill_on_drop(true);
 
-    let timeout = std::time::Duration::from_secs(60);
-    let output = tokio::time::timeout(timeout, cmd.output()).await
-        .map_err(|_| AppError::Other("Generowanie tytułu przekroczyło limit 60s".into()))?
-        .map_err(|e| AppError::Other(format!("claude -p: {e}")))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(AppError::Other(format!("claude -p failed: {}", stderr.trim())));
-    }
+            let timeout = std::time::Duration::from_secs(60);
+            let output = tokio::time::timeout(timeout, cmd.output()).await
+                .map_err(|_| AppError::Other("Generowanie tytułu przekroczyło limit 60s".into()))?
+                .map_err(|e| AppError::Other(format!("claude -p: {e}")))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(AppError::Other(format!("claude -p failed: {}", stderr.trim())));
+            }
 
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let first_line = raw.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
-    let cleaned: String = first_line
-        .trim()
-        .trim_matches(|c: char| c == '"' || c == '\'' || c == '`')
-        .trim()
-        .chars()
-        .take(80)
-        .collect();
-    if cleaned.is_empty() {
-        return Err(AppError::Other("Pusta odpowiedź z claude -p".into()));
+            let raw = String::from_utf8_lossy(&output.stdout);
+            let cleaned = clean_title(&raw);
+            if cleaned.is_empty() {
+                return Err(AppError::Other("Pusta odpowiedź z claude -p".into()));
+            }
+            Ok(cleaned)
+        }
+        Provider::Codex => {
+            let out_file = std::env::temp_dir().join(format!("abeoncode-title-{}.txt", uuid::Uuid::new_v4()));
+            let mut cmd = tokio::process::Command::new("codex");
+            cmd.arg("exec")
+                .arg("--ephemeral")
+                .arg("--skip-git-repo-check")
+                .arg("--color").arg("never")
+                .arg("-o").arg(&out_file);
+            if let Some(m) = &model {
+                if !m.is_empty() { cmd.arg("-m").arg(m); }
+            }
+            cmd.arg(&prompt);
+            cmd.current_dir(std::env::temp_dir());
+            cmd.kill_on_drop(true);
+
+            let timeout = std::time::Duration::from_secs(90);
+            let output = tokio::time::timeout(timeout, cmd.output()).await
+                .map_err(|_| AppError::Other("Generowanie tytułu przekroczyło limit 90s".into()))?
+                .map_err(|e| AppError::Other(format!("codex exec: {e}")))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(AppError::Other(format!("codex exec failed: {}", stderr.trim())));
+            }
+            let raw = std::fs::read_to_string(&out_file).unwrap_or_default();
+            let _ = std::fs::remove_file(&out_file);
+            let cleaned = clean_title(&raw);
+            if cleaned.is_empty() {
+                return Err(AppError::Other("Pusta odpowiedź z codex exec".into()));
+            }
+            Ok(cleaned)
+        }
     }
-    Ok(cleaned)
 }
 
 fn merge_session_lists(
@@ -379,5 +418,19 @@ mod roster_tests {
         let c = p.get().unwrap();
         let entries = roster_snapshot(&c).unwrap();
         assert!(entries.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    #[test]
+    fn clean_title_takes_first_line_trims_and_caps() {
+        assert_eq!(clean_title("\n  \"Fix login bug\"  \nmore"), "Fix login bug");
+        let long = "x".repeat(120);
+        assert_eq!(clean_title(&long).chars().count(), 80);
+        assert_eq!(clean_title("`tytuł`"), "tytuł");
+        assert_eq!(clean_title("   \n  \n"), "");
     }
 }
