@@ -9,11 +9,12 @@ const WAITING_DECAY_MS: i64 = 4 * 60 * 60 * 1000;
 const IDLE_HARD_CAP_MS: i64 = 24 * 60 * 60 * 1000;
 
 pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
-    compute_activity_with(find_last_significant, path, now_ms)
+    compute_activity_with(find_last_significant, read_tail_lines, path, now_ms)
 }
 
 pub(crate) fn compute_activity_with(
     extractor: fn(&[String]) -> Option<LastEvent>,
+    read_tail: fn(&Path) -> Option<Vec<String>>,
     path: &Path,
     now_ms: i64,
 ) -> SessionActivity {
@@ -32,7 +33,7 @@ pub(crate) fn compute_activity_with(
         return SessionActivity::Running;
     }
 
-    let Some(lines) = read_tail_lines(path) else { return SessionActivity::Idle };
+    let Some(lines) = read_tail(path) else { return SessionActivity::Idle };
     let Some(last) = extractor(&lines) else { return SessionActivity::Idle };
 
     let waiting = match last {
@@ -59,8 +60,13 @@ pub(crate) fn compute_activity_with(
 
 pub fn compute_activity_for(provider: Provider, path: &Path, now_ms: i64) -> SessionActivity {
     match provider {
-        Provider::Claude => compute_activity_with(find_last_significant, path, now_ms),
-        Provider::Codex => compute_activity_with(find_last_significant, path, now_ms),
+        Provider::Claude => compute_activity_with(find_last_significant, read_tail_lines, path, now_ms),
+        Provider::Codex => compute_activity_with(
+            crate::sessions::codex::activity::find_last_significant_codex,
+            crate::sessions::codex::activity::read_tail_lines_codex,
+            path,
+            now_ms,
+        ),
     }
 }
 
