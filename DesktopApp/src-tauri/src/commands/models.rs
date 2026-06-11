@@ -75,9 +75,7 @@ fn build_models(tokens: Vec<String>, source: &str) -> Vec<DetectedModel> {
     out
 }
 
-/// Resolve the `claude` binary the same way the PTYs do: search the chosen
-/// shell's PATH (falling back to the process PATH), then canonicalize.
-fn locate_claude(state: &AppState) -> Option<PathBuf> {
+pub(crate) fn locate_binary(state: &AppState, name: &str) -> Option<PathBuf> {
     let path_var = state
         .db
         .get()
@@ -90,12 +88,16 @@ fn locate_claude(state: &AppState) -> Option<PathBuf> {
         if dir.is_empty() {
             continue;
         }
-        let candidate = Path::new(dir).join("claude");
+        let candidate = Path::new(dir).join(name);
         if candidate.is_file() {
             return Some(std::fs::canonicalize(&candidate).unwrap_or(candidate));
         }
     }
     None
+}
+
+fn locate_claude(state: &AppState) -> Option<PathBuf> {
+    locate_binary(state, "claude")
 }
 
 fn mtime_ms(path: &Path) -> i64 {

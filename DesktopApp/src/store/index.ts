@@ -7,6 +7,7 @@ import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 import { createGitSlice, type GitSlice } from './gitSlice';
 import { tauri } from '../lib/tauri';
 import type { Provider } from '../types';
+import { isProvider } from '../lib/providers';
 
 export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice;
 
@@ -44,6 +45,7 @@ type Persisted = {
   editorPath?: string;
   shortcutOverrides?: Record<string, string>;
   historyViewMode?: 'communication' | 'full';
+  enabledProviders?: Provider[];
 };
 
 const PERSISTED_KEYS = [
@@ -56,6 +58,7 @@ const PERSISTED_KEYS = [
   'editorPath',
   'shortcutOverrides',
   'historyViewMode',
+  'enabledProviders',
 ] as const satisfies readonly (keyof Persisted)[];
 
 type PersistedKey = typeof PERSISTED_KEYS[number];
@@ -82,6 +85,7 @@ function pickPersistedFields(state: AppState): Persisted {
     editorPath: state.editorPath,
     shortcutOverrides: state.shortcutOverrides,
     historyViewMode: state.historyViewMode,
+    enabledProviders: state.enabledProviders,
   };
 }
 
@@ -98,6 +102,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'modelEfforts':
     case 'customModels':
     case 'shortcutOverrides':
+    case 'enabledProviders':
       return JSON.stringify(value);
     default:
       return String(value);
@@ -118,6 +123,7 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
     case 'modelEfforts':
     case 'customModels':
     case 'shortcutOverrides':
+    case 'enabledProviders':
       try { return JSON.parse(raw); } catch { return undefined; }
     default:
       return raw;
@@ -161,6 +167,10 @@ function applyPersistedToState(p: Persisted) {
   if (p.historyViewMode === 'communication' || p.historyViewMode === 'full') {
     patch.historyViewMode = p.historyViewMode;
   }
+  if (Array.isArray(p.enabledProviders)) {
+    const valid = p.enabledProviders.filter(isProvider);
+    if (valid.length > 0) patch.enabledProviders = valid;
+  }
   if (Object.keys(patch).length > 0) useStore.setState(patch);
 }
 
@@ -201,13 +211,15 @@ type PersistedTabs = {
 // Drops malformed entries and orphaned `new-` placeholders that were never linked
 // to a real session — those point at no file on disk and would render as an error tab.
 export function sanitizeRestoredTabs(tabs: PersistedTab[]): PersistedTab[] {
-  return tabs.filter(
-    (t): t is PersistedTab =>
-      t.kind === 'session'
-      && typeof t.id === 'string'
-      && typeof t.sessionId === 'string'
-      && !(t.sessionId.startsWith('new-') && !t.linkedSessionId),
-  );
+  return tabs
+    .filter(
+      (t): t is PersistedTab =>
+        t.kind === 'session'
+        && typeof t.id === 'string'
+        && typeof t.sessionId === 'string'
+        && !(t.sessionId.startsWith('new-') && !t.linkedSessionId),
+    )
+    .map(t => t.provider !== undefined && !isProvider(t.provider) ? { ...t, provider: undefined } : t);
 }
 
 function loadTabsFromLocalStorage(): PersistedTabs | null {

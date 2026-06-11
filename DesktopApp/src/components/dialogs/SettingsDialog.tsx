@@ -7,7 +7,8 @@ import { Icon } from '../shared/Icon';
 import { BUILTIN_MODELS, detectUnknownModels, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
 import type { ThemeMode } from '../../styles/theme';
 import { tauri } from '../../lib/tauri';
-import type { ShellInfo, EditorInfo, DetectedModel } from '../../types';
+import type { ShellInfo, EditorInfo, DetectedModel, ProviderInfo } from '../../types';
+import { ALL_PROVIDERS, PROVIDER_LABEL, PROVIDER_ICON } from '../../lib/providers';
 import {
   SHORTCUTS, FIXED_SHORTCUTS, getBinding, formatBinding, eventToBinding,
   type ShortcutId,
@@ -82,6 +83,52 @@ function TabButton({ active, onClick, children }: {
     >
       {children}
     </button>
+  );
+}
+
+function ProvidersSection() {
+  const enabled = useStore(useShallow(s => s.enabledProviders));
+  const toggle = useStore(s => s.toggleProvider);
+  const [infos, setInfos] = useState<ProviderInfo[]>([]);
+
+  useEffect(() => {
+    tauri.detectProviders().then(setInfos).catch(() => setInfos([]));
+  }, []);
+
+  return (
+    <div>
+      <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
+        Dostawcy CLI
+      </label>
+      <div className="space-y-0.5">
+        {ALL_PROVIDERS.map(p => {
+          const info = infos.find(i => i.provider === p);
+          const isOn = enabled.includes(p);
+          const isLastEnabled = isOn && enabled.length === 1;
+          return (
+            <label key={p} className="flex items-start gap-3 cursor-pointer py-1.5 px-2 hover:bg-bg-elev-2">
+              <input
+                type="checkbox"
+                checked={isOn}
+                disabled={isLastEnabled}
+                onChange={() => toggle(p)}
+                className="accent-accent mt-0.5"
+              />
+              <div className="flex items-center gap-2">
+                <Icon name={PROVIDER_ICON[p]} className="w-3.5 h-3.5" />
+                <span className="text-[13px]">{PROVIDER_LABEL[p]}</span>
+                {info && !info.available && (
+                  <span className="text-[11px] text-warn">nie znaleziono w PATH</span>
+                )}
+              </div>
+            </label>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-muted mt-2">
+        Gdy włączony jest więcej niż jeden dostawca, „New session" najpierw pyta, w którym CLI uruchomić sesję.
+      </p>
+    </div>
   );
 }
 
@@ -344,6 +391,8 @@ function GeneralTab() {
           „Pełny" zawiera też narzędzia, hooki i zdarzenia systemowe.
         </p>
       </div>
+
+      <ProvidersSection />
 
       <div>
         <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">

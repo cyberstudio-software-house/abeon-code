@@ -4,6 +4,7 @@ pub mod pty;
 pub mod actions;
 pub mod git;
 pub mod models;
+pub mod providers;
 pub mod settings;
 pub mod activity;
 pub mod usage;

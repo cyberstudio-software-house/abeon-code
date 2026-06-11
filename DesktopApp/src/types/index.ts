@@ -23,3 +23,4 @@ export type { DiffLine } from './DiffLine';
 export type { TokenTotals } from './TokenTotals';
 export type { ModelUsage } from './ModelUsage';
 export type { UsageSummary } from './UsageSummary';
+export type { ProviderInfo } from './ProviderInfo';
