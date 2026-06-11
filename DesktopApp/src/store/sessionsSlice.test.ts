@@ -113,8 +113,8 @@ describe('refreshActivity', () => {
     });
 
     vi.spyOn(tauri, 'listSessions').mockResolvedValue([
-      { ...fakeMeta('real-codex-id', 1, 'idle'), provider: 'codex', title: 'Codex session' },
       { ...fakeMeta('real-claude-id', 1, 'idle'), provider: 'claude', title: 'Claude session' },
+      { ...fakeMeta('real-codex-id', 1, 'idle'), provider: 'codex', title: 'Codex session' },
     ]);
 
     await useStore.getState().refreshActivity(1);
