@@ -70,8 +70,8 @@ The app drives two AI CLIs, selected per session via `domain::Provider` (`claude
 - **Spawn**: `PtyKind::Agent { provider, … }` → `build_agent_command` in `commands/pty.rs`. Claude pre-assigns ids (`--session-id`/`--resume`); Codex cannot (`codex` / `codex resume <id>`), so fresh Codex tabs use a `new-<uuid>` placeholder linked later by `sessionsSlice.refreshActivity` (provider-matched).
 - **Discovery**: Claude reads `~/.claude/projects/<encoded>/`; Codex reads global `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl(.zst)` filtered by `session_meta.cwd == project.path` (`sessions/codex/reader.rs`, mtime-keyed meta+title caches).
 - **History**: codex rollout `response_item`s map to the shared `HistoryBlock`; codex block uuids are synthetic `cx-<physical_line>-<block_idx>` (append-only stable; watcher counts physical lines to match).
-- **Settings**: `enabledProviders` (persisted); >1 enabled → "New session" opens a `providerPicker` tab. `detect_providers` checks binaries on the shell PATH.
-- **v1 limits (by design)**: remote bridge/roster is Claude-only; usage/cost tracking Claude-only; model selection Claude-only; title generation always uses `claude -p`; codex `.zst` watcher appends update activity only (no block parsing).
+- **Settings**: `enabledProviders` (persisted); >1 enabled → "New session" opens a `providerPicker` tab. The CLI settings tab holds provider toggles (`detect_providers` checks binaries on the shell PATH) and per-provider title-gen models; the Models tab shows a section per enabled provider (Codex: `codexModelId`/`codexCustomModels`, '' = Auto; detection via `detect_codex_models` scanning recent rollouts' `turn_context.model`).
+- **v1 limits (by design)**: remote bridge/roster is Claude-only; usage/cost tracking Claude-only; codex `.zst` watcher appends update activity only (no block parsing). Title generation dispatches per provider (`claude -p` / `codex exec --ephemeral` from a temp dir so no rollout is persisted).
 
 ## Keyboard shortcuts (global)
 
