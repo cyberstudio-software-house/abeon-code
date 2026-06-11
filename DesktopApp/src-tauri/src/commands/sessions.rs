@@ -282,8 +282,9 @@ pub async fn generate_session_title(
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(AppError::Other(format!("codex exec failed: {}", stderr.trim())));
             }
-            let raw = std::fs::read_to_string(&out_file).unwrap_or_default();
+            let raw = std::fs::read_to_string(&out_file);
             let _ = std::fs::remove_file(&out_file);
+            let raw = raw.map_err(|e| AppError::Other(format!("codex exec: nie można odczytać pliku wyjściowego: {e}")))?;
             let cleaned = clean_title(&raw);
             if cleaned.is_empty() {
                 return Err(AppError::Other("Pusta odpowiedź z codex exec".into()));
