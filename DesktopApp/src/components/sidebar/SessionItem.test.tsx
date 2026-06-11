@@ -3,7 +3,7 @@ import { render } from '@testing-library/react';
 import { SessionItem } from './SessionItem';
 import type { SessionMeta } from '../../types';
 
-function meta(activity: SessionMeta['activity']): SessionMeta {
+function meta(activity: SessionMeta['activity'], provider: SessionMeta['provider'] = 'claude'): SessionMeta {
   return {
     id: 'abc12345',
     projectId: 1,
@@ -13,32 +13,44 @@ function meta(activity: SessionMeta['activity']): SessionMeta {
     gitBranch: null,
     cwd: null,
     activity,
-    provider: 'claude',
+    provider,
   };
 }
 
-describe('SessionItem dot', () => {
-  it('uses bg-success class when running', () => {
+describe('SessionItem provider icon', () => {
+  it('renders provider icon tinted by activity (waitingTool → text-warn)', () => {
+    const session = meta('waitingTool', 'codex');
+    const { container } = render(<SessionItem session={session} onClick={() => {}} />);
+    const iconSpan = container.querySelector('span[title]');
+    expect(iconSpan).toBeTruthy();
+    const svg = iconSpan?.querySelector('svg');
+    expect(svg).toBeTruthy();
+    expect(svg?.getAttribute('class') ?? '').toContain('text-warn');
+  });
+
+  it('renders text-success when running', () => {
     const { container } = render(<SessionItem session={meta('running')} onClick={() => {}} />);
-    const dot = container.querySelector('span.rounded-full');
-    expect(dot?.className).toMatch(/bg-success/);
+    const svg = container.querySelector('span[title] svg');
+    expect(svg?.getAttribute('class') ?? '').toContain('text-success');
   });
 
-  it('uses bg-accent class when waitingUser', () => {
+  it('renders text-accent when waitingUser', () => {
     const { container } = render(<SessionItem session={meta('waitingUser')} onClick={() => {}} />);
-    const dot = container.querySelector('span.rounded-full');
-    expect(dot?.className).toMatch(/bg-accent/);
+    const svg = container.querySelector('span[title] svg');
+    expect(svg?.getAttribute('class') ?? '').toContain('text-accent');
   });
 
-  it('uses bg-warn class when waitingTool', () => {
-    const { container } = render(<SessionItem session={meta('waitingTool')} onClick={() => {}} />);
-    const dot = container.querySelector('span.rounded-full');
-    expect(dot?.className).toMatch(/bg-warn/);
-  });
-
-  it('uses bg-muted class when idle', () => {
+  it('renders text-muted when idle', () => {
     const { container } = render(<SessionItem session={meta('idle')} onClick={() => {}} />);
-    const dot = container.querySelector('span.rounded-full');
-    expect(dot?.className).toMatch(/bg-muted/);
+    const svg = container.querySelector('span[title] svg');
+    expect(svg?.getAttribute('class') ?? '').toContain('text-muted');
+  });
+
+  it('claude and codex sessions render different svgs (different polygon vs path content)', () => {
+    const { container: claudeContainer } = render(<SessionItem session={meta('idle', 'claude')} onClick={() => {}} />);
+    const { container: codexContainer } = render(<SessionItem session={meta('idle', 'codex')} onClick={() => {}} />);
+    const claudeSvgInner = claudeContainer.querySelector('span[title] svg')?.innerHTML;
+    const codexSvgInner = codexContainer.querySelector('span[title] svg')?.innerHTML;
+    expect(claudeSvgInner).not.toEqual(codexSvgInner);
   });
 });
