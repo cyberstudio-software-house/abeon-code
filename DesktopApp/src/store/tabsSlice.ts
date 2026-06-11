@@ -1,10 +1,12 @@
 import type { StateCreator } from 'zustand';
 import type { Provider } from '../types';
+import type { SettingsSlice } from './settingsSlice';
 
 export type Tab =
   | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; provider?: Provider }
   | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number }
-  | { kind: 'terminal'; id: string; projectId: number; title: string };
+  | { kind: 'terminal'; id: string; projectId: number; title: string }
+  | { kind: 'providerPicker'; id: string; projectId: number; title: string };
 
 export type TabsSlice = {
   tabs: Tab[];
@@ -13,6 +15,8 @@ export type TabsSlice = {
   openSessionTab: (projectId: number, sessionId: string, title: string, provider?: Provider) => void;
   openNewSessionTab: (projectId: number) => void;
   openNewTerminalTab: (projectId: number) => void;
+  startSessionTab: (projectId: number, provider: Provider) => void;
+  chooseProvider: (tabId: string, provider: Provider) => void;
   setSessionMode: (tabId: string, mode: 'history' | 'terminal') => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
@@ -25,7 +29,7 @@ const sessionTabId = (sessionId: string) => `session:${sessionId}`;
 
 const moveToFront = (order: string[], id: string) => [id, ...order.filter(x => x !== id)];
 
-export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
+export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], TabsSlice> = (set, get) => ({
   tabs: [],
   activeTabId: null,
   mruOrder: [],
@@ -40,12 +44,38 @@ export const createTabsSlice: StateCreator<TabsSlice> = (set, get) => ({
     });
   },
   openNewSessionTab: (projectId) => {
-    const sessionId = crypto.randomUUID();
+    const enabled = get().enabledProviders;
+    if (enabled.length > 1) {
+      const id = `picker:${crypto.randomUUID()}`;
+      set({
+        tabs: [...get().tabs, { kind: 'providerPicker', id, projectId, title: 'New session' }],
+        activeTabId: id,
+        mruOrder: moveToFront(get().mruOrder, id),
+      });
+      return;
+    }
+    get().startSessionTab(projectId, enabled[0] ?? 'claude');
+  },
+  startSessionTab: (projectId, provider) => {
+    const sessionId = provider === 'claude' ? crypto.randomUUID() : `new-${crypto.randomUUID()}`;
     const id = sessionTabId(sessionId);
     set({
-      tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title: 'New session', mode: 'terminal', fresh: true }],
+      tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title: 'New session', mode: 'terminal', fresh: true, provider }],
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
+    });
+  },
+  chooseProvider: (tabId, provider) => {
+    const picker = get().tabs.find(t => t.id === tabId && t.kind === 'providerPicker');
+    if (!picker || picker.kind !== 'providerPicker') return;
+    const sessionId = provider === 'claude' ? crypto.randomUUID() : `new-${crypto.randomUUID()}`;
+    const id = sessionTabId(sessionId);
+    set({
+      tabs: get().tabs.map(t => t.id === tabId
+        ? { kind: 'session' as const, id, projectId: picker.projectId, sessionId, title: 'New session', mode: 'terminal' as const, fresh: true, provider }
+        : t),
+      activeTabId: id,
+      mruOrder: get().mruOrder.map(x => x === tabId ? id : x),
     });
   },
   openNewTerminalTab: (projectId) => {

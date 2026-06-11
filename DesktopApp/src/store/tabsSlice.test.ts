@@ -88,3 +88,63 @@ describe('tabsSlice mruOrder', () => {
     expect(useStore.getState().mruOrder[0]).toBe('action:5');
   });
 });
+
+describe('tabsSlice provider picker', () => {
+  beforeEach(() => {
+    useStore.setState({ tabs: [], activeTabId: null, mruOrder: [], enabledProviders: ['claude'] });
+  });
+
+  it('single provider: New session spawns a fresh claude tab directly', () => {
+    useStore.getState().openNewSessionTab(1);
+    const tab = useStore.getState().tabs[0];
+    expect(tab.kind).toBe('session');
+    if (tab.kind !== 'session') return;
+    expect(tab.fresh).toBe(true);
+    expect(tab.provider).toBe('claude');
+    expect(tab.sessionId.startsWith('new-')).toBe(false);
+  });
+
+  it('single codex provider: fresh tab uses a new- placeholder id', () => {
+    useStore.setState({ enabledProviders: ['codex'] });
+    useStore.getState().openNewSessionTab(1);
+    const tab = useStore.getState().tabs[0];
+    if (tab.kind !== 'session') throw new Error('expected session tab');
+    expect(tab.provider).toBe('codex');
+    expect(tab.sessionId.startsWith('new-')).toBe(true);
+  });
+
+  it('multiple providers: New session opens a picker tab', () => {
+    useStore.setState({ enabledProviders: ['claude', 'codex'] });
+    useStore.getState().openNewSessionTab(1);
+    const tab = useStore.getState().tabs[0];
+    expect(tab.kind).toBe('providerPicker');
+    expect(useStore.getState().activeTabId).toBe(tab.id);
+  });
+
+  it('chooseProvider replaces the picker with a fresh session tab in place', () => {
+    useStore.setState({ enabledProviders: ['claude', 'codex'] });
+    useStore.getState().openNewSessionTab(1);
+    const pickerId = useStore.getState().tabs[0].id;
+    useStore.getState().chooseProvider(pickerId, 'codex');
+    const tabs = useStore.getState().tabs;
+    expect(tabs).toHaveLength(1);
+    const tab = tabs[0];
+    if (tab.kind !== 'session') throw new Error('expected session tab');
+    expect(tab.provider).toBe('codex');
+    expect(tab.fresh).toBe(true);
+    expect(tab.sessionId.startsWith('new-')).toBe(true);
+    expect(useStore.getState().activeTabId).toBe(tab.id);
+  });
+
+  it('chooseProvider keeps the picker position in the tab strip', () => {
+    useStore.setState({ enabledProviders: ['claude', 'codex'] });
+    useStore.getState().openNewTerminalTab(1);
+    useStore.getState().openNewSessionTab(1);
+    useStore.getState().openNewTerminalTab(1);
+    const pickerId = useStore.getState().tabs[1].id;
+    useStore.getState().chooseProvider(pickerId, 'claude');
+    const tabs = useStore.getState().tabs;
+    expect(tabs).toHaveLength(3);
+    expect(tabs[1].kind).toBe('session');
+  });
+});

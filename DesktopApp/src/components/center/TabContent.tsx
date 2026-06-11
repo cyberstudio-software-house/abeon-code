@@ -1,9 +1,17 @@
 import { useStore } from '../../store';
 import { HistoryView } from '../history/HistoryView';
 import { TerminalView } from '../terminal/TerminalView';
+import { ProviderPicker } from './ProviderPicker';
 import type { Tab } from '../../store/tabsSlice';
 
 function TabPanel({ tab, visible }: { tab: Tab; visible: boolean }) {
+  if (tab.kind === 'providerPicker') {
+    return (
+      <div className={`absolute inset-0 ${visible ? '' : 'invisible pointer-events-none'}`}>
+        <ProviderPicker tabId={tab.id} />
+      </div>
+    );
+  }
   if (tab.kind === 'session' && tab.mode === 'history') {
     const historySessionId = tab.linkedSessionId ?? tab.sessionId;
     return (

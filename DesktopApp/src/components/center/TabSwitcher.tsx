@@ -9,6 +9,7 @@ import type { Tab } from '../../store/tabsSlice';
 function SwitcherIcon({ tab }: { tab: Tab }) {
   if (tab.kind === 'session') return <>{tab.mode === 'terminal' ? '›' : '◇'}</>;
   if (tab.kind === 'terminal') return <>$</>;
+  if (tab.kind === 'providerPicker') return <>+</>;
   return <>▶</>;
 }
 
