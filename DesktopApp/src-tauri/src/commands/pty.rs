@@ -543,4 +543,20 @@ mod tests {
         assert!(!Path::new(&path2).exists());
         assert!(state.clipboard_images.lock().get(&pty_id).is_none());
     }
+
+    #[test]
+    fn codex_command_resume_with_skip_permissions() {
+        assert_eq!(
+            build_agent_command(Provider::Codex, Some("uuid-1"), None, true, false),
+            "codex resume uuid-1 --dangerously-bypass-approvals-and-sandbox"
+        );
+    }
+
+    #[test]
+    fn codex_command_fresh_with_session_id_ignores_id() {
+        assert_eq!(
+            build_agent_command(Provider::Codex, Some("uuid-1"), Some("gpt-x"), false, true),
+            "codex -m gpt-x"
+        );
+    }
 }
