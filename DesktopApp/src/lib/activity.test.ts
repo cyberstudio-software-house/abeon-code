@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ACTIVITY_DOT, ACTIVITY_LABEL, ACTIVITY_ICON } from './activity';
+import { ACTIVITY_DOT, ACTIVITY_LABEL, ACTIVITY_ICON, ACTIVITY_TEXT } from './activity';
 import type { SessionActivity } from '../types';
 
 const ALL_STATES: SessionActivity[] = ['running', 'waitingUser', 'waitingTool', 'idle'];
@@ -20,6 +20,12 @@ describe('activity maps', () => {
   it('ACTIVITY_ICON covers every state', () => {
     for (const s of ALL_STATES) {
       expect(ACTIVITY_ICON[s]).toBeDefined();
+    }
+  });
+
+  it('ACTIVITY_TEXT covers every state with a text- class', () => {
+    for (const s of ALL_STATES) {
+      expect(ACTIVITY_TEXT[s]).toMatch(/^text-/);
     }
   });
 });
