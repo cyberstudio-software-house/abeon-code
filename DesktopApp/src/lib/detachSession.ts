@@ -22,6 +22,7 @@ export async function detachSessionTab(
     linkedSessionId: tab.linkedSessionId,
     title: tab.title,
     fresh: tab.fresh ?? false,
+    provider: tab.provider,
   });
 
   const win = new WebviewWindow(label, {

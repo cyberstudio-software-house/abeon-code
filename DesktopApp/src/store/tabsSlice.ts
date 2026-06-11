@@ -38,6 +38,7 @@ export function sessionTabFromMode(mode: WindowMode): Extract<Tab, { kind: 'sess
     title: mode.title,
     mode: 'terminal',
     ...(mode.fresh ? { fresh: true } : {}),
+    ...(mode.provider ? { provider: mode.provider } : {}),
   };
 }
 

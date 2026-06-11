@@ -1,3 +1,5 @@
+import type { Provider } from '../types';
+
 export type WindowMode = {
   view: 'session';
   projectId: number;
@@ -5,6 +7,7 @@ export type WindowMode = {
   linkedSessionId?: string;
   title: string;
   fresh: boolean;
+  provider?: Provider;
 };
 
 export function parseWindowMode(search: string): WindowMode | null {
@@ -18,6 +21,7 @@ export function parseWindowMode(search: string): WindowMode | null {
   const linkedSessionId = q.get('linkedSessionId') ?? undefined;
   const title = q.get('title') ?? 'Sesja';
   const fresh = q.get('fresh') === 'true';
+  const provider: Provider | undefined = q.get('provider') === 'codex' ? 'codex' : undefined;
   return {
     view: 'session',
     projectId,
@@ -25,6 +29,7 @@ export function parseWindowMode(search: string): WindowMode | null {
     ...(linkedSessionId ? { linkedSessionId } : {}),
     title,
     fresh,
+    ...(provider ? { provider } : {}),
   };
 }
 
@@ -34,6 +39,7 @@ export function buildSessionWindowUrl(p: {
   linkedSessionId?: string;
   title: string;
   fresh: boolean;
+  provider?: Provider;
 }): string {
   const q = new URLSearchParams();
   q.set('view', 'session');
@@ -42,6 +48,7 @@ export function buildSessionWindowUrl(p: {
   if (p.linkedSessionId) q.set('linkedSessionId', p.linkedSessionId);
   q.set('title', p.title);
   q.set('fresh', p.fresh ? 'true' : 'false');
+  if (p.provider) q.set('provider', p.provider);
   return `index.html?${q.toString()}`;
 }
 
