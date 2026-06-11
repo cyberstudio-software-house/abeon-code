@@ -3,6 +3,7 @@ import type { ThemeMode } from '../styles/theme';
 import type { EffortLevel, CustomModel } from '../lib/models';
 import { DEFAULT_MODEL_ID } from '../lib/models';
 import type { NotificationTrigger } from '../lib/attention';
+import type { Provider } from '../types';
 
 export type SortMode = 'manual' | 'alpha' | 'activity';
 export type HistoryViewMode = 'communication' | 'full';
@@ -28,8 +29,13 @@ export type SettingsSlice = {
   historyViewMode: HistoryViewMode;
   notificationsEnabled: boolean;
   notificationTrigger: NotificationTrigger;
+  enabledProviders: Provider[];
   settingsOpen: boolean;
+  codexModelId: string;
+  codexTitleGenModelId: string;
+  codexCustomModels: string[];
 
+  toggleProvider: (p: Provider) => void;
   setTheme: (t: ThemeMode) => void;
   setLeftWidth: (w: number) => void;
   setRightWidth: (w: number) => void;
@@ -54,6 +60,10 @@ export type SettingsSlice = {
   setNotificationTrigger: (t: NotificationTrigger) => void;
   openSettings: () => void;
   closeSettings: () => void;
+  setCodexModel: (modelId: string) => void;
+  setCodexTitleGenModel: (modelId: string) => void;
+  addCodexCustomModel: (modelId: string) => void;
+  removeCodexCustomModel: (modelId: string) => void;
 };
 
 export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
@@ -77,8 +87,18 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   historyViewMode: 'full',
   notificationsEnabled: true,
   notificationTrigger: 'both',
+  enabledProviders: ['claude'],
   settingsOpen: false,
+  codexModelId: '',
+  codexTitleGenModelId: '',
+  codexCustomModels: [],
 
+  toggleProvider: (p) => {
+    const cur = get().enabledProviders;
+    const next = cur.includes(p) ? cur.filter(x => x !== p) : [...cur, p];
+    if (next.length === 0) return;
+    set({ enabledProviders: next });
+  },
   setTheme: (theme) => set({ theme }),
   setLeftWidth: (leftWidth) => set({ leftWidth }),
   setRightWidth: (rightWidth) => set({ rightWidth }),
@@ -111,4 +131,18 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
+  setCodexModel: (codexModelId) => set({ codexModelId }),
+  setCodexTitleGenModel: (codexTitleGenModelId) => set({ codexTitleGenModelId }),
+  addCodexCustomModel: (modelId) => {
+    const trimmed = modelId.trim();
+    if (!trimmed || get().codexCustomModels.includes(trimmed)) return;
+    set({ codexCustomModels: [...get().codexCustomModels, trimmed] });
+  },
+  removeCodexCustomModel: (modelId) => {
+    set({
+      codexCustomModels: get().codexCustomModels.filter(m => m !== modelId),
+      ...(get().codexModelId === modelId ? { codexModelId: '' } : {}),
+      ...(get().codexTitleGenModelId === modelId ? { codexTitleGenModelId: '' } : {}),
+    });
+  },
 });

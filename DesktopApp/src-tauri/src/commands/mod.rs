@@ -5,6 +5,7 @@ pub mod actions;
 pub mod git;
 pub mod models;
 pub mod notifications;
+pub mod providers;
 pub mod settings;
 pub mod activity;
 pub mod usage;

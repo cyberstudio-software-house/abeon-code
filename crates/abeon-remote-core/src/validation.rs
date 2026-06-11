@@ -89,6 +89,8 @@ mod tests {
         assert!(validate_model("opus").is_ok());
         assert!(validate_model("claude-opus-4-8").is_ok());
         assert!(validate_model("claude-sonnet-4-6").is_ok());
+        assert!(validate_model("gpt-4o").is_ok());
+        assert!(validate_model("gpt-5.5-codex").is_ok());
     }
 
     #[test]

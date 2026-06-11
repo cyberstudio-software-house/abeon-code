@@ -11,6 +11,8 @@ import { sessionTabFromMode } from './tabsSlice';
 import { applyTheme } from '../styles/theme';
 
 const windowMode = parseWindowMode(window.location.search);
+import type { Provider } from '../types';
+import { isProvider } from '../lib/providers';
 
 export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice;
 
@@ -50,6 +52,10 @@ type Persisted = {
   historyViewMode?: 'communication' | 'full';
   notificationsEnabled?: boolean;
   notificationTrigger?: 'turnEnd' | 'questionsOnly' | 'both';
+  enabledProviders?: Provider[];
+  codexModelId?: string;
+  codexTitleGenModelId?: string;
+  codexCustomModels?: string[];
 };
 
 const PERSISTED_KEYS = [
@@ -64,6 +70,10 @@ const PERSISTED_KEYS = [
   'historyViewMode',
   'notificationsEnabled',
   'notificationTrigger',
+  'enabledProviders',
+  'codexModelId',
+  'codexTitleGenModelId',
+  'codexCustomModels',
 ] as const satisfies readonly (keyof Persisted)[];
 
 type PersistedKey = typeof PERSISTED_KEYS[number];
@@ -92,6 +102,10 @@ function pickPersistedFields(state: AppState): Persisted {
     historyViewMode: state.historyViewMode,
     notificationsEnabled: state.notificationsEnabled,
     notificationTrigger: state.notificationTrigger,
+    enabledProviders: state.enabledProviders,
+    codexModelId: state.codexModelId,
+    codexTitleGenModelId: state.codexTitleGenModelId,
+    codexCustomModels: state.codexCustomModels,
   };
 }
 
@@ -109,6 +123,8 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'modelEfforts':
     case 'customModels':
     case 'shortcutOverrides':
+    case 'enabledProviders':
+    case 'codexCustomModels':
       return JSON.stringify(value);
     default:
       return String(value);
@@ -130,6 +146,8 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
     case 'modelEfforts':
     case 'customModels':
     case 'shortcutOverrides':
+    case 'enabledProviders':
+    case 'codexCustomModels':
       try { return JSON.parse(raw); } catch { return undefined; }
     default:
       return raw;
@@ -177,6 +195,15 @@ function applyPersistedToState(p: Persisted) {
   if (p.notificationTrigger === 'turnEnd' || p.notificationTrigger === 'questionsOnly' || p.notificationTrigger === 'both') {
     patch.notificationTrigger = p.notificationTrigger;
   }
+  if (Array.isArray(p.enabledProviders)) {
+    const valid = p.enabledProviders.filter(isProvider);
+    if (valid.length > 0) patch.enabledProviders = valid;
+  }
+  if (typeof p.codexModelId === 'string') patch.codexModelId = p.codexModelId;
+  if (typeof p.codexTitleGenModelId === 'string') patch.codexTitleGenModelId = p.codexTitleGenModelId;
+  if (Array.isArray(p.codexCustomModels)) {
+    patch.codexCustomModels = p.codexCustomModels.filter((x): x is string => typeof x === 'string');
+  }
   if (Object.keys(patch).length > 0) useStore.setState(patch);
 }
 
@@ -206,6 +233,7 @@ type PersistedTab = {
   sessionId: string;
   linkedSessionId?: string;
   title: string;
+  provider?: Provider;
 };
 
 type PersistedTabs = {
@@ -216,13 +244,15 @@ type PersistedTabs = {
 // Drops malformed entries and orphaned `new-` placeholders that were never linked
 // to a real session — those point at no file on disk and would render as an error tab.
 export function sanitizeRestoredTabs(tabs: PersistedTab[]): PersistedTab[] {
-  return tabs.filter(
-    (t): t is PersistedTab =>
-      t.kind === 'session'
-      && typeof t.id === 'string'
-      && typeof t.sessionId === 'string'
-      && !(t.sessionId.startsWith('new-') && !t.linkedSessionId),
-  );
+  return tabs
+    .filter(
+      (t): t is PersistedTab =>
+        t.kind === 'session'
+        && typeof t.id === 'string'
+        && typeof t.sessionId === 'string'
+        && !(t.sessionId.startsWith('new-') && !t.linkedSessionId),
+    )
+    .map(t => t.provider !== undefined && !isProvider(t.provider) ? { ...t, provider: undefined } : t);
 }
 
 function loadTabsFromLocalStorage(): PersistedTabs | null {
@@ -251,6 +281,7 @@ function writeTabsToLocalStorage(state: AppState) {
       sessionId: t.sessionId,
       ...(t.linkedSessionId ? { linkedSessionId: t.linkedSessionId } : {}),
       title: t.title,
+      ...(t.provider ? { provider: t.provider } : {}),
     }));
   const activeTabId = sessionTabs.some(t => t.id === state.activeTabId)
     ? state.activeTabId

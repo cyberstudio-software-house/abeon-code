@@ -51,6 +51,7 @@ function actionIconColor(r: RunningAction | undefined): string {
 function TabIcon({ tab, actionColor }: { tab: Tab; actionColor?: string }) {
   if (tab.kind === 'session') return <>{tab.mode === 'terminal' ? '›' : '◇'}</>;
   if (tab.kind === 'terminal') return <>$</>;
+  if (tab.kind === 'providerPicker') return <>+</>;
   return <span className={actionColor ?? 'text-muted'}>▶</span>;
 }
 

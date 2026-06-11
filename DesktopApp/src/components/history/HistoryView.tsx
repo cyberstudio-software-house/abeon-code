@@ -3,19 +3,19 @@ import { tauri } from '../../lib/tauri';
 import { formatTauriError } from '../../lib/errors';
 import { useStore } from '../../store';
 import type { HistoryViewMode } from '../../store/settingsSlice';
-import type { SessionHistory, HistoryBlock } from '../../types';
+import type { SessionHistory, HistoryBlock, Provider } from '../../types';
 import { HistoryHeader } from './HistoryHeader';
 import { HistoryStream } from './HistoryStream';
 import { ReadOnlyPill } from './ReadOnlyPill';
 import { SessionFooter } from './SessionFooter';
 
-type Props = { projectId: number; sessionId: string; tabId: string };
+type Props = { projectId: number; sessionId: string; tabId: string; provider?: Provider };
 
 function blockUuid(b: HistoryBlock): string {
   return b.uuid;
 }
 
-export function HistoryView({ projectId, sessionId, tabId }: Props) {
+export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }: Props) {
   const [data, setData] = useState<SessionHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
   const patchActivity = useStore(s => s.patchActivity);
@@ -23,10 +23,10 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
   const [viewMode, setViewMode] = useState<HistoryViewMode>(defaultViewMode);
 
   useEffect(() => {
-    tauri.readSessionHistory(projectId, sessionId)
+    tauri.readSessionHistory(projectId, sessionId, provider)
       .then(setData)
       .catch(e => setError(formatTauriError(e)));
-  }, [projectId, sessionId]);
+  }, [projectId, sessionId, provider]);
 
   const renameTab = useStore(s => s.renameTab);
 
@@ -34,7 +34,7 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
     let unlistenAppend: (() => void) | null = null;
     let unlistenActivity: (() => void) | null = null;
     let unlistenTitle: (() => void) | null = null;
-    tauri.openSessionWatch(projectId, sessionId).catch(() => {});
+    tauri.openSessionWatch(projectId, sessionId, provider).catch(() => {});
     tauri.onSessionAppend(sessionId, (blocks) => {
       setData(prev => prev ? ({ ...prev, blocks: [...prev.blocks, ...blocks] }) : prev);
     }).then(fn => { unlistenAppend = fn; });
@@ -51,12 +51,12 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
       if (unlistenTitle) unlistenTitle();
       tauri.closeSessionWatch(sessionId).catch(() => {});
     };
-  }, [projectId, sessionId, patchActivity, renameTab]);
+  }, [projectId, sessionId, provider, patchActivity, renameTab]);
 
   const loadMore = async () => {
     if (!data || !data.hasMoreBefore || data.blocks.length === 0) return;
     const firstUuid = blockUuid(data.blocks[0]);
-    const more = await tauri.readSessionHistory(projectId, sessionId, 200, firstUuid);
+    const more = await tauri.readSessionHistory(projectId, sessionId, provider, 200, firstUuid);
     setData({
       meta: more.meta,
       blocks: [...more.blocks, ...data.blocks],
@@ -86,7 +86,7 @@ export function HistoryView({ projectId, sessionId, tabId }: Props) {
   if (!data || !meta) return <div className="p-6 text-muted text-[13px]">Wczytywanie historii…</div>;
   return (
     <div className="h-full flex flex-col">
-      <HistoryHeader meta={meta} viewMode={viewMode} onViewModeChange={setViewMode} />
+      <HistoryHeader meta={meta} viewMode={viewMode} onViewModeChange={setViewMode} provider={provider} />
       <HistoryStream
         blocks={data.blocks}
         onLoadMore={loadMore}

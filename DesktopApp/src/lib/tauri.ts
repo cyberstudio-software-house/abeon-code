@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel } from '../types';
+import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -12,7 +12,7 @@ export type AttentionReason = 'hook' | 'heuristic';
 export type AttentionEvent = { sessionId: string; reason: AttentionReason; message: string | null };
 
 export type PtyKindClient =
-  | { kind: 'claude'; session_id?: string; model?: string; skip_permissions?: boolean; fresh?: boolean }
+  | { kind: 'agent'; provider: Provider; session_id?: string; model?: string; skip_permissions?: boolean; fresh?: boolean }
   | { kind: 'action'; action_id: number }
   | { kind: 'shell' };
 
@@ -26,10 +26,10 @@ export const tauri = {
   reorderProjects: (ids: number[]) => invoke<void>('reorder_projects', { ids }),
   listSessions: (projectId: number, limit = 20, offset = 0) =>
     invoke<SessionMeta[]>('list_sessions', { projectId, limit, offset }),
-  readSessionHistory: (projectId: number, sessionId: string, limit?: number, beforeUuid?: string) =>
-    invoke<SessionHistory>('read_session_history', { projectId, sessionId, limit, beforeUuid }),
-  openSessionWatch: (projectId: number, sessionId: string) =>
-    invoke<void>('open_session_watch', { projectId, sessionId }),
+  readSessionHistory: (projectId: number, sessionId: string, provider: Provider = 'claude', limit?: number, beforeUuid?: string) =>
+    invoke<SessionHistory>('read_session_history', { projectId, sessionId, provider, limit, beforeUuid }),
+  openSessionWatch: (projectId: number, sessionId: string, provider: Provider = 'claude') =>
+    invoke<void>('open_session_watch', { projectId, sessionId, provider }),
   closeSessionWatch: (sessionId: string) =>
     invoke<void>('close_session_watch', { sessionId }),
   onSessionAppend: (sessionId: string, cb: (blocks: HistoryBlock[]) => void): Promise<UnlistenFn> =>
@@ -80,8 +80,8 @@ export const tauri = {
   getGitUser: () => invoke<GitUser>('get_git_user'),
   renameSession: (projectId: number, sessionId: string, title: string) =>
     invoke<void>('rename_session', { projectId, sessionId, title }),
-  generateSessionTitle: (projectId: number, sessionId: string, model?: string) =>
-    invoke<string>('generate_session_title', { projectId, sessionId, model }),
+  generateSessionTitle: (projectId: number, sessionId: string, model?: string, provider: Provider = 'claude') =>
+    invoke<string>('generate_session_title', { projectId, sessionId, model, provider }),
   countSessions: (projectId: number) => invoke<number>('count_sessions', { projectId }),
   getSetting: (key: string) =>
     invoke<string | null>('get_setting', { key }),
@@ -107,4 +107,6 @@ export const tauri = {
   installAttentionHook: () => invoke<void>('install_attention_hook'),
   uninstallAttentionHook: () => invoke<void>('uninstall_attention_hook'),
   attentionHookStatus: () => invoke<boolean>('attention_hook_status'),
+  detectProviders: () => invoke<ProviderInfo[]>('detect_providers'),
+  detectCodexModels: () => invoke<string[]>('detect_codex_models'),
 };

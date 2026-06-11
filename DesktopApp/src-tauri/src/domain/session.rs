@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use super::Provider;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/")]
@@ -26,6 +27,7 @@ pub struct SessionMeta {
     pub git_branch: Option<String>,
     pub cwd: Option<String>,
     pub activity: SessionActivity,
+    pub provider: Provider,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

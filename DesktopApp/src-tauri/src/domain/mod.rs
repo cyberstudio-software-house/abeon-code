@@ -8,6 +8,7 @@ pub mod usage;
 pub mod model;
 pub mod session_event;
 pub mod roster;
+pub mod provider;
 
 pub use project::*;
 pub use action::*;
@@ -17,3 +18,4 @@ pub use shell::*;
 pub use editor::*;
 pub use usage::*;
 pub use model::*;
+pub use provider::Provider;

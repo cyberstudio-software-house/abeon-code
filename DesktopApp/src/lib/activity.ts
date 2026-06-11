@@ -9,10 +9,17 @@ export const ACTIVITY_DOT: Record<SessionActivity, string> = {
 };
 
 export const ACTIVITY_LABEL: Record<SessionActivity, string> = {
-  running:     'Aktywna — Claude pracuje',
+  running:     'Aktywna — agent pracuje',
   waitingUser: 'Czeka na Twoją odpowiedź',
   waitingTool: 'Czeka na zatwierdzenie narzędzia',
   idle:        'Bezczynna',
+};
+
+export const ACTIVITY_TEXT: Record<SessionActivity, string> = {
+  running:     'text-success',
+  waitingUser: 'text-accent',
+  waitingTool: 'text-warn',
+  idle:        'text-muted',
 };
 
 export const ACTIVITY_ICON: Record<SessionActivity, IconName> = {

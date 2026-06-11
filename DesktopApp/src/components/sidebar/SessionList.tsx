@@ -18,7 +18,7 @@ export function SessionList({ projectId }: Props) {
   return (
     <ul className="space-y-0.5 mt-1">
       {state.items.map(s => (
-        <SessionItem key={s.id} session={s} onClick={() => openTab(projectId, s.id, s.title)} />
+        <SessionItem key={s.id} session={s} onClick={() => openTab(projectId, s.id, s.title, s.provider)} />
       ))}
       {state.hasMore && (
         <li>

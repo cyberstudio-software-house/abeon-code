@@ -32,7 +32,7 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 - `commands/` — Tauri command handlers grouped by domain: `projects.rs`, `sessions.rs`, `pty.rs`, `actions.rs`, `git.rs`, `settings.rs`, `activity.rs`. Registered in `lib.rs`.
 - `db/` — SQLite migrations + queries.
 - `pty/` — PTY spawning and lifecycle (claude / action / shell variants).
-- `sessions/` — JSONL session file reading and watch.
+- `sessions/` — JSONL session reading and watch; Claude Code format at top level, `sessions/codex/` holds the OpenAI Codex rollout reader/parser/activity.
 - `git/` — git2 wrappers.
 - `detectors/` — script detection (npm/cargo/etc).
 - `domain/` — shared structs (ts-rs derives live here).
@@ -63,6 +63,16 @@ A `subscribe` handler diffs persisted fields and writes both layers. `PERSISTED_
 
 Closing a tab with an active process (`session+terminal`, `action`, `terminal`) **must** route through the `ConfirmDialog` in `TabBar.tsx`. Helpers there: `isActiveProcess()` + `closeWithGuard()`. Close triggers: X button, middle-click on tab, Ctrl/Cmd+W (global capture-phase listener).
 
+## Providers
+
+The app drives two AI CLIs, selected per session via `domain::Provider` (`claude` | `codex`):
+
+- **Spawn**: `PtyKind::Agent { provider, … }` → `build_agent_command` in `commands/pty.rs`. Claude pre-assigns ids (`--session-id`/`--resume`); Codex cannot (`codex` / `codex resume <id>`), so fresh Codex tabs use a `new-<uuid>` placeholder linked later by `sessionsSlice.refreshActivity` (provider-matched).
+- **Discovery**: Claude reads `~/.claude/projects/<encoded>/`; Codex reads global `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl(.zst)` filtered by `session_meta.cwd == project.path` (`sessions/codex/reader.rs`, mtime-keyed meta+title caches).
+- **History**: codex rollout `response_item`s map to the shared `HistoryBlock`; codex block uuids are synthetic `cx-<physical_line>-<block_idx>` (append-only stable; watcher counts physical lines to match).
+- **Settings**: `enabledProviders` (persisted); >1 enabled → "New session" opens a `providerPicker` tab. The CLI settings tab holds provider toggles (`detect_providers` checks binaries on the shell PATH) and per-provider title-gen models; the Models tab shows a section per enabled provider (Codex: `codexModelId`/`codexCustomModels`, '' = Auto; detection via `detect_codex_models` scanning recent rollouts' `turn_context.model`).
+- **v1 limits (by design)**: remote bridge/roster is Claude-only; usage/cost tracking Claude-only; codex `.zst` watcher appends update activity only (no block parsing). Title generation dispatches per provider (`claude -p` / `codex exec --ephemeral` from a temp dir so no rollout is persisted).
+
 ## Keyboard shortcuts (global)
 
 - `Ctrl/Cmd+K` — focus sidebar search (`Sidebar.tsx`, document listener, no capture).
@@ -80,6 +90,7 @@ Pattern when adding a new global shortcut that may conflict with xterm: register
 - **Zustand selectors over arrays**: wrap with `useShallow` when selecting arrays/objects — see `selectSortedProjects` usage in `Sidebar.tsx` (commit `1bd2d64` fixed an infinite-rerender from missing it).
 - **ts-rs exports `src/types/*.ts` during `cargo test`, NOT `cargo build`**. After adding `#[derive(TS)]`, run `cargo test` once to materialize the file. **Remote-contract types** (`RemoteCommand`/`RemoteEnvelope`/`RemoteEvent`) now live in the shared `crates/abeon-remote-core` crate; regenerate them with `cargo test --manifest-path crates/abeon-remote-core/Cargo.toml` (they still emit into `DesktopApp/src/types/`).
 - **Lint**: `npm run lint` (= `tsc --noEmit`) should report zero errors. Any error is a real issue.
+- The codex rollout fixture (`src-tauri/tests/fixtures/codex-rollout.jsonl`) is synthetic (documented 0.139 format) — verify against a real capture before relying on new payload fields.
 - **Process-env mutating Rust tests** use shared `TEST_ENV_LOCK: Mutex<()>` at parent-module scope in `commands/settings.rs`. Reuse this pattern (not new local locks) when adding tests that touch `std::env::set_var`/`remove_var`.
 - **Shell PTY program** is resolved per-spawn via `commands::settings::resolve_shell(&conn)` (fallback: `shellPath` setting → `$SHELL` → `"bash"`). Claude/Action PTYs deliberately use `bash -c <cmd>` (NOT `-lc`) as a stable command runner. `-l` was dropped because bash's login profile sources `nvm.sh` which calls `nvm use default` — that overrides the PATH we pre-loaded from the user's chosen shell, falling back to bash's nvm default (often a different node version than zsh's). Env from the chosen shell already provides what `-l` would have set up, so login behavior is redundant.
 - **PTY env is loaded from the user's chosen shell**, not inherited from the Tauri process. `commands::settings::ensure_shell_env(&state, &shell)` runs `<shell> -lc 'env -0'` once and caches in `AppState::shell_env` (`Mutex<Option<HashMap>>`). Falls back to `std::env::vars()` if the subprocess fails. Cache is invalidated by `set_setting` when key == `"shellPath"`. This is how `bash -c "claude"` finds the right node binary even when nvm is set up only in zsh/fish rcfiles.

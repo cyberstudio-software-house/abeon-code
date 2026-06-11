@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { SessionMeta } from '../../types';
+import type { SessionMeta, Provider } from '../../types';
 import type { HistoryViewMode } from '../../store/settingsSlice';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
@@ -12,9 +12,10 @@ type Props = {
   meta: SessionMeta;
   viewMode: HistoryViewMode;
   onViewModeChange: (mode: HistoryViewMode) => void;
+  provider?: Provider;
 };
 
-export function HistoryHeader({ meta, viewMode, onViewModeChange }: Props) {
+export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'claude' }: Props) {
   const [editing, setEditing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
@@ -24,6 +25,7 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange }: Props) {
   const openTerminal = useStore(s => s.openNewTerminalTab);
   const titleGenModelId = useStore(s => s.titleGenModelId);
   const customModels = useStore(s => s.customModels);
+  const codexTitleGenModelId = useStore(s => s.codexTitleGenModelId);
 
   const commitRename = () => {
     const value = inputRef.current?.value.trim();
@@ -38,8 +40,10 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange }: Props) {
     setGenerating(true);
     setGenError(null);
     try {
-      const modelCli = getCliModelString(titleGenModelId, customModels);
-      const title = (await tauri.generateSessionTitle(meta.projectId, meta.id, modelCli)).trim();
+      const modelCli = provider === 'codex'
+        ? (codexTitleGenModelId || undefined)
+        : getCliModelString(titleGenModelId, customModels);
+      const title = (await tauri.generateSessionTitle(meta.projectId, meta.id, modelCli, provider)).trim();
       if (title && title !== meta.title) {
         await rename(meta.projectId, meta.id, title);
       }

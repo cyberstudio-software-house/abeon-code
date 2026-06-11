@@ -1,4 +1,5 @@
 use crate::commands::pty::PtyKind;
+use crate::domain::Provider;
 use crate::remote::protocol::RemoteCommand;
 use crate::remote::registry::SessionPtyRegistry;
 
@@ -74,7 +75,7 @@ pub fn command_to_action(
 /// `SessionPtyRegistry`. Only Claude PTYs with a known session id qualify.
 pub fn session_to_bind(kind: &PtyKind) -> Option<String> {
     match kind {
-        PtyKind::Claude { session_id: Some(id), .. } => Some(id.clone()),
+        PtyKind::Agent { provider: Provider::Claude, session_id: Some(id), .. } => Some(id.clone()),
         _ => None,
     }
 }
@@ -150,18 +151,31 @@ mod tests {
     #[test]
     fn session_to_bind_only_for_claude_with_id() {
         assert_eq!(
-            session_to_bind(&PtyKind::Claude {
+            session_to_bind(&PtyKind::Agent {
+                provider: Provider::Claude,
                 session_id: Some("s1".into()), model: None, skip_permissions: false, fresh: true,
             }),
             Some("s1".to_string())
         );
         assert_eq!(
-            session_to_bind(&PtyKind::Claude {
+            session_to_bind(&PtyKind::Agent {
+                provider: Provider::Claude,
                 session_id: None, model: None, skip_permissions: false, fresh: false,
             }),
             None
         );
         assert_eq!(session_to_bind(&PtyKind::Shell), None);
         assert_eq!(session_to_bind(&PtyKind::Action { action_id: 1 }), None);
+    }
+
+    #[test]
+    fn session_to_bind_none_for_codex() {
+        assert_eq!(
+            session_to_bind(&PtyKind::Agent {
+                provider: Provider::Codex,
+                session_id: Some("s1".into()), model: None, skip_permissions: false, fresh: true,
+            }),
+            None
+        );
     }
 }

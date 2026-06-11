@@ -1,0 +1,15 @@
+{"timestamp": "2026-06-11T19:00:37.040Z", "type": "session_meta", "payload": {"id": "019eb80e-c7eb-74a1-80f7-a26d9af4b0fb", "timestamp": "2026-06-11T19:00:36.971Z", "cwd": "/tmp/codex-recon", "originator": "codex_exec", "cli_version": "0.139.0", "source": "exec", "model_provider": "openai"}}
+{"timestamp": "2026-06-11T19:00:37.040Z", "type": "event_msg", "payload": {"type": "task_started"}}
+{"timestamp": "2026-06-11T19:00:38.543Z", "type": "response_item", "payload": {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "<permissions instructions>\nFilesystem sandboxing defines which files can be read or written. `sandbox_mode` is `read-onl…"}, {"type": "input_text", "text": "<skills_instructions>\n## Skills\nA skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Be…"}]}}
+{"timestamp": "2026-06-11T19:00:38.543Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>\n  <cwd>/tmp/codex-recon</cwd>\n  <shell>zsh</shell>\n  <current_date>2026-06-11</current_date>\n  <ti…"}]}}
+{"timestamp": "2026-06-11T19:00:38.544Z", "type": "turn_context", "payload": {"cwd": "/tmp/codex-recon", "model": "gpt-5.5"}}
+{"timestamp": "2026-06-11T19:00:38.546Z", "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Run the command: ls. Then reply with exactly one word: done"}]}}
+{"timestamp": "2026-06-11T19:00:38.546Z", "type": "event_msg", "payload": {"type": "user_message"}}
+{"timestamp": "2026-06-11T19:00:45.309Z", "type": "response_item", "payload": {"type": "reasoning", "summary": [], "encrypted_content": "redacted"}}
+{"timestamp": "2026-06-11T19:00:45.483Z", "type": "response_item", "payload": {"type": "function_call", "name": "exec_command", "arguments": "{\"cmd\":\"cat /home/pszweda/.agents/skills/using-superpowers/SKILL.md && ls\",\"work…", "call_id": "call_djhq9KvDyQHWNPI7LvX6fvmp"}}
+{"timestamp": "2026-06-11T19:00:45.582Z", "type": "response_item", "payload": {"type": "function_call_output", "call_id": "call_djhq9KvDyQHWNPI7LvX6fvmp", "output": "Chunk ID: 7f11c2\nWall time: 0.0000 seconds\nProcess exited with code 0\nOriginal token count: 1305\nOutput:\n---\nname: using-superpowers\ndescription: Use …"}}
+{"timestamp": "2026-06-11T19:00:45.582Z", "type": "event_msg", "payload": {"type": "token_count"}}
+{"timestamp": "2026-06-11T19:00:47.000Z", "type": "event_msg", "payload": {"type": "agent_message"}}
+{"timestamp": "2026-06-11T19:00:47.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done"}], "phase": "final_answer"}}
+{"timestamp": "2026-06-11T19:00:47.023Z", "type": "event_msg", "payload": {"type": "token_count"}}
+{"timestamp": "2026-06-11T19:00:47.025Z", "type": "event_msg", "payload": {"type": "task_complete"}}

@@ -146,9 +146,13 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
         && t.sessionId.startsWith('new-') && !t.linkedSessionId
     );
     if (unlinkedNewTabs.length > 0 && newSessions.length > 0) {
-      for (let i = 0; i < Math.min(unlinkedNewTabs.length, newSessions.length); i++) {
-        linkNewSession(unlinkedNewTabs[i].id, newSessions[i].id);
-        renameTab(unlinkedNewTabs[i].id, newSessions[i].title);
+      const pool = [...newSessions];
+      for (const tab of unlinkedNewTabs) {
+        const idx = pool.findIndex(s => s.provider === (tab.provider ?? 'claude'));
+        if (idx < 0) continue;
+        const [s] = pool.splice(idx, 1);
+        linkNewSession(tab.id, s.id);
+        renameTab(tab.id, s.title);
       }
     }
 
