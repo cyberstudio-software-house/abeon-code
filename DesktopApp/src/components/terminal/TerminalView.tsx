@@ -69,6 +69,7 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
 export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, visible = true }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const customModels = useStore(s => s.customModels);
+  const codexModelId = useStore(s => s.codexModelId);
   const skipPermissions = useStore(s => s.skipPermissions);
   const projectPath = useStore(s => s.projects.find(p => p.id === projectId)?.path ?? '');
   const projectPathRef = useRef(projectPath);
@@ -156,6 +157,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
             provider: agentProvider,
             ...(sessionId ? { session_id: sessionId } : {}),
             ...(agentProvider === 'claude' && cliModel ? { model: cliModel } : {}),
+            ...(agentProvider === 'codex' && !isResume && codexModelId ? { model: codexModelId } : {}),
             ...(fresh ? { fresh: true } : {}),
             ...(skipPermissions ? { skip_permissions: true } : {}),
           }

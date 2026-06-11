@@ -16,3 +16,38 @@ describe('settingsSlice enabledProviders', () => {
     expect(useStore.getState().enabledProviders).toEqual(['claude']);
   });
 });
+
+describe('settingsSlice codex models', () => {
+  beforeEach(() => {
+    useStore.setState({ codexModelId: '', codexTitleGenModelId: '', codexCustomModels: [] });
+  });
+
+  it('addCodexCustomModel trims and dedupes', () => {
+    useStore.getState().addCodexCustomModel('  gpt-5.5-codex  ');
+    useStore.getState().addCodexCustomModel('gpt-5.5-codex');
+    expect(useStore.getState().codexCustomModels).toEqual(['gpt-5.5-codex']);
+  });
+
+  it('addCodexCustomModel ignores empty input', () => {
+    useStore.getState().addCodexCustomModel('   ');
+    expect(useStore.getState().codexCustomModels).toEqual([]);
+  });
+
+  it('removeCodexCustomModel resets selections pointing at it', () => {
+    useStore.getState().addCodexCustomModel('gpt-x');
+    useStore.getState().setCodexModel('gpt-x');
+    useStore.getState().setCodexTitleGenModel('gpt-x');
+    useStore.getState().removeCodexCustomModel('gpt-x');
+    expect(useStore.getState().codexCustomModels).toEqual([]);
+    expect(useStore.getState().codexModelId).toBe('');
+    expect(useStore.getState().codexTitleGenModelId).toBe('');
+  });
+
+  it('removeCodexCustomModel keeps selections of other models', () => {
+    useStore.getState().addCodexCustomModel('gpt-a');
+    useStore.getState().addCodexCustomModel('gpt-b');
+    useStore.getState().setCodexModel('gpt-a');
+    useStore.getState().removeCodexCustomModel('gpt-b');
+    expect(useStore.getState().codexModelId).toBe('gpt-a');
+  });
+});

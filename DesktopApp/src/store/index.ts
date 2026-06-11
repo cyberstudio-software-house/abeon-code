@@ -46,6 +46,9 @@ type Persisted = {
   shortcutOverrides?: Record<string, string>;
   historyViewMode?: 'communication' | 'full';
   enabledProviders?: Provider[];
+  codexModelId?: string;
+  codexTitleGenModelId?: string;
+  codexCustomModels?: string[];
 };
 
 const PERSISTED_KEYS = [
@@ -59,6 +62,9 @@ const PERSISTED_KEYS = [
   'shortcutOverrides',
   'historyViewMode',
   'enabledProviders',
+  'codexModelId',
+  'codexTitleGenModelId',
+  'codexCustomModels',
 ] as const satisfies readonly (keyof Persisted)[];
 
 type PersistedKey = typeof PERSISTED_KEYS[number];
@@ -86,6 +92,9 @@ function pickPersistedFields(state: AppState): Persisted {
     shortcutOverrides: state.shortcutOverrides,
     historyViewMode: state.historyViewMode,
     enabledProviders: state.enabledProviders,
+    codexModelId: state.codexModelId,
+    codexTitleGenModelId: state.codexTitleGenModelId,
+    codexCustomModels: state.codexCustomModels,
   };
 }
 
@@ -103,6 +112,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'customModels':
     case 'shortcutOverrides':
     case 'enabledProviders':
+    case 'codexCustomModels':
       return JSON.stringify(value);
     default:
       return String(value);
@@ -124,6 +134,7 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
     case 'customModels':
     case 'shortcutOverrides':
     case 'enabledProviders':
+    case 'codexCustomModels':
       try { return JSON.parse(raw); } catch { return undefined; }
     default:
       return raw;
@@ -170,6 +181,11 @@ function applyPersistedToState(p: Persisted) {
   if (Array.isArray(p.enabledProviders)) {
     const valid = p.enabledProviders.filter(isProvider);
     if (valid.length > 0) patch.enabledProviders = valid;
+  }
+  if (typeof p.codexModelId === 'string') patch.codexModelId = p.codexModelId;
+  if (typeof p.codexTitleGenModelId === 'string') patch.codexTitleGenModelId = p.codexTitleGenModelId;
+  if (Array.isArray(p.codexCustomModels)) {
+    patch.codexCustomModels = p.codexCustomModels.filter((x): x is string => typeof x === 'string');
   }
   if (Object.keys(patch).length > 0) useStore.setState(patch);
 }

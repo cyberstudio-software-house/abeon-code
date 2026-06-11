@@ -28,6 +28,9 @@ export type SettingsSlice = {
   historyViewMode: HistoryViewMode;
   enabledProviders: Provider[];
   settingsOpen: boolean;
+  codexModelId: string;
+  codexTitleGenModelId: string;
+  codexCustomModels: string[];
 
   toggleProvider: (p: Provider) => void;
   setTheme: (t: ThemeMode) => void;
@@ -52,6 +55,10 @@ export type SettingsSlice = {
   setHistoryViewMode: (mode: HistoryViewMode) => void;
   openSettings: () => void;
   closeSettings: () => void;
+  setCodexModel: (modelId: string) => void;
+  setCodexTitleGenModel: (modelId: string) => void;
+  addCodexCustomModel: (modelId: string) => void;
+  removeCodexCustomModel: (modelId: string) => void;
 };
 
 export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
@@ -75,6 +82,9 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   historyViewMode: 'full',
   enabledProviders: ['claude'],
   settingsOpen: false,
+  codexModelId: '',
+  codexTitleGenModelId: '',
+  codexCustomModels: [],
 
   toggleProvider: (p) => {
     const cur = get().enabledProviders;
@@ -112,4 +122,18 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),
+  setCodexModel: (codexModelId) => set({ codexModelId }),
+  setCodexTitleGenModel: (codexTitleGenModelId) => set({ codexTitleGenModelId }),
+  addCodexCustomModel: (modelId) => {
+    const trimmed = modelId.trim();
+    if (!trimmed || get().codexCustomModels.includes(trimmed)) return;
+    set({ codexCustomModels: [...get().codexCustomModels, trimmed] });
+  },
+  removeCodexCustomModel: (modelId) => {
+    set({
+      codexCustomModels: get().codexCustomModels.filter(m => m !== modelId),
+      ...(get().codexModelId === modelId ? { codexModelId: '' } : {}),
+      ...(get().codexTitleGenModelId === modelId ? { codexTitleGenModelId: '' } : {}),
+    });
+  },
 });
