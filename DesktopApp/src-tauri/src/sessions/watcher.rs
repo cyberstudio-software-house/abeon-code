@@ -58,8 +58,7 @@ impl SessionWatchers {
                 Provider::Codex => {
                     if let Ok(reader) = crate::sessions::codex::reader::open_lines(&path) {
                         use std::io::BufRead;
-                        for line in reader.lines().map_while(Result::ok) {
-                            if line.trim().is_empty() { continue; }
+                        for _ in reader.lines().map_while(Result::ok) {
                             lines_seen += 1;
                         }
                     }
@@ -212,6 +211,8 @@ fn read_tail(path: &Path, from: u64, to: u64, provider: Provider, usage: &mut Us
     let mut blocks = Vec::new();
     let mut title = None;
     for line in text.lines() {
+        let line_no = *lines_seen;
+        *lines_seen += 1;
         if line.trim().is_empty() { continue; }
         match provider {
             Provider::Claude => {
@@ -230,13 +231,11 @@ fn read_tail(path: &Path, from: u64, to: u64, provider: Provider, usage: &mut Us
                 }
             }
             Provider::Codex => {
-                let line_no = *lines_seen;
                 if let Ok(bs) = crate::sessions::codex::parser::parse_codex_line(line_no, line) {
                     blocks.extend(bs);
                 }
             }
         }
-        *lines_seen += 1;
     }
     TailResult { blocks, title }
 }

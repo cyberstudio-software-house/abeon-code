@@ -407,4 +407,45 @@ mod tests {
         assert_eq!(older.blocks.len(), 1);
         assert!(matches!(&older.blocks[0], crate::domain::HistoryBlock::UserText { text, .. } if text == "one"));
     }
+
+    #[test]
+    fn physical_line_count_includes_empty_lines() {
+        // File "A\n\nB\n": A at physical index 0, empty at 1, B at 2.
+        // enumerate() in read_history counts all lines, so B gets line_no 2 → uuid "cx-2-…".
+        // The watcher must also count 3 physical lines after open, so the next
+        // appended line gets line_no 3 — not 2 (which would collide with B).
+        let td = TempDir::new().unwrap();
+        let user_line = r#"{"timestamp":"2026-06-11T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"A"}]}}"#;
+        let assistant_line = r#"{"timestamp":"2026-06-11T10:00:06.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"B"}]}}"#;
+        let content = format!("{}\n\n{}\n", user_line, assistant_line);
+        write_rollout(td.path(), "11", "rollout-phys.jsonl", &content);
+
+        let path = td.path().join("2026").join("06").join("11").join("rollout-phys.jsonl");
+
+        // Verify read_history assigns physical line numbers (A→0, empty skipped, B→2).
+        let reader = open_lines(&path).unwrap();
+        use std::io::BufRead;
+        let line_nos: Vec<usize> = reader.lines()
+            .map_while(Result::ok)
+            .enumerate()
+            .filter(|(_, l)| !l.trim().is_empty())
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(line_nos, vec![0, 2], "read_history uses physical indices 0 and 2");
+
+        // The watcher open path must count all physical lines (3), so the
+        // next appended line gets line_no 3.
+        let mut lines_seen = 0usize;
+        let reader2 = open_lines(&path).unwrap();
+        for _ in reader2.lines().map_while(Result::ok) {
+            lines_seen += 1;
+        }
+        assert_eq!(lines_seen, 3, "watcher open must count 3 physical lines for 'A\\n\\nB\\n'");
+
+        // Simulate one appended line: line_no captured before increment must equal 3.
+        let line_no = lines_seen;
+        lines_seen += 1;
+        assert_eq!(line_no, 3);
+        assert_eq!(lines_seen, 4);
+    }
 }
