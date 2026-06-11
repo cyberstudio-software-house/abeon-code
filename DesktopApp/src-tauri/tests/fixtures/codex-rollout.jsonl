@@ -1,0 +1,8 @@
+{"timestamp":"2026-06-11T10:00:00.000Z","type":"session_meta","payload":{"id":"0196f7a1-aaaa-bbbb-cccc-123456789abc","timestamp":"2026-06-11T10:00:00.000Z","cwd":"/home/user/proj","originator":"codex_cli_rs","cli_version":"0.139.0"}}
+{"timestamp":"2026-06-11T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<user_instructions>repo rules</user_instructions>"}]}}
+{"timestamp":"2026-06-11T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Hello"}]}}
+{"timestamp":"2026-06-11T10:00:03.000Z","type":"response_item","payload":{"type":"reasoning","summary":[{"type":"summary_text","text":"Thinking about it"}],"content":null}}
+{"timestamp":"2026-06-11T10:00:04.000Z","type":"response_item","payload":{"type":"function_call","name":"shell","arguments":"{\"command\":[\"ls\"]}","call_id":"call_1"}}
+{"timestamp":"2026-06-11T10:00:05.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call_1","output":"{\"output\":\"file.txt\\n\",\"metadata\":{\"exit_code\":0,\"duration_seconds\":0.1}}"}}
+{"timestamp":"2026-06-11T10:00:06.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done."}]}}
+{"timestamp":"2026-06-11T10:00:07.000Z","type":"event_msg","payload":{"type":"token_count"}}

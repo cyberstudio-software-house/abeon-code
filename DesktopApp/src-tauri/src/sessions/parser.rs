@@ -132,7 +132,7 @@ fn render_tool_result(v: Option<&Value>) -> String {
     }
 }
 
-fn summarize_input(v: &Value) -> String {
+pub(crate) fn summarize_input(v: &Value) -> String {
     match v {
         Value::Object(map) => {
             let mut parts = Vec::new();

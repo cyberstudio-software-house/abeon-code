@@ -143,7 +143,6 @@ pub fn find_session(root: &Path, session_id: &str) -> Option<PathBuf> {
     scan_sessions(root).into_iter().find(|s| s.session_id == session_id).map(|s| s.path)
 }
 
-#[allow(dead_code)]
 pub(crate) fn is_meta_codex_text(text: &str) -> bool {
     let t = text.trim_start();
     t.starts_with("<user_instructions>")
