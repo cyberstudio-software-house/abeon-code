@@ -5,16 +5,18 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher as _, Event, EventKind};
 use tauri::{AppHandle, Emitter};
-use crate::domain::{HistoryBlock, SessionActivity};
+use crate::domain::{HistoryBlock, Provider, SessionActivity};
 use crate::error::AppResult;
 use crate::remote::bus::{RemoteEventBus, SessionBusEvent};
 use crate::sessions::parser::parse_line;
-use crate::sessions::activity::compute_activity;
+use crate::sessions::activity::{compute_activity_for};
 use crate::sessions::usage::UsageAccumulator;
 
 struct OpenSession {
     path: PathBuf,
+    provider: Provider,
     last_offset: u64,
+    lines_seen: usize,
     usage: UsageAccumulator,
 }
 
@@ -35,21 +37,42 @@ impl SessionWatchers {
         })
     }
 
-    pub fn open(self: &Arc<Self>, app: AppHandle, session_id: &str, path: PathBuf) -> AppResult<()> {
+    pub fn open(self: &Arc<Self>, app: AppHandle, session_id: &str, path: PathBuf, provider: Provider) -> AppResult<()> {
         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         {
             let mut acc = UsageAccumulator::default();
-            if let Ok(file) = std::fs::File::open(&path) {
-                use std::io::{BufRead, BufReader};
-                for line in BufReader::new(file).lines().map_while(Result::ok) {
-                    if line.trim().is_empty() { continue; }
-                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                        acc.add_line(&v);
+            let mut lines_seen = 0usize;
+            match provider {
+                Provider::Claude => {
+                    if let Ok(file) = std::fs::File::open(&path) {
+                        use std::io::{BufRead, BufReader};
+                        for line in BufReader::new(file).lines().map_while(Result::ok) {
+                            if line.trim().is_empty() { continue; }
+                            lines_seen += 1;
+                            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                                acc.add_line(&v);
+                            }
+                        }
+                    }
+                }
+                Provider::Codex => {
+                    if let Ok(reader) = crate::sessions::codex::reader::open_lines(&path) {
+                        use std::io::BufRead;
+                        for line in reader.lines().map_while(Result::ok) {
+                            if line.trim().is_empty() { continue; }
+                            lines_seen += 1;
+                        }
                     }
                 }
             }
             let mut s = self.sessions.lock();
-            s.insert(session_id.to_string(), OpenSession { path: path.clone(), last_offset: size, usage: acc });
+            s.insert(session_id.to_string(), OpenSession {
+                path: path.clone(),
+                provider,
+                last_offset: size,
+                lines_seen,
+                usage: acc,
+            });
         }
         let mut w = self.watcher.lock();
         if w.is_none() {
@@ -86,7 +109,7 @@ impl SessionWatchers {
         let mut sessions = self.sessions.lock();
         let mut block_updates: Vec<(String, Vec<HistoryBlock>)> = Vec::new();
         let mut title_updates: Vec<(String, String)> = Vec::new();
-        let mut activity_inputs: Vec<(String, PathBuf)> = Vec::new();
+        let mut activity_inputs: Vec<(String, PathBuf, Provider)> = Vec::new();
         let mut usage_updates: Vec<(String, crate::domain::UsageSummary)> = Vec::new();
 
         for (sid, sess) in sessions.iter_mut() {
@@ -96,21 +119,36 @@ impl SessionWatchers {
                 Err(_) => continue,
             };
             if new_size <= sess.last_offset {
-                activity_inputs.push((sid.clone(), sess.path.clone()));
+                activity_inputs.push((sid.clone(), sess.path.clone(), sess.provider));
                 continue;
             }
             let prev_offset = sess.last_offset;
             let path = sess.path.clone();
-            let tail = read_tail(&path, prev_offset, new_size, &mut sess.usage);
-            sess.last_offset = new_size;
-            usage_updates.push((sid.clone(), sess.usage.finalize()));
+            let provider = sess.provider;
+
+            // For Codex zst files, byte-offset seeking into a zstd stream is not valid.
+            // In v1 we skip block parsing of appended lines for Codex zst files and emit
+            // activity only. For plain .jsonl Codex files we parse appended lines normally.
+            let is_zst = path.extension().map(|e| e == "zst").unwrap_or(false);
+            let tail = if provider == Provider::Codex && is_zst {
+                sess.last_offset = new_size;
+                TailResult { blocks: vec![], title: None }
+            } else {
+                let tail = read_tail(&path, prev_offset, new_size, provider, &mut sess.usage, &mut sess.lines_seen);
+                sess.last_offset = new_size;
+                tail
+            };
+
+            if provider == Provider::Claude {
+                usage_updates.push((sid.clone(), sess.usage.finalize()));
+            }
             if !tail.blocks.is_empty() {
                 block_updates.push((sid.clone(), tail.blocks));
             }
             if let Some(title) = tail.title {
                 title_updates.push((sid.clone(), title));
             }
-            activity_inputs.push((sid.clone(), sess.path.clone()));
+            activity_inputs.push((sid.clone(), sess.path.clone(), provider));
         }
         drop(sessions);
 
@@ -140,8 +178,8 @@ impl SessionWatchers {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         let mut last = self.last_activity.lock();
-        for (sid, path) in activity_inputs {
-            let new_activity = compute_activity(&path, now);
+        for (sid, path, provider) in activity_inputs {
+            let new_activity = compute_activity_for(provider, &path, now);
             let changed_state = last.get(&sid).copied() != Some(new_activity);
             if changed_state {
                 last.insert(sid.clone(), new_activity);
@@ -163,7 +201,7 @@ struct TailResult {
     title: Option<String>,
 }
 
-fn read_tail(path: &Path, from: u64, to: u64, usage: &mut UsageAccumulator) -> TailResult {
+fn read_tail(path: &Path, from: u64, to: u64, provider: Provider, usage: &mut UsageAccumulator, lines_seen: &mut usize) -> TailResult {
     use std::io::{Read, Seek, SeekFrom};
     let empty = TailResult { blocks: vec![], title: None };
     let mut f = match std::fs::File::open(path) { Ok(f) => f, Err(_) => return empty };
@@ -175,19 +213,30 @@ fn read_tail(path: &Path, from: u64, to: u64, usage: &mut UsageAccumulator) -> T
     let mut title = None;
     for line in text.lines() {
         if line.trim().is_empty() { continue; }
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-            if v.get("type").and_then(|t| t.as_str()) == Some("ai-title") {
-                if let Some(t) = v.get("aiTitle").and_then(|t| t.as_str()) {
-                    if !t.is_empty() {
-                        title = Some(t.to_string());
+        match provider {
+            Provider::Claude => {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
+                    if v.get("type").and_then(|t| t.as_str()) == Some("ai-title") {
+                        if let Some(t) = v.get("aiTitle").and_then(|t| t.as_str()) {
+                            if !t.is_empty() {
+                                title = Some(t.to_string());
+                            }
+                        }
                     }
+                    usage.add_line(&v);
+                }
+                if let Ok(bs) = parse_line(line) {
+                    blocks.extend(bs);
                 }
             }
-            usage.add_line(&v);
+            Provider::Codex => {
+                let line_no = *lines_seen;
+                if let Ok(bs) = crate::sessions::codex::parser::parse_codex_line(line_no, line) {
+                    blocks.extend(bs);
+                }
+            }
         }
-        if let Ok(bs) = parse_line(line) {
-            blocks.extend(bs);
-        }
+        *lines_seen += 1;
     }
     TailResult { blocks, title }
 }

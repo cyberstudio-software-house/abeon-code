@@ -10,7 +10,6 @@ use crate::error::{AppError, AppResult};
 
 const META_SCAN_LIMIT: usize = 100;
 
-#[allow(dead_code)]
 pub fn codex_root() -> AppResult<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home".into()))?;
     Ok(home.join(".codex").join("sessions"))
@@ -215,14 +214,72 @@ pub fn list_for_cwd(root: &Path, cwd: &str, project_id: i64, limit: usize) -> Ve
         .collect()
 }
 
-#[allow(dead_code)]
 pub fn count_for_cwd(root: &Path, cwd: &str) -> usize {
     scan_sessions(root).into_iter().filter(|s| s.cwd == cwd).count()
 }
 
-#[allow(dead_code)]
 pub fn first_user_prompt(path: &Path) -> AppResult<Option<String>> {
     Ok(first_user_text(path))
+}
+
+pub fn read_history(
+    root: &Path,
+    project_id: i64,
+    session_id: &str,
+    limit: Option<usize>,
+    before_uuid: Option<&str>,
+) -> crate::error::AppResult<crate::domain::SessionHistory> {
+    crate::validation::validate_session_id(session_id)?;
+    let path = find_session(root, session_id)
+        .ok_or_else(|| AppError::NotFound(session_id.to_string()))?;
+    let limit = limit.unwrap_or(200).min(500);
+
+    let mut all_blocks: Vec<crate::domain::HistoryBlock> = Vec::new();
+    let mut title: Option<String> = None;
+    let mut line_count = 0usize;
+    let reader = open_lines(&path)?;
+    for (i, line) in reader.lines().map_while(Result::ok).enumerate() {
+        if line.trim().is_empty() { continue; }
+        line_count += 1;
+        if let Ok(bs) = super::parser::parse_codex_line(i, &line) {
+            if title.is_none() {
+                if let Some(crate::domain::HistoryBlock::UserText { text, .. }) = bs.first() {
+                    title = Some(truncate(text, 80));
+                }
+            }
+            all_blocks.extend(bs);
+        }
+    }
+
+    let end = match before_uuid {
+        Some(before) => all_blocks.iter().position(|b| block_uuid(b) == before).unwrap_or(all_blocks.len()),
+        None => all_blocks.len(),
+    };
+    let start = end.saturating_sub(limit);
+    let blocks = all_blocks[start..end].to_vec();
+    let has_more_before = start > 0;
+
+    let file_meta = session_file_meta(&path).ok_or_else(|| AppError::NotFound(session_id.to_string()))?;
+    let meta = SessionMeta {
+        id: session_id.to_string(),
+        project_id,
+        title: title.unwrap_or_else(|| format!("Sesja {}", &session_id[..8.min(session_id.len())])),
+        message_count: line_count,
+        last_modified: file_meta.modified_ms,
+        git_branch: file_meta.git_branch,
+        cwd: Some(file_meta.cwd),
+        activity: crate::sessions::activity::compute_activity_for(Provider::Codex, &path, now_ms()),
+        provider: Provider::Codex,
+    };
+    Ok(crate::domain::SessionHistory { meta, blocks, has_more_before })
+}
+
+fn block_uuid(b: &crate::domain::HistoryBlock) -> &str {
+    use crate::domain::HistoryBlock::*;
+    match b {
+        UserText { uuid, .. } | AssistantText { uuid, .. } | AssistantThinking { uuid, .. }
+        | ToolUse { uuid, .. } | ToolResult { uuid, .. } | Attachment { uuid, .. } | System { uuid, .. } => uuid,
+    }
 }
 
 #[cfg(test)]
@@ -328,5 +385,26 @@ mod tests {
         let all = scan_sessions(td.path());
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].cwd, "/proj/z");
+    }
+
+    #[test]
+    fn read_history_paginates_with_stable_uuids() {
+        let td = TempDir::new().unwrap();
+        let content = format!(
+            "{}\n{}\n{}\n",
+            meta_line("abab1212-abab-abab-abab-abababababab", "/p"),
+            r#"{"timestamp":"2026-06-11T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"one"}]}}"#,
+            r#"{"timestamp":"2026-06-11T10:00:06.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"two"}]}}"#,
+        );
+        write_rollout(td.path(), "11", "rollout-abab.jsonl", &content);
+
+        let h = read_history(td.path(), 1, "abab1212-abab-abab-abab-abababababab", Some(1), None).unwrap();
+        assert_eq!(h.blocks.len(), 1);
+        assert!(h.has_more_before);
+        assert_eq!(h.meta.provider, crate::domain::Provider::Codex);
+
+        let older = read_history(td.path(), 1, "abab1212-abab-abab-abab-abababababab", Some(1), Some("cx-2-0")).unwrap();
+        assert_eq!(older.blocks.len(), 1);
+        assert!(matches!(&older.blocks[0], crate::domain::HistoryBlock::UserText { text, .. } if text == "one"));
     }
 }

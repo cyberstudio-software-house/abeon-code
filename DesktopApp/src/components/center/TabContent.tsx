@@ -8,7 +8,7 @@ function TabPanel({ tab, visible }: { tab: Tab; visible: boolean }) {
     const historySessionId = tab.linkedSessionId ?? tab.sessionId;
     return (
       <div className={`absolute inset-0 ${visible ? '' : 'invisible pointer-events-none'}`}>
-        <HistoryView projectId={tab.projectId} sessionId={historySessionId} tabId={tab.id} />
+        <HistoryView projectId={tab.projectId} sessionId={historySessionId} tabId={tab.id} provider={tab.provider ?? 'claude'} />
       </div>
     );
   }

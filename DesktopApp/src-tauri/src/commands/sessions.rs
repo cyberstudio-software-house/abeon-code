@@ -1,10 +1,10 @@
 use std::panic;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
-use crate::domain::{Project, SessionMeta, SessionHistory};
+use crate::domain::{Project, Provider, SessionMeta, SessionHistory};
 use crate::error::{AppError, AppResult};
 use crate::sessions::encoding::encode_project_path;
-use crate::sessions::reader;
+use crate::sessions::{codex, reader};
 use crate::sessions::reader::session_file;
 use crate::state::AppState;
 use crate::db::{projects_repo, session_titles_repo};
@@ -46,7 +46,12 @@ pub fn list_sessions(
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
     let dir = session_dir(&proj)?;
-    let mut sessions = catch(move || reader::list_sessions(project_id, &dir, limit, offset))?;
+    let window = offset + limit;
+    let claude = catch(move || reader::list_sessions(project_id, &dir, window, 0))?;
+    let codex_dir = codex::reader::codex_root()?;
+    let proj_path = proj.path.clone();
+    let codex_list = catch(move || Ok(codex::reader::list_for_cwd(&codex_dir, &proj_path, project_id, window)))?;
+    let mut sessions = merge_session_lists(claude, codex_list, limit, offset);
     let titles = session_titles_repo::get_all(&c, project_id);
     for s in &mut sessions {
         if let Some(t) = titles.get(&s.id) {
@@ -61,14 +66,24 @@ pub fn read_session_history(
     state: State<AppState>,
     project_id: i64,
     session_id: String,
+    provider: Option<Provider>,
     limit: Option<usize>,
     before_uuid: Option<String>,
 ) -> AppResult<SessionHistory> {
     let c = state.db.get()?;
-    let proj = projects_repo::get(&c, project_id)?;
-    let dir = session_dir(&proj)?;
-    let sid = session_id.clone();
-    let mut history = catch(move || reader::read_history(project_id, &dir, &sid, limit, before_uuid.as_deref()))?;
+    let mut history = match provider.unwrap_or(Provider::Claude) {
+        Provider::Claude => {
+            let proj = projects_repo::get(&c, project_id)?;
+            let dir = session_dir(&proj)?;
+            let sid = session_id.clone();
+            catch(move || reader::read_history(project_id, &dir, &sid, limit, before_uuid.as_deref()))?
+        }
+        Provider::Codex => {
+            let codex_dir = codex::reader::codex_root()?;
+            let sid = session_id.clone();
+            catch(move || codex::reader::read_history(&codex_dir, project_id, &sid, limit, before_uuid.as_deref()))?
+        }
+    };
     if let Some(t) = session_titles_repo::get(&c, project_id, &session_id) {
         history.meta.title = t;
     }
@@ -81,12 +96,23 @@ pub fn open_session_watch(
     state: State<AppState>,
     project_id: i64,
     session_id: String,
+    provider: Option<Provider>,
 ) -> AppResult<()> {
-    let c = state.db.get()?;
-    let proj = projects_repo::get(&c, project_id)?;
-    let dir = session_dir(&proj)?;
-    let path = session_file(&dir, &session_id)?;
-    state.session_watchers.open(app, &session_id, path)
+    let prov = provider.unwrap_or(Provider::Claude);
+    let path = match prov {
+        Provider::Claude => {
+            let c = state.db.get()?;
+            let proj = projects_repo::get(&c, project_id)?;
+            let dir = session_dir(&proj)?;
+            session_file(&dir, &session_id)?
+        }
+        Provider::Codex => {
+            let codex_dir = codex::reader::codex_root()?;
+            codex::reader::find_session(&codex_dir, &session_id)
+                .ok_or_else(|| AppError::NotFound(session_id.clone()))?
+        }
+    };
+    state.session_watchers.open(app, &session_id, path, prov)
 }
 
 #[tauri::command]
@@ -103,12 +129,18 @@ pub fn count_sessions(
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
     let dir = session_dir(&proj)?;
-    if !dir.exists() { return Ok(0); }
-    let count = std::fs::read_dir(&dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))
-        .count();
-    Ok(count)
+    let claude_count = if !dir.exists() {
+        0
+    } else {
+        std::fs::read_dir(&dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map(|x| x == "jsonl").unwrap_or(false))
+            .count()
+    };
+    let codex_count = codex::reader::codex_root()
+        .map(|root| codex::reader::count_for_cwd(&root, &proj.path))
+        .unwrap_or(0);
+    Ok(claude_count + codex_count)
 }
 
 #[tauri::command]
@@ -117,17 +149,26 @@ pub fn export_session(
     project_id: i64,
     session_id: String,
     format: String,
+    provider: Option<Provider>,
 ) -> AppResult<String> {
     let c = state.db.get()?;
-    let proj = projects_repo::get(&c, project_id)?;
-    let dir = session_dir(&proj)?;
-    catch(move || {
-        let history = reader::read_history(project_id, &dir, &session_id, None, None)?;
-        match format.as_str() {
-            "json" => Ok(serde_json::to_string_pretty(&history)?),
-            "md" | _ => Ok(render_markdown(&history)),
+    let history = match provider.unwrap_or(Provider::Claude) {
+        Provider::Claude => {
+            let proj = projects_repo::get(&c, project_id)?;
+            let dir = session_dir(&proj)?;
+            let sid = session_id.clone();
+            catch(move || reader::read_history(project_id, &dir, &sid, None, None))?
         }
-    })
+        Provider::Codex => {
+            let codex_dir = codex::reader::codex_root()?;
+            let sid = session_id.clone();
+            catch(move || codex::reader::read_history(&codex_dir, project_id, &sid, None, None))?
+        }
+    };
+    match format.as_str() {
+        "json" => Ok(serde_json::to_string_pretty(&history)?),
+        _ => Ok(render_markdown(&history)),
+    }
 }
 
 #[tauri::command]
@@ -148,15 +189,29 @@ pub async fn generate_session_title(
     project_id: i64,
     session_id: String,
     model: Option<String>,
+    provider: Option<Provider>,
 ) -> AppResult<String> {
-    let (proj_path, dir) = {
+    let prov = provider.unwrap_or(Provider::Claude);
+    let (proj_path, first) = {
         let c = state.db.get()?;
         let proj = projects_repo::get(&c, project_id)?;
-        (proj.path.clone(), session_dir(&proj)?)
+        let first = match prov {
+            Provider::Claude => {
+                let dir = session_dir(&proj)?;
+                let path = reader::session_file(&dir, &session_id)?;
+                reader::first_user_prompt(&path)?
+            }
+            Provider::Codex => {
+                let codex_dir = codex::reader::codex_root()?;
+                let path = codex::reader::find_session(&codex_dir, &session_id)
+                    .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
+                codex::reader::first_user_prompt(&path)?
+            }
+        };
+        (proj.path.clone(), first)
     };
-    let path = reader::session_file(&dir, &session_id)?;
 
-    let first = reader::first_user_prompt(&path)?
+    let first = first
         .ok_or_else(|| AppError::Other("Sesja nie zawiera promptu użytkownika".into()))?;
 
     let truncated: String = first.chars().take(2000).collect();
@@ -197,6 +252,17 @@ pub async fn generate_session_title(
         return Err(AppError::Other("Pusta odpowiedź z claude -p".into()));
     }
     Ok(cleaned)
+}
+
+fn merge_session_lists(
+    claude: Vec<SessionMeta>,
+    codex: Vec<SessionMeta>,
+    limit: usize,
+    offset: usize,
+) -> Vec<SessionMeta> {
+    let mut all: Vec<SessionMeta> = claude.into_iter().chain(codex).collect();
+    all.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    all.into_iter().skip(offset).take(limit).collect()
 }
 
 fn render_markdown(h: &SessionHistory) -> String {
@@ -265,6 +331,33 @@ pub fn roster_snapshot(conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnecti
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+    use crate::domain::{Provider, SessionActivity, SessionMeta};
+
+    fn meta(id: &str, provider: Provider, last_modified: i64) -> SessionMeta {
+        SessionMeta {
+            id: id.into(), project_id: 1, title: id.into(), message_count: 1,
+            last_modified, git_branch: None, cwd: None,
+            activity: SessionActivity::Idle, provider,
+        }
+    }
+
+    #[test]
+    fn merge_interleaves_by_mtime_desc_with_offset() {
+        let claude = vec![meta("c1", Provider::Claude, 300), meta("c2", Provider::Claude, 100)];
+        let codex = vec![meta("x1", Provider::Codex, 200)];
+        let merged = merge_session_lists(claude.clone(), codex.clone(), 10, 0);
+        let ids: Vec<&str> = merged.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["c1", "x1", "c2"]);
+
+        let page2 = merge_session_lists(claude, codex, 2, 1);
+        let ids2: Vec<&str> = page2.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids2, vec!["x1", "c2"]);
+    }
 }
 
 #[cfg(test)]

@@ -23,10 +23,10 @@ export const tauri = {
   reorderProjects: (ids: number[]) => invoke<void>('reorder_projects', { ids }),
   listSessions: (projectId: number, limit = 20, offset = 0) =>
     invoke<SessionMeta[]>('list_sessions', { projectId, limit, offset }),
-  readSessionHistory: (projectId: number, sessionId: string, limit?: number, beforeUuid?: string) =>
-    invoke<SessionHistory>('read_session_history', { projectId, sessionId, limit, beforeUuid }),
-  openSessionWatch: (projectId: number, sessionId: string) =>
-    invoke<void>('open_session_watch', { projectId, sessionId }),
+  readSessionHistory: (projectId: number, sessionId: string, provider: Provider = 'claude', limit?: number, beforeUuid?: string) =>
+    invoke<SessionHistory>('read_session_history', { projectId, sessionId, provider, limit, beforeUuid }),
+  openSessionWatch: (projectId: number, sessionId: string, provider: Provider = 'claude') =>
+    invoke<void>('open_session_watch', { projectId, sessionId, provider }),
   closeSessionWatch: (sessionId: string) =>
     invoke<void>('close_session_watch', { sessionId }),
   onSessionAppend: (sessionId: string, cb: (blocks: HistoryBlock[]) => void): Promise<UnlistenFn> =>
@@ -77,8 +77,8 @@ export const tauri = {
   getGitUser: () => invoke<GitUser>('get_git_user'),
   renameSession: (projectId: number, sessionId: string, title: string) =>
     invoke<void>('rename_session', { projectId, sessionId, title }),
-  generateSessionTitle: (projectId: number, sessionId: string, model?: string) =>
-    invoke<string>('generate_session_title', { projectId, sessionId, model }),
+  generateSessionTitle: (projectId: number, sessionId: string, model?: string, provider: Provider = 'claude') =>
+    invoke<string>('generate_session_title', { projectId, sessionId, model, provider }),
   countSessions: (projectId: number) => invoke<number>('count_sessions', { projectId }),
   getSetting: (key: string) =>
     invoke<string | null>('get_setting', { key }),
