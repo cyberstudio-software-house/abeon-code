@@ -18,4 +18,4 @@ pub use shell::*;
 pub use editor::*;
 pub use usage::*;
 pub use model::*;
-pub use provider::*;
+pub use provider::Provider;

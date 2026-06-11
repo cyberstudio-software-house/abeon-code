@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use crate::domain::{HistoryBlock, SessionHistory, SessionMeta};
+use crate::domain::{HistoryBlock, Provider, SessionHistory, SessionMeta};
 use crate::error::{AppError, AppResult};
 use super::activity::compute_activity;
 use super::parser::parse_line;
@@ -149,7 +149,7 @@ fn meta_for_file_fast(project_id: i64, path: &Path) -> AppResult<SessionMeta> {
         message_count: approx_messages,
         last_modified, git_branch, cwd,
         activity: compute_activity(path, now_ms()),
-        provider: crate::domain::Provider::Claude,
+        provider: Provider::Claude,
     })
 }
 
@@ -246,7 +246,7 @@ pub fn read_history(
         message_count: line_count,
         last_modified, git_branch, cwd,
         activity: compute_activity(&path, now_ms()),
-        provider: crate::domain::Provider::Claude,
+        provider: Provider::Claude,
     };
 
     Ok(SessionHistory { meta, blocks, has_more_before })

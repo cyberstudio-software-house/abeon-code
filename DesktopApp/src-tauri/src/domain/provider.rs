@@ -31,5 +31,11 @@ mod tests {
     #[test]
     fn deserializes_camel_case() {
         assert_eq!(serde_json::from_str::<Provider>("\"codex\"").unwrap(), Provider::Codex);
+        assert_eq!(serde_json::from_str::<Provider>("\"claude\"").unwrap(), Provider::Claude);
+    }
+
+    #[test]
+    fn rejects_unknown_variant() {
+        assert!(serde_json::from_str::<Provider>("\"openai\"").is_err());
     }
 }
