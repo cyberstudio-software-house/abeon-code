@@ -3,6 +3,7 @@ use ts_rs::TS;
 use tauri::{AppHandle, State};
 use base64::Engine;
 use uuid::Uuid;
+use crate::domain::Provider;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::db::{projects_repo, actions_repo};
@@ -12,7 +13,8 @@ use crate::remote::dispatch::session_to_bind;
 #[ts(export, export_to = "../../src/types/")]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum PtyKind {
-    Claude {
+    Agent {
+        provider: Provider,
         #[serde(default)]
         session_id: Option<String>,
         #[serde(default)]
@@ -58,6 +60,40 @@ fn build_claude_command(
     cmd
 }
 
+fn build_codex_command(
+    session_id: Option<&str>,
+    model: Option<&str>,
+    skip_permissions: bool,
+    fresh: bool,
+) -> String {
+    let mut cmd = String::from("codex");
+    match session_id {
+        Some(id) if !fresh => cmd.push_str(&format!(" resume {id}")),
+        _ => {
+            if let Some(m) = model {
+                cmd.push_str(&format!(" -m {m}"));
+            }
+        }
+    }
+    if skip_permissions {
+        cmd.push_str(" --dangerously-bypass-approvals-and-sandbox");
+    }
+    cmd
+}
+
+fn build_agent_command(
+    provider: Provider,
+    session_id: Option<&str>,
+    model: Option<&str>,
+    skip_permissions: bool,
+    fresh: bool,
+) -> String {
+    match provider {
+        Provider::Claude => build_claude_command(session_id, model, skip_permissions, fresh),
+        Provider::Codex => build_codex_command(session_id, model, skip_permissions, fresh),
+    }
+}
+
 /// Spawn `claude --resume <session_id>` for a project, outside a Tauri command
 /// (used by the remote bridge actuator). Mirrors spawn_pty's Claude path:
 /// `bash -c "claude --resume <id>"` with env pre-loaded from the chosen shell.
@@ -92,7 +128,7 @@ pub fn spawn_pty(
     let mut cwd = std::path::PathBuf::from(&proj.path);
 
     let (program, args_owned) = match &kind {
-        PtyKind::Claude { session_id, model, skip_permissions, fresh } => {
+        PtyKind::Agent { provider, session_id, model, skip_permissions, fresh } => {
             // Untrusted in the remote-bridge path (session_id can originate from a
             // mobile `resumeSession`). Validate before it reaches `bash -c` so the
             // shell can never reinterpret it; the allowlist also blocks flag smuggling.
@@ -102,7 +138,8 @@ pub fn spawn_pty(
             if let Some(m) = model {
                 crate::validation::validate_model(m)?;
             }
-            let cmd = build_claude_command(
+            let cmd = build_agent_command(
+                *provider,
                 session_id.as_deref(),
                 model.as_deref(),
                 *skip_permissions,
@@ -334,6 +371,46 @@ pub fn read_clipboard_text() -> AppResult<Option<String>> {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn codex_command_fresh_plain() {
+        assert_eq!(
+            build_agent_command(Provider::Codex, None, None, false, true),
+            "codex"
+        );
+    }
+
+    #[test]
+    fn codex_command_resume() {
+        assert_eq!(
+            build_agent_command(Provider::Codex, Some("uuid-1"), None, false, false),
+            "codex resume uuid-1"
+        );
+    }
+
+    #[test]
+    fn codex_command_skip_permissions() {
+        assert_eq!(
+            build_agent_command(Provider::Codex, None, None, true, true),
+            "codex --dangerously-bypass-approvals-and-sandbox"
+        );
+    }
+
+    #[test]
+    fn codex_command_resume_ignores_model() {
+        assert_eq!(
+            build_agent_command(Provider::Codex, Some("uuid-1"), Some("gpt-x"), false, false),
+            "codex resume uuid-1"
+        );
+    }
+
+    #[test]
+    fn claude_command_via_agent_dispatch() {
+        assert_eq!(
+            build_agent_command(Provider::Claude, Some("uuid-1"), None, false, true),
+            "claude --session-id uuid-1"
+        );
+    }
 
     #[test]
     fn claude_command_fresh_uses_session_id() {
