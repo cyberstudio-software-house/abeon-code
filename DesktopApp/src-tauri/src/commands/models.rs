@@ -6,6 +6,7 @@ use crate::domain::DetectedModel;
 use crate::state::AppState;
 
 const MAX_FALLBACK_FILES: usize = 50;
+const NON_MODEL_FAMILIES: [&str; 2] = ["code", "cli"];
 
 /// Pull every `claude-...` ASCII token out of a byte blob (CLI binary or JSONL).
 /// A token runs while bytes stay in `[a-z0-9-]`, so `claude-opus-4-8[1m]` yields
@@ -42,6 +43,9 @@ fn normalize_alias(token: &str) -> Option<(String, String)> {
     let mut parts = rest.split('-');
     let family = parts.next()?;
     if family.is_empty() || !family.chars().all(|c| c.is_ascii_lowercase()) {
+        return None;
+    }
+    if NON_MODEL_FAMILIES.contains(&family) {
         return None;
     }
     let major: u32 = parts.next()?.parse().ok()?;
@@ -228,6 +232,12 @@ mod tests {
         assert_eq!(normalize_alias("claude-3-5-sonnet"), None);
         assert_eq!(normalize_alias("claude-code"), None);
         assert_eq!(normalize_alias("claude-cli"), None);
+    }
+
+    #[test]
+    fn rejects_versioned_non_model_families() {
+        assert_eq!(normalize_alias("claude-code-4"), None);
+        assert_eq!(normalize_alias("claude-cli-2-1"), None);
     }
 
     #[test]
