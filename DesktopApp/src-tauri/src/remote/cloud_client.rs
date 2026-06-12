@@ -1,5 +1,15 @@
 use serde::Deserialize;
 
+/// Errors from authenticated CloudService calls. `Unauthorized` is split out so
+/// callers can transparently re-register a stale device secret and retry.
+#[derive(Debug, thiserror::Error)]
+pub enum CloudError {
+    #[error("unauthorized: device secret not recognized by CloudService")]
+    Unauthorized,
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
 /// Async client for the CloudService REST API. The desktop uses it to register,
 /// fetch short-lived Centrifugo tokens, and start phone pairing.
 pub struct CloudClient {
@@ -36,6 +46,15 @@ impl CloudClient {
         format!("{}{}", self.base.trim_end_matches('/'), path)
     }
 
+    /// Map a response into `Unauthorized` on 401, else propagate other HTTP
+    /// errors as `Other`. Used by authenticated calls that support retry.
+    fn check_auth(resp: reqwest::Response) -> Result<reqwest::Response, CloudError> {
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(CloudError::Unauthorized);
+        }
+        resp.error_for_status().map_err(|e| CloudError::Other(e.into()))
+    }
+
     /// First-boot registration → `(deviceId, deviceSecret)`.
     pub async fn register(&self) -> anyhow::Result<(String, String)> {
         let resp: RegisterResponse = self
@@ -50,16 +69,18 @@ impl CloudClient {
     }
 
     /// Exchange the device secret for a short-lived Centrifugo connection JWT.
-    pub async fn fetch_token(&self, device_secret: &str) -> anyhow::Result<String> {
-        let resp: TokenResponse = self
+    pub async fn fetch_token(&self, device_secret: &str) -> Result<String, CloudError> {
+        let resp = self
             .http
             .post(self.url("/v1/token"))
             .bearer_auth(device_secret)
             .send()
-            .await?
-            .error_for_status()?
+            .await
+            .map_err(|e| CloudError::Other(e.into()))?;
+        let resp: TokenResponse = Self::check_auth(resp)?
             .json()
-            .await?;
+            .await
+            .map_err(|e| CloudError::Other(e.into()))?;
         Ok(resp.token)
     }
 
@@ -76,17 +97,19 @@ impl CloudClient {
     }
 
     /// Start pairing → a one-time code to display as text/QR.
-    pub async fn pair_start(&self, device_secret: &str) -> anyhow::Result<PairCode> {
-        let resp: PairCode = self
+    pub async fn pair_start(&self, device_secret: &str) -> Result<PairCode, CloudError> {
+        let resp = self
             .http
             .post(self.url("/v1/pair/start"))
             .bearer_auth(device_secret)
             .send()
-            .await?
-            .error_for_status()?
+            .await
+            .map_err(|e| CloudError::Other(e.into()))?;
+        let pc: PairCode = Self::check_auth(resp)?
             .json()
-            .await?;
-        Ok(resp)
+            .await
+            .map_err(|e| CloudError::Other(e.into()))?;
+        Ok(pc)
     }
 }
 
@@ -128,6 +151,34 @@ mod tests {
         let client = CloudClient::new(server.uri());
         let token = client.fetch_token("sekret").await.unwrap();
         assert_eq!(token, "jwt-123");
+    }
+
+    #[tokio::test]
+    async fn pair_start_maps_401_to_unauthorized() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/pair/start"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let client = CloudClient::new(server.uri());
+        let err = client.pair_start("stale").await.unwrap_err();
+        assert!(matches!(err, CloudError::Unauthorized), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn fetch_token_maps_401_to_unauthorized() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/token"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+
+        let client = CloudClient::new(server.uri());
+        let err = client.fetch_token("stale").await.unwrap_err();
+        assert!(matches!(err, CloudError::Unauthorized), "got {err:?}");
     }
 
     #[tokio::test]

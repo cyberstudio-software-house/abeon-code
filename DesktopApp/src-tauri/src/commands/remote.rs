@@ -25,22 +25,13 @@ pub async fn remote_pair_start(state: State<'_, AppState>) -> AppResult<PairCode
     };
     let client = CloudClient::new(base);
 
-    // Ensure we have a device secret (register on first use).
-    let device_secret = {
-        let conn = state.db.get().map_err(|e| AppError::Other(e.to_string()))?;
-        crate::db::settings_repo::get(&conn, "remoteDeviceSecret").ok().flatten().filter(|s| !s.is_empty())
-    };
-    let device_secret = match device_secret {
-        Some(s) => s,
-        None => {
-            let (id, secret) = client.register().await.map_err(|e| AppError::Other(e.to_string()))?;
-            let conn = state.db.get().map_err(|e| AppError::Other(e.to_string()))?;
-            crate::db::settings_repo::set(&conn, "remoteDeviceId", &id)?;
-            crate::db::settings_repo::set(&conn, "remoteDeviceSecret", &secret)?;
-            secret
-        }
-    };
-
-    let pc = client.pair_start(&device_secret).await.map_err(|e| AppError::Other(e.to_string()))?;
+    // Register on first use; if the persisted secret is stale (server returns
+    // 401), re-register and retry once.
+    let pc = crate::remote::identity::with_reregister_on_unauthorized(&state.db, &client, |secret| {
+        let client = &client;
+        async move { client.pair_start(&secret).await }
+    })
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?;
     Ok(PairCodeDto { code: pc.code, expires_in_secs: pc.expires_in_secs })
 }
