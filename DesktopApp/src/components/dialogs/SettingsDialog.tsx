@@ -646,7 +646,7 @@ function ClaudeModelsSection() {
     const rows = detectedClaudeModels(detected, customModels);
     const isRawSelected =
       defaultModelId.startsWith('claude-') &&
-      !customModels.some(m => m.id === defaultModelId) &&
+      !customModels.some(m => m.id === defaultModelId || m.modelId === defaultModelId) &&
       !rows.some(r => r.modelId === defaultModelId);
     return isRawSelected
       ? [...rows, { modelId: defaultModelId, label: getModelDisplayLabel(defaultModelId, customModels) }]
