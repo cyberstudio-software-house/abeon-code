@@ -5,7 +5,6 @@ use crate::commands::settings::{ensure_shell_env, resolve_shell};
 use crate::domain::DetectedModel;
 use crate::state::AppState;
 
-const FAMILIES: [&str; 3] = ["opus", "sonnet", "haiku"];
 const MAX_FALLBACK_FILES: usize = 50;
 
 /// Pull every `claude-...` ASCII token out of a byte blob (CLI binary or JSONL).
@@ -34,20 +33,27 @@ fn scan_aliases(bytes: &[u8]) -> Vec<String> {
     out
 }
 
-/// Reduce a raw token to its clean `claude-family-major-minor` alias, dropping
-/// date / `-v1` / `-fast` suffixes and rejecting base aliases (no minor) and
-/// `.0` minors. Returns `(clean_id, family)`.
-fn normalize_alias(token: &str) -> Option<(String, &'static str)> {
+/// Reduce a raw token to its clean `claude-family-major[-minor]` alias.
+/// Accepts any alphabetic family plus at least one numeric version segment;
+/// drops date / `-v1` / `-fast` suffixes; rejects an explicit `.0` minor
+/// (base alias) and tokens without a numeric version. Returns `(clean_id, family)`.
+fn normalize_alias(token: &str) -> Option<(String, String)> {
     let rest = token.strip_prefix("claude-")?;
     let mut parts = rest.split('-');
-    let fam_raw = parts.next()?;
-    let family = FAMILIES.iter().copied().find(|f| *f == fam_raw)?;
-    let major: u32 = parts.next()?.parse().ok()?;
-    let minor: u32 = parts.next()?.parse().ok()?;
-    if minor == 0 {
+    let family = parts.next()?;
+    if family.is_empty() || !family.chars().all(|c| c.is_ascii_lowercase()) {
         return None;
     }
-    Some((format!("claude-{family}-{major}-{minor}"), family))
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: Option<u32> = parts.next().and_then(|s| s.parse::<u32>().ok());
+    if minor == Some(0) {
+        return None;
+    }
+    let clean = match minor {
+        Some(m) => format!("claude-{family}-{major}-{m}"),
+        None => format!("claude-{family}-{major}"),
+    };
+    Some((clean, family.to_string()))
 }
 
 /// Normalize + dedupe raw tokens into `DetectedModel`s. Opus aliases also get a
@@ -59,14 +65,13 @@ fn build_models(tokens: Vec<String>, source: &str) -> Vec<DetectedModel> {
         let Some((clean, family)) = normalize_alias(&tok) else { continue; };
         let mut variants = vec![clean.clone()];
         if family == "opus" {
-            // Opus models expose a 1M-context variant; the CLI appends `[1m]` at runtime.
             variants.push(format!("{clean}[1m]"));
         }
         for v in variants {
             if seen.insert(v.clone()) {
                 out.push(DetectedModel {
                     model_id: v,
-                    family: family.to_string(),
+                    family: family.clone(),
                     source: source.to_string(),
                 });
             }
@@ -183,21 +188,46 @@ mod tests {
 
     #[test]
     fn normalizes_clean_alias() {
-        assert_eq!(normalize_alias("claude-opus-4-8"), Some(("claude-opus-4-8".to_string(), "opus")));
+        assert_eq!(
+            normalize_alias("claude-opus-4-8"),
+            Some(("claude-opus-4-8".to_string(), "opus".to_string()))
+        );
+    }
+
+    #[test]
+    fn accepts_single_major_and_unknown_family() {
+        assert_eq!(
+            normalize_alias("claude-fable-5"),
+            Some(("claude-fable-5".to_string(), "fable".to_string()))
+        );
+        assert_eq!(
+            normalize_alias("claude-newfamily-7"),
+            Some(("claude-newfamily-7".to_string(), "newfamily".to_string()))
+        );
     }
 
     #[test]
     fn strips_date_and_v1_suffixes() {
-        assert_eq!(normalize_alias("claude-haiku-4-5-20251001"), Some(("claude-haiku-4-5".to_string(), "haiku")));
-        assert_eq!(normalize_alias("claude-opus-4-6-v1"), Some(("claude-opus-4-6".to_string(), "opus")));
-        assert_eq!(normalize_alias("claude-opus-4-6-fast"), Some(("claude-opus-4-6".to_string(), "opus")));
+        assert_eq!(
+            normalize_alias("claude-haiku-4-5-20251001"),
+            Some(("claude-haiku-4-5".to_string(), "haiku".to_string()))
+        );
+        assert_eq!(
+            normalize_alias("claude-opus-4-6-v1"),
+            Some(("claude-opus-4-6".to_string(), "opus".to_string()))
+        );
+        assert_eq!(
+            normalize_alias("claude-opus-4-6-fast"),
+            Some(("claude-opus-4-6".to_string(), "opus".to_string()))
+        );
     }
 
     #[test]
-    fn rejects_base_aliases_and_zero_minor_and_non_family() {
-        assert_eq!(normalize_alias("claude-opus-4"), None);
+    fn rejects_zero_minor_numeric_family_and_no_version() {
         assert_eq!(normalize_alias("claude-opus-4-0"), None);
-        assert_eq!(normalize_alias("claude-gpt-4-1"), None);
+        assert_eq!(normalize_alias("claude-3-5-sonnet"), None);
+        assert_eq!(normalize_alias("claude-code"), None);
+        assert_eq!(normalize_alias("claude-cli"), None);
     }
 
     #[test]
@@ -211,14 +241,14 @@ mod tests {
         let toks = vec![
             "claude-opus-4-9".to_string(),
             "claude-opus-4-9-20260101".to_string(),
-            "claude-sonnet-4-7".to_string(),
+            "claude-fable-5".to_string(),
         ];
         let models = build_models(toks, "binary");
         let ids: Vec<&str> = models.iter().map(|m| m.model_id.as_str()).collect();
         assert!(ids.contains(&"claude-opus-4-9"));
         assert!(ids.contains(&"claude-opus-4-9[1m]"));
-        assert!(ids.contains(&"claude-sonnet-4-7"));
-        assert!(!ids.contains(&"claude-sonnet-4-7[1m]"));
+        assert!(ids.contains(&"claude-fable-5"));
+        assert!(!ids.contains(&"claude-fable-5[1m]"));
         assert_eq!(ids.iter().filter(|i| **i == "claude-opus-4-9").count(), 1);
         assert!(models.iter().all(|m| m.source == "binary"));
     }
