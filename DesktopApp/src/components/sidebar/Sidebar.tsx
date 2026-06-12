@@ -37,13 +37,14 @@ export function Sidebar() {
     const overrides = useStore.getState().shortcutOverrides;
     if (matchesShortcut(e, 'focusSearch', overrides)) {
       e.preventDefault();
+      e.stopPropagation();
       inputRef.current?.focus();
     }
   }, []);
 
   useEffect(() => {
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown, { capture: true });
+    return () => document.removeEventListener('keydown', handleKeyDown, { capture: true });
   }, [handleKeyDown]);
 
   const filtered = query.trim()

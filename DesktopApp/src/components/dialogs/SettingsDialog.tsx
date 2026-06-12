@@ -16,6 +16,9 @@ import {
 } from '../../lib/shortcuts';
 import type { NotificationTrigger } from '../../lib/attention';
 
+const SELECT_BASE =
+  'bg-bg-elev-2 border border-border rounded text-fg cursor-pointer transition-colors hover:border-muted focus:outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed';
+
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'light', label: 'Jasny' },
   { value: 'dark', label: 'Ciemny' },
@@ -136,7 +139,7 @@ function NotificationsSection() {
           value={trigger}
           onChange={e => setTrigger(e.target.value as NotificationTrigger)}
           disabled={!enabled}
-          className="bg-bg border border-border rounded px-2 py-1 text-[12px]"
+          className={`${SELECT_BASE} px-2 py-1 text-[12px]`}
         >
           {TRIGGER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
@@ -451,7 +454,7 @@ function GeneralTab() {
               setShellPath(v);
             }
           }}
-          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
+          className={`${SELECT_BASE} w-full px-3 py-1.5 text-[13px]`}
         >
           <option value="">Auto (z $SHELL)</option>
           {shells.map(s => (
@@ -490,7 +493,7 @@ function GeneralTab() {
               setEditorPath(v);
             }
           }}
-          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
+          className={`${SELECT_BASE} w-full px-3 py-1.5 text-[13px]`}
         >
           <option value="">Auto (pierwszy wykryty)</option>
           {editors.map(s => (
@@ -1069,7 +1072,7 @@ function ModelRow({ label, context, selected, effort, onSelect, onEffortChange }
           <select
             value={effort}
             onChange={e => onEffortChange(e.target.value as EffortLevel)}
-            className="bg-bg border border-border text-[11px] px-1.5 py-0.5 text-fg-secondary"
+            className={`${SELECT_BASE} text-[11px] px-1.5 py-0.5`}
           >
             {EFFORT_OPTIONS.map(o => (
               <option key={o.value} value={o.value}>{o.label}</option>

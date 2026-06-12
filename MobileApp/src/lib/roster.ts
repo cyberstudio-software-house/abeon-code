@@ -22,7 +22,7 @@ export function groupByProject(sessions: Session[]): SessionSection[] {
   }
   return [...buckets.entries()]
     .map(([title, data]) => ({ title, data: [...data].sort((a, b) => b.lastEventAt - a.lastEventAt) }))
-    .sort((a, b) => a.title.localeCompare(b.title));
+    .sort((a, b) => (b.data[0]?.lastEventAt ?? 0) - (a.data[0]?.lastEventAt ?? 0));
 }
 
 // Which sessions to render when a section is collapsed. Active sessions are ALWAYS kept

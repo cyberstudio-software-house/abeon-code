@@ -75,7 +75,7 @@ The app drives two AI CLIs, selected per session via `domain::Provider` (`claude
 
 ## Keyboard shortcuts (global)
 
-- `Ctrl/Cmd+K` — focus sidebar search (`Sidebar.tsx`, document listener, no capture).
+- `Ctrl/Cmd+K` — focus sidebar search (`Sidebar.tsx`, document listener **with `capture: true`** so it wins over xterm's textarea while a session/terminal is focused).
 - `Ctrl/Cmd+W` — close active tab (`TabBar.tsx`, document listener **with `capture: true`** so it wins over xterm's textarea).
 
 Pattern when adding a new global shortcut that may conflict with xterm: register on `document` in `useEffect` with `{ capture: true }`, then `preventDefault()` + `stopPropagation()`.

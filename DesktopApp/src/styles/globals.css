@@ -3,6 +3,7 @@
 
 @layer base {
   :root {
+    color-scheme: light;
     --color-bg: #faf8f5;
     --color-bg-elev: #ffffff;
     --color-bg-elev-2: #f2f0ed;
@@ -17,6 +18,7 @@
     --color-warn: #f4be4f;
   }
   :root[data-theme="dark"] {
+    color-scheme: dark;
     --color-bg: #121210;
     --color-bg-elev: #1a1917;
     --color-bg-elev-2: #232220;
