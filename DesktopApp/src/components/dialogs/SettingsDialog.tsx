@@ -5,7 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
 import { Icon } from '../shared/Icon';
-import { BUILTIN_MODELS, detectUnknownModels, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
+import { BUILTIN_MODELS, detectedClaudeModels, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
 import type { ThemeMode } from '../../styles/theme';
 import { tauri } from '../../lib/tauri';
 import type { ShellInfo, EditorInfo, DetectedModel, ProviderInfo } from '../../types';
@@ -643,7 +643,7 @@ function ClaudeModelsSection() {
   }, []);
   useEffect(() => { refreshDetected(); }, [refreshDetected]);
   const suggestions = useMemo<DetectedSuggestion[]>(
-    () => detectUnknownModels(detected, customModels),
+    () => detectedClaudeModels(detected, customModels),
     [detected, customModels],
   );
 

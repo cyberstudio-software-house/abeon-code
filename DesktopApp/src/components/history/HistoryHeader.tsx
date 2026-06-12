@@ -42,7 +42,7 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'cl
     try {
       const modelCli = provider === 'codex'
         ? (codexTitleGenModelId || undefined)
-        : getCliModelString(titleGenModelId, customModels);
+        : (getCliModelString(titleGenModelId, customModels) ?? undefined);
       const title = (await tauri.generateSessionTitle(meta.projectId, meta.id, modelCli, provider)).trim();
       if (title && title !== meta.title) {
         await rename(meta.projectId, meta.id, title);
