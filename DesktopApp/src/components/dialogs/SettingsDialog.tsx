@@ -5,7 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
 import { Icon } from '../shared/Icon';
-import { BUILTIN_MODELS, detectUnknownModels, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
+import { BUILTIN_MODELS, detectedClaudeModels, getModelDisplayLabel, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
 import type { ThemeMode } from '../../styles/theme';
 import { tauri } from '../../lib/tauri';
 import type { ShellInfo, EditorInfo, DetectedModel, ProviderInfo } from '../../types';
@@ -642,15 +642,16 @@ function ClaudeModelsSection() {
     tauri.detectModels(force).then(setDetected).catch(() => setDetected([]));
   }, []);
   useEffect(() => { refreshDetected(); }, [refreshDetected]);
-  const suggestions = useMemo<DetectedSuggestion[]>(
-    () => detectUnknownModels(detected, customModels),
-    [detected, customModels],
-  );
-
-  const promoteSuggestion = (s: DetectedSuggestion) => {
-    const id = `custom-${crypto.randomUUID().slice(0, 8)}`;
-    addCustomModel({ id, modelId: s.modelId, label: s.label });
-  };
+  const detectedRows = useMemo<DetectedSuggestion[]>(() => {
+    const rows = detectedClaudeModels(detected, customModels);
+    const isRawSelected =
+      defaultModelId.startsWith('claude-') &&
+      !customModels.some(m => m.id === defaultModelId || m.modelId === defaultModelId) &&
+      !rows.some(r => r.modelId === defaultModelId);
+    return isRawSelected
+      ? [...rows, { modelId: defaultModelId, label: getModelDisplayLabel(defaultModelId, customModels) }]
+      : rows;
+  }, [detected, customModels, defaultModelId]);
 
   const submitCustom = () => {
     const label = newLabel.trim();
@@ -674,6 +675,11 @@ function ClaudeModelsSection() {
       </p>
 
       <div className="space-y-0.5 mb-4">
+        <ModelRow
+          label="Auto (domyślny model Claude)"
+          selected={defaultModelId === ''}
+          onSelect={() => setDefaultModel('')}
+        />
         {BUILTIN_MODELS.map(m => (
           <ModelRow
             key={m.id}
@@ -721,7 +727,7 @@ function ClaudeModelsSection() {
         </>
       )}
 
-      {suggestions.length > 0 && (
+      {detectedRows.length > 0 && (
         <>
           <div className="flex items-center justify-between mb-2">
             <label className="block text-[10px] text-muted uppercase tracking-wider">
@@ -735,23 +741,25 @@ function ClaudeModelsSection() {
             </button>
           </div>
           <p className="text-[11px] text-muted mb-2">
-            Nowsze modele wykryte w Claude Code, których nie ma jeszcze na liście.
+            Modele wykryte w Claude Code, których nie ma na liście wbudowanej.
           </p>
           <div className="space-y-0.5 mb-4">
-            {suggestions.map(s => (
-              <div key={s.modelId} className="flex items-center gap-2 py-1.5 px-2">
-                <div className="flex-1">
-                  <span className="text-[13px]">{s.label}</span>
-                  <span className="text-[11px] text-muted ml-2 font-mono">{s.modelId}</span>
-                </div>
-                <button
-                  onClick={() => promoteSuggestion(s)}
-                  className="flex items-center gap-1 text-[12px] text-muted hover:text-fg transition-colors"
-                >
-                  <Icon name="plus" className="w-3 h-3" />
-                  Dodaj
-                </button>
-              </div>
+            {detectedRows.map(s => (
+              <label
+                key={s.modelId}
+                className={`flex items-center gap-3 py-1.5 px-2 cursor-pointer ${defaultModelId === s.modelId ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}
+              >
+                <input
+                  type="radio"
+                  name="default-model"
+                  checked={defaultModelId === s.modelId}
+                  onChange={() => setDefaultModel(s.modelId)}
+                  className="accent-accent"
+                />
+                <span className="text-[13px]">{s.label}</span>
+                <span className="text-[11px] text-muted font-mono">{s.modelId}</span>
+                <span className="text-[10px] text-muted border border-border px-1.5 py-0.5 rounded">wykryty</span>
+              </label>
             ))}
           </div>
         </>
