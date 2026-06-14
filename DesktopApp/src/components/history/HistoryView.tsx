@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 import { tauri } from '../../lib/tauri';
 import { formatTauriError } from '../../lib/errors';
@@ -107,7 +107,7 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
     }
   }, [search.activeBlockIndex]);
 
-  const closeSearch = () => { setSearchOpen(false); search.reset(); };
+  const closeSearch = useCallback(() => { setSearchOpen(false); search.reset(); }, [search]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

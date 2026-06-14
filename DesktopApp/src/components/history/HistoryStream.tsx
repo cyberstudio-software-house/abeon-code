@@ -1,6 +1,5 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, type RefObject } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
-import type { RefObject } from 'react';
 import type { HistoryBlock } from '../../types';
 import { UserBubble } from './blocks/UserBubble';
 import { AssistantBubble } from './blocks/AssistantBubble';
