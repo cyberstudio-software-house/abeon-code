@@ -9,7 +9,9 @@ export function blockSearchText(block: HistoryBlock): string {
     case 'toolUse': {
       const raw = typeof block.raw_input === 'string'
         ? block.raw_input
-        : JSON.stringify(block.raw_input ?? '');
+        : block.raw_input != null
+          ? JSON.stringify(block.raw_input)
+          : '';
       return `${block.name} ${block.input_summary} ${raw}`;
     }
     case 'toolResult':

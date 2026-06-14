@@ -54,4 +54,25 @@ describe('useHistorySearch', () => {
     expect(result.current.query).toBe('');
     expect(result.current.matches).toEqual([]);
   });
+
+  it('navigates correctly after the match set shrinks (view-mode switch)', () => {
+    const wide: HistoryBlock[] = [
+      { ...base, uuid: '0', kind: 'userText', text: 'beta one' },
+      { ...base, uuid: '1', kind: 'toolUse', name: 'beta tool', input_summary: '', raw_input: null },
+      { ...base, uuid: '2', kind: 'assistantText', text: 'beta three' },
+    ];
+    const narrow: HistoryBlock[] = [
+      { ...base, uuid: '0', kind: 'userText', text: 'beta one' },
+    ];
+    const { result, rerender } = renderHook(({ b }) => useHistorySearch(b), { initialProps: { b: wide } });
+    act(() => result.current.setQuery('beta'));
+    act(() => result.current.next());
+    act(() => result.current.next());
+    expect(result.current.activeBlockIndex).toBe(2);
+    rerender({ b: narrow });
+    expect(result.current.matches).toEqual([0]);
+    expect(result.current.activeBlockIndex).toBe(0);
+    act(() => result.current.next());
+    expect(result.current.activeBlockIndex).toBe(0);
+  });
 });

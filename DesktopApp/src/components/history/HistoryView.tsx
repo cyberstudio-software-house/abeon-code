@@ -29,6 +29,7 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
   const activeTabId = useStore(s => s.activeTabId);
 
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFocusTick, setSearchFocusTick] = useState(0);
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
 
   useEffect(() => {
@@ -107,7 +108,11 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
     }
   }, [search.activeBlockIndex]);
 
-  const closeSearch = useCallback(() => { setSearchOpen(false); search.reset(); }, [search]);
+  const { reset: resetSearch } = search;
+  const closeSearch = useCallback(() => { setSearchOpen(false); resetSearch(); }, [resetSearch]);
+  const toggleSearch = useCallback(() => {
+    if (searchOpen) closeSearch(); else setSearchOpen(true);
+  }, [searchOpen, closeSearch]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -116,6 +121,7 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
         e.preventDefault();
         e.stopPropagation();
         setSearchOpen(true);
+        setSearchFocusTick(t => t + 1);
       }
     };
     document.addEventListener('keydown', onKey, { capture: true });
@@ -131,10 +137,11 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         provider={provider}
-        onToggleSearch={() => setSearchOpen(o => !o)}
+        onToggleSearch={toggleSearch}
       />
       {searchOpen && (
         <HistorySearchBar
+          key={`search-${searchFocusTick}`}
           query={search.query}
           onQueryChange={search.setQuery}
           count={search.count}

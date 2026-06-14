@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { HistoryBlock } from '../../types';
 import { blockSearchText } from '../../lib/historySearch';
 
@@ -15,7 +15,7 @@ export type HistorySearch = {
 };
 
 export function useHistorySearch(blocks: HistoryBlock[]): HistorySearch {
-  const [query, setQuery] = useState('');
+  const [query, setQueryState] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
 
   const matches = useMemo(() => {
@@ -28,17 +28,28 @@ export function useHistorySearch(blocks: HistoryBlock[]): HistorySearch {
     return out;
   }, [blocks, query]);
 
-  useEffect(() => { setActiveIndex(0); }, [query]);
+  const setQuery = useCallback((q: string) => {
+    setQueryState(q);
+    setActiveIndex(0);
+  }, []);
 
   const next = useCallback(() => {
-    setActiveIndex(i => (matches.length === 0 ? 0 : (i + 1) % matches.length));
+    setActiveIndex(i => {
+      if (matches.length === 0) return 0;
+      const cur = Math.min(i, matches.length - 1);
+      return (cur + 1) % matches.length;
+    });
   }, [matches.length]);
 
   const prev = useCallback(() => {
-    setActiveIndex(i => (matches.length === 0 ? 0 : (i - 1 + matches.length) % matches.length));
+    setActiveIndex(i => {
+      if (matches.length === 0) return 0;
+      const cur = Math.min(i, matches.length - 1);
+      return (cur - 1 + matches.length) % matches.length;
+    });
   }, [matches.length]);
 
-  const reset = useCallback(() => { setQuery(''); setActiveIndex(0); }, []);
+  const reset = useCallback(() => { setQueryState(''); setActiveIndex(0); }, []);
 
   const safeActive = matches.length === 0 ? -1 : Math.min(activeIndex, matches.length - 1);
   const activeBlockIndex = safeActive === -1 ? -1 : matches[safeActive];

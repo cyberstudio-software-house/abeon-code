@@ -29,4 +29,9 @@ describe('blockSearchText', () => {
     expect(blockSearchText({ ...base, kind: 'attachment', attachmentKind: 'image', name: 'pic.png' })).toBe('pic.png');
     expect(blockSearchText({ ...base, kind: 'system', subtype: 'info', message: 'system note' })).toBe('system note');
   });
+
+  it('does not inject quote characters for null raw_input', () => {
+    const block: HistoryBlock = { ...base, kind: 'toolUse', name: 'X', input_summary: 'y', raw_input: null };
+    expect(blockSearchText(block)).not.toContain('"');
+  });
 });
