@@ -1,7 +1,7 @@
-import { type ReactNode, useMemo } from 'react';
-import { Virtuoso } from 'react-virtuoso';
+import { type ReactNode } from 'react';
+import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
+import type { RefObject } from 'react';
 import type { HistoryBlock } from '../../types';
-import type { HistoryViewMode } from '../../store/settingsSlice';
 import { UserBubble } from './blocks/UserBubble';
 import { AssistantBubble } from './blocks/AssistantBubble';
 import { ThinkingBlock } from './blocks/ThinkingBlock';
@@ -15,10 +15,10 @@ type Props = {
   onLoadMore?: () => void;
   hasMore: boolean;
   header?: ReactNode;
-  viewMode: HistoryViewMode;
+  matchedIndices?: Set<number>;
+  activeBlockIndex?: number;
+  virtuosoRef?: RefObject<VirtuosoHandle | null>;
 };
-
-const COMMUNICATION_KINDS = new Set<HistoryBlock['kind']>(['userText', 'assistantText']);
 
 function render(b: HistoryBlock) {
   switch (b.kind) {
@@ -32,19 +32,24 @@ function render(b: HistoryBlock) {
   }
 }
 
-export function HistoryStream({ blocks, onLoadMore, hasMore, header, viewMode }: Props) {
-  const filtered = useMemo(
-    () => viewMode === 'communication'
-      ? blocks.filter(b => COMMUNICATION_KINDS.has(b.kind))
-      : blocks,
-    [blocks, viewMode],
-  );
-
+export function HistoryStream({
+  blocks, onLoadMore, hasMore, header, matchedIndices, activeBlockIndex = -1, virtuosoRef,
+}: Props) {
   return (
     <Virtuoso
-      data={filtered}
-      initialTopMostItemIndex={filtered.length > 0 ? filtered.length - 1 : 0}
-      itemContent={(_, b) => <div className="px-8">{render(b)}</div>}
+      ref={virtuosoRef}
+      data={blocks}
+      initialTopMostItemIndex={blocks.length > 0 ? blocks.length - 1 : 0}
+      itemContent={(index, b) => {
+        const isActive = index === activeBlockIndex;
+        const isMatch = matchedIndices?.has(index) ?? false;
+        const highlight = isActive
+          ? 'ring-2 ring-accent rounded-md'
+          : isMatch
+            ? 'bg-accent/10 rounded-md'
+            : '';
+        return <div className={`px-8 ${highlight}`}>{render(b)}</div>;
+      }}
       startReached={() => { if (hasMore && onLoadMore) onLoadMore(); }}
       followOutput="auto"
       className="flex-1"
