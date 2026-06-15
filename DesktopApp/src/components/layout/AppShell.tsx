@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { isPermissionGranted, requestPermission, sendNotification, onAction } from '@tauri-apps/plugin-notification';
 import { type PluginListener } from '@tauri-apps/api/core';
@@ -15,6 +15,8 @@ import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
 import { shouldNotify } from '../../lib/attention';
 import { DragHandle, clamp } from './DragHandle';
+import { checkForUpdate, type AvailableUpdate } from '../../lib/updater';
+import { UpdateDialog } from '../dialogs/UpdateDialog';
 
 const LEFT_MIN = 200;
 const LEFT_MAX = 420;
@@ -164,6 +166,31 @@ export function AppShell() {
     [rightWidth, setRightWidth],
   );
 
+  const [update, setUpdate] = useState<AvailableUpdate | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void checkForUpdate().then((u) => { if (!cancelled && u) setUpdate(u); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const runUpdate = useCallback(async () => {
+    if (!update) return;
+    setUpdateBusy(true);
+    try {
+      await update.downloadAndInstall((downloaded, total) => {
+        setUpdateProgress(total ? downloaded / total : null);
+      });
+      await update.relaunch();
+    } catch (err) {
+      console.error('Update install failed', err);
+      setUpdateBusy(false);
+      setUpdate(null);
+    }
+  }, [update]);
+
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
       <TitleBar />
@@ -185,6 +212,16 @@ export function AppShell() {
         )}
       </div>
       <TabSwitcher />
+      {update && (
+        <UpdateDialog
+          version={update.version}
+          notes={update.notes}
+          busy={updateBusy}
+          progress={updateProgress}
+          onUpdate={() => void runUpdate()}
+          onLater={() => setUpdate(null)}
+        />
+      )}
     </div>
   );
 }
