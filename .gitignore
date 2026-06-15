@@ -12,3 +12,6 @@ target/
 # local secrets — never commit (Centrifugo token secret etc.)
 docs/centrifungo.md
 *.secret
+# Tauri updater signing keys — never commit
+*.key
+*.key.pub
