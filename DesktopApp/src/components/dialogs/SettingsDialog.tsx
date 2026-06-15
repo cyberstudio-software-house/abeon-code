@@ -25,7 +25,7 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: 'Systemowy' },
 ];
 
-type SettingsTab = 'general' | 'cli' | 'models' | 'shortcuts';
+type SettingsTab = 'general' | 'cli' | 'models' | 'shortcuts' | 'cloud';
 
 const EFFORT_OPTIONS: { value: EffortLevel; label: string }[] = [
   { value: 'low', label: 'Niski' },
@@ -61,6 +61,7 @@ export function SettingsDialog() {
           <TabButton active={tab === 'cli'} onClick={() => setTab('cli')}>CLI</TabButton>
           <TabButton active={tab === 'models'} onClick={() => setTab('models')}>Modele</TabButton>
           <TabButton active={tab === 'shortcuts'} onClick={() => setTab('shortcuts')}>Skróty</TabButton>
+          <TabButton active={tab === 'cloud'} onClick={() => setTab('cloud')}>Cloud</TabButton>
         </div>
 
         <div className="flex-1 min-h-0 overflow-auto p-5">
@@ -68,6 +69,7 @@ export function SettingsDialog() {
           {tab === 'cli' && <CliTab />}
           {tab === 'models' && <ModelsTab />}
           {tab === 'shortcuts' && <ShortcutsTab />}
+          {tab === 'cloud' && <CloudTab />}
         </div>
       </div>
     </div>
@@ -323,13 +325,6 @@ function GeneralTab() {
   const setEditorPath = useStore(s => s.setEditorPath);
   const historyViewMode = useStore(s => s.historyViewMode);
   const setHistoryViewMode = useStore(s => s.setHistoryViewMode);
-  const remoteBridgeEnabled = useStore(s => s.remoteBridgeEnabled);
-  const setRemoteBridgeEnabled = useStore(s => s.setRemoteBridgeEnabled);
-  const allowRemoteSpawn = useStore(s => s.allowRemoteSpawn);
-  const setAllowRemoteSpawn = useStore(s => s.setAllowRemoteSpawn);
-  const cloudServiceUrl = useStore(s => s.cloudServiceUrl);
-  const setCloudServiceUrl = useStore(s => s.setCloudServiceUrl);
-  const [pairingOpen, setPairingOpen] = useState(false);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [editors, setEditors] = useState<EditorInfo[]>([]);
   const [detectedName, setDetectedName] = useState<string | null>(null);
@@ -569,7 +564,21 @@ function GeneralTab() {
           „Pełny" zawiera też narzędzia, hooki i zdarzenia systemowe.
         </p>
       </div>
+    </div>
+  );
+}
 
+function CloudTab() {
+  const remoteBridgeEnabled = useStore(s => s.remoteBridgeEnabled);
+  const setRemoteBridgeEnabled = useStore(s => s.setRemoteBridgeEnabled);
+  const allowRemoteSpawn = useStore(s => s.allowRemoteSpawn);
+  const setAllowRemoteSpawn = useStore(s => s.setAllowRemoteSpawn);
+  const cloudServiceUrl = useStore(s => s.cloudServiceUrl);
+  const setCloudServiceUrl = useStore(s => s.setCloudServiceUrl);
+  const [pairingOpen, setPairingOpen] = useState(false);
+
+  return (
+    <div className="space-y-6">
       <div>
         <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
           AbeonCloud (zdalne sterowanie)
