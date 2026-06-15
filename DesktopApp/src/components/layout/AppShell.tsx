@@ -178,15 +178,17 @@ export function AppShell() {
 
   const runUpdate = useCallback(async () => {
     if (!update) return;
+    setUpdateProgress(null);
     setUpdateBusy(true);
     try {
       await update.downloadAndInstall((downloaded, total) => {
-        setUpdateProgress(total ? downloaded / total : null);
+        setUpdateProgress(total ? Math.min(1, downloaded / total) : null);
       });
       await update.relaunch();
     } catch (err) {
       console.error('Update install failed', err);
       setUpdateBusy(false);
+      setUpdateProgress(null);
       setUpdate(null);
     }
   }, [update]);

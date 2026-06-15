@@ -18,6 +18,9 @@ jobs:
       version: ${{ steps.check.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
       - id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
