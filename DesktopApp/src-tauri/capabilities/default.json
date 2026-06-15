@@ -19,6 +19,8 @@
     "fs:allow-exists",
     "notification:default",
     "core:window:allow-show",
-    "core:window:allow-unminimize"
+    "core:window:allow-unminimize",
+    "updater:default",
+    "process:default"
   ]
 }
