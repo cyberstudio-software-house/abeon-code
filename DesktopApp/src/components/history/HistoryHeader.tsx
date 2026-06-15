@@ -13,9 +13,10 @@ type Props = {
   viewMode: HistoryViewMode;
   onViewModeChange: (mode: HistoryViewMode) => void;
   provider?: Provider;
+  onToggleSearch: () => void;
 };
 
-export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'claude' }: Props) {
+export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'claude', onToggleSearch }: Props) {
   const [editing, setEditing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
@@ -124,6 +125,11 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'cl
             </span>
           ) : null}
           <div className="flex gap-1.5">
+            <IconBtn
+              icon="search"
+              label="Szukaj w sesji"
+              onClick={onToggleSearch}
+            />
             <IconBtn
               icon="sparkles"
               label={generating ? 'Generuję tytuł…' : 'Generuj tytuł sesji'}
