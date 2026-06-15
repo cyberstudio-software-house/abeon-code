@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { WindowMode } from '../lib/windowMode';
 import type { Provider } from '../types';
 import type { SettingsSlice } from './settingsSlice';
+import type { AppState } from './index';
 
 export type Tab =
   | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; provider?: Provider }
@@ -79,6 +80,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
     });
+    (get() as AppState).scheduleNewSessionRefresh(projectId);
   },
   chooseProvider: (tabId, provider) => {
     const picker = get().tabs.find(t => t.id === tabId && t.kind === 'providerPicker');
@@ -92,6 +94,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       activeTabId: id,
       mruOrder: get().mruOrder.map(x => x === tabId ? id : x),
     });
+    (get() as AppState).scheduleNewSessionRefresh(picker.projectId);
   },
   openNewTerminalTab: (projectId) => {
     const id = `terminal:${crypto.randomUUID()}`;

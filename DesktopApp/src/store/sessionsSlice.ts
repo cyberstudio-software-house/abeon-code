@@ -29,9 +29,12 @@ export type SessionsSlice = {
   markAttention: (sessionId: string) => void;
   clearAttention: (sessionId: string) => void;
   refreshActivity: (projectId: number) => Promise<void>;
+  scheduleNewSessionRefresh: (projectId: number) => void;
   startActivityPolling: () => void;
   stopActivityPolling: () => void;
 };
+
+const NEW_SESSION_REFRESH_DELAYS_MS = [800, 2000, 4000];
 
 export const selectSessionActivity =
   (tabId: string, sessionId: string) => (s: AppState): SessionActivity => {
@@ -165,12 +168,21 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
       }
     }
   },
+  scheduleNewSessionRefresh: (projectId) => {
+    for (const delay of NEW_SESSION_REFRESH_DELAYS_MS) {
+      setTimeout(() => {
+        get().refreshActivity(projectId).catch(() => {});
+        (get() as AppState).loadActivity().catch(() => {});
+      }, delay);
+    }
+  },
   startActivityPolling: () => {
     const tick = () => {
       const projectIds = Object.keys(get().sessionsByProject).map(Number);
       for (const pid of projectIds) {
         get().refreshActivity(pid).catch(() => {});
       }
+      (get() as AppState).loadActivity().catch(() => {});
     };
     focusHandler = () => {
       clearPoll();
