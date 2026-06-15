@@ -17,8 +17,11 @@ jobs:
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       version: ${{ steps.check.outputs.version }}
+      changelog: ${{ steps.check.outputs.changelog }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v5
         with:
           node-version: 20
@@ -35,6 +38,18 @@ jobs:
           else
             echo "should_release=true" >> "$GITHUB_OUTPUT"
           fi
+          if [ -n "$last" ] && git rev-parse "$last" >/dev/null 2>&1; then
+            range="$last..HEAD"
+          else
+            range=""
+          fi
+          changelog="$(git log $range --no-merges --pretty=format:'- %s' | grep -v '^- chore(release)' || true)"
+          [ -z "$changelog" ] && changelog="- Drobne poprawki i usprawnienia."
+          {
+            echo "changelog<<__CHANGELOG_EOF__"
+            echo "$changelog"
+            echo "__CHANGELOG_EOF__"
+          } >> "$GITHUB_OUTPUT"
 
   release:
     needs: detect
@@ -87,7 +102,7 @@ jobs:
           projectPath: DesktopApp
           tagName: v${{ needs.detect.outputs.version }}
           releaseName: 'AbeonCode v${{ needs.detect.outputs.version }}'
-          releaseBody: 'Zobacz listę zmian poniżej.'
+          releaseBody: ${{ needs.detect.outputs.changelog }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
