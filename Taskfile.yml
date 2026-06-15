@@ -1,0 +1,56 @@
+version: '3'
+
+vars:
+  DESKTOP: DesktopApp
+  REPO: cyberstudio-software-house/abeon-code
+
+tasks:
+  default:
+    cmds:
+      - task --list
+    silent: true
+
+  check:
+    desc: Lint i testy desktopa — bramka przed wydaniem
+    dir: '{{.DESKTOP}}'
+    cmds:
+      - npm run lint
+      - npm test
+
+  release:patch:
+    desc: Wydanie patch (0.0.X) — bump wersji i push na main, wyzwala release w CI
+    cmds:
+      - task: _release
+        vars: { BUMP: patch }
+
+  release:minor:
+    desc: Wydanie minor (0.X.0) — bump wersji i push na main
+    cmds:
+      - task: _release
+        vars: { BUMP: minor }
+
+  release:major:
+    desc: Wydanie major (X.0.0) — bump wersji i push na main
+    cmds:
+      - task: _release
+        vars: { BUMP: major }
+
+  watch:
+    desc: Śledź ostatni build release w GitHub Actions
+    cmds:
+      - gh run watch --repo {{.REPO}}
+
+  _release:
+    internal: true
+    preconditions:
+      - sh: '[ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]'
+        msg: 'Musisz być na gałęzi main (release idzie z main).'
+      - sh: 'git diff --quiet && git diff --cached --quiet'
+        msg: 'Drzewo robocze nie jest czyste — zacommituj lub odłóż zmiany przed wydaniem.'
+    prompt: 'Wydać nową wersję ({{.BUMP}}) i wypchnąć na main? To wyzwoli build i PUBLICZNY release.'
+    cmds:
+      - task: check
+      - 'cd {{.DESKTOP}} && npm version {{.BUMP}} -m "chore(release): %s"'
+      - git push origin main
+      - cmd: echo "✓ Wypchnięto na main. Śledź build — task watch"
+        silent: true
