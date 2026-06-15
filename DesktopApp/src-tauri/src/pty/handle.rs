@@ -98,19 +98,32 @@ impl PtyHandle {
     }
 
     pub fn kill(&self) -> AppResult<()> {
-        let pid = self.pid.load(Ordering::Relaxed);
-        if pid > 0 {
-            unsafe { libc::kill(pid as i32, libc::SIGKILL); }
-        }
+        kill_pid(self.pid.load(Ordering::Relaxed));
         Ok(())
     }
 }
 
 impl Drop for PtyHandle {
     fn drop(&mut self) {
-        let pid = self.pid.load(Ordering::Relaxed);
-        if pid > 0 {
-            unsafe { libc::kill(pid as i32, libc::SIGKILL); }
-        }
+        kill_pid(self.pid.load(Ordering::Relaxed));
+    }
+}
+
+fn kill_pid(pid: u32) {
+    if pid == 0 {
+        return;
+    }
+    #[cfg(unix)]
+    unsafe {
+        libc::kill(pid as i32, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
     }
 }
