@@ -3,6 +3,7 @@ import type { WindowMode } from '../lib/windowMode';
 import type { Provider } from '../types';
 import type { SettingsSlice } from './settingsSlice';
 import type { AppState } from './index';
+import { pushNav, stepBack, stepForward, pruneNav } from '../lib/navHistory';
 
 export type Tab =
   | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; provider?: Provider }
@@ -14,6 +15,8 @@ export type TabsSlice = {
   tabs: Tab[];
   activeTabId: string | null;
   mruOrder: string[];
+  navHistory: string[];
+  navIndex: number;
   openSessionTab: (projectId: number, sessionId: string, title: string, provider?: Provider) => void;
   openNewSessionTab: (projectId: number) => void;
   openNewTerminalTab: (projectId: number) => void;
@@ -22,6 +25,8 @@ export type TabsSlice = {
   setSessionMode: (tabId: string, mode: 'history' | 'terminal') => void;
   closeTab: (id: string) => void;
   setActive: (id: string) => void;
+  goBack: () => void;
+  goForward: () => void;
   renameTab: (id: string, title: string) => void;
   linkNewSession: (tabId: string, realSessionId: string) => void;
   upsertActionTab: (tab: Extract<Tab, { kind: 'action' }>) => void;
@@ -45,18 +50,26 @@ export function sessionTabFromMode(mode: WindowMode): Extract<Tab, { kind: 'sess
 
 const moveToFront = (order: string[], id: string) => [id, ...order.filter(x => x !== id)];
 
+const withNav = (get: () => TabsSlice, id: string) => {
+  const nav = pushNav({ history: get().navHistory, index: get().navIndex }, id);
+  return { navHistory: nav.history, navIndex: nav.index };
+};
+
 export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], TabsSlice> = (set, get) => ({
   tabs: [],
   activeTabId: null,
   mruOrder: [],
+  navHistory: [],
+  navIndex: 0,
   openSessionTab: (projectId, sessionId, title, provider) => {
     const id = sessionTabId(sessionId);
     const existing = get().tabs.find(t => t.id === id || (t.kind === 'session' && t.linkedSessionId === sessionId));
-    if (existing) { set({ activeTabId: existing.id, mruOrder: moveToFront(get().mruOrder, existing.id) }); return; }
+    if (existing) { set({ activeTabId: existing.id, mruOrder: moveToFront(get().mruOrder, existing.id), ...withNav(get, existing.id) }); return; }
     set({
       tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title, mode: 'history', ...(provider ? { provider } : {}) }],
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
+      ...withNav(get, id),
     });
   },
   openNewSessionTab: (projectId) => {
@@ -67,6 +80,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
         tabs: [...get().tabs, { kind: 'providerPicker', id, projectId, title: 'New session' }],
         activeTabId: id,
         mruOrder: moveToFront(get().mruOrder, id),
+        ...withNav(get, id),
       });
       return;
     }
@@ -79,6 +93,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title: 'New session', mode: 'terminal', fresh: true, provider }],
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
+      ...withNav(get, id),
     });
     (get() as AppState).scheduleNewSessionRefresh(projectId);
   },
@@ -93,6 +108,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
         : t),
       activeTabId: id,
       mruOrder: get().mruOrder.map(x => x === tabId ? id : x),
+      navHistory: get().navHistory.map(x => x === tabId ? id : x),
     });
     (get() as AppState).scheduleNewSessionRefresh(picker.projectId);
   },
@@ -102,6 +118,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       tabs: [...get().tabs, { kind: 'terminal', id, projectId, title: 'Terminal' }],
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
+      ...withNav(get, id),
     });
   },
   setSessionMode: (tabId, mode) => set({
@@ -111,9 +128,20 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
     const tabs = get().tabs.filter(t => t.id !== id);
     const mruOrder = get().mruOrder.filter(x => x !== id);
     const activeTabId = get().activeTabId === id ? (tabs[tabs.length - 1]?.id ?? null) : get().activeTabId;
-    set({ tabs, activeTabId, mruOrder });
+    const nav = pruneNav({ history: get().navHistory, index: get().navIndex }, id);
+    set({ tabs, activeTabId, mruOrder, navHistory: nav.history, navIndex: nav.index });
   },
-  setActive: (id) => set({ activeTabId: id, mruOrder: moveToFront(get().mruOrder, id) }),
+  setActive: (id) => set({ activeTabId: id, mruOrder: moveToFront(get().mruOrder, id), ...withNav(get, id) }),
+  goBack: () => {
+    const step = stepBack({ history: get().navHistory, index: get().navIndex });
+    if (!step) return;
+    set({ navIndex: step.index, activeTabId: step.targetId, mruOrder: moveToFront(get().mruOrder, step.targetId) });
+  },
+  goForward: () => {
+    const step = stepForward({ history: get().navHistory, index: get().navIndex });
+    if (!step) return;
+    set({ navIndex: step.index, activeTabId: step.targetId, mruOrder: moveToFront(get().mruOrder, step.targetId) });
+  },
   renameTab: (id, title) => set({
     tabs: get().tabs.map(t => t.id === id ? { ...t, title } : t),
   }),
@@ -125,10 +153,11 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
   upsertActionTab: (tab) => {
     const existing = get().tabs.find(t => t.id === tab.id);
     const mruOrder = moveToFront(get().mruOrder, tab.id);
+    const nav = withNav(get, tab.id);
     if (existing) {
-      set({ tabs: get().tabs.map(t => t.id === tab.id ? tab : t), activeTabId: tab.id, mruOrder });
+      set({ tabs: get().tabs.map(t => t.id === tab.id ? tab : t), activeTabId: tab.id, mruOrder, ...nav });
     } else {
-      set({ tabs: [...get().tabs, tab], activeTabId: tab.id, mruOrder });
+      set({ tabs: [...get().tabs, tab], activeTabId: tab.id, mruOrder, ...nav });
     }
   },
 });
