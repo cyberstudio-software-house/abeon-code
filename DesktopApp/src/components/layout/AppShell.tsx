@@ -14,6 +14,7 @@ import type { AttentionEvent } from '../../lib/tauri';
 import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
 import { shouldNotify } from '../../lib/attention';
+import { useMouseNavigation } from '../../hooks/useMouseNavigation';
 import { DragHandle, clamp } from './DragHandle';
 import { checkForUpdate, type AvailableUpdate } from '../../lib/updater';
 import { UpdateDialog } from '../dialogs/UpdateDialog';
@@ -156,6 +157,8 @@ export function AppShell() {
       state.clearAttention(activeTab.linkedSessionId ?? activeTab.sessionId);
     }
   }, [activeTabId]);
+
+  useMouseNavigation();
 
   const onLeftDrag = useCallback(
     (delta: number) => setLeftWidth(clamp(leftWidth + delta, LEFT_MIN, LEFT_MAX)),
