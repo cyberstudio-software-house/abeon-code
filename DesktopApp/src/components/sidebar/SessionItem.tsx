@@ -13,6 +13,9 @@ export function SessionItem({ session, active, onClick }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const rename = useStore(s => s.renameSession);
   const hasAttention = useStore(s => s.attentionSessions.has(session.id));
+  const hasOpenTab = useStore(s =>
+    s.tabs.some(t => t.kind === 'session' && (t.sessionId === session.id || t.linkedSessionId === session.id)),
+  );
 
   const commitRename = () => {
     const value = inputRef.current?.value.trim();
@@ -57,7 +60,7 @@ export function SessionItem({ session, active, onClick }: Props) {
         />
       ) : (
         <span
-          className="truncate font-medium text-[12px] flex-1 min-w-0"
+          className={`truncate text-[12px] flex-1 min-w-0 ${hasOpenTab ? 'font-medium' : 'font-normal'}`}
           onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
         >
           {session.title}
