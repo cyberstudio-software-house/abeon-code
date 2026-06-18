@@ -127,8 +127,13 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
   closeTab: (id) => {
     const tabs = get().tabs.filter(t => t.id !== id);
     const mruOrder = get().mruOrder.filter(x => x !== id);
-    const activeTabId = get().activeTabId === id ? (tabs[tabs.length - 1]?.id ?? null) : get().activeTabId;
-    const nav = pruneNav({ history: get().navHistory, index: get().navIndex }, id);
+    const wasActive = get().activeTabId === id;
+    const activeTabId = wasActive ? (tabs[tabs.length - 1]?.id ?? null) : get().activeTabId;
+    let nav = pruneNav({ history: get().navHistory, index: get().navIndex }, id);
+    if (wasActive && activeTabId) {
+      const idx = nav.history.lastIndexOf(activeTabId);
+      if (idx !== -1) nav = { history: nav.history, index: idx };
+    }
     set({ tabs, activeTabId, mruOrder, navHistory: nav.history, navIndex: nav.index });
   },
   setActive: (id) => set({ activeTabId: id, mruOrder: moveToFront(get().mruOrder, id), ...withNav(get, id) }),

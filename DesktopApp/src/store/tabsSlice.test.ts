@@ -162,6 +162,30 @@ describe('tabsSlice navHistory', () => {
     expect(useStore.getState().navHistory).toEqual(['session:sess']);
     expect(useStore.getState().navIndex).toBe(0);
   });
+
+  it('closing the active tab aligns the cursor to the fallback active tab', () => {
+    useStore.setState({
+      tabs: [term('a'), term('b'), term('c')],
+      activeTabId: 'b',
+      navHistory: ['c', 'a', 'b'],
+      navIndex: 2,
+      mruOrder: ['b', 'a', 'c'],
+    });
+    useStore.getState().closeTab('b');
+    const s = useStore.getState();
+    expect(s.activeTabId).toBe('c');
+    expect(s.navHistory[s.navIndex]).toBe('c');
+  });
+
+  it('chooseProvider renames the picker id in navHistory without duplicating', () => {
+    useStore.setState({ enabledProviders: ['claude', 'codex'] });
+    useStore.getState().openNewSessionTab(1);
+    const pickerId = useStore.getState().tabs[0].id;
+    expect(useStore.getState().navHistory).toEqual([pickerId]);
+    useStore.getState().chooseProvider(pickerId, 'codex');
+    const newId = useStore.getState().tabs[0].id;
+    expect(useStore.getState().navHistory).toEqual([newId]);
+  });
 });
 
 describe('tabsSlice provider picker', () => {
