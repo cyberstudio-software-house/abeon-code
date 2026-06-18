@@ -19,6 +19,7 @@ export const SHORTCUTS: ShortcutDef[] = [
 export const FIXED_SHORTCUTS = [
   { label: 'Akcja 1–9', description: 'Uruchamia akcję o podanym numerze', binding: 'mod+1…9' },
   { label: 'Przełącz zakładki', description: 'Cyklicznie po ostatnio używanych (Shift = wstecz)', binding: 'ctrl+tab' },
+  { label: 'Nawigacja zakładek', description: 'Przyciski myszy wstecz/następny — po historii oglądania', binding: 'mousenav' },
 ];
 
 export function getBinding(id: ShortcutId, overrides: Record<string, string>): string {
@@ -71,6 +72,7 @@ export function formatBinding(binding: string): string {
       if (p === 'shift') return IS_MAC ? '⇧' : 'Shift';
       if (p === 'alt') return IS_MAC ? '⌥' : 'Alt';
       if (p === '1…9') return '1–9';
+      if (p === 'mousenav') return 'Mysz ←/→';
       return p.toUpperCase();
     })
     .join(IS_MAC ? '' : '+');
