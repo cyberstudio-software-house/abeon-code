@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Terminal, type ILinkProvider, type ILink, type IBufferRange } from '@xterm/xterm';
+import { Terminal, type ILinkProvider, type ILink, type IBufferRange, type ITheme } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -25,6 +25,35 @@ const FILE_PATH_RE = /((?:\.\.?\/|~\/|\/|[\w@.-]+\/)[\w@.\/-]*\.\w{1,10})(?::(\d
 
 function isModClick(e: MouseEvent) {
   return e.ctrlKey || e.metaKey;
+}
+
+function buildXtermTheme(): ITheme {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name: string) => cs.getPropertyValue(name).trim();
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  return {
+    background:  v('--color-bg-elev') || (isDark ? '#1a1917' : '#ffffff'),
+    foreground:  v('--color-fg') || (isDark ? '#e8e6e1' : '#1a1a1a'),
+    cursor:      v('--color-accent') || '#b78640',
+    cursorAccent: v('--color-bg-elev') || '#ffffff',
+    selectionBackground: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
+    black:   isDark ? '#1a1917' : '#1a1a1a',
+    red:     '#c14a3d',
+    green:   '#61c454',
+    yellow:  '#f4be4f',
+    blue:    '#5b9bd5',
+    magenta: '#b78640',
+    cyan:    '#4db8a4',
+    white:   isDark ? '#e8e6e1' : '#52504a',
+    brightBlack:   isDark ? '#6b6860' : '#94918a',
+    brightRed:     '#ec6a5e',
+    brightGreen:   '#7dd56f',
+    brightYellow:  '#f5cf6e',
+    brightBlue:    '#7db8e8',
+    brightMagenta: '#d4a04e',
+    brightCyan:    '#6dd4bf',
+    brightWhite:   isDark ? '#faf8f5' : '#1a1a1a',
+  };
 }
 
 function createFilePathProvider(term: Terminal, projectPathRef: { current: string }): ILinkProvider {
@@ -86,36 +115,11 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
-    const cs = getComputedStyle(document.documentElement);
-    const v = (name: string) => cs.getPropertyValue(name).trim();
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const term = new Terminal({
       fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
       fontSize: 13,
       lineHeight: 1.4,
-      theme: {
-        background:  v('--color-bg-elev') || (isDark ? '#1a1917' : '#ffffff'),
-        foreground:  v('--color-fg') || (isDark ? '#e8e6e1' : '#1a1a1a'),
-        cursor:      v('--color-accent') || '#b78640',
-        cursorAccent: v('--color-bg-elev') || '#ffffff',
-        selectionBackground: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
-        black:   isDark ? '#1a1917' : '#1a1a1a',
-        red:     '#c14a3d',
-        green:   '#61c454',
-        yellow:  '#f4be4f',
-        blue:    '#5b9bd5',
-        magenta: '#b78640',
-        cyan:    '#4db8a4',
-        white:   isDark ? '#e8e6e1' : '#52504a',
-        brightBlack:   isDark ? '#6b6860' : '#94918a',
-        brightRed:     '#ec6a5e',
-        brightGreen:   '#7dd56f',
-        brightYellow:  '#f5cf6e',
-        brightBlue:    '#7db8e8',
-        brightMagenta: '#d4a04e',
-        brightCyan:    '#6dd4bf',
-        brightWhite:   isDark ? '#faf8f5' : '#1a1a1a',
-      },
+      theme: buildXtermTheme(),
       cursorBlink: true,
       convertEol: true,
     });
@@ -248,6 +252,15 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
       // xterm internal state will be GC'd with the Terminal object.
     };
   }, [projectId, kind, provider, sessionId, fresh, actionId]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => {
+      if (termRef.current) termRef.current.options.theme = buildXtermTheme();
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
+    return () => observer.disconnect();
+  }, []);
 
   const actionPtyId = useStore(s =>
     kind === 'action' && actionId != null ? s.runningActions[actionId]?.ptyId : undefined
