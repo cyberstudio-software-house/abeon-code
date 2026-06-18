@@ -104,6 +104,90 @@ describe('sessionTabFromMode', () => {
   });
 });
 
+describe('tabsSlice navHistory', () => {
+  beforeEach(() => {
+    useStore.setState({ tabs: [], activeTabId: null, mruOrder: [], navHistory: [], navIndex: 0 });
+  });
+
+  const term = (id: string) => ({ kind: 'terminal' as const, id, projectId: 1, title: id });
+
+  it('setActive pushes onto the navigation history', () => {
+    useStore.setState({ tabs: [term('t1'), term('t2')] });
+    useStore.getState().setActive('t1');
+    useStore.getState().setActive('t2');
+    expect(useStore.getState().navHistory).toEqual(['t1', 't2']);
+    expect(useStore.getState().navIndex).toBe(1);
+  });
+
+  it('goBack moves the cursor without mutating navHistory', () => {
+    useStore.setState({ tabs: [term('t1'), term('t2')], navHistory: ['t1', 't2'], navIndex: 1, mruOrder: ['t2', 't1'] });
+    useStore.getState().goBack();
+    expect(useStore.getState().activeTabId).toBe('t1');
+    expect(useStore.getState().navIndex).toBe(0);
+    expect(useStore.getState().navHistory).toEqual(['t1', 't2']);
+    expect(useStore.getState().mruOrder[0]).toBe('t1');
+  });
+
+  it('goForward returns to the later tab', () => {
+    useStore.setState({ tabs: [term('t1'), term('t2')], navHistory: ['t1', 't2'], navIndex: 0 });
+    useStore.getState().goForward();
+    expect(useStore.getState().activeTabId).toBe('t2');
+    expect(useStore.getState().navIndex).toBe(1);
+  });
+
+  it('goBack at the start boundary is a no-op', () => {
+    useStore.setState({ tabs: [term('t1')], navHistory: ['t1'], navIndex: 0, activeTabId: 't1' });
+    useStore.getState().goBack();
+    expect(useStore.getState().activeTabId).toBe('t1');
+    expect(useStore.getState().navIndex).toBe(0);
+  });
+
+  it('activating a tab after goBack discards the forward branch', () => {
+    useStore.setState({ tabs: [term('t1'), term('t2'), term('t3')], navHistory: ['t1', 't2'], navIndex: 1 });
+    useStore.getState().goBack();              // cursor -> t1
+    useStore.getState().setActive('t3');       // new navigation from t1
+    expect(useStore.getState().navHistory).toEqual(['t1', 't3']);
+    expect(useStore.getState().navIndex).toBe(1);
+  });
+
+  it('closeTab prunes the closed tab from navHistory', () => {
+    useStore.setState({ tabs: [term('t1'), term('t2')], activeTabId: 't2', navHistory: ['t1', 't2'], navIndex: 1, mruOrder: ['t2', 't1'] });
+    useStore.getState().closeTab('t2');
+    expect(useStore.getState().navHistory).toEqual(['t1']);
+    expect(useStore.getState().navIndex).toBe(0);
+  });
+
+  it('openSessionTab pushes the new tab onto navHistory', () => {
+    useStore.getState().openSessionTab(1, 'sess', 'Session');
+    expect(useStore.getState().navHistory).toEqual(['session:sess']);
+    expect(useStore.getState().navIndex).toBe(0);
+  });
+
+  it('closing the active tab aligns the cursor to the fallback active tab', () => {
+    useStore.setState({
+      tabs: [term('a'), term('b'), term('c')],
+      activeTabId: 'b',
+      navHistory: ['c', 'a', 'b'],
+      navIndex: 2,
+      mruOrder: ['b', 'a', 'c'],
+    });
+    useStore.getState().closeTab('b');
+    const s = useStore.getState();
+    expect(s.activeTabId).toBe('c');
+    expect(s.navHistory[s.navIndex]).toBe('c');
+  });
+
+  it('chooseProvider renames the picker id in navHistory without duplicating', () => {
+    useStore.setState({ enabledProviders: ['claude', 'codex'] });
+    useStore.getState().openNewSessionTab(1);
+    const pickerId = useStore.getState().tabs[0].id;
+    expect(useStore.getState().navHistory).toEqual([pickerId]);
+    useStore.getState().chooseProvider(pickerId, 'codex');
+    const newId = useStore.getState().tabs[0].id;
+    expect(useStore.getState().navHistory).toEqual([newId]);
+  });
+});
+
 describe('tabsSlice provider picker', () => {
   beforeEach(() => {
     useStore.setState({ tabs: [], activeTabId: null, mruOrder: [], enabledProviders: ['claude'] });

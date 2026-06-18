@@ -303,13 +303,15 @@ applyTheme(useStore.getState().theme);
 // --- Boot: seed the single session in a detached window, else restore tabs ---
 if (windowMode) {
   const tab = sessionTabFromMode(windowMode);
-  useStore.setState({ tabs: [tab], activeTabId: tab.id });
+  useStore.setState({ tabs: [tab], activeTabId: tab.id, navHistory: [tab.id], navIndex: 0 });
 } else {
   const savedTabs = loadTabsFromLocalStorage();
   if (savedTabs && savedTabs.tabs.length > 0) {
     useStore.setState({
       tabs: savedTabs.tabs.map(t => ({ ...t, mode: 'history' as const })),
       activeTabId: savedTabs.activeTabId,
+      navHistory: savedTabs.activeTabId ? [savedTabs.activeTabId] : [],
+      navIndex: 0,
     });
   }
 }
