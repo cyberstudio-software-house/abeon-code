@@ -28,6 +28,10 @@ pub fn run() {
     let app_state = AppState::new(pool);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            crate::cli::scan_args_into_pending(app, &argv, Some(&cwd));
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -42,6 +46,20 @@ pub fn run() {
                 watcher.start(app.handle().clone());
                 app.manage(watcher);
             }
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        if let Some(path) = crate::cli::open_input::parse_open_input(url.as_str(), None) {
+                            crate::cli::dispatch_open(&handle, path);
+                        }
+                    }
+                });
+            }
+            let cwd = std::env::current_dir().ok().map(|p| p.to_string_lossy().to_string());
+            let args: Vec<String> = std::env::args().collect();
+            crate::cli::scan_args_into_pending(app.handle(), &args, cwd.as_deref());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
