@@ -53,8 +53,9 @@ Zakres v1: Linux + macOS, działanie na **zainstalowanej** aplikacji.
 - Wspólny handler `openProjectPath(absPath)`:
   1. `project = await find_or_create_project(absPath)`
   2. `await loadProjects()` — sidebar widzi nowy/istniejący projekt
-  3. `selectProject(project.id)`
-  4. `openNewSessionTab(project.id)`
+  3. `openNewSessionTab(project.id)` — nowa karta sesji staje się aktywna
+     (to jest obserwowalne „zaznaczenie" projektu; brak osobnej akcji
+     `selectProject` w store). Podniesienie okna robi Rust w `dispatch_open`.
 - Boot: po hydratacji `take_pending_open_paths()` → dla każdej ścieżki handler.
 - Listener `onCliOpenPath` (w `AppShell`/store) → handler.
 - Ustawienia: przycisk „Zainstaluj komendę `abeon-code`" → `install_cli_command()`.
@@ -89,17 +90,23 @@ Generowany przez `install_cli_command()` z realną ścieżką binarki
 
 ### Scenariusz 3 — deep-link
 
-- App nie działa: plugin dostarcza początkowy URL przy starcie → parsujemy
-  `?path=` → `pending_open_paths.push` → ten sam pull przy boocie.
-- App działa: URL przekazany do instancji → parsujemy → emit `cli://open-path`.
+- App nie działa (Linux/Windows): OS uruchamia binarkę z URL-em jako jedynym
+  argumentem CLI, więc obsługuje go **ten sam tor co Scenariusz 1** —
+  `scan_args_into_pending` → `parse_open_input` rozpoznaje schemat
+  `abeon-code://` → `pending_open_paths.push` → pull przy boocie.
+  (Plugin emituje `deep-link://new-url` w fazie setupu pluginu, zanim
+  zarejestrujemy `on_open_url`, więc cold-startu nie łapiemy przez handler —
+  tor argv go pokrywa.) macOS dostarcza cold-start przez `RunEvent::Opened` /
+  `on_open_url` — wymaga manualnego smoke-testu.
+- App działa: URL przekazany do instancji → `on_open_url` parsuje → emit
+  `cli://open-path`.
 
 ### Wspólny rdzeń
 
 ```
 project = await find_or_create_project(absPath)
 await loadProjects()
-selectProject(project.id)
-openNewSessionTab(project.id)
+openNewSessionTab(project.id)   // nowa karta sesji = aktywny projekt
 ```
 
 ## Obsługa błędów i przypadki brzegowe
