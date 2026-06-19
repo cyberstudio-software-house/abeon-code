@@ -40,7 +40,7 @@ fn deep_link_path(raw: &str) -> Option<String> {
 }
 
 fn looks_like_path(raw: &str) -> bool {
-    !raw.starts_with('-')
+    !raw.is_empty() && !raw.starts_with('-')
 }
 
 fn expand_tilde(raw: &str) -> String {
@@ -106,5 +106,15 @@ mod tests {
     fn non_path_is_ignored() {
         assert_eq!(parse_open_input("-psn_0_123", None), None);
         assert_eq!(parse_open_input("--flag", None), None);
+    }
+
+    #[test]
+    fn empty_string_is_ignored() {
+        assert_eq!(parse_open_input("", None), None);
+    }
+
+    #[test]
+    fn deep_link_without_query_is_ignored() {
+        assert_eq!(parse_open_input("abeon-code://open", None), None);
     }
 }
