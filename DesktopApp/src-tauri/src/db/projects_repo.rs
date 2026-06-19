@@ -66,6 +66,17 @@ pub fn get(conn: &Connection, id: i64) -> AppResult<Project> {
     )?)
 }
 
+pub fn get_by_path(conn: &Connection, path: &str) -> AppResult<Option<Project>> {
+    let mut s = conn.prepare(
+        "SELECT id,name,path,claude_dir,color,sort_order,created_at FROM projects WHERE path=?",
+    )?;
+    let mut rows = s.query(params![path])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(row_to_project(row)?)),
+        None => Ok(None),
+    }
+}
+
 pub fn delete(conn: &Connection, id: i64) -> AppResult<()> {
     conn.execute("DELETE FROM projects WHERE id=?", params![id])?;
     Ok(())
@@ -123,5 +134,16 @@ mod tests {
         let all = list(&c).unwrap();
         assert_eq!(all[0].id, b.id);
         assert_eq!(all[1].id, a.id);
+    }
+
+    #[test]
+    fn get_by_path_finds_and_misses() {
+        let p = pool();
+        let c = p.get().unwrap();
+        insert(&c, "Demo", "/x/y", "-x-y", None).unwrap();
+        let found = get_by_path(&c, "/x/y").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "Demo");
+        assert!(get_by_path(&c, "/nope").unwrap().is_none());
     }
 }
