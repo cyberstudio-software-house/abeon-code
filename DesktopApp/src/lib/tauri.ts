@@ -24,6 +24,8 @@ export const tauri = {
     invoke<Project>('update_project', { id, ...patch }),
   removeProject: (id: number) => invoke<void>('remove_project', { id }),
   reorderProjects: (ids: number[]) => invoke<void>('reorder_projects', { ids }),
+  findOrCreateProject: (path: string) =>
+    invoke<Project>('find_or_create_project', { path }),
   listSessions: (projectId: number, limit = 20, offset = 0) =>
     invoke<SessionMeta[]>('list_sessions', { projectId, limit, offset }),
   readSessionHistory: (projectId: number, sessionId: string, provider: Provider = 'claude', limit?: number, beforeUuid?: string) =>
