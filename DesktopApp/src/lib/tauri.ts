@@ -26,6 +26,10 @@ export const tauri = {
   reorderProjects: (ids: number[]) => invoke<void>('reorder_projects', { ids }),
   findOrCreateProject: (path: string) =>
     invoke<Project>('find_or_create_project', { path }),
+  takePendingOpenPaths: () => invoke<string[]>('take_pending_open_paths'),
+  installCliCommand: () => invoke<string>('install_cli_command'),
+  onCliOpenPath: (cb: (path: string) => void): Promise<UnlistenFn> =>
+    listen<string>('cli://open-path', e => cb(e.payload)),
   listSessions: (projectId: number, limit = 20, offset = 0) =>
     invoke<SessionMeta[]>('list_sessions', { projectId, limit, offset }),
   readSessionHistory: (projectId: number, sessionId: string, provider: Provider = 'claude', limit?: number, beforeUuid?: string) =>

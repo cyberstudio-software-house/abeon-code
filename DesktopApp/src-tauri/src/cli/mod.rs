@@ -1,2 +1,2 @@
 pub mod open_input;
-// pub mod installer;
+pub mod installer;

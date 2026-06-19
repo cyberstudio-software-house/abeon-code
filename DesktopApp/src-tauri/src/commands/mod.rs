@@ -1,5 +1,6 @@
 pub mod projects;
 pub mod sessions;
+pub mod cli;
 pub mod pty;
 pub mod actions;
 pub mod git;

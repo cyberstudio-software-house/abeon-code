@@ -52,6 +52,8 @@ pub fn run() {
             commands::projects::remove_project,
             commands::projects::reorder_projects,
             commands::projects::find_or_create_project,
+            commands::cli::take_pending_open_paths,
+            commands::cli::install_cli_command,
             commands::sessions::list_sessions,
             commands::sessions::read_session_history,
             commands::sessions::open_session_watch,

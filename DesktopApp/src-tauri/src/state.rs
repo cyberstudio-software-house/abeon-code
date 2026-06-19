@@ -18,6 +18,8 @@ pub struct AppState {
     pub project_usage_cache: Mutex<HashMap<i64, (i64, crate::domain::UsageSummary)>>,
     /// Cached result of `detect_models`; populated on first call, bypassed by `force`.
     pub detected_models: Mutex<Option<Vec<crate::domain::DetectedModel>>>,
+    pub pending_open_paths: Mutex<Vec<String>>,
+    pub cli_frontend_ready: Mutex<bool>,
 }
 
 impl AppState {
@@ -31,6 +33,8 @@ impl AppState {
             clipboard_images: Mutex::new(HashMap::new()),
             project_usage_cache: Mutex::new(HashMap::new()),
             detected_models: Mutex::new(None),
+            pending_open_paths: Mutex::new(Vec::new()),
+            cli_frontend_ready: Mutex::new(false),
         }
     }
 }
