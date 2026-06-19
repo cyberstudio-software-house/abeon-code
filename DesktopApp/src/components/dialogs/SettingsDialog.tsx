@@ -301,11 +301,43 @@ function TitleGenSection() {
   );
 }
 
+function CliCommandSection() {
+  const [installedPath, setInstalledPath] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const doInstall = () => {
+    setError(null);
+    tauri.installCliCommand()
+      .then(setInstalledPath)
+      .catch(err => setError(String(err?.message ?? err)));
+  };
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-[12px] font-semibold text-fg">Komenda terminala</h3>
+      <p className="text-[11px] text-muted">
+        Instaluje komendę <code className="mx-1">abeon-code</code> w
+        <code className="mx-1">~/.local/bin</code>. Użyj
+        <code className="mx-1">abeon-code .</code>, aby otworzyć projekt i nową sesję
+        z konsoli. Upewnij się, że ten katalog jest w <code>PATH</code>.
+      </p>
+      <button onClick={doInstall} className="text-accent underline text-[12px]">
+        Zainstaluj komendę
+      </button>
+      {installedPath && (
+        <p className="text-[11px] text-success">Zainstalowano: {installedPath}</p>
+      )}
+      {error && <p className="text-[11px] text-danger">{error}</p>}
+    </div>
+  );
+}
+
 function CliTab() {
   return (
     <div className="space-y-6">
       <ProvidersSection />
       <TitleGenSection />
+      <CliCommandSection />
     </div>
   );
 }
