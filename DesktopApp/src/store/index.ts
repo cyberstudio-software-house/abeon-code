@@ -430,9 +430,19 @@ async function bootstrapShellPath(): Promise<void> {
   }
 }
 
+async function drainPendingOpenPaths(): Promise<void> {
+  try {
+    const paths = await tauri.takePendingOpenPaths();
+    const { openProjectPath } = await import('../lib/openProject');
+    for (const p of paths) await openProjectPath(p);
+  } catch (err) {
+    console.error('[cli] drainPendingOpenPaths failed', err);
+  }
+}
+
 // Detached windows inherit settings from the synchronous localStorage load
 // above and must not run SQLite hydration (it writes to disk). The PTY shell
 // is resolved on the Rust side, so shell detection is unnecessary here.
 if (!windowMode) {
-  void bootstrapShellPath();
+  void bootstrapShellPath().then(() => drainPendingOpenPaths());
 }

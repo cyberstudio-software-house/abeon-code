@@ -15,6 +15,7 @@ import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
 import { shouldNotify } from '../../lib/attention';
 import { useMouseNavigation } from '../../hooks/useMouseNavigation';
+import { openProjectPath } from '../../lib/openProject';
 import { DragHandle, clamp } from './DragHandle';
 import { checkForUpdate, type AvailableUpdate } from '../../lib/updater';
 import { UpdateDialog } from '../dialogs/UpdateDialog';
@@ -147,6 +148,13 @@ export function AppShell() {
       if (unlistenEvent) unlistenEvent();
       if (unlistenAction) void unlistenAction.unregister();
     };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    tauri.onCliOpenPath((path) => { void openProjectPath(path); })
+      .then(fn => { unlisten = fn; });
+    return () => { if (unlisten) unlisten(); };
   }, []);
 
   useEffect(() => {
