@@ -6,7 +6,7 @@ import type { AppState } from './index';
 import { pushNav, stepBack, stepForward, pruneNav } from '../lib/navHistory';
 
 export type Tab =
-  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; provider?: Provider }
+  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider }
   | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number }
   | { kind: 'terminal'; id: string; projectId: number; title: string }
   | { kind: 'providerPicker'; id: string; projectId: number; title: string };
@@ -65,8 +65,21 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
     const id = sessionTabId(sessionId);
     const existing = get().tabs.find(t => t.id === id || (t.kind === 'session' && t.linkedSessionId === sessionId));
     if (existing) { set({ activeTabId: existing.id, mruOrder: moveToFront(get().mruOrder, existing.id), ...withNav(get, existing.id) }); return; }
+    const tab: Tab = { kind: 'session', id, projectId, sessionId, title, mode: 'history', preview: true, ...(provider ? { provider } : {}) };
+    const preview = get().tabs.find(t => t.kind === 'session' && t.preview);
+    if (preview) {
+      const nav = pushNav(pruneNav({ history: get().navHistory, index: get().navIndex }, preview.id), id);
+      set({
+        tabs: get().tabs.map(t => t.id === preview.id ? tab : t),
+        activeTabId: id,
+        mruOrder: moveToFront(get().mruOrder.filter(x => x !== preview.id), id),
+        navHistory: nav.history,
+        navIndex: nav.index,
+      });
+      return;
+    }
     set({
-      tabs: [...get().tabs, { kind: 'session', id, projectId, sessionId, title, mode: 'history', ...(provider ? { provider } : {}) }],
+      tabs: [...get().tabs, tab],
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
       ...withNav(get, id),
@@ -122,7 +135,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
     });
   },
   setSessionMode: (tabId, mode) => set({
-    tabs: get().tabs.map(t => t.id === tabId && t.kind === 'session' ? { ...t, mode, fresh: false } : t),
+    tabs: get().tabs.map(t => t.id === tabId && t.kind === 'session' ? { ...t, mode, fresh: false, preview: false } : t),
   }),
   closeTab: (id) => {
     const tabs = get().tabs.filter(t => t.id !== id);

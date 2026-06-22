@@ -206,7 +206,7 @@ export function TabBar() {
         />
       ) : (
         <span
-          className="truncate max-w-[160px] inline-block align-middle"
+          className={`truncate max-w-[160px] inline-block align-middle ${t.kind === 'session' && t.preview ? 'italic' : ''}`}
           onDoubleClick={(e) => {
             e.stopPropagation();
             setEditingId(t.id);

@@ -247,3 +247,61 @@ describe('tabsSlice provider picker', () => {
     expect(tabs[1].kind).toBe('session');
   });
 });
+
+describe('tabsSlice preview tabs', () => {
+  beforeEach(() => {
+    useStore.setState({ tabs: [], activeTabId: null, mruOrder: [], navHistory: [], navIndex: 0 });
+  });
+
+  it('opening an older session marks the tab as preview', () => {
+    useStore.getState().openSessionTab(1, 'a', 'A');
+    const tab = useStore.getState().tabs[0];
+    if (tab.kind !== 'session') throw new Error('expected session tab');
+    expect(tab.preview).toBe(true);
+    expect(tab.mode).toBe('history');
+  });
+
+  it('browsing another older session reuses the preview slot instead of opening a new tab', () => {
+    useStore.getState().openSessionTab(1, 'a', 'A');
+    useStore.getState().openSessionTab(1, 'b', 'B');
+    const tabs = useStore.getState().tabs;
+    expect(tabs).toHaveLength(1);
+    const tab = tabs[0];
+    if (tab.kind !== 'session') throw new Error('expected session tab');
+    expect(tab.sessionId).toBe('b');
+    expect(tab.id).toBe('session:b');
+    expect(tab.preview).toBe(true);
+    expect(useStore.getState().activeTabId).toBe('session:b');
+  });
+
+  it('reusing the preview slot swaps its id in navHistory without duplicating', () => {
+    useStore.getState().openSessionTab(1, 'a', 'A');
+    useStore.getState().openSessionTab(1, 'b', 'B');
+    expect(useStore.getState().navHistory).toEqual(['session:b']);
+    expect(useStore.getState().navIndex).toBe(0);
+    expect(useStore.getState().mruOrder).toEqual(['session:b']);
+  });
+
+  it('continuing in terminal pins the tab so the next older session opens beside it', () => {
+    useStore.getState().openSessionTab(1, 'a', 'A');
+    useStore.getState().setSessionMode('session:a', 'terminal');
+    const pinned = useStore.getState().tabs[0];
+    if (pinned.kind !== 'session') throw new Error('expected session tab');
+    expect(pinned.preview).toBe(false);
+
+    useStore.getState().openSessionTab(1, 'b', 'B');
+    const tabs = useStore.getState().tabs;
+    expect(tabs).toHaveLength(2);
+    expect(tabs.map(t => t.id)).toEqual(['session:a', 'session:b']);
+  });
+
+  it('clicking a session that already has a pinned tab just activates it', () => {
+    useStore.getState().openSessionTab(1, 'a', 'A');
+    useStore.getState().setSessionMode('session:a', 'terminal');
+    useStore.getState().openNewTerminalTab(1);
+    useStore.getState().openSessionTab(1, 'a', 'A');
+    const tabs = useStore.getState().tabs;
+    expect(tabs).toHaveLength(2);
+    expect(useStore.getState().activeTabId).toBe('session:a');
+  });
+});
