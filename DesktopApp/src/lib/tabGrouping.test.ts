@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { groupTabsByProject, getGroupColor, GROUP_COLORS } from './tabGrouping';
+import { groupTabsByProject } from './tabGrouping';
+import { getProjectColor } from './projectColors';
 import type { Tab } from '../store/tabsSlice';
 
 const tab = (id: string, projectId: number, kind: Tab['kind'] = 'session'): Tab => {
@@ -11,7 +12,7 @@ const tab = (id: string, projectId: number, kind: Tab['kind'] = 'session'): Tab 
 
 const projects = [
   { id: 1, name: 'Alpha', path: '/a', claudeDir: '', color: null, sortOrder: 0, createdAt: 0 },
-  { id: 2, name: 'Beta', path: '/b', claudeDir: '', color: null, sortOrder: 1, createdAt: 0 },
+  { id: 2, name: 'Beta', path: '/b', claudeDir: '', color: '#123456', sortOrder: 1, createdAt: 0 },
 ];
 
 describe('groupTabsByProject', () => {
@@ -43,24 +44,28 @@ describe('groupTabsByProject', () => {
   });
 });
 
-describe('getGroupColor', () => {
-  it('returns different colors for different indices', () => {
-    expect(getGroupColor(0)).not.toBe(getGroupColor(1));
+describe('group color', () => {
+  it('derives the color from the project, independent of group order', () => {
+    const order1 = groupTabsByProject([tab('a', 1), tab('b', 2)], projects);
+    const order2 = groupTabsByProject([tab('b', 2), tab('a', 1)], projects);
+    const color1 = (id: number) => order1.find(g => g.projectId === id)!.color;
+    const color2 = (id: number) => order2.find(g => g.projectId === id)!.color;
+    expect(color1(1)).toBe(color2(1));
+    expect(color1(2)).toBe(color2(2));
   });
 
-  it('wraps around the palette', () => {
-    expect(getGroupColor(0)).toBe(getGroupColor(GROUP_COLORS.length));
-  });
-});
-
-describe('GROUP_COLORS', () => {
-  it('has at least 6 colors', () => {
-    expect(GROUP_COLORS.length).toBeGreaterThanOrEqual(6);
+  it('honors a manually set project color', () => {
+    const groups = groupTabsByProject([tab('b', 2)], projects);
+    expect(groups[0].color).toBe('#123456');
   });
 
-  it('all entries are valid hex colors', () => {
-    for (const c of GROUP_COLORS) {
-      expect(c).toMatch(/^#[0-9a-fA-F]{6}$/);
-    }
+  it('uses the id-derived color for projects without a manual color', () => {
+    const groups = groupTabsByProject([tab('a', 1)], projects);
+    expect(groups[0].color).toBe(getProjectColor({ id: 1, color: null }));
+  });
+
+  it('still assigns a color for an unknown project', () => {
+    const groups = groupTabsByProject([tab('x', 999)], projects);
+    expect(groups[0].color).toBe(getProjectColor({ id: 999, color: null }));
   });
 });

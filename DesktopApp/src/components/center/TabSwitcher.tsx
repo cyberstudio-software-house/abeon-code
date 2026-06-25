@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
-import { groupTabsByProject, getGroupColor } from '../../lib/tabGrouping';
+import { groupTabsByProject } from '../../lib/tabGrouping';
 import { orderTabsByMru, wrapIndex } from '../../lib/tabSwitcher';
 import { TabActivityDot } from './TabBar';
 import type { Tab } from '../../store/tabsSlice';
@@ -100,9 +100,9 @@ export function TabSwitcher() {
         onMouseDown={e => e.stopPropagation()}
       >
         <div className="px-3 pb-1 text-[10px] uppercase tracking-wide text-muted">Przełącz zakładkę</div>
-        {groups.map((group, gi) => (
+        {groups.map(group => (
           <div key={group.projectId} className="py-1">
-            <div className="px-3 py-0.5 text-[10px] font-semibold" style={{ color: getGroupColor(gi) }}>
+            <div className="px-3 py-0.5 text-[10px] font-semibold" style={{ color: group.color }}>
               {group.name}
             </div>
             {group.tabs.map(t => {
@@ -114,7 +114,7 @@ export function TabSwitcher() {
                   onMouseEnter={() => setIndex(i)}
                   onMouseDown={e => { e.stopPropagation(); commit(t.id); }}
                   className={`flex items-center px-3 py-1 text-[12px] cursor-pointer select-none ${selected ? 'text-fg' : 'text-muted'}`}
-                  style={selected ? { backgroundColor: `${getGroupColor(gi)}33` } : undefined}
+                  style={selected ? { backgroundColor: `${group.color}33` } : undefined}
                 >
                   {t.kind === 'session' && <TabActivityDot tabId={t.id} sessionId={t.sessionId} />}
                   <span className="mr-2 text-muted"><SwitcherIcon tab={t} /></span>

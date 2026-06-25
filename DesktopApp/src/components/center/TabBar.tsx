@@ -5,7 +5,7 @@ import { ACTIVITY_DOT, ACTIVITY_LABEL } from '../../lib/activity';
 import { selectSessionActivity } from '../../store/sessionsSlice';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { matchesShortcut } from '../../lib/shortcuts';
-import { groupTabsByProject, getGroupColor } from '../../lib/tabGrouping';
+import { groupTabsByProject } from '../../lib/tabGrouping';
 import { processManager } from '../../lib/processManager';
 import type { RunningAction } from '../../store/actionsSlice';
 import { actionTone } from '../../lib/actionStatus';
@@ -247,17 +247,17 @@ export function TabBar() {
             groups.map((group, gi) => (
               <div key={group.projectId} className="contents">
                 {gi > 0 && <div className="w-2 shrink-0" />}
-                <div className="flex items-end shrink-0" style={{ borderBottom: `2px solid ${getGroupColor(gi)}` }}>
+                <div className="flex items-end shrink-0" style={{ borderBottom: `2px solid ${group.color}` }}>
                   <div
                     onClick={() => toggleCollapse(group.projectId)}
                     className="flex items-center px-2 py-1 cursor-pointer text-[10px] shrink-0 select-none"
                   >
                     <span className="mr-1 text-[8px]">{collapsed.has(group.projectId) ? '▶' : '▼'}</span>
-                    <span className="font-semibold" style={{ color: getGroupColor(gi) }}>{group.name}</span>
+                    <span className="font-semibold" style={{ color: group.color }}>{group.name}</span>
                     {collapsed.has(group.projectId) && (
                       <span
                         className="ml-1 px-1.5 rounded-full text-[9px]"
-                        style={{ backgroundColor: `${getGroupColor(gi)}33`, color: getGroupColor(gi) }}
+                        style={{ backgroundColor: `${group.color}33`, color: group.color }}
                       >
                         {group.tabs.length}
                       </span>

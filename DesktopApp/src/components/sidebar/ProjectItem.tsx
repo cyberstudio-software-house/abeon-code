@@ -8,6 +8,7 @@ import { tauri } from '../../lib/tauri';
 import { ProjectManageMenu } from './ProjectManageMenu';
 import { EditProjectDialog } from '../dialogs/EditProjectDialog';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
+import { getProjectColor } from '../../lib/projectColors';
 
 type Props = { project: Project };
 
@@ -66,9 +67,7 @@ export function ProjectItem({ project }: Props) {
             strokeWidth={2.5}
           />
           <div className="min-w-0 flex-1 flex items-center gap-1.5">
-            {project.color && (
-              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: project.color }} />
-            )}
+            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: getProjectColor(project) }} />
             <div className={`text-[12.5px] truncate ${expanded ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>
               {project.name}
             </div>

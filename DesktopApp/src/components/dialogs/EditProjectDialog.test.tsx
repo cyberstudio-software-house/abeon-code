@@ -40,9 +40,22 @@ describe('EditProjectDialog', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('omits color from the patch when none is selected', () => {
+  it('defaults to Auto for a project without a manual color', () => {
+    render(<EditProjectDialog project={project} onClose={() => {}} />);
+    expect(screen.getByLabelText('Kolor automatyczny')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('sends an empty color (auto) when no color is picked', () => {
     render(<EditProjectDialog project={project} onClose={() => {}} />);
     fireEvent.click(screen.getByText('Zapisz'));
-    expect(h.update).toHaveBeenCalledWith(3, { name: 'gamma' });
+    expect(h.update).toHaveBeenCalledWith(3, { name: 'gamma', color: '' });
+  });
+
+  it('returns to auto when Auto is clicked after picking a color', () => {
+    render(<EditProjectDialog project={project} onClose={() => {}} />);
+    fireEvent.click(screen.getByLabelText('Kolor #b78640'));
+    fireEvent.click(screen.getByLabelText('Kolor automatyczny'));
+    fireEvent.click(screen.getByText('Zapisz'));
+    expect(h.update).toHaveBeenCalledWith(3, { name: 'gamma', color: '' });
   });
 });

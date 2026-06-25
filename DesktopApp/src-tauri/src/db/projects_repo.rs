@@ -54,7 +54,11 @@ pub fn update(
         conn.execute("UPDATE projects SET name=? WHERE id=?", params![n, id])?;
     }
     if let Some(c) = color {
-        conn.execute("UPDATE projects SET color=? WHERE id=?", params![c, id])?;
+        if c.is_empty() {
+            conn.execute("UPDATE projects SET color=NULL WHERE id=?", params![id])?;
+        } else {
+            conn.execute("UPDATE projects SET color=? WHERE id=?", params![c, id])?;
+        }
     }
     get(conn, id)
 }
@@ -145,5 +149,19 @@ mod tests {
         assert!(found.is_some());
         assert_eq!(found.unwrap().name, "Demo");
         assert!(get_by_path(&c, "/nope").unwrap().is_none());
+    }
+
+    #[test]
+    fn update_sets_and_clears_color() {
+        let p = pool();
+        let c = p.get().unwrap();
+        let proj = insert(&c, "Demo", "/x/y", "-x-y", Some("#b78640")).unwrap();
+        let recolored = update(&c, proj.id, None, Some("#4a7dc2")).unwrap();
+        assert_eq!(recolored.color.as_deref(), Some("#4a7dc2"));
+        let cleared = update(&c, proj.id, None, Some("")).unwrap();
+        assert_eq!(cleared.color, None);
+        let untouched = update(&c, proj.id, Some("Renamed"), None).unwrap();
+        assert_eq!(untouched.name, "Renamed");
+        assert_eq!(untouched.color, None);
     }
 }

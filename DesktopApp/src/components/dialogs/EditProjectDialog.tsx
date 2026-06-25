@@ -11,9 +11,7 @@ export function EditProjectDialog({ project, onClose }: Props) {
   const [color, setColor] = useState<string | null>(project.color);
 
   const submit = async () => {
-    const patch: { name?: string; color?: string } = { name: name.trim() };
-    if (color) patch.color = color;
-    await updateProject(project.id, patch);
+    await updateProject(project.id, { name: name.trim(), color: color ?? '' });
     onClose();
   };
 
@@ -29,7 +27,16 @@ export function EditProjectDialog({ project, onClose }: Props) {
           className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] mb-3"
         />
         <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">Kolor</label>
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <button
+            type="button"
+            aria-label="Kolor automatyczny"
+            aria-pressed={color === null}
+            onClick={() => setColor(null)}
+            className={`h-5 px-2 rounded-full text-[10px] leading-none border transition-transform ${color === null ? 'ring-2 ring-offset-2 ring-offset-bg-elev ring-fg scale-110 border-transparent text-fg' : 'border-border text-muted'}`}
+          >
+            Auto
+          </button>
           {PROJECT_COLORS.map(c => (
             <button
               key={c}
