@@ -129,7 +129,7 @@ describe('refreshActivity', () => {
 });
 
 describe('sessionsSlice activeSessions', () => {
-  beforeEach(() => { useStore.setState({ activeSessions: [] }); });
+  beforeEach(() => { useStore.setState({ activeSessions: [], showActiveSessions: true }); });
 
   it('refreshActiveSessions stores the fetched rows', async () => {
     const rows = [{
@@ -139,6 +139,19 @@ describe('sessionsSlice activeSessions', () => {
     const spy = vi.spyOn(tauri, 'listActiveSessions').mockResolvedValue(rows);
     await useStore.getState().refreshActiveSessions();
     expect(useStore.getState().activeSessions).toEqual(rows);
+    spy.mockRestore();
+  });
+
+  it('refreshActiveSessions does not fetch when showActiveSessions is off', async () => {
+    useStore.setState({ showActiveSessions: false, activeSessions: [] });
+    const rows = [{
+      sessionId: 'a', projectId: 1, projectName: 'P', title: 'T',
+      activity: 'running' as const, lastModified: 5, provider: 'claude' as const,
+    }];
+    const spy = vi.spyOn(tauri, 'listActiveSessions').mockResolvedValue(rows);
+    await useStore.getState().refreshActiveSessions();
+    expect(spy).not.toHaveBeenCalled();
+    expect(useStore.getState().activeSessions).toEqual([]);
     spy.mockRestore();
   });
 });

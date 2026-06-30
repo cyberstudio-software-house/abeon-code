@@ -504,6 +504,16 @@ mod roster_tests {
         let c = p.get().unwrap();
         assert!(active_sessions_snapshot(&c).unwrap().is_empty());
     }
+
+    #[test]
+    fn active_sessions_snapshot_aggregates_across_projects_without_error() {
+        let p = pool();
+        let c = p.get().unwrap();
+        projects_repo::insert(&c, "Alpha", "/tmp/abeon-active-snapshot-alpha", "-tmp-abeon-active-snapshot-alpha", None).unwrap();
+        projects_repo::insert(&c, "Beta", "/tmp/abeon-active-snapshot-beta", "-tmp-abeon-active-snapshot-beta", None).unwrap();
+        let rows = active_sessions_snapshot(&c).unwrap();
+        assert!(rows.is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -546,5 +556,7 @@ mod active_tests {
         assert!(rows.iter().all(|r| r.project_id == 7 && r.project_name == "Proj"));
         assert_eq!(rows[1].provider, Provider::Codex);
         assert_eq!(rows[0].title, "title-a");
+        assert_eq!(rows[0].activity, SessionActivity::Running);
+        assert_eq!(rows[0].last_modified, 100);
     }
 }

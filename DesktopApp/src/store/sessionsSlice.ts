@@ -172,6 +172,7 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
     }
   },
   refreshActiveSessions: async () => {
+    if (!(get() as AppState).showActiveSessions) return;
     try {
       const items = await tauri.listActiveSessions();
       set({ activeSessions: items });
