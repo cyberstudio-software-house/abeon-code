@@ -7,6 +7,7 @@ pub mod pty;
 pub mod state;
 pub mod commands;
 pub mod cli;
+pub mod clickup;
 pub mod detectors;
 pub mod git;
 pub mod remote;
