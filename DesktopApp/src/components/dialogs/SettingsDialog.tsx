@@ -357,6 +357,8 @@ function GeneralTab() {
   const setEditorPath = useStore(s => s.setEditorPath);
   const historyViewMode = useStore(s => s.historyViewMode);
   const setHistoryViewMode = useStore(s => s.setHistoryViewMode);
+  const showActiveSessions = useStore(s => s.showActiveSessions);
+  const setShowActiveSessions = useStore(s => s.setShowActiveSessions);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [editors, setEditors] = useState<EditorInfo[]>([]);
   const [detectedName, setDetectedName] = useState<string | null>(null);
@@ -462,6 +464,20 @@ function GeneralTab() {
         <p className="text-[11px] text-muted mt-2">
           Opcja „Systemowy" automatycznie dostosowuje motyw do ustawień systemu operacyjnego.
         </p>
+      </div>
+
+      <div className="space-y-2">
+        <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">
+          Pasek boczny
+        </label>
+        <label className="flex items-center gap-2 text-[12px] cursor-pointer">
+          <input
+            type="checkbox"
+            checked={showActiveSessions}
+            onChange={e => setShowActiveSessions(e.target.checked)}
+          />
+          Pokaż aktywne sesje nad projektami
+        </label>
       </div>
 
       <NotificationsSection />
