@@ -1,6 +1,6 @@
 const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.includes('Mac');
 
-export type ShortcutId = 'newSession' | 'newTerminal' | 'closeTab' | 'focusSearch';
+export type ShortcutId = 'newSession' | 'newTerminal' | 'closeTab' | 'focusSearch' | 'openProjectLauncher';
 
 export type ShortcutDef = {
   id: ShortcutId;
@@ -14,6 +14,7 @@ export const SHORTCUTS: ShortcutDef[] = [
   { id: 'newTerminal', label: 'Nowy terminal', description: 'Otwiera nowy terminal w aktywnym projekcie', defaultBinding: 'mod+t' },
   { id: 'closeTab', label: 'Zamknij tab', description: 'Zamyka aktywny tab (z potwierdzeniem jeśli proces)', defaultBinding: 'mod+w' },
   { id: 'focusSearch', label: 'Szukaj', description: 'Przenosi fokus do wyszukiwarki projektów', defaultBinding: 'mod+k' },
+  { id: 'openProjectLauncher', label: 'Szukaj projektu', description: 'Otwiera szybką wyszukiwarkę projektów (nowa sesja / terminal)', defaultBinding: 'mod+shift+n' },
 ];
 
 export const FIXED_SHORTCUTS = [
