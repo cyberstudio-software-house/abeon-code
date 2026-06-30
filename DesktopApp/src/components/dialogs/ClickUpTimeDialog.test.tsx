@@ -25,4 +25,16 @@ describe('ClickUpTimeDialog', () => {
     expect(durationMs as number).toBeGreaterThanOrEqual(1_800_000);
     expect(durationMs as number).toBeLessThanOrEqual(5_400_000);
   });
+
+  it('falls back to the proposed time when the override is non-numeric', async () => {
+    render(<ClickUpTimeDialog projectId={1} taskId="t1" onClose={() => {}} />);
+    await waitFor(() => expect(tauri.clickupEstimateTime).toHaveBeenCalled());
+    fireEvent.change(await screen.findByPlaceholderText('60'), { target: { value: 'abc' } });
+    fireEvent.click(await screen.findByText('Zapisz czas'));
+    await waitFor(() => expect(tauri.clickupLogTime).toHaveBeenCalled());
+    const [, , durationMs] = (tauri.clickupLogTime as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    expect(Number.isFinite(durationMs as number)).toBe(true);
+    expect(durationMs as number).toBeGreaterThanOrEqual(1_800_000);
+    expect(durationMs as number).toBeLessThanOrEqual(5_400_000);
+  });
 });

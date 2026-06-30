@@ -28,7 +28,8 @@ export function ClickUpTimeDialog({ projectId, taskId, onClose }: { projectId: n
   }, [projectId, activeSession]);
 
   const proposedMs = est ? Math.round(est.sessionMs + blend * (est.devEstimateMs - est.sessionMs)) : 0;
-  const finalMs = overrideMin.trim() ? Math.round(Number(overrideMin) * 60000) : proposedMs;
+  const overrideMs = overrideMin.trim() ? Math.round(Number(overrideMin) * 60000) : NaN;
+  const finalMs = Number.isFinite(overrideMs) ? overrideMs : proposedMs;
 
   const save = async () => {
     setBusy(true);
