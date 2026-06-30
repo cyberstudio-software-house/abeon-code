@@ -181,6 +181,16 @@ pub async fn clickup_link_task(state: State<'_, AppState>, project_id: i64, task
     Ok(link)
 }
 
+fn validate_task_id(task_id: &str) -> AppResult<()> {
+    if !task_id.is_empty()
+        && task_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        Ok(())
+    } else {
+        Err(AppError::Other("ClickUp: nieprawidłowy identyfikator zadania".into()))
+    }
+}
+
 fn render_task_markdown(d: &ClickUpTaskDetail) -> String {
     let title = match &d.custom_id {
         Some(c) => format!("{c} {}", d.name),
@@ -223,6 +233,7 @@ fn ensure_gitignore(project_path: &str) -> std::io::Result<()> {
 pub async fn clickup_write_task_file(state: State<'_, AppState>, project_id: i64, task_id: String)
     -> AppResult<String>
 {
+    validate_task_id(&task_id)?;
     let project_path = {
         let c = state.db.get()?;
         projects_repo::get(&c, project_id)?.path
@@ -230,14 +241,17 @@ pub async fn clickup_write_task_file(state: State<'_, AppState>, project_id: i64
     let detail = load_client(&state)?
         .get_task_detail(&task_id, false, None).await
         .map_err(|e| AppError::Other(e.to_string()))?;
-    let rel = format!(".abeon/clickup/{task_id}.md");
-    let abs = std::path::Path::new(&project_path).join(&rel);
-    if let Some(dir) = abs.parent() {
-        std::fs::create_dir_all(dir)?;
+    let base = std::fs::canonicalize(&project_path)?;
+    let target_dir = base.join(".abeon/clickup");
+    std::fs::create_dir_all(&target_dir)?;
+    let canon_dir = std::fs::canonicalize(&target_dir)?;
+    if !canon_dir.starts_with(&base) {
+        return Err(AppError::Other("ClickUp: ścieżka poza projektem".into()));
     }
+    let abs = target_dir.join(format!("{task_id}.md"));
     std::fs::write(&abs, render_task_markdown(&detail))?;
     ensure_gitignore(&project_path)?;
-    Ok(rel)
+    Ok(format!(".abeon/clickup/{task_id}.md"))
 }
 
 fn now_ms() -> i64 {
@@ -274,6 +288,18 @@ mod tests {
         let p = crate::db::projects_repo::insert(&c, "X", "/x", "-x", None).unwrap();
         clickup_config_repo::set(&c, p.id, "ws1", Some("sp1"), None).unwrap();
         assert_eq!(clickup_config_repo::get(&c, p.id).unwrap().unwrap().workspace_id, "ws1");
+    }
+
+    #[test]
+    fn validate_task_id_rejects_traversal_and_accepts_ids() {
+        assert!(validate_task_id("868abc12").is_ok());
+        assert!(validate_task_id("CU-123").is_ok());
+        assert!(validate_task_id("a_b-9").is_ok());
+        assert!(validate_task_id("../../etc/passwd").is_err());
+        assert!(validate_task_id("/etc/passwd").is_err());
+        assert!(validate_task_id("a/b").is_err());
+        assert!(validate_task_id("..").is_err());
+        assert!(validate_task_id("").is_err());
     }
 
     #[test]
