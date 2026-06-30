@@ -4,6 +4,12 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
+import type { ClickUpSpace } from '../types/ClickUpSpace';
+import type { ClickUpList } from '../types/ClickUpList';
+import type { ClickUpProjectConfig } from '../types/ClickUpProjectConfig';
+import type { ClickUpLink } from '../types/ClickUpLink';
+import type { ClickUpTaskRef } from '../types/ClickUpTaskRef';
+import type { ClickUpTaskDetail } from '../types/ClickUpTaskDetail';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -122,4 +128,21 @@ export const tauri = {
   clickupConnectionStatus: () =>
     invoke<ClickUpConnectionStatus>('clickup_connection_status'),
   clickupListWorkspaces: () => invoke<ClickUpWorkspace[]>('clickup_list_workspaces'),
+  clickupListSpaces: (workspaceId: string) =>
+    invoke<ClickUpSpace[]>('clickup_list_spaces', { workspaceId }),
+  clickupListLists: (spaceId: string) =>
+    invoke<ClickUpList[]>('clickup_list_lists', { spaceId }),
+  clickupGetConfig: (projectId: number) =>
+    invoke<ClickUpProjectConfig | null>('clickup_get_config', { projectId }),
+  clickupSetConfig: (projectId: number, workspaceId: string, spaceId: string | null, listId: string | null) =>
+    invoke<void>('clickup_set_config', { projectId, workspaceId, spaceId, listId }),
+  clickupListLinks: (projectId: number) =>
+    invoke<ClickUpLink[]>('clickup_list_links', { projectId }),
+  clickupUnlinkTask: (projectId: number, taskId: string) =>
+    invoke<void>('clickup_unlink_task', { projectId, taskId }),
+  clickupGetTask: (taskId: string) => invoke<ClickUpTaskDetail>('clickup_get_task', { taskId }),
+  clickupSearchTasks: (projectId: number, query: string) =>
+    invoke<ClickUpTaskRef[]>('clickup_search_tasks', { projectId, query }),
+  clickupLinkTask: (projectId: number, taskId: string) =>
+    invoke<ClickUpLink>('clickup_link_task', { projectId, taskId }),
 };

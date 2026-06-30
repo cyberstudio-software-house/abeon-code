@@ -1,7 +1,10 @@
 use tauri::State;
-use crate::clickup::ClickUpClient;
-use crate::db::settings_repo;
-use crate::domain::clickup::{ClickUpConnectionStatus, ClickUpWorkspace};
+use crate::clickup::{classify_query, parse_task_input, ClickUpClient, QueryKind};
+use crate::db::{clickup_config_repo, clickup_links_repo, settings_repo};
+use crate::domain::clickup::{
+    ClickUpConnectionStatus, ClickUpLink, ClickUpList, ClickUpProjectConfig, ClickUpSpace,
+    ClickUpTaskDetail, ClickUpTaskRef, ClickUpWorkspace,
+};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -59,6 +62,129 @@ pub async fn clickup_list_workspaces(state: State<'_, AppState>) -> AppResult<Ve
     client.list_workspaces().await.map_err(|e| AppError::Other(e.to_string()))
 }
 
+#[tauri::command]
+pub async fn clickup_list_spaces(state: State<'_, AppState>, workspace_id: String)
+    -> AppResult<Vec<ClickUpSpace>>
+{
+    load_client(&state)?.list_spaces(&workspace_id).await.map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub async fn clickup_list_lists(state: State<'_, AppState>, space_id: String)
+    -> AppResult<Vec<ClickUpList>>
+{
+    load_client(&state)?.list_lists(&space_id).await.map_err(|e| AppError::Other(e.to_string()))
+}
+
+#[tauri::command]
+pub fn clickup_get_config(state: State<AppState>, project_id: i64)
+    -> AppResult<Option<ClickUpProjectConfig>>
+{
+    let c = state.db.get()?;
+    clickup_config_repo::get(&c, project_id)
+}
+
+#[tauri::command]
+pub fn clickup_set_config(
+    state: State<AppState>, project_id: i64,
+    workspace_id: String, space_id: Option<String>, list_id: Option<String>,
+) -> AppResult<()> {
+    let c = state.db.get()?;
+    clickup_config_repo::set(&c, project_id, &workspace_id, space_id.as_deref(), list_id.as_deref())
+}
+
+#[tauri::command]
+pub fn clickup_list_links(state: State<AppState>, project_id: i64) -> AppResult<Vec<ClickUpLink>> {
+    let c = state.db.get()?;
+    clickup_links_repo::list(&c, project_id)
+}
+
+#[tauri::command]
+pub fn clickup_unlink_task(state: State<AppState>, project_id: i64, task_id: String) -> AppResult<()> {
+    let c = state.db.get()?;
+    clickup_links_repo::delete(&c, project_id, &task_id)
+}
+
+#[tauri::command]
+pub async fn clickup_get_task(state: State<'_, AppState>, task_id: String) -> AppResult<ClickUpTaskDetail> {
+    load_client(&state)?
+        .get_task_detail(&task_id, false, None).await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
+async fn search_tasks_by_name(
+    client: &ClickUpClient,
+    config: &ClickUpProjectConfig,
+    query: &str,
+) -> AppResult<Vec<ClickUpTaskRef>> {
+    let mut tasks = if let Some(list_id) = &config.list_id {
+        client.list_tasks_in_list(list_id).await
+    } else if let Some(space_id) = &config.space_id {
+        client.list_tasks_in_space(&config.workspace_id, space_id).await
+    } else {
+        return Err(AppError::Other("ClickUp: ustaw Space lub Listę dla wyszukiwania po nazwie".into()));
+    }.map_err(|e| AppError::Other(e.to_string()))?;
+    let needle = query.to_lowercase();
+    tasks.retain(|t| t.name.to_lowercase().contains(&needle));
+    tasks.truncate(50);
+    Ok(tasks)
+}
+
+#[tauri::command]
+pub async fn clickup_search_tasks(state: State<'_, AppState>, project_id: i64, query: String)
+    -> AppResult<Vec<ClickUpTaskRef>>
+{
+    let config = {
+        let c = state.db.get()?;
+        clickup_config_repo::get(&c, project_id)?
+            .ok_or_else(|| AppError::Other("ClickUp: brak skonfigurowanego zakresu projektu".into()))?
+    };
+    let client = load_client(&state)?;
+    match classify_query(&query) {
+        QueryKind::Id => {
+            let r = parse_task_input(&query);
+            match client.get_task_detail(&r.id, r.custom, Some(&config.workspace_id)).await {
+                Ok(detail) => Ok(vec![ClickUpTaskRef {
+                    id: detail.id,
+                    custom_id: detail.custom_id,
+                    name: detail.name,
+                    status: detail.status,
+                    url: detail.url,
+                    list_name: None,
+                }]),
+                Err(_) => search_tasks_by_name(&client, &config, &query).await,
+            }
+        }
+        QueryKind::Name => search_tasks_by_name(&client, &config, &query).await,
+    }
+}
+
+#[tauri::command]
+pub async fn clickup_link_task(state: State<'_, AppState>, project_id: i64, task_id: String)
+    -> AppResult<ClickUpLink>
+{
+    let detail = load_client(&state)?
+        .get_task_detail(&task_id, false, None).await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let link = ClickUpLink {
+        project_id,
+        task_id: detail.id.clone(),
+        custom_id: detail.custom_id.clone(),
+        name: detail.name.clone(),
+        status: detail.status.clone(),
+        url: detail.url.clone(),
+        linked_at: now_ms(),
+    };
+    let c = state.db.get()?;
+    clickup_links_repo::upsert(&c, &link)?;
+    Ok(link)
+}
+
+fn now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,5 +203,16 @@ mod tests {
 
     fn token_in(c: &rusqlite::Connection) -> Option<String> {
         settings_repo::get(c, TOKEN_KEY).unwrap()
+    }
+
+    #[test]
+    fn config_command_helpers_round_trip() {
+        use crate::db::clickup_config_repo;
+        let f = NamedTempFile::new().unwrap();
+        let pool = init_pool(&f.path().to_path_buf()).unwrap();
+        let c = pool.get().unwrap();
+        let p = crate::db::projects_repo::insert(&c, "X", "/x", "-x", None).unwrap();
+        clickup_config_repo::set(&c, p.id, "ws1", Some("sp1"), None).unwrap();
+        assert_eq!(clickup_config_repo::get(&c, p.id).unwrap().unwrap().workspace_id, "ws1");
     }
 }
