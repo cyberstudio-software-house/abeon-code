@@ -4,6 +4,7 @@ export type { Action } from './Action';
 export type { ActionInput } from './ActionInput';
 export type { ActionPatch } from './ActionPatch';
 export type { SessionMeta } from './SessionMeta';
+export type { ActiveSession } from './ActiveSession';
 export type { SessionActivity } from './SessionActivity';
 export type { Provider } from './Provider';
 export type { HistoryBlock } from './HistoryBlock';
