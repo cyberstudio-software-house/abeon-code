@@ -6,6 +6,7 @@ use crate::domain::clickup::{
     ClickUpConnectionStatus, ClickUpLink, ClickUpList, ClickUpProjectConfig, ClickUpSpace,
     ClickUpTaskDetail, ClickUpTaskRef, ClickUpWorkspace,
 };
+use crate::domain::{HistoryBlock, Provider};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
@@ -254,6 +255,52 @@ pub async fn clickup_write_task_file(state: State<'_, AppState>, project_id: i64
     Ok(format!(".abeon/clickup/{task_id}.md"))
 }
 
+fn build_summary_prompt(blocks: &[HistoryBlock]) -> String {
+    let mut t = String::new();
+    for b in blocks {
+        match b {
+            HistoryBlock::UserText { text, .. } => t.push_str(&format!("UŻYTKOWNIK: {text}\n")),
+            HistoryBlock::AssistantText { text, .. } => t.push_str(&format!("ASYSTENT: {text}\n")),
+            HistoryBlock::ToolUse { name, input_summary, .. } => {
+                t.push_str(&format!("NARZĘDZIE {name}: {input_summary}\n"))
+            }
+            _ => {}
+        }
+    }
+    let transcript: String = t.chars().take(12000).collect();
+    format!(
+        "Na podstawie poniższego zapisu sesji programistycznej przygotuj ZWIĘZŁE podsumowanie zrealizowanych prac do wklejenia w zadaniu ClickUp.\n\n\
+        Pisz po polsku, rzeczowo, w punktach (3–7 punktów). Skup się na tym, co zostało ZROBIONE i zmienione; pomiń dygresje.\n\n\
+        Odpowiedz wyłącznie treścią podsumowania — bez nagłówków i komentarza.\n\n\
+        Zapis sesji:\n<<<\n{transcript}\n>>>"
+    )
+}
+
+#[tauri::command]
+pub async fn clickup_generate_summary(
+    state: State<'_, AppState>, project_id: i64, session_id: String, provider: Option<Provider>,
+) -> AppResult<String> {
+    let prov = provider.unwrap_or(Provider::Claude);
+    let (proj_path, blocks) = {
+        let c = state.db.get()?;
+        let path = projects_repo::get(&c, project_id)?.path;
+        let blocks = crate::commands::sessions::history_blocks_for_session(&c, &session_id);
+        (path, blocks)
+    };
+    if blocks.is_empty() {
+        return Err(AppError::Other("Sesja nie zawiera historii".into()));
+    }
+    let prompt = build_summary_prompt(&blocks);
+    let raw = crate::commands::sessions::run_agent_prompt(
+        prov, None, prompt, std::path::PathBuf::from(proj_path),
+    ).await?;
+    let trimmed = raw.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(AppError::Other("Pusta odpowiedź modelu".into()));
+    }
+    Ok(trimmed)
+}
+
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
@@ -329,5 +376,17 @@ mod tests {
         assert!(md.contains("Body"));
         assert!(md.contains("ann"));
         assert!(md.contains("log"));
+    }
+
+    #[test]
+    fn build_summary_prompt_embeds_transcript_and_instruction() {
+        use crate::domain::HistoryBlock;
+        let blocks = vec![
+            HistoryBlock::UserText { uuid: "1".into(), timestamp: 1, text: "dodaj logowanie".into() },
+            HistoryBlock::AssistantText { uuid: "2".into(), timestamp: 2, text: "zrobione".into() },
+        ];
+        let p = build_summary_prompt(&blocks);
+        assert!(p.contains("dodaj logowanie"));
+        assert!(p.to_lowercase().contains("podsumowanie"));
     }
 }
