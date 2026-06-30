@@ -50,7 +50,14 @@ tasks:
     prompt: 'Wydać nową wersję ({{.BUMP}}) i wypchnąć na main? To wyzwoli build i PUBLICZNY release.'
     cmds:
       - task: check
-      - 'cd {{.DESKTOP}} && npm version {{.BUMP}} -m "chore(release): %s"'
+      - cmd: |
+          set -e
+          cd {{.DESKTOP}}
+          npm version {{.BUMP}} --no-git-tag-version
+          new_version="v$(node -p "require('./package.json').version")"
+          cd ..
+          git add {{.DESKTOP}}/package.json {{.DESKTOP}}/package-lock.json {{.DESKTOP}}/src-tauri/tauri.conf.json {{.DESKTOP}}/src-tauri/Cargo.toml
+          git commit -m "chore(release): ${new_version}"
       - git push origin main
       - cmd: echo "✓ Wypchnięto na main. Śledź build — task watch"
         silent: true
