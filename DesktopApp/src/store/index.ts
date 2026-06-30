@@ -52,6 +52,7 @@ type Persisted = {
   historyViewMode?: 'communication' | 'full';
   notificationsEnabled?: boolean;
   notificationTrigger?: 'turnEnd' | 'questionsOnly' | 'both';
+  showActiveSessions?: boolean;
   enabledProviders?: Provider[];
   codexModelId?: string;
   codexTitleGenModelId?: string;
@@ -70,6 +71,7 @@ const PERSISTED_KEYS = [
   'historyViewMode',
   'notificationsEnabled',
   'notificationTrigger',
+  'showActiveSessions',
   'enabledProviders',
   'codexModelId',
   'codexTitleGenModelId',
@@ -102,6 +104,7 @@ function pickPersistedFields(state: AppState): Persisted {
     historyViewMode: state.historyViewMode,
     notificationsEnabled: state.notificationsEnabled,
     notificationTrigger: state.notificationTrigger,
+    showActiveSessions: state.showActiveSessions,
     enabledProviders: state.enabledProviders,
     codexModelId: state.codexModelId,
     codexTitleGenModelId: state.codexTitleGenModelId,
@@ -119,6 +122,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'remoteBridgeEnabled':
     case 'allowRemoteSpawn':
     case 'notificationsEnabled':
+    case 'showActiveSessions':
       return value ? 'true' : 'false';
     case 'modelEfforts':
     case 'customModels':
@@ -142,6 +146,7 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
     case 'remoteBridgeEnabled':
     case 'allowRemoteSpawn':
     case 'notificationsEnabled':
+    case 'showActiveSessions':
       return raw === 'true';
     case 'modelEfforts':
     case 'customModels':
@@ -192,6 +197,7 @@ function applyPersistedToState(p: Persisted) {
     patch.historyViewMode = p.historyViewMode;
   }
   if (p.notificationsEnabled !== undefined) patch.notificationsEnabled = p.notificationsEnabled;
+  if (p.showActiveSessions !== undefined) patch.showActiveSessions = p.showActiveSessions;
   if (p.notificationTrigger === 'turnEnd' || p.notificationTrigger === 'questionsOnly' || p.notificationTrigger === 'both') {
     patch.notificationTrigger = p.notificationTrigger;
   }

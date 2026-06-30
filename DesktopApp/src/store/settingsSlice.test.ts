@@ -51,3 +51,13 @@ describe('settingsSlice codex models', () => {
     expect(useStore.getState().codexModelId).toBe('gpt-a');
   });
 });
+
+describe('settingsSlice showActiveSessions', () => {
+  beforeEach(() => { useStore.setState({ showActiveSessions: true }); });
+
+  it('defaults to true and toggles via setter', () => {
+    expect(useStore.getState().showActiveSessions).toBe(true);
+    useStore.getState().setShowActiveSessions(false);
+    expect(useStore.getState().showActiveSessions).toBe(false);
+  });
+});

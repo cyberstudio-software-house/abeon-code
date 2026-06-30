@@ -29,6 +29,7 @@ export type SettingsSlice = {
   historyViewMode: HistoryViewMode;
   notificationsEnabled: boolean;
   notificationTrigger: NotificationTrigger;
+  showActiveSessions: boolean;
   enabledProviders: Provider[];
   settingsOpen: boolean;
   codexModelId: string;
@@ -58,6 +59,7 @@ export type SettingsSlice = {
   setHistoryViewMode: (mode: HistoryViewMode) => void;
   setNotificationsEnabled: (v: boolean) => void;
   setNotificationTrigger: (t: NotificationTrigger) => void;
+  setShowActiveSessions: (v: boolean) => void;
   openSettings: () => void;
   closeSettings: () => void;
   setCodexModel: (modelId: string) => void;
@@ -87,6 +89,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   historyViewMode: 'full',
   notificationsEnabled: true,
   notificationTrigger: 'both',
+  showActiveSessions: true,
   enabledProviders: ['claude'],
   settingsOpen: false,
   codexModelId: '',
@@ -123,6 +126,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   setHistoryViewMode: (historyViewMode) => set({ historyViewMode }),
   setNotificationsEnabled: (notificationsEnabled) => set({ notificationsEnabled }),
   setNotificationTrigger: (notificationTrigger) => set({ notificationTrigger }),
+  setShowActiveSessions: (showActiveSessions) => set({ showActiveSessions }),
   removeCustomModel: (id) => {
     const customModels = get().customModels.filter(m => m.id !== id);
     const defaultModelId = get().defaultModelId === id ? DEFAULT_MODEL_ID : get().defaultModelId;
