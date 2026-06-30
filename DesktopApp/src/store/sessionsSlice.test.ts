@@ -127,3 +127,18 @@ describe('refreshActivity', () => {
     expect(claudeTab?.kind === 'session' && claudeTab.linkedSessionId).toBe('real-claude-id');
   });
 });
+
+describe('sessionsSlice activeSessions', () => {
+  beforeEach(() => { useStore.setState({ activeSessions: [] }); });
+
+  it('refreshActiveSessions stores the fetched rows', async () => {
+    const rows = [{
+      sessionId: 'a', projectId: 1, projectName: 'P', title: 'T',
+      activity: 'running' as const, lastModified: 5, provider: 'claude' as const,
+    }];
+    const spy = vi.spyOn(tauri, 'listActiveSessions').mockResolvedValue(rows);
+    await useStore.getState().refreshActiveSessions();
+    expect(useStore.getState().activeSessions).toEqual(rows);
+    spy.mockRestore();
+  });
+});
