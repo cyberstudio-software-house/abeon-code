@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -101,6 +101,7 @@ export const tauri = {
   listAvailableShells: () => invoke<ShellInfo[]>('list_available_shells'),
   getProjectsActivity: () =>
     invoke<Record<number, number>>('get_projects_activity'),
+  listActiveSessions: () => invoke<ActiveSession[]>('list_active_sessions'),
   openInEditor: (projectPath: string, filePath: string, line?: number, col?: number) =>
     invoke<void>('open_in_editor', { projectPath, filePath, line, col }),
   listAvailableEditors: () => invoke<EditorInfo[]>('list_available_editors'),
