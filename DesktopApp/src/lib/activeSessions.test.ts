@@ -19,6 +19,7 @@ describe('buildActiveSessionRows', () => {
       new Set(),
       {},
       [project(1, '#abcdef')],
+      new Set(['run-old', 'wait', 'run-new']),
     );
     expect(rows.map(r => r.sessionId)).toEqual(['wait', 'run-new', 'run-old']);
   });
@@ -29,13 +30,14 @@ describe('buildActiveSessionRows', () => {
       new Set(['a']),
       {},
       [project(1, '#abcdef')],
+      new Set(['a']),
     );
     expect(rows).toHaveLength(1);
     expect(rows[0].attention).toBe(true);
   });
 
   it('attaches the project color', () => {
-    const rows = buildActiveSessionRows([active('a', 'running', 1)], new Set(), {}, [project(1, '#123456')]);
+    const rows = buildActiveSessionRows([active('a', 'running', 1)], new Set(), {}, [project(1, '#123456')], new Set(['a']));
     expect(rows[0].color).toBe('#123456');
   });
 
@@ -45,9 +47,32 @@ describe('buildActiveSessionRows', () => {
       new Set(['z']),
       { 1: { items: [sessionMeta('z', 1, 'idle')], hasMore: false } },
       [project(1, null)],
+      new Set(['z']),
     );
     expect(rows.map(r => r.sessionId)).toEqual(['z']);
     expect(rows[0].attention).toBe(true);
     expect(rows[0].provider).toBe('codex');
+  });
+
+  it('excludes sessions without an open tab, even waiting/attention ones', () => {
+    const rows = buildActiveSessionRows(
+      [active('a', 'waitingUser', 100)],
+      new Set(['a']),
+      {},
+      [project(1, '#abcdef')],
+      new Set(),
+    );
+    expect(rows).toEqual([]);
+  });
+
+  it('keeps only the open-tab subset when some sessions are open and others are not', () => {
+    const rows = buildActiveSessionRows(
+      [active('open', 'running', 100), active('closed', 'waitingUser', 200)],
+      new Set(),
+      {},
+      [project(1, '#abcdef')],
+      new Set(['open']),
+    );
+    expect(rows.map(r => r.sessionId)).toEqual(['open']);
   });
 });

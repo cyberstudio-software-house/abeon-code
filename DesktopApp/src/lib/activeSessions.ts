@@ -27,6 +27,7 @@ export function buildActiveSessionRows(
   attentionSessions: Set<string>,
   sessionsByProject: SessionsByProject,
   projects: Project[],
+  openSessionIds: Set<string>,
 ): ActiveSessionRow[] {
   const projById = new Map(projects.map(p => [p.id, p]));
   const colorFor = (projectId: number) => {
@@ -69,7 +70,7 @@ export function buildActiveSessionRows(
     }
   }
 
-  return [...byId.values()].sort(
-    (a, b) => urgencyRank(a) - urgencyRank(b) || b.lastModified - a.lastModified,
-  );
+  return [...byId.values()]
+    .filter(row => openSessionIds.has(row.sessionId))
+    .sort((a, b) => urgencyRank(a) - urgencyRank(b) || b.lastModified - a.lastModified);
 }

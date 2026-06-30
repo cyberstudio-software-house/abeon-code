@@ -13,13 +13,24 @@ export function ActiveSessionsPanel() {
   const attentionSessions = useStore(s => s.attentionSessions);
   const sessionsByProject = useStore(s => s.sessionsByProject);
   const projects = useStore(useShallow(s => s.projects));
+  const tabs = useStore(useShallow(s => s.tabs));
   const openTab = useStore(s => s.openSessionTab);
   const clearAttention = useStore(s => s.clearAttention);
   const [collapsed, setCollapsed] = useState(false);
 
+  const openSessionIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const t of tabs) {
+      if (t.kind !== 'session') continue;
+      ids.add(t.sessionId);
+      if (t.linkedSessionId) ids.add(t.linkedSessionId);
+    }
+    return ids;
+  }, [tabs]);
+
   const rows = useMemo(
-    () => buildActiveSessionRows(activeSessions, attentionSessions, sessionsByProject, projects),
-    [activeSessions, attentionSessions, sessionsByProject, projects],
+    () => buildActiveSessionRows(activeSessions, attentionSessions, sessionsByProject, projects, openSessionIds),
+    [activeSessions, attentionSessions, sessionsByProject, projects, openSessionIds],
   );
 
   if (!showActiveSessions || rows.length === 0) return null;
