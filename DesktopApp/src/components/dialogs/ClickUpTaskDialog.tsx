@@ -4,6 +4,7 @@ import { tauri } from '../../lib/tauri';
 import type { ClickUpTaskDetail } from '../../types/ClickUpTaskDetail';
 import { Icon } from '../shared/Icon';
 import { ClickUpSummaryDialog } from './ClickUpSummaryDialog';
+import { ClickUpTimeDialog } from './ClickUpTimeDialog';
 
 export function ClickUpTaskDialog({ projectId, taskId, onClose }: { projectId: number; taskId: string; onClose: () => void }) {
   const activeAgentPtyId = useStore(s => s.activeAgentPtyId);
@@ -12,6 +13,7 @@ export function ClickUpTaskDialog({ projectId, taskId, onClose }: { projectId: n
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [timeOpen, setTimeOpen] = useState(false);
 
   const load = async () => {
     setError(null);
@@ -112,10 +114,12 @@ export function ClickUpTaskDialog({ projectId, taskId, onClose }: { projectId: n
           <button disabled={busy} onClick={load} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg disabled:opacity-40">Odśwież</button>
           <div className="flex-1" />
           <button disabled={busy} onClick={() => setSummaryOpen(true)} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Generuj podsumowanie</button>
+          <button disabled={busy} onClick={() => setTimeOpen(true)} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Czas pracy</button>
           <button onClick={onUnlink} className="px-3 py-1.5 border border-border text-[12px] text-danger hover:text-danger">Odepnij</button>
         </div>
       </div>
       {summaryOpen && <ClickUpSummaryDialog projectId={projectId} taskId={taskId} onClose={() => setSummaryOpen(false)} />}
+      {timeOpen && <ClickUpTimeDialog projectId={projectId} taskId={taskId} onClose={() => setTimeOpen(false)} />}
     </div>
   );
 }

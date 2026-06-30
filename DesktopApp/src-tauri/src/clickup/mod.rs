@@ -87,6 +87,18 @@ impl ClickUpClient {
             .map_err(|e| ClickUpError::Offline(e.to_string()))?;
         Self::ok(resp).await.map(|_| ())
     }
+
+    pub async fn create_time_entry(&self, team_id: &str, task_id: &str, start_ms: i64, duration_ms: i64, description: &str)
+        -> Result<(), ClickUpError>
+    {
+        let resp = self.http
+            .post(self.url(&format!("/team/{team_id}/time_entries")))
+            .header("Authorization", &self.token)
+            .json(&serde_json::json!({ "tid": task_id, "start": start_ms, "duration": duration_ms, "description": description }))
+            .send().await
+            .map_err(|e| ClickUpError::Offline(e.to_string()))?;
+        Self::ok(resp).await.map(|_| ())
+    }
 }
 
 pub struct TaskInputRef { pub id: String, pub custom: bool }
@@ -382,5 +394,18 @@ mod tests {
             .mount(&server).await;
         let c = ClickUpClient::with_base("pk", server.uri());
         c.post_comment("t1", "done").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn create_time_entry_posts_to_team() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/team/111/time_entries"))
+            .and(wiremock::matchers::body_json(serde_json::json!({
+                "tid": "t1", "start": 1000, "duration": 600000, "description": "praca"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "data": {} })))
+            .mount(&server).await;
+        let c = ClickUpClient::with_base("pk", server.uri());
+        c.create_time_entry("111", "t1", 1000, 600_000, "praca").await.unwrap();
     }
 }

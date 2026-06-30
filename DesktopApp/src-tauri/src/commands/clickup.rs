@@ -306,6 +306,22 @@ pub async fn clickup_post_comment(state: State<'_, AppState>, task_id: String, t
     load_client(&state)?.post_comment(&task_id, &text).await.map_err(|e| AppError::Other(e.to_string()))
 }
 
+#[tauri::command]
+pub async fn clickup_log_time(
+    state: State<'_, AppState>, project_id: i64, task_id: String, duration_ms: i64, description: Option<String>,
+) -> AppResult<()> {
+    let workspace_id = {
+        let c = state.db.get()?;
+        clickup_config_repo::get(&c, project_id)?
+            .ok_or_else(|| AppError::Other("ClickUp: brak skonfigurowanego workspace".into()))?
+            .workspace_id
+    };
+    let start = now_ms() - duration_ms;
+    load_client(&state)?
+        .create_time_entry(&workspace_id, &task_id, start, duration_ms, description.as_deref().unwrap_or("")).await
+        .map_err(|e| AppError::Other(e.to_string()))
+}
+
 const IDLE_CAP_MS: i64 = 5 * 60 * 1000;
 
 fn block_ts(b: &HistoryBlock) -> i64 {

@@ -154,4 +154,6 @@ export const tauri = {
     invoke<void>('clickup_post_comment', { taskId, text }),
   clickupEstimateTime: (projectId: number, sessionId: string, provider?: Provider) =>
     invoke<TimeEstimate>('clickup_estimate_time', { projectId, sessionId, provider }),
+  clickupLogTime: (projectId: number, taskId: string, durationMs: number, description?: string) =>
+    invoke<void>('clickup_log_time', { projectId, taskId, durationMs, description }),
 };
