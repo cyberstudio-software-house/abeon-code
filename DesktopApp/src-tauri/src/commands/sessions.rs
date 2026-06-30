@@ -233,14 +233,28 @@ pub async fn generate_session_title(
         User's first prompt:\n<<<\n{truncated}\n>>>"
     );
 
-    match prov {
+    let raw = run_agent_prompt(prov, model, prompt, std::path::PathBuf::from(proj_path)).await?;
+    let cleaned = clean_title(&raw);
+    if cleaned.is_empty() {
+        return Err(AppError::Other("Pusta odpowiedź modelu".into()));
+    }
+    Ok(cleaned)
+}
+
+pub(crate) async fn run_agent_prompt(
+    provider: Provider,
+    model: Option<String>,
+    prompt: String,
+    cwd: std::path::PathBuf,
+) -> AppResult<String> {
+    match provider {
         Provider::Claude => {
             let mut cmd = tokio::process::Command::new("claude");
             cmd.arg("-p").arg("--no-session-persistence").arg(&prompt);
             if let Some(m) = &model {
                 if !m.is_empty() { cmd.arg("--model").arg(m); }
             }
-            cmd.current_dir(&proj_path);
+            cmd.current_dir(&cwd);
             cmd.kill_on_drop(true);
 
             let timeout = std::time::Duration::from_secs(60);
@@ -251,13 +265,7 @@ pub async fn generate_session_title(
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(AppError::Other(format!("claude -p failed: {}", stderr.trim())));
             }
-
-            let raw = String::from_utf8_lossy(&output.stdout);
-            let cleaned = clean_title(&raw);
-            if cleaned.is_empty() {
-                return Err(AppError::Other("Pusta odpowiedź z claude -p".into()));
-            }
-            Ok(cleaned)
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
         }
         Provider::Codex => {
             let out_file = std::env::temp_dir().join(format!("abeoncode-title-{}.txt", uuid::Uuid::new_v4()));
@@ -284,12 +292,7 @@ pub async fn generate_session_title(
             }
             let raw = std::fs::read_to_string(&out_file);
             let _ = std::fs::remove_file(&out_file);
-            let raw = raw.map_err(|e| AppError::Other(format!("codex exec: nie można odczytać pliku wyjściowego: {e}")))?;
-            let cleaned = clean_title(&raw);
-            if cleaned.is_empty() {
-                return Err(AppError::Other("Pusta odpowiedź z codex exec".into()));
-            }
-            Ok(cleaned)
+            raw.map_err(|e| AppError::Other(format!("codex exec: nie można odczytać pliku wyjściowego: {e}")))
         }
     }
 }
