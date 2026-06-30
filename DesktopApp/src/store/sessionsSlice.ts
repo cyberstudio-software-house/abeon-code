@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import { tauri } from '../lib/tauri';
-import type { SessionActivity, SessionMeta } from '../types';
+import type { SessionActivity, SessionMeta, ActiveSession } from '../types';
 import type { TabsSlice } from './tabsSlice';
 import type { AppState } from './index';
 
@@ -29,6 +29,8 @@ export type SessionsSlice = {
   markAttention: (sessionId: string) => void;
   clearAttention: (sessionId: string) => void;
   refreshActivity: (projectId: number) => Promise<void>;
+  activeSessions: ActiveSession[];
+  refreshActiveSessions: () => Promise<void>;
   scheduleNewSessionRefresh: (projectId: number) => void;
   startActivityPolling: () => void;
   stopActivityPolling: () => void;
@@ -50,6 +52,7 @@ export const selectSessionActivity =
 export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], [], SessionsSlice> = (set, get) => ({
   sessionsByProject: {},
   attentionSessions: new Set<string>(),
+  activeSessions: [],
   markAttention: (sessionId) => {
     const cur = get().attentionSessions;
     if (cur.has(sessionId)) return;
@@ -168,6 +171,15 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
       }
     }
   },
+  refreshActiveSessions: async () => {
+    if (!(get() as AppState).showActiveSessions) return;
+    try {
+      const items = await tauri.listActiveSessions();
+      set({ activeSessions: items });
+    } catch (err) {
+      console.error('[sessions] refreshActiveSessions failed', err);
+    }
+  },
   scheduleNewSessionRefresh: (projectId) => {
     for (const delay of NEW_SESSION_REFRESH_DELAYS_MS) {
       setTimeout(() => {
@@ -183,6 +195,7 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
         get().refreshActivity(pid).catch(() => {});
       }
       (get() as AppState).loadActivity().catch(() => {});
+      get().refreshActiveSessions().catch(() => {});
     };
     focusHandler = () => {
       clearPoll();

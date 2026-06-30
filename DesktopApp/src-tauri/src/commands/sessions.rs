@@ -1,7 +1,7 @@
 use std::panic;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
-use crate::domain::{Project, Provider, SessionMeta, SessionHistory};
+use crate::domain::{Project, Provider, SessionMeta, SessionHistory, SessionActivity, ActiveSession};
 use crate::error::{AppError, AppResult};
 use crate::sessions::encoding::encode_project_path;
 use crate::sessions::{codex, reader};
@@ -11,6 +11,7 @@ use crate::db::{projects_repo, session_titles_repo};
 use crate::domain::roster::RosterEntry;
 
 const ROSTER_SESSIONS_PER_PROJECT: usize = 30;
+const ACTIVE_SCAN_WINDOW: usize = 30;
 
 fn claude_root() -> AppResult<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home".into()))?;
@@ -36,6 +37,27 @@ fn catch<T, F: FnOnce() -> AppResult<T> + panic::UnwindSafe>(f: F) -> AppResult<
     }
 }
 
+fn list_project_sessions(
+    c: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+    proj: &Project,
+    window: usize,
+) -> AppResult<Vec<SessionMeta>> {
+    let dir = session_dir(proj)?;
+    let project_id = proj.id;
+    let claude = catch(move || reader::list_sessions(project_id, &dir, window, 0))?;
+    let codex_dir = codex::reader::codex_root()?;
+    let proj_path = proj.path.clone();
+    let codex_list = catch(move || Ok(codex::reader::list_for_cwd(&codex_dir, &proj_path, project_id, window)))?;
+    let mut sessions = merge_session_lists(claude, codex_list, window, 0);
+    let titles = session_titles_repo::get_all(c, project_id);
+    for s in &mut sessions {
+        if let Some(t) = titles.get(&s.id) {
+            s.title = t.clone();
+        }
+    }
+    Ok(sessions)
+}
+
 #[tauri::command]
 pub fn list_sessions(
     state: State<AppState>,
@@ -45,20 +67,9 @@ pub fn list_sessions(
 ) -> AppResult<Vec<SessionMeta>> {
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
-    let dir = session_dir(&proj)?;
     let window = offset + limit;
-    let claude = catch(move || reader::list_sessions(project_id, &dir, window, 0))?;
-    let codex_dir = codex::reader::codex_root()?;
-    let proj_path = proj.path.clone();
-    let codex_list = catch(move || Ok(codex::reader::list_for_cwd(&codex_dir, &proj_path, project_id, window)))?;
-    let mut sessions = merge_session_lists(claude, codex_list, limit, offset);
-    let titles = session_titles_repo::get_all(&c, project_id);
-    for s in &mut sessions {
-        if let Some(t) = titles.get(&s.id) {
-            s.title = t.clone();
-        }
-    }
-    Ok(sessions)
+    let sessions = list_project_sessions(&c, &proj, window)?;
+    Ok(sessions.into_iter().skip(offset).take(limit).collect())
 }
 
 #[tauri::command]
@@ -297,6 +308,22 @@ pub(crate) async fn run_agent_prompt(
     }
 }
 
+fn active_from_metas(project_id: i64, project_name: &str, sessions: Vec<SessionMeta>) -> Vec<ActiveSession> {
+    sessions
+        .into_iter()
+        .filter(|s| s.activity != SessionActivity::Idle)
+        .map(|s| ActiveSession {
+            session_id: s.id,
+            project_id,
+            project_name: project_name.to_string(),
+            title: s.title,
+            activity: s.activity,
+            last_modified: s.last_modified,
+            provider: s.provider,
+        })
+        .collect()
+}
+
 fn merge_session_lists(
     claude: Vec<SessionMeta>,
     codex: Vec<SessionMeta>,
@@ -376,6 +403,26 @@ pub fn roster_snapshot(conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnecti
     Ok(out)
 }
 
+pub fn active_sessions_snapshot(
+    c: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+) -> AppResult<Vec<ActiveSession>> {
+    let mut out = Vec::new();
+    for proj in projects_repo::list(c)? {
+        let sessions = match list_project_sessions(c, &proj, ACTIVE_SCAN_WINDOW) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        out.extend(active_from_metas(proj.id, &proj.name, sessions));
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn list_active_sessions(state: State<AppState>) -> AppResult<Vec<ActiveSession>> {
+    let c = state.db.get()?;
+    active_sessions_snapshot(&c)
+}
+
 /// Read the most-recent history blocks (chronological, capped by the reader at 500)
 /// for a session, locating its project by scanning known projects for the matching
 /// session file. Used by the remote bridge to answer RequestHistory. Returns empty
@@ -453,6 +500,23 @@ mod roster_tests {
         let blocks = history_blocks_for_session(&c, "no-such-session");
         assert!(blocks.is_empty());
     }
+
+    #[test]
+    fn active_sessions_snapshot_empty_db_is_empty() {
+        let p = pool();
+        let c = p.get().unwrap();
+        assert!(active_sessions_snapshot(&c).unwrap().is_empty());
+    }
+
+    #[test]
+    fn active_sessions_snapshot_aggregates_across_projects_without_error() {
+        let p = pool();
+        let c = p.get().unwrap();
+        projects_repo::insert(&c, "Alpha", "/tmp/abeon-active-snapshot-alpha", "-tmp-abeon-active-snapshot-alpha", None).unwrap();
+        projects_repo::insert(&c, "Beta", "/tmp/abeon-active-snapshot-beta", "-tmp-abeon-active-snapshot-beta", None).unwrap();
+        let rows = active_sessions_snapshot(&c).unwrap();
+        assert!(rows.is_empty());
+    }
 }
 
 #[cfg(test)]
@@ -466,5 +530,36 @@ mod title_tests {
         assert_eq!(clean_title(&long).chars().count(), 80);
         assert_eq!(clean_title("`tytuł`"), "tytuł");
         assert_eq!(clean_title("   \n  \n"), "");
+    }
+}
+
+#[cfg(test)]
+mod active_tests {
+    use super::*;
+    use crate::domain::{Provider, SessionActivity, SessionMeta};
+
+    fn meta(id: &str, provider: Provider, activity: SessionActivity) -> SessionMeta {
+        SessionMeta {
+            id: id.into(), project_id: 7, title: format!("title-{id}"), message_count: 1,
+            last_modified: 100, git_branch: None, cwd: None, activity, provider,
+        }
+    }
+
+    #[test]
+    fn active_from_metas_drops_idle_keeps_both_providers() {
+        let metas = vec![
+            meta("a", Provider::Claude, SessionActivity::Running),
+            meta("b", Provider::Codex, SessionActivity::WaitingUser),
+            meta("c", Provider::Claude, SessionActivity::Idle),
+            meta("d", Provider::Codex, SessionActivity::WaitingTool),
+        ];
+        let rows = active_from_metas(7, "Proj", metas);
+        let ids: Vec<&str> = rows.iter().map(|r| r.session_id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "d"]);
+        assert!(rows.iter().all(|r| r.project_id == 7 && r.project_name == "Proj"));
+        assert_eq!(rows[1].provider, Provider::Codex);
+        assert_eq!(rows[0].title, "title-a");
+        assert_eq!(rows[0].activity, SessionActivity::Running);
+        assert_eq!(rows[0].last_modified, 100);
     }
 }

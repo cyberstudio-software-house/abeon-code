@@ -32,6 +32,21 @@ pub struct SessionMeta {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct ActiveSession {
+    pub session_id: String,
+    #[ts(type = "number")]
+    pub project_id: i64,
+    pub project_name: String,
+    pub title: String,
+    pub activity: SessionActivity,
+    #[ts(type = "number")]
+    pub last_modified: i64,
+    pub provider: Provider,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum HistoryBlock {
     UserText {

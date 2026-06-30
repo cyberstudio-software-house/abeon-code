@@ -74,6 +74,7 @@ pub fn run() {
             commands::cli::take_pending_open_paths,
             commands::cli::install_cli_command,
             commands::sessions::list_sessions,
+            commands::sessions::list_active_sessions,
             commands::sessions::read_session_history,
             commands::sessions::open_session_watch,
             commands::sessions::close_session_watch,
