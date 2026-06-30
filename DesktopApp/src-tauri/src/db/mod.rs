@@ -9,10 +9,13 @@ pub mod projects_repo;
 pub mod actions_repo;
 pub mod session_titles_repo;
 pub mod settings_repo;
+pub mod clickup_config_repo;
+pub mod clickup_links_repo;
 
 const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/002_session_titles.sql");
 const MIGRATION_003: &str = include_str!("migrations/003_action_pre_command.sql");
+const MIGRATION_004: &str = include_str!("migrations/004_clickup.sql");
 
 pub fn db_path() -> AppResult<PathBuf> {
     let mut dir = dirs::config_dir().ok_or_else(|| AppError::Other("no config dir".into()))?;
@@ -39,6 +42,7 @@ fn run_migrations(pool: &DbPool) -> AppResult<()> {
     ).unwrap_or(0);
     if v < 2 { conn.execute_batch(MIGRATION_002)?; }
     if v < 3 { conn.execute_batch(MIGRATION_003)?; }
+    if v < 4 { conn.execute_batch(MIGRATION_004)?; }
     Ok(())
 }
 
