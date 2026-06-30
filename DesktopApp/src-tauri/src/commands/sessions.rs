@@ -36,6 +36,27 @@ fn catch<T, F: FnOnce() -> AppResult<T> + panic::UnwindSafe>(f: F) -> AppResult<
     }
 }
 
+fn list_project_sessions(
+    c: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+    proj: &Project,
+    window: usize,
+) -> AppResult<Vec<SessionMeta>> {
+    let dir = session_dir(proj)?;
+    let project_id = proj.id;
+    let claude = catch(move || reader::list_sessions(project_id, &dir, window, 0))?;
+    let codex_dir = codex::reader::codex_root()?;
+    let proj_path = proj.path.clone();
+    let codex_list = catch(move || Ok(codex::reader::list_for_cwd(&codex_dir, &proj_path, project_id, window)))?;
+    let mut sessions = merge_session_lists(claude, codex_list, window, 0);
+    let titles = session_titles_repo::get_all(c, project_id);
+    for s in &mut sessions {
+        if let Some(t) = titles.get(&s.id) {
+            s.title = t.clone();
+        }
+    }
+    Ok(sessions)
+}
+
 #[tauri::command]
 pub fn list_sessions(
     state: State<AppState>,
@@ -45,20 +66,9 @@ pub fn list_sessions(
 ) -> AppResult<Vec<SessionMeta>> {
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
-    let dir = session_dir(&proj)?;
     let window = offset + limit;
-    let claude = catch(move || reader::list_sessions(project_id, &dir, window, 0))?;
-    let codex_dir = codex::reader::codex_root()?;
-    let proj_path = proj.path.clone();
-    let codex_list = catch(move || Ok(codex::reader::list_for_cwd(&codex_dir, &proj_path, project_id, window)))?;
-    let mut sessions = merge_session_lists(claude, codex_list, limit, offset);
-    let titles = session_titles_repo::get_all(&c, project_id);
-    for s in &mut sessions {
-        if let Some(t) = titles.get(&s.id) {
-            s.title = t.clone();
-        }
-    }
-    Ok(sessions)
+    let sessions = list_project_sessions(&c, &proj, window)?;
+    Ok(sessions.into_iter().skip(offset).take(limit).collect())
 }
 
 #[tauri::command]
