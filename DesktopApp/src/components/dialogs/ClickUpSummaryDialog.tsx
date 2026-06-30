@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
 import { selectActiveSession } from '../../store/tabsSlice';
 import { tauri } from '../../lib/tauri';
 
 export function ClickUpSummaryDialog({ projectId, taskId, onClose }: { projectId: number; taskId: string; onClose: () => void }) {
-  const activeSession = useStore(selectActiveSession);
+  const activeSession = useStore(useShallow(selectActiveSession));
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
