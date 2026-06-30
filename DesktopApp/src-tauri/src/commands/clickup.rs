@@ -301,6 +301,11 @@ pub async fn clickup_generate_summary(
     Ok(trimmed)
 }
 
+#[tauri::command]
+pub async fn clickup_post_comment(state: State<'_, AppState>, task_id: String, text: String) -> AppResult<()> {
+    load_client(&state)?.post_comment(&task_id, &text).await.map_err(|e| AppError::Other(e.to_string()))
+}
+
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)

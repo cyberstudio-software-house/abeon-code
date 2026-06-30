@@ -36,6 +36,14 @@ export type TabsSlice = {
 
 const sessionTabId = (sessionId: string) => `session:${sessionId}`;
 
+export function selectActiveSession(
+  state: Pick<TabsSlice, 'tabs' | 'activeTabId'>,
+): { sessionId: string; provider: Provider } | null {
+  const tab = state.tabs.find(t => t.id === state.activeTabId);
+  if (!tab || tab.kind !== 'session') return null;
+  return { sessionId: tab.linkedSessionId ?? tab.sessionId, provider: tab.provider ?? 'claude' };
+}
+
 export function sessionTabFromMode(mode: WindowMode): Extract<Tab, { kind: 'session' }> {
   return {
     kind: 'session',

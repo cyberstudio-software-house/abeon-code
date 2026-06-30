@@ -128,6 +128,7 @@ pub fn run() {
             commands::clickup::clickup_link_task,
             commands::clickup::clickup_write_task_file,
             commands::clickup::clickup_generate_summary,
+            commands::clickup::clickup_post_comment,
             commands::notifications::install_attention_hook,
             commands::notifications::uninstall_attention_hook,
             commands::notifications::attention_hook_status,

@@ -77,6 +77,16 @@ impl ClickUpClient {
         let r: TeamsResponse = self.get_json("/team").await?;
         Ok(r.teams.into_iter().map(|t| ClickUpWorkspace { id: t.id, name: t.name }).collect())
     }
+
+    pub async fn post_comment(&self, task_id: &str, text: &str) -> Result<(), ClickUpError> {
+        let resp = self.http
+            .post(self.url(&format!("/task/{task_id}/comment")))
+            .header("Authorization", &self.token)
+            .json(&serde_json::json!({ "comment_text": text }))
+            .send().await
+            .map_err(|e| ClickUpError::Offline(e.to_string()))?;
+        Self::ok(resp).await.map(|_| ())
+    }
 }
 
 pub struct TaskInputRef { pub id: String, pub custom: bool }
@@ -361,5 +371,16 @@ mod tests {
         assert_eq!(r[0].id, "t1");
         assert_eq!(r[0].name, "Alpha");
         assert_eq!(r[0].status.as_deref(), Some("open"));
+    }
+
+    #[tokio::test]
+    async fn post_comment_sends_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST")).and(path("/task/t1/comment"))
+            .and(wiremock::matchers::body_json(serde_json::json!({ "comment_text": "done" })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": "c1" })))
+            .mount(&server).await;
+        let c = ClickUpClient::with_base("pk", server.uri());
+        c.post_comment("t1", "done").await.unwrap();
     }
 }
