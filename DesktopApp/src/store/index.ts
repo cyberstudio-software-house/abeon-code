@@ -5,6 +5,7 @@ import { createSessionsSlice, type SessionsSlice } from './sessionsSlice';
 import { createTabsSlice, type TabsSlice } from './tabsSlice';
 import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 import { createGitSlice, type GitSlice } from './gitSlice';
+import { createClickUpSlice, type ClickUpSlice } from './clickupSlice';
 import { tauri } from '../lib/tauri';
 import { parseWindowMode } from '../lib/windowMode';
 import { sessionTabFromMode } from './tabsSlice';
@@ -14,7 +15,7 @@ const windowMode = parseWindowMode(window.location.search);
 import type { Provider } from '../types';
 import { isProvider } from '../lib/providers';
 
-export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice;
+export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice;
 
 export const useStore = create<AppState>()((...a) => ({
   ...createSettingsSlice(...a),
@@ -23,6 +24,7 @@ export const useStore = create<AppState>()((...a) => ({
   ...createTabsSlice(...a),
   ...createActionsSlice(...a),
   ...createGitSlice(...a),
+  ...createClickUpSlice(...a),
 }));
 
 const PERSIST_KEY = 'abeoncode.settings';
