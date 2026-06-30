@@ -6,6 +6,7 @@ import { selectSortedProjects } from '../../store/projectsSlice';
 import { ProjectItem } from './ProjectItem';
 import { SidebarFooter } from './SidebarFooter';
 import { SortMenu } from './SortMenu';
+import { ActiveSessionsPanel } from './ActiveSessionsPanel';
 import { Icon } from '../shared/Icon';
 import { Kbd } from '../shared/Kbd';
 import { AddProjectDialog } from '../dialogs/AddProjectDialog';
@@ -15,6 +16,7 @@ export function Sidebar() {
   const projects = useStore(useShallow(selectSortedProjects));
   const load = useStore(s => s.loadProjects);
   const loadActivity = useStore(s => s.loadActivity);
+  const refreshActiveSessions = useStore(s => s.refreshActiveSessions);
   const [query, setQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -25,13 +27,14 @@ export function Sidebar() {
   // Load activity on mount + refresh when the window regains focus.
   useEffect(() => {
     loadActivity();
+    refreshActiveSessions();
     let unlisten: (() => void) | null = null;
     const win = getCurrentWebviewWindow();
     win.onFocusChanged(({ payload: focused }) => {
-      if (focused) loadActivity();
+      if (focused) { loadActivity(); refreshActiveSessions(); }
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
-  }, [loadActivity]);
+  }, [loadActivity, refreshActiveSessions]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const overrides = useStore.getState().shortcutOverrides;
@@ -84,6 +87,8 @@ export function Sidebar() {
         />
         <Kbd>{searchBinding}</Kbd>
       </div>
+
+      <ActiveSessionsPanel />
 
       <ul className="mt-3 space-y-0.5 overflow-y-auto scroll-thin flex-1 pb-3">
         {filtered.length === 0 && <li className="text-muted text-[12px] px-2.5">— pusto —</li>}
