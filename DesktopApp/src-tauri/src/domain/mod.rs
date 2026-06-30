@@ -9,6 +9,7 @@ pub mod model;
 pub mod session_event;
 pub mod roster;
 pub mod provider;
+pub mod clickup;
 
 pub use project::*;
 pub use action::*;
