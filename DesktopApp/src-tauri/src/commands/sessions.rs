@@ -11,6 +11,7 @@ use crate::db::{projects_repo, session_titles_repo};
 use crate::domain::roster::RosterEntry;
 
 const ROSTER_SESSIONS_PER_PROJECT: usize = 30;
+const ACTIVE_SCAN_WINDOW: usize = 30;
 
 fn claude_root() -> AppResult<PathBuf> {
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home".into()))?;
@@ -399,6 +400,26 @@ pub fn roster_snapshot(conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnecti
     Ok(out)
 }
 
+pub fn active_sessions_snapshot(
+    c: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+) -> AppResult<Vec<ActiveSession>> {
+    let mut out = Vec::new();
+    for proj in projects_repo::list(c)? {
+        let sessions = match list_project_sessions(c, &proj, ACTIVE_SCAN_WINDOW) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        out.extend(active_from_metas(proj.id, &proj.name, sessions));
+    }
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn list_active_sessions(state: State<AppState>) -> AppResult<Vec<ActiveSession>> {
+    let c = state.db.get()?;
+    active_sessions_snapshot(&c)
+}
+
 /// Read the most-recent history blocks (chronological, capped by the reader at 500)
 /// for a session, locating its project by scanning known projects for the matching
 /// session file. Used by the remote bridge to answer RequestHistory. Returns empty
@@ -475,6 +496,13 @@ mod roster_tests {
         let c = p.get().unwrap();
         let blocks = history_blocks_for_session(&c, "no-such-session");
         assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn active_sessions_snapshot_empty_db_is_empty() {
+        let p = pool();
+        let c = p.get().unwrap();
+        assert!(active_sessions_snapshot(&c).unwrap().is_empty());
     }
 }
 
