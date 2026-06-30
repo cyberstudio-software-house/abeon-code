@@ -4,7 +4,7 @@ use crate::clickup::{classify_query, parse_task_input, ClickUpClient, QueryKind}
 use crate::db::{clickup_config_repo, clickup_links_repo, projects_repo, settings_repo};
 use crate::domain::clickup::{
     ClickUpConnectionStatus, ClickUpLink, ClickUpList, ClickUpProjectConfig, ClickUpSpace,
-    ClickUpTaskDetail, ClickUpTaskRef, ClickUpWorkspace,
+    ClickUpTaskDetail, ClickUpTaskRef, ClickUpWorkspace, TimeEstimate,
 };
 use crate::domain::{HistoryBlock, Provider};
 use crate::error::{AppError, AppResult};
@@ -306,6 +306,69 @@ pub async fn clickup_post_comment(state: State<'_, AppState>, task_id: String, t
     load_client(&state)?.post_comment(&task_id, &text).await.map_err(|e| AppError::Other(e.to_string()))
 }
 
+const IDLE_CAP_MS: i64 = 5 * 60 * 1000;
+
+fn block_ts(b: &HistoryBlock) -> i64 {
+    match b {
+        HistoryBlock::UserText { timestamp, .. }
+        | HistoryBlock::AssistantText { timestamp, .. }
+        | HistoryBlock::AssistantThinking { timestamp, .. }
+        | HistoryBlock::ToolUse { timestamp, .. }
+        | HistoryBlock::ToolResult { timestamp, .. }
+        | HistoryBlock::Attachment { timestamp, .. }
+        | HistoryBlock::System { timestamp, .. } => *timestamp,
+    }
+}
+
+fn active_session_ms(blocks: &[HistoryBlock], idle_cap_ms: i64) -> i64 {
+    let mut ts: Vec<i64> = blocks.iter().map(block_ts).collect();
+    ts.sort_unstable();
+    ts.windows(2).map(|w| (w[1] - w[0]).clamp(0, idle_cap_ms)).sum()
+}
+
+fn parse_minutes(raw: &str) -> Option<i64> {
+    let mut digits = String::new();
+    for ch in raw.chars() {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+        } else if !digits.is_empty() {
+            break;
+        }
+    }
+    digits.parse().ok()
+}
+
+fn build_time_prompt(blocks: &[HistoryBlock]) -> String {
+    let prompt_body = build_summary_prompt(blocks);
+    format!(
+        "Poniżej zapis sesji programistycznej. Oszacuj, ile MINUT zajęłoby wykonanie tej pracy RĘCZNIE doświadczonemu programiście (bez asystenta AI).\n\
+        Odpowiedz wyłącznie liczbą całkowitą minut — bez słów, bez jednostek.\n\n{prompt_body}"
+    )
+}
+
+#[tauri::command]
+pub async fn clickup_estimate_time(
+    state: State<'_, AppState>, project_id: i64, session_id: String, provider: Option<Provider>,
+) -> AppResult<TimeEstimate> {
+    let prov = provider.unwrap_or(Provider::Claude);
+    let (proj_path, blocks) = {
+        let c = state.db.get()?;
+        let path = projects_repo::get(&c, project_id)?.path;
+        let blocks = crate::commands::sessions::history_blocks_for_session(&c, &session_id);
+        (path, blocks)
+    };
+    if blocks.is_empty() {
+        return Err(AppError::Other("Sesja nie zawiera historii".into()));
+    }
+    let session_ms = active_session_ms(&blocks, IDLE_CAP_MS);
+    let prompt = build_time_prompt(&blocks);
+    let raw = crate::commands::sessions::run_agent_prompt(
+        prov, None, prompt, std::path::PathBuf::from(proj_path),
+    ).await?;
+    let dev_minutes = parse_minutes(&raw).unwrap_or((session_ms / 60_000).max(1));
+    Ok(TimeEstimate { session_ms, dev_estimate_ms: dev_minutes * 60_000 })
+}
+
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
@@ -393,5 +456,20 @@ mod tests {
         let p = build_summary_prompt(&blocks);
         assert!(p.contains("dodaj logowanie"));
         assert!(p.to_lowercase().contains("podsumowanie"));
+    }
+
+    #[test]
+    fn active_session_ms_caps_idle_gaps() {
+        use crate::domain::HistoryBlock;
+        let b = |ts: i64| HistoryBlock::UserText { uuid: ts.to_string(), timestamp: ts, text: "x".into() };
+        let blocks = vec![b(0), b(60_000), b(60_000 + 3_600_000)];
+        assert_eq!(active_session_ms(&blocks, 5 * 60 * 1000), 60_000 + 5 * 60 * 1000);
+    }
+
+    #[test]
+    fn parse_minutes_reads_first_integer() {
+        assert_eq!(parse_minutes("Około 90 minut"), Some(90));
+        assert_eq!(parse_minutes("120"), Some(120));
+        assert_eq!(parse_minutes("brak"), None);
     }
 }

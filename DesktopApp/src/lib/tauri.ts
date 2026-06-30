@@ -10,6 +10,7 @@ import type { ClickUpProjectConfig } from '../types/ClickUpProjectConfig';
 import type { ClickUpLink } from '../types/ClickUpLink';
 import type { ClickUpTaskRef } from '../types/ClickUpTaskRef';
 import type { ClickUpTaskDetail } from '../types/ClickUpTaskDetail';
+import type { TimeEstimate } from '../types/TimeEstimate';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -151,4 +152,6 @@ export const tauri = {
     invoke<string>('clickup_generate_summary', { projectId, sessionId, provider }),
   clickupPostComment: (taskId: string, text: string) =>
     invoke<void>('clickup_post_comment', { taskId, text }),
+  clickupEstimateTime: (projectId: number, sessionId: string, provider?: Provider) =>
+    invoke<TimeEstimate>('clickup_estimate_time', { projectId, sessionId, provider }),
 };
