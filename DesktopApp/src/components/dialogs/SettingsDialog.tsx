@@ -9,6 +9,7 @@ import { BUILTIN_MODELS, detectedClaudeModels, getModelDisplayLabel, type Effort
 import type { ThemeMode } from '../../styles/theme';
 import { tauri } from '../../lib/tauri';
 import type { ShellInfo, EditorInfo, DetectedModel, ProviderInfo } from '../../types';
+import type { ClickUpConnectionStatus } from '../../types/ClickUpConnectionStatus';
 import { ALL_PROVIDERS, PROVIDER_LABEL, PROVIDER_ICON } from '../../lib/providers';
 import {
   SHORTCUTS, FIXED_SHORTCUTS, getBinding, formatBinding, eventToBinding,
@@ -25,7 +26,7 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: 'Systemowy' },
 ];
 
-type SettingsTab = 'general' | 'cli' | 'models' | 'shortcuts' | 'cloud';
+type SettingsTab = 'general' | 'cli' | 'models' | 'shortcuts' | 'cloud' | 'clickup';
 
 const EFFORT_OPTIONS: { value: EffortLevel; label: string }[] = [
   { value: 'low', label: 'Niski' },
@@ -62,6 +63,7 @@ export function SettingsDialog() {
           <TabButton active={tab === 'models'} onClick={() => setTab('models')}>Modele</TabButton>
           <TabButton active={tab === 'shortcuts'} onClick={() => setTab('shortcuts')}>Skróty</TabButton>
           <TabButton active={tab === 'cloud'} onClick={() => setTab('cloud')}>Cloud</TabButton>
+          <TabButton active={tab === 'clickup'} onClick={() => setTab('clickup')}>ClickUp</TabButton>
         </div>
 
         <div className="flex-1 min-h-0 overflow-auto p-5">
@@ -70,6 +72,7 @@ export function SettingsDialog() {
           {tab === 'models' && <ModelsTab />}
           {tab === 'shortcuts' && <ShortcutsTab />}
           {tab === 'cloud' && <CloudTab />}
+          {tab === 'clickup' && <ClickUpTab />}
         </div>
       </div>
     </div>
@@ -662,6 +665,57 @@ function CloudTab() {
 
       {pairingOpen && <PairingDialog onClose={() => setPairingOpen(false)} />}
     </div>
+  );
+}
+
+export function ClickUpTab() {
+  const [token, setToken] = useState('');
+  const [status, setStatus] = useState<ClickUpConnectionStatus>('absent');
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setStatus(await tauri.clickupConnectionStatus());
+  }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  const save = async () => {
+    setBusy(true);
+    try { await tauri.clickupSetToken(token); setToken(''); await refresh(); }
+    finally { setBusy(false); }
+  };
+  const clear = async () => {
+    setBusy(true);
+    try { await tauri.clickupClearToken(); await refresh(); }
+    finally { setBusy(false); }
+  };
+
+  const label =
+    status === 'configured' ? 'Połączono' :
+    status === 'invalid' ? 'Token nieprawidłowy' : 'Brak tokenu';
+
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-[10px] text-muted font-medium uppercase tracking-wider">CLICKUP</span>
+        <span className="text-[11px] text-fg-secondary">{label}</span>
+      </div>
+      <input
+        type="password"
+        value={token}
+        onChange={e => setToken(e.target.value)}
+        placeholder="pk_..."
+        className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] font-mono placeholder:text-muted/60"
+      />
+      <div className="flex gap-2">
+        <button disabled={busy || !token.trim()} onClick={save}
+          className="px-3 py-1.5 bg-fg text-bg text-[12px] font-medium disabled:opacity-50">Zapisz token</button>
+        <button disabled={busy} onClick={refresh}
+          className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Testuj połączenie</button>
+        <button disabled={busy} onClick={clear}
+          className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Usuń token</button>
+      </div>
+      <p className="text-[11px] text-muted">Token wygenerujesz w ClickUp: Settings → Apps → API Token.</p>
+    </section>
   );
 }
 
