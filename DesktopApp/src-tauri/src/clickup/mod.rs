@@ -1,5 +1,7 @@
 use serde::Deserialize;
-use crate::domain::clickup::ClickUpWorkspace;
+use crate::domain::clickup::{
+    ClickUpAttachment, ClickUpComment, ClickUpList, ClickUpSpace, ClickUpTaskDetail, ClickUpWorkspace,
+};
 
 const DEFAULT_BASE: &str = "https://api.clickup.com/api/v2";
 
@@ -76,6 +78,108 @@ impl ClickUpClient {
     }
 }
 
+pub struct TaskInputRef { pub id: String, pub custom: bool }
+
+fn looks_custom(s: &str) -> bool {
+    s.contains('-') && s.chars().next().map_or(false, |c| c.is_ascii_alphabetic())
+}
+
+pub fn parse_task_input(input: &str) -> TaskInputRef {
+    let t = input.trim();
+    if let Some(idx) = t.find("/t/") {
+        let rest = &t[idx + 3..];
+        let seg: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+        if seg.len() >= 2 {
+            return TaskInputRef { id: seg[1].to_string(), custom: true };
+        }
+        if let Some(one) = seg.first() {
+            return TaskInputRef { id: (*one).to_string(), custom: looks_custom(one) };
+        }
+    }
+    TaskInputRef { id: t.to_string(), custom: looks_custom(t) }
+}
+
+#[derive(Deserialize)] struct NamedDto { id: String, name: String }
+#[derive(Deserialize)] struct SpacesResponse { spaces: Vec<NamedDto> }
+#[derive(Deserialize)] struct ListsResponse { lists: Vec<NamedDto> }
+#[derive(Deserialize)] struct FoldersResponse { folders: Vec<FolderDto> }
+#[derive(Deserialize)] struct FolderDto { lists: Vec<NamedDto> }
+
+#[derive(Deserialize)] struct StatusDto { status: String }
+#[derive(Deserialize)] struct AttachmentDto { id: String, #[serde(default)] title: Option<String>, #[serde(default)] url: Option<String> }
+#[derive(Deserialize)]
+struct TaskDto {
+    id: String,
+    #[serde(default)] custom_id: Option<String>,
+    name: String,
+    #[serde(default)] description: Option<String>,
+    #[serde(default)] markdown_description: Option<String>,
+    #[serde(default)] text_content: Option<String>,
+    #[serde(default)] status: Option<StatusDto>,
+    #[serde(default)] url: Option<String>,
+    #[serde(default)] attachments: Vec<AttachmentDto>,
+}
+#[derive(Deserialize)] struct CommentsResponse { comments: Vec<CommentDto> }
+#[derive(Deserialize)] struct CommentDto {
+    id: String,
+    #[serde(default)] comment_text: String,
+    #[serde(default)] user: Option<UserDto>,
+    #[serde(default)] date: Option<String>,
+}
+#[derive(Deserialize)] struct UserDto { #[serde(default)] username: Option<String> }
+
+impl ClickUpClient {
+    pub async fn list_spaces(&self, workspace_id: &str) -> Result<Vec<ClickUpSpace>, ClickUpError> {
+        let r: SpacesResponse = self.get_json(&format!("/team/{workspace_id}/space")).await?;
+        Ok(r.spaces.into_iter().map(|s| ClickUpSpace { id: s.id, name: s.name }).collect())
+    }
+
+    pub async fn list_lists(&self, space_id: &str) -> Result<Vec<ClickUpList>, ClickUpError> {
+        let mut out: Vec<ClickUpList> = Vec::new();
+        let folderless: ListsResponse = self.get_json(&format!("/space/{space_id}/list")).await?;
+        out.extend(folderless.lists.into_iter().map(|l| ClickUpList { id: l.id, name: l.name }));
+        let folders: FoldersResponse = self.get_json(&format!("/space/{space_id}/folder")).await?;
+        for f in folders.folders {
+            out.extend(f.lists.into_iter().map(|l| ClickUpList { id: l.id, name: l.name }));
+        }
+        Ok(out)
+    }
+
+    pub async fn get_task_detail(&self, id: &str, custom: bool, team_id: Option<&str>)
+        -> Result<ClickUpTaskDetail, ClickUpError>
+    {
+        let q = if custom {
+            format!("?custom_task_ids=true&team_id={}", team_id.unwrap_or(""))
+        } else { String::new() };
+        let t: TaskDto = self.get_json(&format!("/task/{id}{q}")).await?;
+        let comments: CommentsResponse = self.get_json(&format!("/task/{id}/comment{q}")).await?;
+        let description = t.markdown_description
+            .filter(|s| !s.is_empty())
+            .or(t.description)
+            .or(t.text_content)
+            .unwrap_or_default();
+        Ok(ClickUpTaskDetail {
+            id: t.id,
+            custom_id: t.custom_id,
+            name: t.name,
+            description,
+            status: t.status.map(|s| s.status),
+            url: t.url.unwrap_or_default(),
+            attachments: t.attachments.into_iter().map(|a| ClickUpAttachment {
+                id: a.id,
+                title: a.title.unwrap_or_else(|| "(załącznik)".into()),
+                url: a.url.unwrap_or_default(),
+            }).collect(),
+            comments: comments.comments.into_iter().map(|c| ClickUpComment {
+                id: c.id,
+                user: c.user.and_then(|u| u.username).unwrap_or_else(|| "?".into()),
+                text: c.comment_text,
+                date: c.date.and_then(|d| d.parse().ok()).unwrap_or(0),
+            }).collect(),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,5 +232,67 @@ mod tests {
             .mount(&server).await;
         let client = ClickUpClient::with_base("pk_test", server.uri());
         assert!(matches!(client.list_workspaces().await.unwrap_err(), ClickUpError::RateLimited));
+    }
+
+    #[test]
+    fn parse_plain_id() {
+        let r = parse_task_input("868abc12");
+        assert_eq!(r.id, "868abc12");
+        assert!(!r.custom);
+    }
+    #[test]
+    fn parse_custom_id() {
+        let r = parse_task_input("CU-123");
+        assert_eq!(r.id, "CU-123");
+        assert!(r.custom);
+    }
+    #[test]
+    fn parse_url_with_team_and_custom() {
+        let r = parse_task_input("https://app.clickup.com/t/9008/CU-123");
+        assert_eq!(r.id, "CU-123");
+        assert!(r.custom);
+    }
+    #[test]
+    fn parse_url_plain() {
+        let r = parse_task_input("https://app.clickup.com/t/868abc12");
+        assert_eq!(r.id, "868abc12");
+        assert!(!r.custom);
+    }
+
+    #[tokio::test]
+    async fn list_spaces_parses() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/team/111/space"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "spaces": [ { "id": "s1", "name": "Space 1" } ]
+            }))).mount(&server).await;
+        let c = ClickUpClient::with_base("pk", server.uri());
+        let s = c.list_spaces("111").await.unwrap();
+        assert_eq!(s[0].name, "Space 1");
+    }
+
+    #[tokio::test]
+    async fn get_task_detail_maps_description_status_attachments_and_comments() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/task/868abc12"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": "868abc12", "custom_id": "CU-9", "name": "Fix bug",
+                "markdown_description": "## do it",
+                "status": { "status": "in progress" },
+                "url": "https://app.clickup.com/t/868abc12",
+                "attachments": [ { "id": "a1", "title": "log.txt", "url": "https://files/a1" } ]
+            }))).mount(&server).await;
+        Mock::given(method("GET")).and(path("/task/868abc12/comment"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "comments": [ { "id": "c1", "comment_text": "hi", "user": { "username": "ann" }, "date": "1700000000000" } ]
+            }))).mount(&server).await;
+        let c = ClickUpClient::with_base("pk", server.uri());
+        let d = c.get_task_detail("868abc12", false, None).await.unwrap();
+        assert_eq!(d.name, "Fix bug");
+        assert_eq!(d.description, "## do it");
+        assert_eq!(d.status.as_deref(), Some("in progress"));
+        assert_eq!(d.attachments[0].title, "log.txt");
+        assert_eq!(d.comments[0].user, "ann");
+        assert_eq!(d.comments[0].date, 1_700_000_000_000);
     }
 }
