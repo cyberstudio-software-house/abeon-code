@@ -15,6 +15,7 @@ export function ProjectLauncher() {
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectedRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -33,6 +34,10 @@ export function ProjectLauncher() {
     setIndex(0);
     inputRef.current?.focus();
   }, [open]);
+
+  useLayoutEffect(() => {
+    selectedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [index, query]);
 
   if (!open) return null;
 
@@ -90,6 +95,7 @@ export function ProjectLauncher() {
             return (
               <div
                 key={p.id}
+                ref={isSelected ? selectedRef : undefined}
                 onMouseEnter={() => setIndex(i)}
                 onMouseDown={e => { e.stopPropagation(); launch(p.id, false); }}
                 className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer select-none ${isSelected ? 'text-fg' : 'text-muted'}`}

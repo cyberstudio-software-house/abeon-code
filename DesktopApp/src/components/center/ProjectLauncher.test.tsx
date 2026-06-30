@@ -3,6 +3,8 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { useStore } from '../../store';
 import { ProjectLauncher } from './ProjectLauncher';
 
+Element.prototype.scrollIntoView = vi.fn();
+
 const openSession = vi.fn();
 const openTerminal = vi.fn();
 
@@ -86,5 +88,22 @@ describe('ProjectLauncher', () => {
     open();
     fireEvent.keyDown(screen.getByPlaceholderText('Szukaj projektu…'), { key: 'Escape' });
     expect(screen.queryByPlaceholderText('Szukaj projektu…')).toBeNull();
+  });
+
+  it('clicking a project row starts a new session for that project', () => {
+    render(<ProjectLauncher />);
+    open();
+    fireEvent.mouseDown(screen.getByText('beta'));
+    expect(openSession).toHaveBeenCalledWith(2);
+  });
+
+  it('clicking the backdrop closes the overlay without launching', () => {
+    render(<ProjectLauncher />);
+    open();
+    const backdrop = screen.getByPlaceholderText('Szukaj projektu…').closest('.fixed');
+    fireEvent.mouseDown(backdrop!);
+    expect(screen.queryByPlaceholderText('Szukaj projektu…')).toBeNull();
+    expect(openSession).not.toHaveBeenCalled();
+    expect(openTerminal).not.toHaveBeenCalled();
   });
 });
