@@ -17,6 +17,8 @@ export type TabsSlice = {
   mruOrder: string[];
   navHistory: string[];
   navIndex: number;
+  activeAgentPtyId: string | null;
+  setActiveAgentPtyId: (id: string | null) => void;
   openSessionTab: (projectId: number, sessionId: string, title: string, provider?: Provider) => void;
   openNewSessionTab: (projectId: number) => void;
   openNewTerminalTab: (projectId: number) => void;
@@ -61,6 +63,8 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
   mruOrder: [],
   navHistory: [],
   navIndex: 0,
+  activeAgentPtyId: null,
+  setActiveAgentPtyId: (id) => set({ activeAgentPtyId: id }),
   openSessionTab: (projectId, sessionId, title, provider) => {
     const id = sessionTabId(sessionId);
     const existing = get().tabs.find(t => t.id === id || (t.kind === 'session' && t.linkedSessionId === sessionId));

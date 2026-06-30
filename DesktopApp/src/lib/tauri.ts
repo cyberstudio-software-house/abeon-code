@@ -145,4 +145,6 @@ export const tauri = {
     invoke<ClickUpTaskRef[]>('clickup_search_tasks', { projectId, query }),
   clickupLinkTask: (projectId: number, taskId: string) =>
     invoke<ClickUpLink>('clickup_link_task', { projectId, taskId }),
+  clickupWriteTaskFile: (projectId: number, taskId: string) =>
+    invoke<string>('clickup_write_task_file', { projectId, taskId }),
 };

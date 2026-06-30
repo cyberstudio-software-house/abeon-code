@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Terminal, type ILinkProvider, type ILink, type IBufferRange, type ITheme } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -100,6 +100,8 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
   const customModels = useStore(s => s.customModels);
   const codexModelId = useStore(s => s.codexModelId);
   const skipPermissions = useStore(s => s.skipPermissions);
+  const setActiveAgentPtyId = useStore(s => s.setActiveAgentPtyId);
+  const [agentPtyId, setAgentPtyId] = useState<string | null>(null);
   const projectPath = useStore(s => s.projects.find(p => p.id === projectId)?.path ?? '');
   const projectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
@@ -177,6 +179,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
         return;
       }
       ptyRef.current = id;
+      if (kind === 'agent') setAgentPtyId(id);
       const offOut = await tauri.onPtyOutput(id, (bytes) => {
         if (cancelled) return;
         if (visibleRef.current) {
@@ -305,6 +308,12 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     fit.fit();
     term.focus();
   }, [visible]);
+
+  useEffect(() => {
+    if (kind !== 'agent' || !agentPtyId || !visible) return;
+    setActiveAgentPtyId(agentPtyId);
+    return () => setActiveAgentPtyId(null);
+  }, [kind, agentPtyId, visible, setActiveAgentPtyId]);
 
   useEffect(() => {
     const container = containerRef.current;

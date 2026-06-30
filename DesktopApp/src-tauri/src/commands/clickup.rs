@@ -1,6 +1,7 @@
+use std::io::Write;
 use tauri::State;
 use crate::clickup::{classify_query, parse_task_input, ClickUpClient, QueryKind};
-use crate::db::{clickup_config_repo, clickup_links_repo, settings_repo};
+use crate::db::{clickup_config_repo, clickup_links_repo, projects_repo, settings_repo};
 use crate::domain::clickup::{
     ClickUpConnectionStatus, ClickUpLink, ClickUpList, ClickUpProjectConfig, ClickUpSpace,
     ClickUpTaskDetail, ClickUpTaskRef, ClickUpWorkspace,
@@ -180,6 +181,65 @@ pub async fn clickup_link_task(state: State<'_, AppState>, project_id: i64, task
     Ok(link)
 }
 
+fn render_task_markdown(d: &ClickUpTaskDetail) -> String {
+    let title = match &d.custom_id {
+        Some(c) => format!("{c} {}", d.name),
+        None => d.name.clone(),
+    };
+    let mut out = format!("# {title}\n\n");
+    if let Some(s) = &d.status {
+        out.push_str(&format!("**Status:** {s}\n\n"));
+    }
+    out.push_str(&format!("**URL:** {}\n\n## Opis\n\n{}\n\n", d.url, d.description));
+    if !d.attachments.is_empty() {
+        out.push_str("## Załączniki\n\n");
+        for a in &d.attachments {
+            out.push_str(&format!("- [{}]({})\n", a.title, a.url));
+        }
+        out.push('\n');
+    }
+    if !d.comments.is_empty() {
+        out.push_str("## Komentarze\n\n");
+        for c in &d.comments {
+            out.push_str(&format!("**{}:** {}\n\n", c.user, c.text));
+        }
+    }
+    out
+}
+
+fn ensure_gitignore(project_path: &str) -> std::io::Result<()> {
+    let path = std::path::Path::new(project_path).join(".gitignore");
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    if existing.lines().any(|l| l.trim() == ".abeon/") {
+        return Ok(());
+    }
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+    let prefix = if existing.is_empty() || existing.ends_with('\n') { "" } else { "\n" };
+    write!(f, "{prefix}.abeon/\n")?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn clickup_write_task_file(state: State<'_, AppState>, project_id: i64, task_id: String)
+    -> AppResult<String>
+{
+    let project_path = {
+        let c = state.db.get()?;
+        projects_repo::get(&c, project_id)?.path
+    };
+    let detail = load_client(&state)?
+        .get_task_detail(&task_id, false, None).await
+        .map_err(|e| AppError::Other(e.to_string()))?;
+    let rel = format!(".abeon/clickup/{task_id}.md");
+    let abs = std::path::Path::new(&project_path).join(&rel);
+    if let Some(dir) = abs.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&abs, render_task_markdown(&detail))?;
+    ensure_gitignore(&project_path)?;
+    Ok(rel)
+}
+
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
@@ -214,5 +274,34 @@ mod tests {
         let p = crate::db::projects_repo::insert(&c, "X", "/x", "-x", None).unwrap();
         clickup_config_repo::set(&c, p.id, "ws1", Some("sp1"), None).unwrap();
         assert_eq!(clickup_config_repo::get(&c, p.id).unwrap().unwrap().workspace_id, "ws1");
+    }
+
+    #[test]
+    fn render_task_markdown_includes_name_description_comments() {
+        use crate::domain::clickup::{ClickUpAttachment, ClickUpComment, ClickUpTaskDetail};
+        let d = ClickUpTaskDetail {
+            id: "t1".into(),
+            custom_id: Some("CU-1".into()),
+            name: "Fix".into(),
+            description: "Body".into(),
+            status: Some("open".into()),
+            url: "https://app.clickup.com/t/t1".into(),
+            attachments: vec![ClickUpAttachment {
+                id: "a".into(),
+                title: "log".into(),
+                url: "https://f/a".into(),
+            }],
+            comments: vec![ClickUpComment {
+                id: "c".into(),
+                user: "ann".into(),
+                text: "hi".into(),
+                date: 0,
+            }],
+        };
+        let md = render_task_markdown(&d);
+        assert!(md.contains("# CU-1 Fix"));
+        assert!(md.contains("Body"));
+        assert!(md.contains("ann"));
+        assert!(md.contains("log"));
     }
 }
