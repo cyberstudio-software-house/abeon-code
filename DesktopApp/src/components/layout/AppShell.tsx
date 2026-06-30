@@ -7,6 +7,7 @@ import { CenterPanel } from '../center/CenterPanel';
 import { RightPanel } from '../right/RightPanel';
 import { TitleBar } from './TitleBar';
 import { TabSwitcher } from '../center/TabSwitcher';
+import { ProjectLauncher } from '../center/ProjectLauncher';
 import { useStore } from '../../store';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { tauri } from '../../lib/tauri';
@@ -225,6 +226,7 @@ export function AppShell() {
         )}
       </div>
       <TabSwitcher />
+      <ProjectLauncher />
       {update && (
         <UpdateDialog
           version={update.version}
