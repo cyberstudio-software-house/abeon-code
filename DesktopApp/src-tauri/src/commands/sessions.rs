@@ -1,7 +1,7 @@
 use std::panic;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
-use crate::domain::{Project, Provider, SessionMeta, SessionHistory};
+use crate::domain::{Project, Provider, SessionMeta, SessionHistory, SessionActivity, ActiveSession};
 use crate::error::{AppError, AppResult};
 use crate::sessions::encoding::encode_project_path;
 use crate::sessions::{codex, reader};
@@ -304,6 +304,22 @@ pub async fn generate_session_title(
     }
 }
 
+fn active_from_metas(project_id: i64, project_name: &str, sessions: Vec<SessionMeta>) -> Vec<ActiveSession> {
+    sessions
+        .into_iter()
+        .filter(|s| s.activity != SessionActivity::Idle)
+        .map(|s| ActiveSession {
+            session_id: s.id,
+            project_id,
+            project_name: project_name.to_string(),
+            title: s.title,
+            activity: s.activity,
+            last_modified: s.last_modified,
+            provider: s.provider,
+        })
+        .collect()
+}
+
 fn merge_session_lists(
     claude: Vec<SessionMeta>,
     codex: Vec<SessionMeta>,
@@ -473,5 +489,34 @@ mod title_tests {
         assert_eq!(clean_title(&long).chars().count(), 80);
         assert_eq!(clean_title("`tytuł`"), "tytuł");
         assert_eq!(clean_title("   \n  \n"), "");
+    }
+}
+
+#[cfg(test)]
+mod active_tests {
+    use super::*;
+    use crate::domain::{Provider, SessionActivity, SessionMeta};
+
+    fn meta(id: &str, provider: Provider, activity: SessionActivity) -> SessionMeta {
+        SessionMeta {
+            id: id.into(), project_id: 7, title: format!("title-{id}"), message_count: 1,
+            last_modified: 100, git_branch: None, cwd: None, activity, provider,
+        }
+    }
+
+    #[test]
+    fn active_from_metas_drops_idle_keeps_both_providers() {
+        let metas = vec![
+            meta("a", Provider::Claude, SessionActivity::Running),
+            meta("b", Provider::Codex, SessionActivity::WaitingUser),
+            meta("c", Provider::Claude, SessionActivity::Idle),
+            meta("d", Provider::Codex, SessionActivity::WaitingTool),
+        ];
+        let rows = active_from_metas(7, "Proj", metas);
+        let ids: Vec<&str> = rows.iter().map(|r| r.session_id.as_str()).collect();
+        assert_eq!(ids, vec!["a", "b", "d"]);
+        assert!(rows.iter().all(|r| r.project_id == 7 && r.project_name == "Proj"));
+        assert_eq!(rows[1].provider, Provider::Codex);
+        assert_eq!(rows[0].title, "title-a");
     }
 }
