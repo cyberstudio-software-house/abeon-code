@@ -11,3 +11,4 @@ pub mod settings;
 pub mod activity;
 pub mod usage;
 pub mod remote;
+pub mod clickup;

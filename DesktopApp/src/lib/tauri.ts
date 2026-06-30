@@ -2,6 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Project, SessionMeta, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
+import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
+import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
 
 // Matches generated src/types/PtyKind.ts (kind is lowercased by serde rename_all=camelCase
 // on the enum; struct-variant fields remain snake_case because ts-rs preserves field names
@@ -115,4 +117,9 @@ export const tauri = {
   attentionHookStatus: () => invoke<boolean>('attention_hook_status'),
   detectProviders: () => invoke<ProviderInfo[]>('detect_providers'),
   detectCodexModels: () => invoke<string[]>('detect_codex_models'),
+  clickupSetToken: (token: string) => invoke<void>('clickup_set_token', { token }),
+  clickupClearToken: () => invoke<void>('clickup_clear_token'),
+  clickupConnectionStatus: () =>
+    invoke<ClickUpConnectionStatus>('clickup_connection_status'),
+  clickupListWorkspaces: () => invoke<ClickUpWorkspace[]>('clickup_list_workspaces'),
 };
