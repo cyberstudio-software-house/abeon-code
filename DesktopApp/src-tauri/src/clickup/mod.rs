@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use crate::domain::clickup::{
-    ClickUpAttachment, ClickUpComment, ClickUpList, ClickUpSpace, ClickUpTaskDetail, ClickUpWorkspace,
+    ClickUpAttachment, ClickUpComment, ClickUpList, ClickUpSpace, ClickUpTaskDetail, ClickUpTaskRef,
+    ClickUpWorkspace,
 };
 
 const DEFAULT_BASE: &str = "https://api.clickup.com/api/v2";
@@ -180,6 +181,48 @@ impl ClickUpClient {
     }
 }
 
+pub enum QueryKind { Id, Name }
+
+pub fn classify_query(q: &str) -> QueryKind {
+    let t = q.trim();
+    let no_space = !t.chars().any(char::is_whitespace);
+    let alnum_id = t.chars().all(|c| c.is_ascii_alphanumeric()) && t.chars().any(|c| c.is_ascii_digit());
+    if no_space && (t.starts_with("http") || looks_custom(t) || alnum_id) {
+        QueryKind::Id
+    } else {
+        QueryKind::Name
+    }
+}
+
+#[derive(Deserialize)] struct TasksResponse { tasks: Vec<TaskDto> }
+
+impl ClickUpClient {
+    fn task_ref(t: TaskDto) -> ClickUpTaskRef {
+        ClickUpTaskRef {
+            id: t.id,
+            custom_id: t.custom_id,
+            name: t.name,
+            status: t.status.map(|s| s.status),
+            url: t.url.unwrap_or_default(),
+            list_name: None,
+        }
+    }
+
+    pub async fn list_tasks_in_list(&self, list_id: &str) -> Result<Vec<ClickUpTaskRef>, ClickUpError> {
+        let r: TasksResponse = self.get_json(&format!("/list/{list_id}/task")).await?;
+        Ok(r.tasks.into_iter().map(Self::task_ref).collect())
+    }
+
+    pub async fn list_tasks_in_space(&self, team_id: &str, space_id: &str)
+        -> Result<Vec<ClickUpTaskRef>, ClickUpError>
+    {
+        let r: TasksResponse = self
+            .get_json(&format!("/team/{team_id}/task?space_ids[]={space_id}"))
+            .await?;
+        Ok(r.tasks.into_iter().map(Self::task_ref).collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,5 +337,29 @@ mod tests {
         assert_eq!(d.attachments[0].title, "log.txt");
         assert_eq!(d.comments[0].user, "ann");
         assert_eq!(d.comments[0].date, 1_700_000_000_000);
+    }
+
+    #[test]
+    fn classify_query_distinguishes_id_and_name() {
+        assert!(matches!(classify_query("CU-123"), QueryKind::Id));
+        assert!(matches!(classify_query("868abc12"), QueryKind::Id));
+        assert!(matches!(classify_query("https://app.clickup.com/t/868abc12"), QueryKind::Id));
+        assert!(matches!(classify_query("fix login bug"), QueryKind::Name));
+        assert!(matches!(classify_query("logowanie"), QueryKind::Name));
+    }
+
+    #[tokio::test]
+    async fn list_tasks_in_list_maps_refs() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/list/li9/task"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "tasks": [ { "id": "t1", "name": "Alpha", "status": { "status": "open" },
+                             "url": "https://app.clickup.com/t/t1" } ]
+            }))).mount(&server).await;
+        let c = ClickUpClient::with_base("pk", server.uri());
+        let r = c.list_tasks_in_list("li9").await.unwrap();
+        assert_eq!(r[0].id, "t1");
+        assert_eq!(r[0].name, "Alpha");
+        assert_eq!(r[0].status.as_deref(), Some("open"));
     }
 }
