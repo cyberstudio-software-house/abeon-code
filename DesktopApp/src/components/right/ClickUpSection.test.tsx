@@ -36,10 +36,16 @@ describe('ClickUpSection', () => {
     expect(screen.getByText('Alpha')).toBeInTheDocument();
   });
 
-  it('prompts to configure ClickUp when not connected', () => {
+  it('renders nothing when the token is absent', () => {
     mockState = baseState({ connectionStatus: 'absent' });
+    const { container } = render(<ClickUpSection />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('prompts to fix an invalid token', () => {
+    mockState = baseState({ connectionStatus: 'invalid' });
     render(<ClickUpSection />);
-    expect(screen.getByText(/Skonfiguruj ClickUp/i)).toBeInTheDocument();
+    expect(screen.getByText(/nieprawidłowy/i)).toBeInTheDocument();
   });
 
   it('prompts to set scope when connected without config', () => {

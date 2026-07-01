@@ -29,7 +29,7 @@ export function ClickUpSection() {
     }
   }, [activeProjectId, loadLinks, loadConfig]);
 
-  if (activeProjectId == null) return null;
+  if (activeProjectId == null || connectionStatus === 'absent') return null;
 
   const config = configByProject[activeProjectId];
   const list = linksByProject[activeProjectId] ?? [];
@@ -44,7 +44,7 @@ export function ClickUpSection() {
       </div>
 
       {connectionStatus !== 'configured' ? (
-        <p className="text-[11px] text-muted">Skonfiguruj ClickUp w ustawieniach.</p>
+        <p className="text-[11px] text-muted">Token ClickUp nieprawidłowy — popraw w ustawieniach.</p>
       ) : !config ? (
         <p className="text-[11px] text-muted">Ustaw zakres (workspace/space) ikoną powyżej.</p>
       ) : (
