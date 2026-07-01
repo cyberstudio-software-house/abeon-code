@@ -688,24 +688,38 @@ export function ClickUpTab() {
   const [token, setToken] = useState('');
   const [status, setStatus] = useState<ClickUpConnectionStatus>('absent');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setStatus(await tauri.clickupConnectionStatus());
+    setBusy(true);
+    setError(null);
+    try { setStatus(await tauri.clickupConnectionStatus()); }
+    catch (e) { setError(String(e)); }
+    finally { setBusy(false); }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
 
   const save = async () => {
-    setBusy(true);
-    try { await tauri.clickupSetToken(token); setToken(''); await refresh(); }
-    finally { setBusy(false); }
+    try { await tauri.clickupSetToken(token); setToken(''); }
+    catch (e) { setError(String(e)); return; }
+    await refresh();
+  };
+  const test = async () => {
+    const t = token.trim();
+    if (t) {
+      try { await tauri.clickupSetToken(t); setToken(''); }
+      catch (e) { setError(String(e)); return; }
+    }
+    await refresh();
   };
   const clear = async () => {
-    setBusy(true);
-    try { await tauri.clickupClearToken(); await refresh(); }
-    finally { setBusy(false); }
+    try { await tauri.clickupClearToken(); }
+    catch (e) { setError(String(e)); return; }
+    await refresh();
   };
 
   const label =
+    busy ? 'Sprawdzam…' :
     status === 'configured' ? 'Połączono' :
     status === 'invalid' ? 'Token nieprawidłowy' : 'Brak tokenu';
 
@@ -725,11 +739,12 @@ export function ClickUpTab() {
       <div className="flex gap-2">
         <button disabled={busy || !token.trim()} onClick={save}
           className="px-3 py-1.5 bg-fg text-bg text-[12px] font-medium disabled:opacity-50">Zapisz token</button>
-        <button disabled={busy} onClick={refresh}
+        <button disabled={busy} onClick={test}
           className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Testuj połączenie</button>
         <button disabled={busy} onClick={clear}
           className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Usuń token</button>
       </div>
+      {error && <p className="text-[11px] text-danger">{error}</p>}
       <p className="text-[11px] text-muted">Token wygenerujesz w ClickUp: Settings → Apps → API Token.</p>
     </section>
   );
