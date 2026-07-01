@@ -1,6 +1,6 @@
 [package]
 name = "abeoncode"
-version = "0.1.11"
+version = "0.1.12"
 description = "Sessions manager for Claude Code"
 authors = ["you"]
 edition = "2021"
