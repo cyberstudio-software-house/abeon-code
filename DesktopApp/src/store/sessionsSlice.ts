@@ -181,6 +181,9 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
     }
   },
   scheduleNewSessionRefresh: (projectId) => {
+    if (!get().sessionsByProject[projectId]) {
+      get().loadInitialSessions(projectId).catch(() => {});
+    }
     for (const delay of NEW_SESSION_REFRESH_DELAYS_MS) {
       setTimeout(() => {
         get().refreshActivity(projectId).catch(() => {});

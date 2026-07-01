@@ -128,6 +128,43 @@ describe('refreshActivity', () => {
   });
 });
 
+describe('scheduleNewSessionRefresh', () => {
+  beforeEach(() => {
+    useStore.setState({ sessionsByProject: {}, tabs: [] });
+    vi.restoreAllMocks();
+  });
+
+  it('updates a fresh tab title for a project whose sessions were never loaded', async () => {
+    vi.useFakeTimers();
+    useStore.setState({
+      sessionsByProject: {},
+      tabs: [{
+        kind: 'session',
+        id: 'session:fresh-x',
+        projectId: 7,
+        sessionId: 'fresh-x',
+        title: 'New session',
+        mode: 'terminal',
+        fresh: true,
+        provider: 'claude',
+      }],
+      loadActivity: vi.fn().mockResolvedValue(undefined),
+    });
+    vi.spyOn(tauri, 'listSessions')
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([{ ...fakeMeta('fresh-x', 7), title: 'Generated Title' }]);
+
+    useStore.getState().scheduleNewSessionRefresh(7);
+    await vi.advanceTimersByTimeAsync(2100);
+
+    const tab = useStore.getState().tabs[0];
+    expect(tab.title).toBe('Generated Title');
+
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+});
+
 describe('sessionsSlice activeSessions', () => {
   beforeEach(() => { useStore.setState({ activeSessions: [], showActiveSessions: true }); });
 
