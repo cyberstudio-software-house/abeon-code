@@ -26,3 +26,8 @@ pub fn uninstall_attention_hook() -> AppResult<()> {
 pub fn attention_hook_status() -> bool {
     hook_installer::status()
 }
+
+#[tauri::command]
+pub fn show_attention_notification(app: AppHandle, session_id: String, title: String, body: String) {
+    crate::notifications::desktop::show_attention_notification(&app, session_id, title, body);
+}

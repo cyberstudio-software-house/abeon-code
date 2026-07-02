@@ -15,7 +15,7 @@ dependencies = [
 
 [[package]]
 name = "abeoncode"
-version = "0.1.8"
+version = "0.1.12"
 dependencies = [
  "abeon-remote-core",
  "anyhow",
@@ -30,6 +30,7 @@ dependencies = [
  "jsonwebtoken",
  "libc",
  "notify",
+ "notify-rust",
  "once_cell",
  "parking_lot",
  "png 0.17.16",

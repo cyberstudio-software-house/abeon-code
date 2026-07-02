@@ -120,6 +120,10 @@ export const tauri = {
   remotePairStart: () => invoke<PairCode>('remote_pair_start'),
   onSessionAttention: (cb: (e: AttentionEvent) => void): Promise<UnlistenFn> =>
     listen<AttentionEvent>('session-attention', e => cb(e.payload)),
+  showAttentionNotification: (sessionId: string, title: string, body: string) =>
+    invoke<void>('show_attention_notification', { sessionId, title, body }),
+  onNotificationActivate: (cb: (sessionId: string) => void): Promise<UnlistenFn> =>
+    listen<string>('notification-activate', e => cb(e.payload)),
   installAttentionHook: () => invoke<void>('install_attention_hook'),
   uninstallAttentionHook: () => invoke<void>('uninstall_attention_hook'),
   attentionHookStatus: () => invoke<boolean>('attention_hook_status'),

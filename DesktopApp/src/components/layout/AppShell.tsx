@@ -1,7 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import { isPermissionGranted, requestPermission, sendNotification, onAction } from '@tauri-apps/plugin-notification';
-import { type PluginListener } from '@tauri-apps/api/core';
 import { Sidebar } from '../sidebar/Sidebar';
 import { CenterPanel } from '../center/CenterPanel';
 import { RightPanel } from '../right/RightPanel';
@@ -87,8 +84,7 @@ export function AppShell() {
 
   useEffect(() => {
     let unlistenEvent: (() => void) | null = null;
-    let unlistenAction: PluginListener | null = null;
-    let lastNotified: { sessionId: string; projectId: number; title: string } | null = null;
+    let unlistenActivate: (() => void) | null = null;
 
     const resolveSession = (sessionId: string) => {
       const state = useStore.getState();
@@ -100,8 +96,6 @@ export function AppShell() {
     };
 
     const focusSession = (target: { sessionId: string; projectId: number; title: string }) => {
-      const win = getCurrentWindow();
-      void win.unminimize().then(() => win.show()).then(() => win.setFocus());
       useStore.getState().openSessionTab(target.projectId, target.sessionId, target.title);
       useStore.getState().clearAttention(target.sessionId);
     };
@@ -125,29 +119,23 @@ export function AppShell() {
         isActiveFocused,
       })) return;
 
-      const resolved = resolveSession(e.sessionId);
-      const title = resolved?.title ?? 'Sesja';
-      if (resolved) lastNotified = { sessionId: e.sessionId, projectId: resolved.projectId, title };
-
-      void (async () => {
-        let granted = await isPermissionGranted();
-        if (!granted) granted = (await requestPermission()) === 'granted';
-        if (!granted) return;
-        sendNotification({
-          title: 'AbeonCode — sesja czeka',
-          body: e.message ?? `„${title}" czeka na Twoją odpowiedź`,
-        });
-      })();
+      const title = resolveSession(e.sessionId)?.title ?? 'Sesja';
+      void tauri.showAttentionNotification(
+        e.sessionId,
+        'AbeonCode — sesja czeka',
+        e.message ?? `„${title}" czeka na Twoją odpowiedź`,
+      );
     };
 
     tauri.onSessionAttention(handle).then(fn => { unlistenEvent = fn; });
-    onAction(() => { if (lastNotified) focusSession(lastNotified); })
-      .then(fn => { unlistenAction = fn; })
-      .catch(() => { /* onAction unsupported on this platform — bell icon is the fallback */ });
+    tauri.onNotificationActivate(sessionId => {
+      const resolved = resolveSession(sessionId);
+      if (resolved) focusSession({ sessionId, projectId: resolved.projectId, title: resolved.title });
+    }).then(fn => { unlistenActivate = fn; });
 
     return () => {
       if (unlistenEvent) unlistenEvent();
-      if (unlistenAction) void unlistenAction.unregister();
+      if (unlistenActivate) unlistenActivate();
     };
   }, []);
 

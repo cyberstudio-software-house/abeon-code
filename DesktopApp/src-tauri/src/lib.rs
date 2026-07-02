@@ -135,6 +135,7 @@ pub fn run() {
             commands::notifications::install_attention_hook,
             commands::notifications::uninstall_attention_hook,
             commands::notifications::attention_hook_status,
+            commands::notifications::show_attention_notification,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
