@@ -6,6 +6,7 @@ import type { SettingsSlice } from './settingsSlice';
 export type ProjectsSlice = {
   projects: Project[];
   activity: Record<number, number>;
+  activityOrder: number[];
   expandedProjectIds: Set<number>;
   loadProjects: () => Promise<void>;
   loadActivity: () => Promise<void>;
@@ -20,6 +21,7 @@ let activityInFlight = false;
 export const createProjectsSlice: StateCreator<ProjectsSlice> = (set, get) => ({
   projects: [],
   activity: {},
+  activityOrder: [],
   expandedProjectIds: new Set(),
   loadProjects: async () => set({ projects: await tauri.listProjects() }),
   loadActivity: async () => {
@@ -27,7 +29,12 @@ export const createProjectsSlice: StateCreator<ProjectsSlice> = (set, get) => ({
     activityInFlight = true;
     try {
       const activity = await tauri.getProjectsActivity();
-      set({ activity });
+      const known = new Set(get().activityOrder);
+      const appended = Object.keys(activity)
+        .map(Number)
+        .filter(id => !known.has(id))
+        .sort((a, b) => (activity[b] ?? 0) - (activity[a] ?? 0));
+      set({ activity, activityOrder: [...get().activityOrder, ...appended] });
     } catch (err) {
       console.error('[projects] loadActivity failed', err);
     } finally {
@@ -64,8 +71,13 @@ export function selectSortedProjects(state: ProjectsSlice & SettingsSlice): Proj
         a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
       );
     case 'activity': {
-      const act = state.activity;
-      return arr.sort((a, b) => (act[b.id] ?? 0) - (act[a.id] ?? 0));
+      const order = state.activityOrder;
+      if (order.length === 0) {
+        const act = state.activity;
+        return arr.sort((a, b) => (act[b.id] ?? 0) - (act[a.id] ?? 0));
+      }
+      const rank = new Map(order.map((id, i) => [id, i]));
+      return arr.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
     }
   }
 }
