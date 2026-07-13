@@ -2,13 +2,15 @@ import { Icon } from '../shared/Icon';
 
 type Props = {
   canDetach: boolean;
+  canDetachGroup: boolean;
   onDetach: () => void;
+  onDetachGroup: () => void;
   onRename: () => void;
   onClose: () => void;
   onCloseMenu: () => void;
 };
 
-export function TabContextMenu({ canDetach, onDetach, onRename, onClose, onCloseMenu }: Props) {
+export function TabContextMenu({ canDetach, canDetachGroup, onDetach, onDetachGroup, onRename, onClose, onCloseMenu }: Props) {
   return (
     <div role="menu" className="py-1">
       <button
@@ -20,6 +22,16 @@ export function TabContextMenu({ canDetach, onDetach, onRename, onClose, onClose
         <Icon name="external-link" className="w-3 h-3" strokeWidth={2} />
         <span>Otwórz w nowym oknie</span>
       </button>
+      {canDetachGroup && (
+        <button
+          role="menuitem"
+          onClick={() => { onDetachGroup(); onCloseMenu(); }}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-[11.5px] text-fg hover:bg-bg-elev"
+        >
+          <Icon name="external-link" className="w-3 h-3" strokeWidth={2} />
+          <span>Wydziel projekt do nowego okna</span>
+        </button>
+      )}
       <button
         role="menuitem"
         onClick={() => { onRename(); onCloseMenu(); }}

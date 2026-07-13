@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
-vi.mock('../../lib/processManager', () => ({ processManager: { dismiss: vi.fn() } }));
+vi.mock('../../lib/processManager', () => ({ processManager: { dismiss: vi.fn(), release: vi.fn() } }));
+vi.mock('../../lib/detachGroup', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/detachGroup')>();
+  return { ...actual, detachProjectGroup: vi.fn() };
+});
 
 vi.stubGlobal('ResizeObserver', class {
   observe() {}
@@ -12,6 +16,7 @@ vi.stubGlobal('ResizeObserver', class {
 Element.prototype.scrollIntoView = vi.fn();
 
 import { processManager } from '../../lib/processManager';
+import { detachProjectGroup } from '../../lib/detachGroup';
 import { useStore } from '../../store';
 import { TabBar } from './TabBar';
 
@@ -50,5 +55,62 @@ describe('TabBar action close', () => {
     const { container } = render(<TabBar />);
     const danger = container.querySelector('.text-danger');
     expect(danger?.textContent).toBe('▶');
+  });
+});
+
+describe('TabBar group detach', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState({
+      tabs: [
+        { kind: 'session', id: 'session:s1', projectId: 1, sessionId: 's1', title: 'S1', mode: 'history' },
+        { kind: 'session', id: 'session:s2', projectId: 2, sessionId: 's2', title: 'S2', mode: 'history' },
+      ],
+      activeTabId: 'session:s1',
+      mruOrder: ['session:s1'],
+      navHistory: ['session:s1'],
+      navIndex: 0,
+      runningActions: {},
+      projects: [{ id: 1, name: 'Alfa', path: '/a' }, { id: 2, name: 'Beta', path: '/b' }] as never,
+    });
+  });
+
+  it('detaches the project group from the group header context menu', () => {
+    render(<TabBar />);
+    fireEvent.contextMenu(screen.getByText('Alfa'));
+    fireEvent.click(screen.getByText('Wydziel do nowego okna'));
+    expect(detachProjectGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 1, projectName: 'Alfa' }),
+    );
+    expect(vi.mocked(detachProjectGroup).mock.calls[0][0].tabs.map(t => t.id)).toEqual(['session:s1']);
+  });
+
+  it('detaches the project group from the tab context menu', () => {
+    render(<TabBar />);
+    fireEvent.contextMenu(screen.getByText('S2'));
+    fireEvent.click(screen.getByText('Wydziel projekt do nowego okna'));
+    expect(detachProjectGroup).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 2, projectName: 'Beta' }),
+    );
+  });
+
+  it('asks for confirmation when the group holds a live process', () => {
+    useStore.setState({
+      tabs: [{ kind: 'terminal', id: 'terminal:t1', projectId: 1, title: 'Terminal' }],
+      activeTabId: 'terminal:t1',
+    });
+    render(<TabBar />);
+    fireEvent.contextMenu(screen.getByText('Terminal'));
+    fireEvent.click(screen.getByText('Wydziel projekt do nowego okna'));
+    expect(detachProjectGroup).not.toHaveBeenCalled();
+    expect(screen.getByText('Wydzielić grupę do nowego okna?')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Wydziel'));
+    expect(detachProjectGroup).toHaveBeenCalledOnce();
+  });
+
+  it('hides the detach items in a detached window', () => {
+    render(<TabBar detachedProjectId={1} />);
+    fireEvent.contextMenu(screen.getByText('S1'));
+    expect(screen.queryByText('Wydziel projekt do nowego okna')).toBeNull();
   });
 });

@@ -11,7 +11,9 @@ import type { RunningAction } from '../../store/actionsSlice';
 import { actionTone } from '../../lib/actionStatus';
 import { isTabLiveProcess } from '../../lib/tabProcess';
 import { TabContextMenu } from './TabContextMenu';
+import { GroupContextMenu } from './GroupContextMenu';
 import { detachSessionTab } from '../../lib/detachSession';
+import { detachProjectGroup, summarizeDetach, detachSummaryMessage } from '../../lib/detachGroup';
 import type { Tab } from '../../store/tabsSlice';
 import { Icon } from '../shared/Icon';
 
@@ -55,17 +57,22 @@ function TabIcon({ tab, actionColor }: { tab: Tab; actionColor?: string }) {
   return <span className={actionColor ?? 'text-muted'}>▶</span>;
 }
 
-export function TabBar() {
+export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {}) {
   const tabs = useStore(s => s.tabs);
   const active = useStore(s => s.activeTabId);
   const setActive = useStore(s => s.setActive);
   const closeTab = useStore(s => s.closeTab);
+  const detachTabs = useStore(s => s.detachTabs);
   const renameTab = useStore(s => s.renameTab);
+  const openNewSessionTab = useStore(s => s.openNewSessionTab);
+  const openNewTerminalTab = useStore(s => s.openNewTerminalTab);
   const projects = useStore(useShallow(s => s.projects));
   const runningActions = useStore(s => s.runningActions);
   const [pendingClose, setPendingClose] = useState<string | null>(null);
+  const [pendingDetach, setPendingDetach] = useState<{ projectId: number; message: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ tab: Tab; x: number; y: number } | null>(null);
+  const [groupMenu, setGroupMenu] = useState<{ projectId: number; x: number; y: number } | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const inputRef = useRef<HTMLInputElement | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -131,6 +138,26 @@ export function TabBar() {
     else doClose(id);
   };
 
+  const runDetach = (projectId: number) => {
+    const state = useStore.getState();
+    void detachProjectGroup({
+      projectId,
+      projectName: state.projects.find(p => p.id === projectId)?.name ?? 'Projekt',
+      tabs: state.tabs.filter(t => t.projectId === projectId),
+      activeTabId: state.activeTabId,
+      runningActions: state.runningActions,
+      detachTabs,
+    });
+  };
+
+  const detachWithGuard = (projectId: number) => {
+    const state = useStore.getState();
+    const groupTabs = state.tabs.filter(t => t.projectId === projectId);
+    const message = detachSummaryMessage(summarizeDetach(groupTabs, state.runningActions));
+    if (message) setPendingDetach({ projectId, message });
+    else runDetach(projectId);
+  };
+
   const requestClose = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     closeWithGuard(id);
@@ -150,13 +177,16 @@ export function TabBar() {
   }, [active, tabs, closeTab]);
 
   useEffect(() => {
-    if (!ctxMenu) return;
+    if (!ctxMenu && !groupMenu) return;
     const onDocClick = (e: MouseEvent) => {
-      if (!ctxMenuRef.current?.contains(e.target as Node)) setCtxMenu(null);
+      if (!ctxMenuRef.current?.contains(e.target as Node)) {
+        setCtxMenu(null);
+        setGroupMenu(null);
+      }
     };
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
-  }, [ctxMenu]);
+  }, [ctxMenu, groupMenu]);
 
   const commitRename = (id: string) => {
     const value = inputRef.current?.value.trim();
@@ -250,6 +280,11 @@ export function TabBar() {
                 <div className="flex items-end shrink-0" style={{ borderBottom: `2px solid ${group.color}` }}>
                   <div
                     onClick={() => toggleCollapse(group.projectId)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setCtxMenu(null);
+                      setGroupMenu({ projectId: group.projectId, x: e.clientX, y: e.clientY });
+                    }}
                     className="flex items-center px-2 py-1 cursor-pointer text-[10px] shrink-0 select-none"
                   >
                     <span className="mr-1 text-[8px]">{collapsed.has(group.projectId) ? '▶' : '▼'}</span>
@@ -270,6 +305,20 @@ export function TabBar() {
           ) : (
             tabs.map(renderTab)
           )}
+          {detachedProjectId != null && (
+            <div className="flex items-end shrink-0 ml-1 gap-0.5">
+              <button
+                onClick={() => openNewSessionTab(detachedProjectId)}
+                title="Nowa sesja"
+                className="px-2 py-1 text-[11px] text-muted hover:text-fg"
+              >+</button>
+              <button
+                onClick={() => openNewTerminalTab(detachedProjectId)}
+                title="Nowy terminal"
+                className="px-2 py-1 text-[11px] text-muted hover:text-fg"
+              >$</button>
+            </div>
+          )}
         </div>
         <button
           onClick={() => scrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })}
@@ -282,13 +331,25 @@ export function TabBar() {
         <div ref={ctxMenuRef} className="fixed z-50" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
           <div className="w-48 rounded-md border border-border bg-bg shadow-lg">
             <TabContextMenu
-              canDetach={ctxMenu.tab.kind === 'session'}
+              canDetach={ctxMenu.tab.kind === 'session' && detachedProjectId == null}
+              canDetachGroup={detachedProjectId == null}
               onDetach={() => {
                 if (ctxMenu.tab.kind === 'session') void detachSessionTab(ctxMenu.tab, closeTab);
               }}
+              onDetachGroup={() => detachWithGuard(ctxMenu.tab.projectId)}
               onRename={() => setEditingId(ctxMenu.tab.id)}
               onClose={() => closeWithGuard(ctxMenu.tab.id)}
               onCloseMenu={() => setCtxMenu(null)}
+            />
+          </div>
+        </div>
+      )}
+      {groupMenu && (
+        <div ref={ctxMenuRef} className="fixed z-50" style={{ left: groupMenu.x, top: groupMenu.y }}>
+          <div className="w-52 rounded-md border border-border bg-bg shadow-lg">
+            <GroupContextMenu
+              onDetach={() => detachWithGuard(groupMenu.projectId)}
+              onCloseMenu={() => setGroupMenu(null)}
             />
           </div>
         </div>
@@ -299,6 +360,15 @@ export function TabBar() {
           message="W tym tabie działa aktywny proces. Zamknięcie zakończy go."
           onCancel={() => setPendingClose(null)}
           onConfirm={() => { doClose(pendingClose); setPendingClose(null); }}
+        />
+      )}
+      {pendingDetach && (
+        <ConfirmDialog
+          title="Wydzielić grupę do nowego okna?"
+          message={pendingDetach.message}
+          confirmLabel="Wydziel"
+          onCancel={() => setPendingDetach(null)}
+          onConfirm={() => { runDetach(pendingDetach.projectId); setPendingDetach(null); }}
         />
       )}
     </>
