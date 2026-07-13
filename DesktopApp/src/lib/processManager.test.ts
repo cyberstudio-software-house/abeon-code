@@ -61,6 +61,26 @@ describe('processManager', () => {
     expect(useStore.getState().runningActions[1]).toBeUndefined();
   });
 
+  it('adopt listens on an existing pty without spawning', async () => {
+    await processManager.adopt(1, 'pty-live');
+    expect(tauri.spawnPty).not.toHaveBeenCalled();
+    expect(tauri.onPtyOutput).toHaveBeenCalledWith('pty-live', expect.any(Function));
+    expect(useStore.getState().runningActions[1]).toMatchObject({ actionId: 1, ptyId: 'pty-live', status: 'running' });
+
+    const received: number[] = [];
+    processManager.attach(1, { write: (b) => received.push(...b) });
+    outCb(new Uint8Array([65]));
+    expect(received).toEqual([65]);
+  });
+
+  it('release clears state without killing the pty', async () => {
+    await processManager.start(7, action);
+    processManager.release(1);
+    expect(tauri.ptyKill).not.toHaveBeenCalled();
+    expect(processManager.isActive(1)).toBe(false);
+    expect(useStore.getState().runningActions[1]).toBeUndefined();
+  });
+
   it('tears down listeners if dismissed during start', async () => {
     const offOut = vi.fn();
     const offExit = vi.fn();

@@ -16,6 +16,29 @@ const procs = new Map<number, ProcEntry>();
 const exitMarker = (code: number) =>
   new TextEncoder().encode(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m\r\n`);
 
+async function register(actionId: number, ptyId: string): Promise<void> {
+  const entry: ProcEntry = { ptyId, buffer: [], subscribers: new Set(), unlisten: [] };
+  procs.set(actionId, entry);
+  useStore.getState().setActionRunning(actionId, ptyId);
+
+  const offOut = await tauri.onPtyOutput(ptyId, (bytes) => {
+    entry.buffer.push(bytes);
+    entry.subscribers.forEach((s) => s.write(bytes));
+  });
+  const offExit = await tauri.onPtyExit(ptyId, (code) => {
+    const marker = exitMarker(code);
+    entry.buffer.push(marker);
+    entry.subscribers.forEach((s) => s.write(marker));
+    useStore.getState().setActionExited(actionId, code);
+  });
+  if (procs.get(actionId) !== entry) {
+    offOut();
+    offExit();
+    return;
+  }
+  entry.unlisten.push(offOut, offExit);
+}
+
 export const processManager = {
   isActive(actionId: number): boolean {
     return procs.has(actionId);
@@ -24,26 +47,21 @@ export const processManager = {
   async start(projectId: number, action: Action): Promise<void> {
     if (procs.has(action.id)) return;
     const ptyId = await tauri.spawnPty(projectId, { kind: 'action', action_id: action.id }, 80, 24);
-    const entry: ProcEntry = { ptyId, buffer: [], subscribers: new Set(), unlisten: [] };
-    procs.set(action.id, entry);
-    useStore.getState().setActionRunning(action.id, ptyId);
+    await register(action.id, ptyId);
+  },
 
-    const offOut = await tauri.onPtyOutput(ptyId, (bytes) => {
-      entry.buffer.push(bytes);
-      entry.subscribers.forEach((s) => s.write(bytes));
-    });
-    const offExit = await tauri.onPtyExit(ptyId, (code) => {
-      const marker = exitMarker(code);
-      entry.buffer.push(marker);
-      entry.subscribers.forEach((s) => s.write(marker));
-      useStore.getState().setActionExited(action.id, code);
-    });
-    if (procs.get(action.id) !== entry) {
-      offOut();
-      offExit();
-      return;
+  async adopt(actionId: number, ptyId: string): Promise<void> {
+    if (procs.has(actionId)) return;
+    await register(actionId, ptyId);
+  },
+
+  release(actionId: number): void {
+    const entry = procs.get(actionId);
+    if (entry) {
+      entry.unlisten.forEach((fn) => fn());
+      procs.delete(actionId);
     }
-    entry.unlisten.push(offOut, offExit);
+    useStore.getState().clearAction(actionId);
   },
 
   attach(actionId: number, sink: ProcessSink): () => void {
