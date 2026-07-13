@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand';
-import type { WindowMode } from '../lib/windowMode';
+import type { SessionWindowMode } from '../lib/windowMode';
 import type { Provider } from '../types';
 import type { SettingsSlice } from './settingsSlice';
 import type { AppState } from './index';
@@ -44,7 +44,7 @@ export function selectActiveSession(
   return { sessionId: tab.linkedSessionId ?? tab.sessionId, provider: tab.provider ?? 'claude' };
 }
 
-export function sessionTabFromMode(mode: WindowMode): Extract<Tab, { kind: 'session' }> {
+export function sessionTabFromMode(mode: SessionWindowMode): Extract<Tab, { kind: 'session' }> {
   return {
     kind: 'session',
     id: sessionTabId(mode.sessionId),

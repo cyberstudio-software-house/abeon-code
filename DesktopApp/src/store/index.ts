@@ -309,7 +309,7 @@ applyPersistedToState(loadFromLocalStorage());
 applyTheme(useStore.getState().theme);
 
 // --- Boot: seed the single session in a detached window, else restore tabs ---
-if (windowMode) {
+if (windowMode?.view === 'session') {
   const tab = sessionTabFromMode(windowMode);
   useStore.setState({ tabs: [tab], activeTabId: tab.id, navHistory: [tab.id], navIndex: 0 });
 } else {
