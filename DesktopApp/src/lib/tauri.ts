@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
@@ -117,6 +117,9 @@ export const tauri = {
   openProjectInEditor: (projectPath: string) =>
     invoke<void>('open_project_in_editor', { projectPath }),
   setWindowTitle: (title: string) => getCurrentWindow().setTitle(title),
+  emitDetachReady: (label: string) => emit('abeon:detach-ready', { label }),
+  onDetachReady: (cb: (label: string) => void): Promise<UnlistenFn> =>
+    listen<{ label: string }>('abeon:detach-ready', e => cb(e.payload.label)),
   remotePairStart: () => invoke<PairCode>('remote_pair_start'),
   onSessionAttention: (cb: (e: AttentionEvent) => void): Promise<UnlistenFn> =>
     listen<AttentionEvent>('session-attention', e => cb(e.payload)),
