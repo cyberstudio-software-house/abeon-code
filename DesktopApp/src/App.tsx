@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { Toaster } from 'sonner';
 import { ThemeProvider } from './components/layout/ThemeProvider';
 import { AppShell } from './components/layout/AppShell';
-import { DetachedSessionShell } from './components/layout/DetachedSessionShell';
+import { DetachedShell } from './components/layout/DetachedShell';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
 import { SettingsDialog } from './components/dialogs/SettingsDialog';
 import { useStore } from './store';
@@ -19,7 +19,7 @@ export default function App() {
   return (
     <ThemeProvider>
       <ErrorBoundary>
-        {windowMode ? <DetachedSessionShell /> : <AppShell />}
+        {windowMode ? <DetachedShell mode={windowMode} /> : <AppShell />}
       </ErrorBoundary>
       {!windowMode && settingsOpen && <SettingsDialog />}
       <ErrorBoundary>
