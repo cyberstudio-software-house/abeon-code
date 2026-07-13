@@ -8,7 +8,8 @@ import { createGitSlice, type GitSlice } from './gitSlice';
 import { createClickUpSlice, type ClickUpSlice } from './clickupSlice';
 import { tauri } from '../lib/tauri';
 import { parseWindowMode } from '../lib/windowMode';
-import { sessionTabFromMode } from './tabsSlice';
+import { processManager } from '../lib/processManager';
+import { sessionTabFromMode, tabsFromGroupMode } from './tabsSlice';
 import { applyTheme } from '../styles/theme';
 
 const windowMode = parseWindowMode(window.location.search);
@@ -312,6 +313,21 @@ applyTheme(useStore.getState().theme);
 if (windowMode?.view === 'session') {
   const tab = sessionTabFromMode(windowMode);
   useStore.setState({ tabs: [tab], activeTabId: tab.id, navHistory: [tab.id], navIndex: 0 });
+} else if (windowMode?.view === 'group') {
+  const tabs = tabsFromGroupMode(windowMode);
+  const activeTabId = tabs.some(t => t.id === windowMode.activeTabId)
+    ? windowMode.activeTabId
+    : (tabs[0]?.id ?? null);
+  useStore.setState({
+    tabs,
+    activeTabId,
+    mruOrder: activeTabId ? [activeTabId] : [],
+    navHistory: activeTabId ? [activeTabId] : [],
+    navIndex: 0,
+  });
+  for (const tab of windowMode.tabs) {
+    if (tab.kind === 'action' && tab.ptyId) void processManager.adopt(tab.actionId, tab.ptyId);
+  }
 } else {
   const savedTabs = loadTabsFromLocalStorage();
   if (savedTabs && savedTabs.tabs.length > 0) {
