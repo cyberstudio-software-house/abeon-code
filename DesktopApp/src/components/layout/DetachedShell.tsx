@@ -7,7 +7,7 @@ import { TabContent } from '../center/TabContent';
 import { RightPanel } from '../right/RightPanel';
 import { DragHandle, clamp } from './DragHandle';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
-import { useStore } from '../../store';
+import { useStore, adoptedActions } from '../../store';
 import { tauri } from '../../lib/tauri';
 import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
@@ -19,9 +19,13 @@ const RIGHT_MAX = 480;
 
 export function DetachedShell({ mode }: { mode: WindowMode }) {
   const isGroup = mode.view === 'group';
+  const projectId = mode.projectId;
   const rightWidth = useStore(s => s.rightWidth);
   const setRightWidth = useStore(s => s.setRightWidth);
   const loadProjects = useStore(s => s.loadProjects);
+  const loadInitialSessions = useStore(s => s.loadInitialSessions);
+  const startActivityPolling = useStore(s => s.startActivityPolling);
+  const stopActivityPolling = useStore(s => s.stopActivityPolling);
 
   const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
   const activeProjectName = useStore(s => {
@@ -33,15 +37,41 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
 
   useEffect(() => { void loadProjects(); }, [loadProjects]);
 
+  // Without the session list this window's activity dots would be stuck on
+  // 'idle'; polling refreshActivity also links codex `new-` tabs to their rollout.
+  useEffect(() => {
+    if (!isGroup) return;
+    void loadInitialSessions(projectId);
+    startActivityPolling();
+    return () => stopActivityPolling();
+  }, [isGroup, projectId, loadInitialSessions, startActivityPolling, stopActivityPolling]);
+
+  // Attention state only — the system notification stays the main window's job,
+  // since the Rust event is broadcast to every webview and would fire twice.
+  useEffect(() => {
+    if (!isGroup) return;
+    let unlisten: (() => void) | null = null;
+    tauri.onSessionAttention((e) => {
+      const state = useStore.getState();
+      const activeTab = state.tabs.find(t => t.id === state.activeTabId);
+      const activeSessionId = activeTab?.kind === 'session'
+        ? (activeTab.linkedSessionId ?? activeTab.sessionId)
+        : null;
+      if (document.hasFocus() && activeSessionId === e.sessionId) return;
+      state.markAttention(e.sessionId);
+    }).then(fn => { unlisten = fn; });
+    return () => { if (unlisten) unlisten(); };
+  }, [isGroup]);
+
   useEffect(() => {
     void tauri.setWindowTitle(formatWindowTitle(activeTabTitle, activeProjectName));
   }, [activeTabTitle, activeProjectName]);
 
-  // The source window holds on to its action tabs until it hears this: the store
-  // boot already adopted their PTYs here, so releasing them there loses no output.
+  // The source window holds on to its action tabs until it hears this, and its
+  // release() drops the PTY listeners — so readiness must wait for adoption.
   useEffect(() => {
     if (!isGroup) return;
-    void tauri.emitDetachReady(getCurrentWebviewWindow().label);
+    void adoptedActions.then(() => tauri.emitDetachReady(getCurrentWebviewWindow().label));
   }, [isGroup]);
 
   // Closing the window ends every session in it. Prompt when any PTY is live; the
@@ -83,7 +113,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
       <div className="flex flex-1 min-h-0">
         <main className="flex-1 h-full min-w-0 bg-bg flex flex-col">
           {mode.view === 'group' && <TabBar detachedProjectId={mode.projectId} />}
-          <TabContent />
+          <TabContent detached={isGroup} />
         </main>
         <DragHandle onDrag={onRightDrag} ariaLabel="Resize right panel" />
         <div style={{ width: rightWidth }} className="h-full flex-shrink-0">

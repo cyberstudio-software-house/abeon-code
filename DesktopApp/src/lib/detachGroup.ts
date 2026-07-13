@@ -80,6 +80,14 @@ export function buildDetachPayload(tabs: Tab[], runningActions: ActionMap): Deta
   });
 }
 
+export async function focusExistingGroupWindow(projectId: number): Promise<boolean> {
+  const existing = await WebviewWindow.getByLabel(groupWindowLabel(projectId));
+  if (!existing) return false;
+  await existing.setFocus();
+  toast.info('Ten projekt jest już otwarty w osobnym oknie');
+  return true;
+}
+
 export async function detachProjectGroup(args: {
   projectId: number;
   projectName: string;
@@ -90,14 +98,9 @@ export async function detachProjectGroup(args: {
 }): Promise<void> {
   const { projectId, projectName, tabs, activeTabId, runningActions, detachTabs } = args;
   if (tabs.length === 0) return;
+  if (await focusExistingGroupWindow(projectId)) return;
 
   const label = groupWindowLabel(projectId);
-  const existing = await WebviewWindow.getByLabel(label);
-  if (existing) {
-    await existing.setFocus();
-    return;
-  }
-
   const actionTabs = tabs.filter(t => t.kind === 'action');
   const plainTabs = tabs.filter(t => t.kind !== 'action');
   const active = tabs.some(t => t.id === activeTabId) ? activeTabId : null;
@@ -144,4 +147,8 @@ export async function detachProjectGroup(args: {
     unlistenReady();
     unlistenCreated?.();
   });
+  // A window closed before it ever reported readiness would leave the ready
+  // handler armed with a stale actionTabs snapshot, which would then release
+  // actions restarted here in the meantime.
+  void win.once('tauri://destroyed', () => unlistenReady());
 }

@@ -13,7 +13,7 @@ import { isTabLiveProcess } from '../../lib/tabProcess';
 import { TabContextMenu } from './TabContextMenu';
 import { GroupContextMenu } from './GroupContextMenu';
 import { detachSessionTab } from '../../lib/detachSession';
-import { detachProjectGroup, summarizeDetach, detachSummaryMessage } from '../../lib/detachGroup';
+import { detachProjectGroup, focusExistingGroupWindow, summarizeDetach, detachSummaryMessage } from '../../lib/detachGroup';
 import type { Tab } from '../../store/tabsSlice';
 import { Icon } from '../shared/Icon';
 
@@ -150,7 +150,8 @@ export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {
     });
   };
 
-  const detachWithGuard = (projectId: number) => {
+  const detachWithGuard = async (projectId: number) => {
+    if (await focusExistingGroupWindow(projectId)) return;
     const state = useStore.getState();
     const groupTabs = state.tabs.filter(t => t.projectId === projectId);
     const message = detachSummaryMessage(summarizeDetach(groupTabs, state.runningActions));
@@ -252,7 +253,7 @@ export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {
     </div>
   );
 
-  if (tabs.length === 0) return null;
+  if (tabs.length === 0 && detachedProjectId == null) return null;
 
   return (
     <>
@@ -336,7 +337,7 @@ export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {
               onDetach={() => {
                 if (ctxMenu.tab.kind === 'session') void detachSessionTab(ctxMenu.tab, closeTab);
               }}
-              onDetachGroup={() => detachWithGuard(ctxMenu.tab.projectId)}
+              onDetachGroup={() => { void detachWithGuard(ctxMenu.tab.projectId); }}
               onRename={() => setEditingId(ctxMenu.tab.id)}
               onClose={() => closeWithGuard(ctxMenu.tab.id)}
               onCloseMenu={() => setCtxMenu(null)}
@@ -348,7 +349,7 @@ export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {
         <div ref={ctxMenuRef} className="fixed z-50" style={{ left: groupMenu.x, top: groupMenu.y }}>
           <div className="w-52 rounded-md border border-border bg-bg shadow-lg">
             <GroupContextMenu
-              onDetach={() => detachWithGuard(groupMenu.projectId)}
+              onDetach={() => { void detachWithGuard(groupMenu.projectId); }}
               onCloseMenu={() => setGroupMenu(null)}
             />
           </div>

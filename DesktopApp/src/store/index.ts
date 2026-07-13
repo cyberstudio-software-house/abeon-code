@@ -13,6 +13,10 @@ import { sessionTabFromMode, tabsFromGroupMode } from './tabsSlice';
 import { applyTheme } from '../styles/theme';
 
 const windowMode = parseWindowMode(window.location.search);
+
+// Guard on the raw `view` param, not on the parsed mode: a payload we failed to
+// parse must still never write the main window's tabs or settings.
+const isDetachedWindow = new URLSearchParams(window.location.search).has('view');
 import type { Provider } from '../types';
 import { isProvider } from '../lib/providers';
 
@@ -310,6 +314,10 @@ applyPersistedToState(loadFromLocalStorage());
 applyTheme(useStore.getState().theme);
 
 // --- Boot: seed the single session in a detached window, else restore tabs ---
+// The source window releases its action PTYs when this window reports readiness,
+// so readiness must wait until every adoption has its output+exit listeners up.
+export let adoptedActions: Promise<unknown> = Promise.resolve();
+
 if (windowMode?.view === 'session') {
   const tab = sessionTabFromMode(windowMode);
   useStore.setState({ tabs: [tab], activeTabId: tab.id, navHistory: [tab.id], navIndex: 0 });
@@ -325,9 +333,11 @@ if (windowMode?.view === 'session') {
     navHistory: activeTabId ? [activeTabId] : [],
     navIndex: 0,
   });
-  for (const tab of windowMode.tabs) {
-    if (tab.kind === 'action' && tab.ptyId) void processManager.adopt(tab.actionId, tab.ptyId);
-  }
+  adoptedActions = Promise.all(
+    windowMode.tabs
+      .filter(t => t.kind === 'action' && !!t.ptyId)
+      .map(t => t.kind === 'action' && t.ptyId ? processManager.adopt(t.actionId, t.ptyId) : null),
+  );
 } else {
   const savedTabs = loadTabsFromLocalStorage();
   if (savedTabs && savedTabs.tabs.length > 0) {
@@ -347,9 +357,9 @@ let prevSnapshot: Persisted = pickPersistedFields(useStore.getState());
 let prevTabsJson = JSON.stringify(useStore.getState().tabs) + '|' + (useStore.getState().activeTabId ?? '');
 
 useStore.subscribe((state) => {
-  // Detached session windows are ephemeral consumers: never persist tabs or
-  // settings from here, or they would overwrite the main window's state.
-  if (windowMode) return;
+  // Detached windows are ephemeral consumers: never persist tabs or settings
+  // from here, or they would overwrite the main window's state.
+  if (isDetachedWindow) return;
 
   // Settings persistence
   const next = pickPersistedFields(state);
@@ -467,6 +477,6 @@ async function drainPendingOpenPaths(): Promise<void> {
 // Detached windows inherit settings from the synchronous localStorage load
 // above and must not run SQLite hydration (it writes to disk). The PTY shell
 // is resolved on the Rust side, so shell detection is unnecessary here.
-if (!windowMode) {
+if (!isDetachedWindow) {
   void bootstrapShellPath().then(() => drainPendingOpenPaths());
 }

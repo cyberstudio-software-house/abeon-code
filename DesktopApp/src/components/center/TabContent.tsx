@@ -60,12 +60,16 @@ function TabPanel({ tab, visible }: { tab: Tab; visible: boolean }) {
   return null;
 }
 
-export function TabContent() {
+export function TabContent({ detached = false }: { detached?: boolean } = {}) {
   const tabs = useStore(s => s.tabs);
   const active = useStore(s => s.activeTabId);
 
   if (tabs.length === 0) {
-    return <div className="flex-1 grid place-items-center text-muted text-[13px]">Wybierz sesję z lewej</div>;
+    return (
+      <div className="flex-1 grid place-items-center text-muted text-[13px]">
+        {detached ? 'Otwórz nową sesję przyciskiem + na pasku zakładek' : 'Wybierz sesję z lewej'}
+      </div>
+    );
   }
 
   return (

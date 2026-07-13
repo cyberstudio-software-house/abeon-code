@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 
 const { onCloseRequested, destroy } = vi.hoisted(() => ({
   onCloseRequested: vi.fn(),
@@ -32,6 +32,8 @@ describe('DetachedShell', () => {
     vi.spyOn(tauri, 'emitDetachReady').mockResolvedValue(undefined);
     vi.spyOn(tauri, 'setWindowTitle').mockResolvedValue(undefined);
     vi.spyOn(tauri, 'listProjects').mockResolvedValue([]);
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([]);
+    vi.spyOn(tauri, 'onSessionAttention').mockResolvedValue(() => {});
     useStore.setState({
       tabs: [
         { kind: 'session', id: 'session:s1', projectId: 1, sessionId: 's1', title: 'S1', mode: 'history' },
@@ -62,13 +64,19 @@ describe('DetachedShell', () => {
     expect(event.preventDefault).not.toHaveBeenCalled();
   });
 
-  it('reports readiness so the source window can release its actions', () => {
+  it('reports readiness so the source window can release its actions', async () => {
     render(<DetachedShell mode={groupMode} />);
-    expect(tauri.emitDetachReady).toHaveBeenCalledWith('project-1');
+    await waitFor(() => expect(tauri.emitDetachReady).toHaveBeenCalledWith('project-1'));
   });
 
-  it('does not report readiness in session mode', () => {
+  it('does not report readiness in session mode', async () => {
     render(<DetachedShell mode={{ view: 'session', projectId: 1, sessionId: 's1', title: 'S1', fresh: false }} />);
+    await Promise.resolve();
     expect(tauri.emitDetachReady).not.toHaveBeenCalled();
+  });
+
+  it('tracks session activity so the tab dots are not stuck on idle', async () => {
+    render(<DetachedShell mode={groupMode} />);
+    await waitFor(() => expect(tauri.listSessions).toHaveBeenCalledWith(1, expect.any(Number), 0));
   });
 });

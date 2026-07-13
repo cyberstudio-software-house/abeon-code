@@ -22,9 +22,9 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
   ),
 }));
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
 
-import { summarizeDetach, detachSummaryMessage, buildDetachPayload, detachProjectGroup } from './detachGroup';
+import { summarizeDetach, detachSummaryMessage, buildDetachPayload, detachProjectGroup, focusExistingGroupWindow } from './detachGroup';
 import { processManager } from './processManager';
 import { tauri } from './tauri';
 import type { Tab } from '../store/tabsSlice';
@@ -112,5 +112,24 @@ describe('detachProjectGroup', () => {
     await detachProjectGroup({ projectId: 5, projectName: 'P', tabs, activeTabId: null, runningActions, detachTabs });
     readyCb('project-99');
     expect(processManager.release).not.toHaveBeenCalled();
+  });
+});
+
+describe('focusExistingGroupWindow', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reports false when the project has no window yet', async () => {
+    getByLabel.mockResolvedValue(null);
+    expect(await focusExistingGroupWindow(5)).toBe(false);
+    expect(setFocus).not.toHaveBeenCalled();
+  });
+
+  it('focuses the window and reports true when it already exists', async () => {
+    getByLabel.mockResolvedValue({ setFocus });
+    expect(await focusExistingGroupWindow(5)).toBe(true);
+    expect(getByLabel).toHaveBeenCalledWith('project-5');
+    expect(setFocus).toHaveBeenCalled();
   });
 });
