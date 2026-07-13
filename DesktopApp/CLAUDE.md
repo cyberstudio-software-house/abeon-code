@@ -63,6 +63,31 @@ A `subscribe` handler diffs persisted fields and writes both layers. `PERSISTED_
 
 Closing a tab with an active process (`session+terminal`, `action`, `terminal`) **must** route through the `ConfirmDialog` in `TabBar.tsx`. Helpers there: `isActiveProcess()` + `closeWithGuard()`. Close triggers: X button, middle-click on tab, Ctrl/Cmd+W (global capture-phase listener).
 
+## Detached windows
+
+Two window modes beyond the main shell, both routed by `lib/windowMode.ts` (`?view=…` in the
+webview URL) and rendered by `layout/DetachedShell.tsx`:
+
+- `session` — one session tab (`lib/detachSession.ts`, label `session-<id>`).
+- `group` — every tab of one project (`lib/detachGroup.ts`, label `project-<id>`); the tab list
+  travels as base64 JSON in the query string.
+
+New window labels **must** be covered by `src-tauri/capabilities/default.json` (`windows` array) —
+an uncovered label gets zero permissions and every `invoke` from it fails at runtime, which no
+frontend test catches.
+
+Detached windows never persist settings or tabs (`store/index.ts` bails out of `subscribe` when
+`windowMode` is set), so they do not come back after an app restart.
+
+Handing a project group over is two-phase, because session PTYs must die before the new window
+respawns them, while action PTYs must survive:
+1. the source window drops session/terminal/picker tabs on `tauri://created` → `TerminalView`
+   cleanup kills their PTYs;
+2. the new window adopts running action PTYs by id (`processManager.adopt`; Rust broadcasts
+   `pty:*` events to every webview) and emits `abeon:detach-ready`;
+3. the source window then calls `processManager.release` (unsubscribe, **no** `ptyKill`) and drops
+   the action tabs.
+
 ## Providers
 
 The app drives two AI CLIs, selected per session via `domain::Provider` (`claude` | `codex`):
