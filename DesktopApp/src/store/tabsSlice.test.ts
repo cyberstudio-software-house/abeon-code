@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from './index';
-import { sessionTabFromMode } from './tabsSlice';
+import { sessionTabFromMode, tabsFromGroupMode } from './tabsSlice';
+import type { GroupWindowMode } from '../lib/windowMode';
 
 describe('tabsSlice mruOrder', () => {
   beforeEach(() => {
@@ -303,5 +304,65 @@ describe('tabsSlice preview tabs', () => {
     const tabs = useStore.getState().tabs;
     expect(tabs).toHaveLength(2);
     expect(useStore.getState().activeTabId).toBe('session:a');
+  });
+});
+
+describe('tabsFromGroupMode', () => {
+  it('maps the payload back to tabs and stamps the projectId', () => {
+    const mode: GroupWindowMode = {
+      view: 'group',
+      projectId: 5,
+      activeTabId: 'terminal:t1',
+      tabs: [
+        { kind: 'session', id: 'session:s1', sessionId: 's1', title: 'S', mode: 'history' },
+        { kind: 'action', id: 'action:4', actionId: 4, title: 'dev', status: 'running', ptyId: 'pty-9' },
+        { kind: 'terminal', id: 'terminal:t1', title: 'Terminal' },
+      ],
+    };
+    expect(tabsFromGroupMode(mode)).toEqual([
+      { kind: 'session', id: 'session:s1', projectId: 5, sessionId: 's1', title: 'S', mode: 'history' },
+      { kind: 'action', id: 'action:4', projectId: 5, actionId: 4, title: 'dev', status: 'running' },
+      { kind: 'terminal', id: 'terminal:t1', projectId: 5, title: 'Terminal' },
+    ]);
+  });
+});
+
+describe('tabsSlice detachTabs', () => {
+  beforeEach(() => {
+    useStore.setState({
+      tabs: [
+        { kind: 'terminal', id: 'a', projectId: 1, title: 'A' },
+        { kind: 'terminal', id: 'b', projectId: 2, title: 'B' },
+        { kind: 'terminal', id: 'c', projectId: 1, title: 'C' },
+      ],
+      activeTabId: 'c',
+      mruOrder: ['c', 'b', 'a'],
+      navHistory: ['a', 'b', 'c'],
+      navIndex: 2,
+    });
+  });
+
+  it('removes the given tabs and moves the active one to a survivor', () => {
+    useStore.getState().detachTabs(['a', 'c']);
+    const s = useStore.getState();
+    expect(s.tabs.map(t => t.id)).toEqual(['b']);
+    expect(s.activeTabId).toBe('b');
+    expect(s.mruOrder).toEqual(['b']);
+    expect(s.navHistory).toEqual(['b']);
+    expect(s.navIndex).toBe(0);
+  });
+
+  it('keeps the active tab when it is not detached', () => {
+    useStore.getState().detachTabs(['a']);
+    const s = useStore.getState();
+    expect(s.tabs.map(t => t.id)).toEqual(['b', 'c']);
+    expect(s.activeTabId).toBe('c');
+  });
+
+  it('nulls the active tab when everything is detached', () => {
+    useStore.getState().detachTabs(['a', 'b', 'c']);
+    const s = useStore.getState();
+    expect(s.tabs).toEqual([]);
+    expect(s.activeTabId).toBeNull();
   });
 });

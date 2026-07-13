@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand';
-import type { SessionWindowMode } from '../lib/windowMode';
+import type { GroupWindowMode, SessionWindowMode } from '../lib/windowMode';
 import type { Provider } from '../types';
 import type { SettingsSlice } from './settingsSlice';
 import type { AppState } from './index';
@@ -26,6 +26,7 @@ export type TabsSlice = {
   chooseProvider: (tabId: string, provider: Provider) => void;
   setSessionMode: (tabId: string, mode: 'history' | 'terminal') => void;
   closeTab: (id: string) => void;
+  detachTabs: (ids: string[]) => void;
   setActive: (id: string) => void;
   goBack: () => void;
   goForward: () => void;
@@ -56,6 +57,40 @@ export function sessionTabFromMode(mode: SessionWindowMode): Extract<Tab, { kind
     ...(mode.fresh ? { fresh: true } : {}),
     ...(mode.provider ? { provider: mode.provider } : {}),
   };
+}
+
+export function tabsFromGroupMode(mode: GroupWindowMode): Tab[] {
+  return mode.tabs.map((t): Tab => {
+    if (t.kind === 'session') {
+      return {
+        kind: 'session',
+        id: t.id,
+        projectId: mode.projectId,
+        sessionId: t.sessionId,
+        ...(t.linkedSessionId ? { linkedSessionId: t.linkedSessionId } : {}),
+        title: t.title,
+        mode: t.mode,
+        ...(t.fresh ? { fresh: true } : {}),
+        ...(t.preview ? { preview: true } : {}),
+        ...(t.provider ? { provider: t.provider } : {}),
+      };
+    }
+    if (t.kind === 'action') {
+      return {
+        kind: 'action',
+        id: t.id,
+        projectId: mode.projectId,
+        actionId: t.actionId,
+        title: t.title,
+        status: t.status,
+        ...(t.exitCode != null ? { exitCode: t.exitCode } : {}),
+      };
+    }
+    if (t.kind === 'terminal') {
+      return { kind: 'terminal', id: t.id, projectId: mode.projectId, title: t.title };
+    }
+    return { kind: 'providerPicker', id: t.id, projectId: mode.projectId, title: t.title };
+  });
 }
 
 const moveToFront = (order: string[], id: string) => [id, ...order.filter(x => x !== id)];
@@ -155,6 +190,21 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
     const wasActive = get().activeTabId === id;
     const activeTabId = wasActive ? (tabs[tabs.length - 1]?.id ?? null) : get().activeTabId;
     let nav = pruneNav({ history: get().navHistory, index: get().navIndex }, id);
+    if (wasActive && activeTabId) {
+      const idx = nav.history.lastIndexOf(activeTabId);
+      if (idx !== -1) nav = { history: nav.history, index: idx };
+    }
+    set({ tabs, activeTabId, mruOrder, navHistory: nav.history, navIndex: nav.index });
+  },
+  detachTabs: (ids) => {
+    const removed = new Set(ids);
+    const tabs = get().tabs.filter(t => !removed.has(t.id));
+    const mruOrder = get().mruOrder.filter(x => !removed.has(x));
+    const prevActive = get().activeTabId;
+    const wasActive = !!prevActive && removed.has(prevActive);
+    const activeTabId = wasActive ? (tabs[tabs.length - 1]?.id ?? null) : prevActive;
+    let nav = { history: get().navHistory, index: get().navIndex };
+    for (const id of ids) nav = pruneNav(nav, id);
     if (wasActive && activeTabId) {
       const idx = nav.history.lastIndexOf(activeTabId);
       if (idx !== -1) nav = { history: nav.history, index: idx };
