@@ -130,6 +130,18 @@ describe('SessionItem subagents', () => {
     expect(listSubagents).not.toHaveBeenCalled();
   });
 
+  it('surfaces a failed agent load instead of claiming the session has no agents', async () => {
+    vi.spyOn(tauri, 'listSubagents').mockRejectedValue('nie ma katalogu subagents');
+    const { getByRole, findByText, queryByText } = render(
+      <ul><SessionItem session={meta('running', 'claude', { runningAgents: 1, totalAgents: 1 })} onClick={() => {}} /></ul>,
+    );
+
+    fireEvent.click(getByRole('button'));
+
+    expect(await findByText(/nie ma katalogu subagents/)).toBeTruthy();
+    expect(queryByText('Brak agentów')).toBeNull();
+  });
+
   it('does not open the session when the badge is clicked', () => {
     const onClick = vi.fn();
     vi.spyOn(tauri, 'listSubagents').mockResolvedValue([]);

@@ -19,7 +19,7 @@ export function SessionItem({ session, active, onClick }: Props) {
   const hasOpenTab = useStore(s =>
     s.tabs.some(t => t.kind === 'session' && (t.sessionId === session.id || t.linkedSessionId === session.id)),
   );
-  const { expanded, agents, toggleAgents, pickAgent } = useSubagentRow({
+  const { expanded, agents, error: agentsError, toggleAgents, pickAgent } = useSubagentRow({
     projectId: session.projectId,
     sessionId: session.id,
     title: session.title,
@@ -86,7 +86,7 @@ export function SessionItem({ session, active, onClick }: Props) {
         />
         <span className="font-mono text-[10px] text-muted shrink-0">{formatRelative(session.lastModified)}</span>
       </li>
-      {expanded && <SubagentList agents={agents} onPick={pickAgent} />}
+      {expanded && <SubagentList agents={agents} error={agentsError} onPick={pickAgent} />}
     </>
   );
 }

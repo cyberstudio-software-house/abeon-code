@@ -66,7 +66,7 @@ export function ActiveSessionsPanel() {
 }
 
 function ActiveSessionRowItem({ row, onClick }: { row: ActiveSessionRow; onClick: () => void }) {
-  const { expanded, agents, toggleAgents, pickAgent } = useSubagentRow({
+  const { expanded, agents, error: agentsError, toggleAgents, pickAgent } = useSubagentRow({
     projectId: row.projectId,
     sessionId: row.sessionId,
     title: row.title,
@@ -97,7 +97,7 @@ function ActiveSessionRowItem({ row, onClick }: { row: ActiveSessionRow; onClick
         <span className="text-[10px] text-muted truncate max-w-[72px] shrink-0">{row.projectName}</span>
         <span className="font-mono text-[10px] text-muted shrink-0">{formatRelative(row.lastModified)}</span>
       </li>
-      {expanded && <SubagentList agents={agents} onPick={pickAgent} />}
+      {expanded && <SubagentList agents={agents} error={agentsError} onPick={pickAgent} />}
     </>
   );
 }

@@ -41,4 +41,19 @@ describe('SubagentList', () => {
     const { container } = render(<ul><SubagentList agents={[]} onPick={() => {}} /></ul>);
     expect(container.textContent).toContain('Brak agentów');
   });
+
+  it('reports loading while the list has not arrived yet', () => {
+    const { container } = render(<ul><SubagentList agents={undefined} onPick={() => {}} /></ul>);
+    expect(container.textContent).toContain('Wczytywanie');
+    expect(container.textContent).not.toContain('Brak agentów');
+  });
+
+  it('reports the failure instead of an empty list when the call failed', () => {
+    const { container } = render(
+      <ul><SubagentList agents={undefined} error="brak katalogu" onPick={() => {}} /></ul>,
+    );
+    expect(container.textContent).toContain('brak katalogu');
+    expect(container.textContent).not.toContain('Brak agentów');
+    expect(container.textContent).not.toContain('Wczytywanie');
+  });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { formatTauriError } from '../lib/errors';
 import { useStore } from '../store';
 import { sessionTabId } from '../store/tabsSlice';
 import type { Provider, SubagentInfo } from '../types';
@@ -15,7 +16,8 @@ type Args = {
 
 type SubagentRow = {
   expanded: boolean;
-  agents: SubagentInfo[];
+  agents: SubagentInfo[] | undefined;
+  error: string | null;
   toggleAgents: () => void;
   pickAgent: (agentId: string) => void;
 };
@@ -24,6 +26,7 @@ export function useSubagentRow(
   { projectId, sessionId, title, provider, runningAgents, totalAgents }: Args,
 ): SubagentRow {
   const [expanded, setExpanded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const agents = useStore(useShallow(s => s.subagentsBySession[sessionId]));
   const loadSubagents = useStore(s => s.loadSubagents);
   const openTab = useStore(s => s.openSessionTab);
@@ -31,7 +34,11 @@ export function useSubagentRow(
 
   useEffect(() => {
     if (!expanded) return;
-    loadSubagents(projectId, sessionId).catch(() => {});
+    let cancelled = false;
+    loadSubagents(projectId, sessionId)
+      .then(() => { if (!cancelled) setError(null); })
+      .catch(e => { if (!cancelled) setError(formatTauriError(e)); });
+    return () => { cancelled = true; };
   }, [expanded, runningAgents, totalAgents, projectId, sessionId, loadSubagents]);
 
   const toggleAgents = () => setExpanded(value => !value);
@@ -41,5 +48,5 @@ export function useSubagentRow(
     viewSubagent(sessionTabId(sessionId), agentId);
   };
 
-  return { expanded, agents: agents ?? [], toggleAgents, pickAgent };
+  return { expanded, agents, error, toggleAgents, pickAgent };
 }

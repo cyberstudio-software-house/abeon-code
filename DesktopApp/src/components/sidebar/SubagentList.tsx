@@ -24,9 +24,21 @@ function duration(a: SubagentInfo): string {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, '0')}s`;
 }
 
-type Props = { agents: SubagentInfo[]; onPick: (agentId: string) => void };
+type Props = {
+  agents: SubagentInfo[] | undefined;
+  error?: string | null;
+  onPick: (agentId: string) => void;
+};
 
-export function SubagentList({ agents, onPick }: Props) {
+export function SubagentList({ agents, error, onPick }: Props) {
+  if (error) {
+    return <li className="pl-7 py-1 text-[11px] text-danger">Nie udało się wczytać agentów: {error}</li>;
+  }
+
+  if (!agents) {
+    return <li className="pl-7 py-1 text-[11px] text-muted">Wczytywanie agentów…</li>;
+  }
+
   if (agents.length === 0) {
     return <li className="pl-7 py-1 text-[11px] text-muted">Brak agentów</li>;
   }
