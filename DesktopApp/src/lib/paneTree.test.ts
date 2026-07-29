@@ -9,6 +9,7 @@ import {
   leaves,
   mapLeaves,
   moveTab,
+  reconcilePanes,
   removeTabFromLeaves,
   type PaneLeaf,
   type PaneNode,
@@ -138,5 +139,61 @@ describe('paneTree mutations', () => {
     expect(flat(out.root)).toBe('row[p2(b) p3(c)]');
     expect((out.root as PaneSplit).sizes).toEqual([0.5, 0.5]);
     expect(out.focusedPaneId).toBe('p2');
+  });
+});
+
+describe('reconcilePanes', () => {
+  const base = (layout: PaneNode, activeTabId: string | null, focusedPaneId: string) =>
+    ({ layout, activeTabId, focusedPaneId });
+
+  it('returns identical references when nothing changed', () => {
+    const snap = base(createLeaf('p1', ['a'], 'a'), 'a', 'p1');
+    const out = reconcilePanes({ ...snap, tabIds: ['a'], prevActiveTabId: 'a' });
+    expect(out.layout).toBe(snap.layout);
+    expect(out.activeTabId).toBe('a');
+    expect(out.focusedPaneId).toBe('p1');
+  });
+
+  it('appends a new tab to the focused pane and makes it active there', () => {
+    const root = insertBeside(createLeaf('p1', ['a'], 'a'), 'p1', 'row', false, createLeaf('p2', ['b'], 'b'), 's1');
+    const out = reconcilePanes({ layout: root, activeTabId: 'c', focusedPaneId: 'p2', tabIds: ['a', 'b', 'c'], prevActiveTabId: 'b' });
+    expect(findLeaf(out.layout, 'p2')?.tabIds).toEqual(['b', 'c']);
+    expect(findLeaf(out.layout, 'p2')?.activeTabId).toBe('c');
+    expect(findLeaf(out.layout, 'p1')?.tabIds).toEqual(['a']);
+  });
+
+  it('drops tabs that no longer exist and collapses the emptied pane', () => {
+    const root = insertBeside(createLeaf('p1', ['a'], 'a'), 'p1', 'row', false, createLeaf('p2', ['b'], 'b'), 's1');
+    const out = reconcilePanes({ layout: root, activeTabId: 'a', focusedPaneId: 'p2', tabIds: ['a'], prevActiveTabId: 'b' });
+    expect(out.layout.kind).toBe('leaf');
+    expect(out.focusedPaneId).toBe('p1');
+    expect(out.activeTabId).toBe('a');
+  });
+
+  it('follows the active tab into another pane when it changed', () => {
+    const root = insertBeside(createLeaf('p1', ['a'], 'a'), 'p1', 'row', false, createLeaf('p2', ['b'], 'b'), 's1');
+    const out = reconcilePanes({ layout: root, activeTabId: 'a', focusedPaneId: 'p2', tabIds: ['a', 'b'], prevActiveTabId: 'b' });
+    expect(out.focusedPaneId).toBe('p1');
+    expect(out.activeTabId).toBe('a');
+  });
+
+  it('keeps the other pane active tab untouched', () => {
+    const root = insertBeside(createLeaf('p1', ['a', 'x'], 'x'), 'p1', 'row', false, createLeaf('p2', ['b'], 'b'), 's1');
+    const out = reconcilePanes({ layout: root, activeTabId: 'b', focusedPaneId: 'p2', tabIds: ['a', 'x', 'b'], prevActiveTabId: 'b' });
+    expect(findLeaf(out.layout, 'p1')?.activeTabId).toBe('x');
+  });
+
+  it('pulls the global active tab back to the focused pane after a close', () => {
+    const root = insertBeside(createLeaf('p1', ['a'], 'a'), 'p1', 'row', false, createLeaf('p2', ['b', 'c'], 'c'), 's1');
+    const out = reconcilePanes({ layout: root, activeTabId: 'a', focusedPaneId: 'p2', tabIds: ['a', 'b', 'c'], prevActiveTabId: 'a' });
+    expect(out.focusedPaneId).toBe('p2');
+    expect(out.activeTabId).toBe('c');
+  });
+
+  it('repoints a pane active tab to the last survivor when it disappears', () => {
+    const root = insertBeside(createLeaf('p1', ['a', 'b'], 'b'), 'p1', 'row', false, createLeaf('p2', ['c'], 'c'), 's1');
+    const out = reconcilePanes({ layout: root, activeTabId: 'c', focusedPaneId: 'p2', tabIds: ['a', 'c'], prevActiveTabId: 'c' });
+    expect(findLeaf(out.layout, 'p1')?.tabIds).toEqual(['a']);
+    expect(findLeaf(out.layout, 'p1')?.activeTabId).toBe('a');
   });
 });

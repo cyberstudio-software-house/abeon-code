@@ -120,3 +120,46 @@ export function collapseEmpty(root: PaneNode, focusedPaneId: string): { root: Pa
   for (let i = at + 1; i < order.length; i++) if (survivors.has(order[i])) return { root: next, focusedPaneId: order[i] };
   return { root: next, focusedPaneId: leaves(next)[0].id };
 }
+
+export type PanesSnapshot = { layout: PaneNode; activeTabId: string | null; focusedPaneId: string };
+
+export function reconcilePanes(
+  input: PanesSnapshot & { tabIds: string[]; prevActiveTabId: string | null },
+): PanesSnapshot {
+  const known = new Set(input.tabIds);
+  let layout = mapLeaves(input.layout, leaf => {
+    const tabIds = leaf.tabIds.filter(id => known.has(id));
+    return tabIds.length === leaf.tabIds.length ? leaf : { ...leaf, tabIds };
+  });
+
+  const placed = new Set(leaves(layout).flatMap(l => l.tabIds));
+  const missing = input.tabIds.filter(id => !placed.has(id));
+  if (missing.length > 0) {
+    const host = findLeaf(layout, input.focusedPaneId) ? input.focusedPaneId : leaves(layout)[0].id;
+    layout = mapLeaves(layout, leaf =>
+      leaf.id === host ? { ...leaf, tabIds: [...leaf.tabIds, ...missing] } : leaf,
+    );
+  }
+
+  const collapsed = collapseEmpty(layout, input.focusedPaneId);
+  layout = collapsed.root;
+  let focusedPaneId = collapsed.focusedPaneId;
+
+  let activeTabId = input.activeTabId;
+  if (activeTabId !== input.prevActiveTabId) {
+    const owner = activeTabId ? findLeafOfTab(layout, activeTabId) : null;
+    if (owner) focusedPaneId = owner.id;
+  }
+
+  layout = mapLeaves(layout, leaf => {
+    const next = activeTabId && leaf.tabIds.includes(activeTabId)
+      ? activeTabId
+      : pickActive(leaf.tabIds, leaf.activeTabId);
+    return next === leaf.activeTabId ? leaf : { ...leaf, activeTabId: next };
+  });
+
+  const focused = findLeaf(layout, focusedPaneId);
+  if (focused && focused.activeTabId !== activeTabId) activeTabId = focused.activeTabId;
+
+  return { layout, activeTabId, focusedPaneId };
+}
