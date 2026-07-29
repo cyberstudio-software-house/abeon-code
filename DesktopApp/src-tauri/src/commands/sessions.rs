@@ -455,6 +455,7 @@ mod merge_tests {
             id: id.into(), project_id: 1, title: id.into(), message_count: 1,
             last_modified, git_branch: None, cwd: None,
             activity: SessionActivity::Idle, provider,
+            running_agents: 0, total_agents: 0,
         }
     }
 
@@ -542,6 +543,7 @@ mod active_tests {
         SessionMeta {
             id: id.into(), project_id: 7, title: format!("title-{id}"), message_count: 1,
             last_modified: 100, git_branch: None, cwd: None, activity, provider,
+            running_agents: 0, total_agents: 0,
         }
     }
 

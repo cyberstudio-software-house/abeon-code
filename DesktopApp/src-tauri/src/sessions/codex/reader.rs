@@ -209,6 +209,8 @@ pub fn list_for_cwd(root: &Path, cwd: &str, project_id: i64, limit: usize) -> Ve
                 cwd: Some(s.cwd.clone()),
                 activity: crate::sessions::activity::compute_activity_for(Provider::Codex, &s.path, now_ms()),
                 provider: Provider::Codex,
+                running_agents: 0,
+                total_agents: 0,
             }
         })
         .collect()
@@ -290,6 +292,8 @@ pub fn read_history(
         cwd: Some(file_meta.cwd),
         activity: crate::sessions::activity::compute_activity_for(Provider::Codex, &path, now_ms()),
         provider: Provider::Codex,
+        running_agents: 0,
+        total_agents: 0,
     };
     Ok(crate::domain::SessionHistory { meta, blocks, has_more_before })
 }

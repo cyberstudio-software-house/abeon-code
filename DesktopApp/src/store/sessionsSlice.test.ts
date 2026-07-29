@@ -14,6 +14,8 @@ function fakeMeta(id: string, projectId: number, activity: SessionMeta['activity
     cwd: null,
     activity,
     provider: 'claude',
+    runningAgents: 0,
+    totalAgents: 0,
   };
 }
 

@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use crate::domain::{HistoryBlock, Provider, SessionHistory, SessionMeta};
 use crate::error::{AppError, AppResult};
-use super::activity::compute_activity;
+use super::activity::compute_activity_with_agents;
 use super::parser::parse_line;
 
 const DEFAULT_PAGE: usize = 200;
@@ -14,6 +14,17 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+pub fn session_agent_counts(path: &Path, now_ms: i64) -> (u32, u32) {
+    let dir = crate::sessions::subagents::subagents_dir(path);
+    if !dir.exists() {
+        return (0, 0);
+    }
+    let lines = crate::sessions::activity::read_tail_lines(path).unwrap_or_default();
+    let completed = crate::sessions::subagents::collect_completed_ids(&lines);
+    let list = crate::sessions::subagents::scan_dir(&dir, &completed, now_ms);
+    (crate::sessions::subagents::count_running(&list), list.len() as u32)
 }
 
 /// Build the path to a session's JSONL file. Validates `session_id` first so an
@@ -144,12 +155,17 @@ fn meta_for_file_fast(project_id: i64, path: &Path) -> AppResult<SessionMeta> {
         if has_ai_title && cwd.is_some() { break; }
     }
 
+    let now = now_ms();
+    let (running_agents, total_agents) = session_agent_counts(path, now);
+
     Ok(SessionMeta {
         id, project_id, title,
         message_count: approx_messages,
         last_modified, git_branch, cwd,
-        activity: compute_activity(path, now_ms()),
+        activity: compute_activity_with_agents(path, running_agents, now),
         provider: Provider::Claude,
+        running_agents,
+        total_agents,
     })
 }
 
@@ -241,12 +257,17 @@ pub fn read_history(
     let blocks = all_blocks[start..end].to_vec();
     let has_more_before = start > 0;
 
+    let now = now_ms();
+    let (running_agents, total_agents) = session_agent_counts(&path, now);
+
     let meta = SessionMeta {
         id, project_id, title,
         message_count: line_count,
         last_modified, git_branch, cwd,
-        activity: compute_activity(&path, now_ms()),
+        activity: compute_activity_with_agents(&path, running_agents, now),
         provider: Provider::Claude,
+        running_agents,
+        total_agents,
     };
 
     Ok(SessionHistory { meta, blocks, has_more_before })

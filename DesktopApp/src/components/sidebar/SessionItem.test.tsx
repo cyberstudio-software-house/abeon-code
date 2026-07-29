@@ -14,6 +14,8 @@ function meta(activity: SessionMeta['activity'], provider: SessionMeta['provider
     cwd: null,
     activity,
     provider,
+    runningAgents: 0,
+    totalAgents: 0,
   };
 }
 

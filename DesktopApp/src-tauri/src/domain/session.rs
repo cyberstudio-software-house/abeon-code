@@ -28,6 +28,10 @@ pub struct SessionMeta {
     pub cwd: Option<String>,
     pub activity: SessionActivity,
     pub provider: Provider,
+    #[ts(type = "number")]
+    pub running_agents: u32,
+    #[ts(type = "number")]
+    pub total_agents: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

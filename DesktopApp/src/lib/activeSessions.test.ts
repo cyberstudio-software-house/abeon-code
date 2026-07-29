@@ -9,7 +9,7 @@ function project(id: number, color: string | null): Project {
   return { id, name: `P${id}`, path: `/p${id}`, claudeDir: `d${id}`, color, sortOrder: 0, createdAt: 0 };
 }
 function sessionMeta(id: string, projectId: number, activity: SessionMeta['activity']): SessionMeta {
-  return { id, projectId, title: `S-${id}`, messageCount: 1, lastModified: 9, gitBranch: null, cwd: null, activity, provider: 'codex' };
+  return { id, projectId, title: `S-${id}`, messageCount: 1, lastModified: 9, gitBranch: null, cwd: null, activity, provider: 'codex', runningAgents: 0, totalAgents: 0 };
 }
 
 describe('buildActiveSessionRows', () => {

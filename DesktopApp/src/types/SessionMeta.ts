@@ -2,4 +2,4 @@
 import type { Provider } from "./Provider";
 import type { SessionActivity } from "./SessionActivity";
 
-export type SessionMeta = { id: string, projectId: number, title: string, messageCount: number, lastModified: number, gitBranch: string | null, cwd: string | null, activity: SessionActivity, provider: Provider, };
+export type SessionMeta = { id: string, projectId: number, title: string, messageCount: number, lastModified: number, gitBranch: string | null, cwd: string | null, activity: SessionActivity, provider: Provider, runningAgents: number, totalAgents: number, };

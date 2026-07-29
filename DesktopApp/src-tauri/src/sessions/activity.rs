@@ -63,6 +63,14 @@ pub(crate) fn compute_activity_with(
     }
 }
 
+pub fn compute_activity_with_agents(path: &Path, running_agents: u32, now_ms: i64) -> SessionActivity {
+    let base = compute_activity(path, now_ms);
+    if running_agents > 0 && base != SessionActivity::Idle {
+        return SessionActivity::Running;
+    }
+    base
+}
+
 pub fn compute_activity_for(provider: Provider, path: &Path, now_ms: i64) -> SessionActivity {
     match provider {
         Provider::Claude => compute_activity_with(find_last_significant, read_tail_lines, path, now_ms),
@@ -517,6 +525,25 @@ mod tests {
 {"type":"user","uuid":"u2","message":{"content":[{"type":"text","text":"i'm back"}]}}"#;
         let (p, mtime) = write_with_mtime(&td, "s.jsonl", body);
         assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn live_agents_force_running_despite_assistant_text() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"hi"}]}}
+{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"uruchomilem agenty"}]}}"#);
+        assert_eq!(compute_activity_with_agents(&p, 0, mtime + 60_000), SessionActivity::WaitingUser);
+        assert_eq!(compute_activity_with_agents(&p, 2, mtime + 60_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn live_agents_do_not_resurrect_a_day_old_session() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"hi"}]}}"#);
+        let twenty_five_hours = 25 * 60 * 60 * 1000;
+        assert_eq!(compute_activity_with_agents(&p, 1, mtime + twenty_five_hours), SessionActivity::Idle);
     }
 
     #[test]

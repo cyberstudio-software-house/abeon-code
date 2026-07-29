@@ -25,3 +25,5 @@ export type { TokenTotals } from './TokenTotals';
 export type { ModelUsage } from './ModelUsage';
 export type { UsageSummary } from './UsageSummary';
 export type { ProviderInfo } from './ProviderInfo';
+export type { SubagentInfo } from './SubagentInfo';
+export type { SubagentStatus } from './SubagentStatus';
