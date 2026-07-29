@@ -1,9 +1,8 @@
 import { useRef, useState } from 'react';
-import { useShallow } from 'zustand/react/shallow';
 import type { SessionMeta } from '../../types';
 import { formatRelative } from '../../lib/format';
 import { useStore } from '../../store';
-import { sessionTabId } from '../../store/tabsSlice';
+import { useSubagentRow } from '../../hooks/useSubagentRow';
 import { ACTIVITY_TEXT, ACTIVITY_LABEL } from '../../lib/activity';
 import { PROVIDER_ICON } from '../../lib/providers';
 import { Icon } from '../shared/Icon';
@@ -14,17 +13,18 @@ type Props = { session: SessionMeta; active?: boolean; onClick: () => void };
 
 export function SessionItem({ session, active, onClick }: Props) {
   const [editing, setEditing] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const rename = useStore(s => s.renameSession);
   const hasAttention = useStore(s => s.attentionSessions.has(session.id));
   const hasOpenTab = useStore(s =>
     s.tabs.some(t => t.kind === 'session' && (t.sessionId === session.id || t.linkedSessionId === session.id)),
   );
-  const agents = useStore(useShallow(s => s.subagentsBySession[session.id]));
-  const loadSubagents = useStore(s => s.loadSubagents);
-  const openTab = useStore(s => s.openSessionTab);
-  const viewSubagent = useStore(s => s.viewSubagent);
+  const { expanded, agents, toggleAgents, pickAgent } = useSubagentRow({
+    projectId: session.projectId,
+    sessionId: session.id,
+    title: session.title,
+    provider: session.provider,
+  });
 
   const commitRename = () => {
     const value = inputRef.current?.value.trim();
@@ -32,17 +32,6 @@ export function SessionItem({ session, active, onClick }: Props) {
       rename(session.projectId, session.id, value);
     }
     setEditing(false);
-  };
-
-  const toggleAgents = () => {
-    const next = !expanded;
-    setExpanded(next);
-    if (next) loadSubagents(session.projectId, session.id).catch(() => {});
-  };
-
-  const pickAgent = (agentId: string) => {
-    openTab(session.projectId, session.id, session.title, session.provider);
-    viewSubagent(sessionTabId(session.id), agentId);
   };
 
   return (
@@ -95,7 +84,7 @@ export function SessionItem({ session, active, onClick }: Props) {
         />
         <span className="font-mono text-[10px] text-muted shrink-0">{formatRelative(session.lastModified)}</span>
       </li>
-      {expanded && <SubagentList agents={agents ?? []} onPick={pickAgent} />}
+      {expanded && <SubagentList agents={agents} onPick={pickAgent} />}
     </>
   );
 }

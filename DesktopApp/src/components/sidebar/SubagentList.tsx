@@ -41,7 +41,7 @@ export function SubagentList({ agents, onPick }: Props) {
           className="pl-7 pr-2 py-1 text-[11px] cursor-pointer flex items-center gap-2 text-fg hover:bg-bg-elev"
         >
           <span className={`shrink-0 ${STATUS_TONE[a.status]}`}>{STATUS_MARK[a.status]}</span>
-          <span className="shrink-0 text-muted">{a.agentType}</span>
+          <span className="shrink-0 truncate max-w-[76px] text-muted">{a.agentType}</span>
           <span className="truncate flex-1 min-w-0">{a.description}</span>
           <span className="font-mono text-[10px] text-muted shrink-0">{duration(a)}</span>
         </li>

@@ -1,14 +1,28 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { render } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, fireEvent } from '@testing-library/react';
 import { ActiveSessionsPanel } from './ActiveSessionsPanel';
 import { useStore } from '../../store';
-import type { ActiveSession, Project } from '../../types';
+import { tauri } from '../../lib/tauri';
+import type { ActiveSession, Project, SessionMeta, SubagentInfo } from '../../types';
 
 function active(id: string): ActiveSession {
   return { sessionId: id, projectId: 1, projectName: 'Proj', title: `T-${id}`, activity: 'running', lastModified: 1, provider: 'claude' };
 }
 function project(): Project {
   return { id: 1, name: 'Proj', path: '/p', claudeDir: 'd', color: null, sortOrder: 0, createdAt: 0 };
+}
+function meta(id: string, over: Partial<SessionMeta> = {}): SessionMeta {
+  return {
+    id, projectId: 1, title: `T-${id}`, messageCount: 1, lastModified: 1,
+    gitBranch: null, cwd: null, activity: 'running', provider: 'claude',
+    runningAgents: 0, totalAgents: 0, ...over,
+  };
+}
+function agent(over: Partial<SubagentInfo> = {}): SubagentInfo {
+  return {
+    agentId: 'agent-1', agentType: 'Explore', description: 'Find shortcuts',
+    status: 'running', startedAt: 1000, endedAt: null, ...over,
+  };
 }
 // Minimal session tab — the panel only reads kind/sessionId/linkedSessionId.
 function sessionTab(sessionId: string) {
@@ -45,5 +59,62 @@ describe('ActiveSessionsPanel visibility', () => {
     const { getByText } = render(<ActiveSessionsPanel />);
     expect(getByText('Aktywne')).toBeTruthy();
     expect(getByText('1')).toBeTruthy();
+  });
+});
+
+describe('ActiveSessionsPanel subagents', () => {
+  const badgeLabel = 'Pracuje 1 z 2 agentów';
+
+  beforeEach(() => {
+    useStore.setState({
+      showActiveSessions: true,
+      activeSessions: [active('a')],
+      attentionSessions: new Set(),
+      sessionsByProject: { 1: { items: [meta('a', { runningAgents: 1, totalAgents: 2 })], hasMore: false } },
+      subagentsBySession: {},
+      projects: [project()],
+      tabs: [sessionTab('a')],
+      activeTabId: null,
+      mruOrder: [],
+    });
+    vi.restoreAllMocks();
+  });
+
+  it('renders the badge from the session counters held in sessionsByProject', () => {
+    const { getByRole } = render(<ActiveSessionsPanel />);
+    expect(getByRole('button', { name: badgeLabel }).textContent).toContain('1');
+  });
+
+  it('renders no badge when the project sessions were never loaded', () => {
+    useStore.setState({ sessionsByProject: {} });
+    const { queryByRole } = render(<ActiveSessionsPanel />);
+    expect(queryByRole('button', { name: badgeLabel })).toBeNull();
+  });
+
+  it('loads the agents once on expand and not again on collapse', async () => {
+    const listSubagents = vi.spyOn(tauri, 'listSubagents').mockResolvedValue([agent()]);
+    const { getByRole, findByTitle } = render(<ActiveSessionsPanel />);
+
+    fireEvent.click(getByRole('button', { name: badgeLabel }));
+    await findByTitle('Pracuje · Find shortcuts');
+    expect(listSubagents).toHaveBeenCalledOnce();
+    expect(listSubagents).toHaveBeenCalledWith(1, 'a');
+
+    fireEvent.click(getByRole('button', { name: badgeLabel }));
+    expect(listSubagents).toHaveBeenCalledOnce();
+  });
+
+  it('points viewSubagent at the tab that openSessionTab focused', async () => {
+    vi.spyOn(tauri, 'listSubagents').mockResolvedValue([agent({ agentId: 'agent-7' })]);
+    const { getByRole, findByTitle } = render(<ActiveSessionsPanel />);
+
+    fireEvent.click(getByRole('button', { name: badgeLabel }));
+    fireEvent.click(await findByTitle('Pracuje · Find shortcuts'));
+
+    const { tabs, activeTabId } = useStore.getState();
+    const focused = tabs.find(t => t.id === activeTabId);
+    expect(focused?.kind).toBe('session');
+    expect(focused?.kind === 'session' && focused.sessionId).toBe('a');
+    expect(focused?.kind === 'session' && focused.viewingSubagentId).toBe('agent-7');
   });
 });

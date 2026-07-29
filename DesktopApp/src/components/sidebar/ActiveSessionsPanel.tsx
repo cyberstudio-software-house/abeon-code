@@ -6,7 +6,9 @@ import { ACTIVITY_TEXT, ACTIVITY_LABEL } from '../../lib/activity';
 import { PROVIDER_ICON } from '../../lib/providers';
 import { formatRelative } from '../../lib/format';
 import { Icon } from '../shared/Icon';
+import { useSubagentRow } from '../../hooks/useSubagentRow';
 import { SubagentBadge } from './SubagentBadge';
+import { SubagentList } from './SubagentList';
 
 export function ActiveSessionsPanel() {
   const showActiveSessions = useStore(s => s.showActiveSessions);
@@ -68,27 +70,36 @@ function ActiveSessionRowItem({ row, onClick }: { row: ActiveSessionRow; onClick
     const meta = s.sessionsByProject[row.projectId]?.items.find(i => i.id === row.sessionId);
     return meta ? { running: meta.runningAgents, total: meta.totalAgents } : { running: 0, total: 0 };
   }));
+  const { expanded, agents, toggleAgents, pickAgent } = useSubagentRow({
+    projectId: row.projectId,
+    sessionId: row.sessionId,
+    title: row.title,
+    provider: row.provider,
+  });
 
   return (
-    <li
-      onClick={onClick}
-      className="pr-2 py-1 pl-1 text-[12px] cursor-pointer flex items-center gap-2 text-fg hover:bg-bg-elev rounded"
-      title={`${row.projectName} — ${ACTIVITY_LABEL[row.activity]}`}
-    >
-      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: row.color }} />
-      {row.attention ? (
-        <span className="shrink-0 inline-flex" title="Czeka na Twoją odpowiedź">
-          <Icon name="bell" className="w-3 h-3 text-accent" aria-label="Czeka na Twoją odpowiedź" />
-        </span>
-      ) : (
-        <span className="shrink-0 inline-flex" title={ACTIVITY_LABEL[row.activity]}>
-          <Icon name={PROVIDER_ICON[row.provider]} className={`w-3 h-3 ${ACTIVITY_TEXT[row.activity]}`} strokeWidth={2.5} />
-        </span>
-      )}
-      <span className="truncate flex-1 min-w-0">{row.title}</span>
-      <SubagentBadge running={counts.running} total={counts.total} expanded={false} onToggle={() => {}} />
-      <span className="text-[10px] text-muted truncate max-w-[72px] shrink-0">{row.projectName}</span>
-      <span className="font-mono text-[10px] text-muted shrink-0">{formatRelative(row.lastModified)}</span>
-    </li>
+    <>
+      <li
+        onClick={onClick}
+        className="pr-2 py-1 pl-1 text-[12px] cursor-pointer flex items-center gap-2 text-fg hover:bg-bg-elev rounded"
+        title={`${row.projectName} — ${ACTIVITY_LABEL[row.activity]}`}
+      >
+        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: row.color }} />
+        {row.attention ? (
+          <span className="shrink-0 inline-flex" title="Czeka na Twoją odpowiedź">
+            <Icon name="bell" className="w-3 h-3 text-accent" aria-label="Czeka na Twoją odpowiedź" />
+          </span>
+        ) : (
+          <span className="shrink-0 inline-flex" title={ACTIVITY_LABEL[row.activity]}>
+            <Icon name={PROVIDER_ICON[row.provider]} className={`w-3 h-3 ${ACTIVITY_TEXT[row.activity]}`} strokeWidth={2.5} />
+          </span>
+        )}
+        <span className="truncate flex-1 min-w-0">{row.title}</span>
+        <SubagentBadge running={counts.running} total={counts.total} expanded={expanded} onToggle={toggleAgents} />
+        <span className="text-[10px] text-muted truncate max-w-[72px] shrink-0">{row.projectName}</span>
+        <span className="font-mono text-[10px] text-muted shrink-0">{formatRelative(row.lastModified)}</span>
+      </li>
+      {expanded && <SubagentList agents={agents} onPick={pickAgent} />}
+    </>
   );
 }

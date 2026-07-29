@@ -1,9 +1,15 @@
-import { describe, it, expect } from 'vitest';
-import { render } from '@testing-library/react';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, fireEvent } from '@testing-library/react';
 import { SessionItem } from './SessionItem';
-import type { SessionMeta } from '../../types';
+import { useStore } from '../../store';
+import { tauri } from '../../lib/tauri';
+import type { SessionMeta, SubagentInfo } from '../../types';
 
-function meta(activity: SessionMeta['activity'], provider: SessionMeta['provider'] = 'claude'): SessionMeta {
+function meta(
+  activity: SessionMeta['activity'],
+  provider: SessionMeta['provider'] = 'claude',
+  over: Partial<SessionMeta> = {},
+): SessionMeta {
   return {
     id: 'abc12345',
     projectId: 1,
@@ -16,6 +22,14 @@ function meta(activity: SessionMeta['activity'], provider: SessionMeta['provider
     provider,
     runningAgents: 0,
     totalAgents: 0,
+    ...over,
+  };
+}
+
+function agent(over: Partial<SubagentInfo> = {}): SubagentInfo {
+  return {
+    agentId: 'agent-1', agentType: 'Explore', description: 'Find shortcuts',
+    status: 'running', startedAt: 1000, endedAt: null, ...over,
   };
 }
 
@@ -54,5 +68,60 @@ describe('SessionItem provider icon', () => {
     const claudeSvgInner = claudeContainer.querySelector('span[title] svg')?.innerHTML;
     const codexSvgInner = codexContainer.querySelector('span[title] svg')?.innerHTML;
     expect(claudeSvgInner).not.toEqual(codexSvgInner);
+  });
+});
+
+describe('SessionItem subagents', () => {
+  beforeEach(() => {
+    useStore.setState({ subagentsBySession: {}, tabs: [], activeTabId: null, mruOrder: [] });
+    vi.restoreAllMocks();
+  });
+
+  it('renders the badge from the session agent counters', () => {
+    const session = meta('running', 'claude', { runningAgents: 2, totalAgents: 3 });
+    const { getByRole } = render(<ul><SessionItem session={session} onClick={() => {}} /></ul>);
+    const badge = getByRole('button');
+    expect(badge.textContent).toContain('2');
+    expect(badge.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('loads the agents once on expand and not again on collapse', async () => {
+    const listSubagents = vi.spyOn(tauri, 'listSubagents').mockResolvedValue([agent()]);
+    const session = meta('running', 'claude', { runningAgents: 1, totalAgents: 1 });
+    const { getByRole, findByTitle } = render(<ul><SessionItem session={session} onClick={() => {}} /></ul>);
+
+    fireEvent.click(getByRole('button'));
+    await findByTitle('Pracuje · Find shortcuts');
+    expect(listSubagents).toHaveBeenCalledOnce();
+    expect(listSubagents).toHaveBeenCalledWith(1, 'abc12345');
+
+    fireEvent.click(getByRole('button'));
+    expect(listSubagents).toHaveBeenCalledOnce();
+  });
+
+  it('does not open the session when the badge is clicked', () => {
+    const onClick = vi.fn();
+    vi.spyOn(tauri, 'listSubagents').mockResolvedValue([]);
+    const session = meta('running', 'claude', { runningAgents: 1, totalAgents: 1 });
+    const { getByRole } = render(<ul><SessionItem session={session} onClick={onClick} /></ul>);
+
+    fireEvent.click(getByRole('button'));
+
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('points viewSubagent at the tab that openSessionTab focused', async () => {
+    vi.spyOn(tauri, 'listSubagents').mockResolvedValue([agent({ agentId: 'agent-7' })]);
+    const session = meta('running', 'claude', { runningAgents: 1, totalAgents: 1 });
+    const { getByRole, findByTitle } = render(<ul><SessionItem session={session} onClick={() => {}} /></ul>);
+
+    fireEvent.click(getByRole('button'));
+    fireEvent.click(await findByTitle('Pracuje · Find shortcuts'));
+
+    const { tabs, activeTabId } = useStore.getState();
+    const focused = tabs.find(t => t.id === activeTabId);
+    expect(focused?.kind).toBe('session');
+    expect(focused?.kind === 'session' && focused.sessionId).toBe('abc12345');
+    expect(focused?.kind === 'session' && focused.viewingSubagentId).toBe('agent-7');
   });
 });
