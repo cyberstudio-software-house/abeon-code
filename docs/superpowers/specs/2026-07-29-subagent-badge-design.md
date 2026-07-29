@@ -70,14 +70,22 @@ uznany za przerwanego.
 
 ## Backend
 
-Nowy moduł `src-tauri/src/sessions/subagents.rs`:
+Typy w `src-tauri/src/domain/subagent.rs` (tam mieszkają struktury z `ts-rs`):
 
 - `SubagentInfo { agent_id, agent_type, description, status, started_at, ended_at }`
 - `SubagentStatus { Running, Completed, Stale }`
-- `count_subagents(session_path, tail_lines, now_ms) -> (running, total)` — dla `list_sessions`.
-- `scan_subagents(session_path, now_ms) -> Vec<SubagentInfo>` — dla `list_subagents`; skanuje
-  cały główny log w poszukiwaniu notyfikacji, z `line.contains("<task-notification>")` jako
-  filtrem przed parsowaniem JSON.
+
+Logika w nowym module `src-tauri/src/sessions/subagents.rs`:
+
+- `subagents_dir(session_path) -> PathBuf`
+- `collect_completed_ids(lines) -> HashSet<String>` — wyciąga `<task-id>` z linii zawierających
+  `<task-notification>`, z `line.contains(...)` jako filtrem przed parsowaniem JSON.
+- `scan_dir(dir, completed, now_ms) -> Vec<SubagentInfo>`
+- `count_running(list) -> u32`
+
+Dwa punkty wejścia różnią się budżetem: `reader::session_agent_counts()` (dla `list_sessions`,
+co 10 s × N sesji) czyta tylko ogon głównego logu, a komenda `list_subagents` skanuje cały log,
+żeby poprawnie oznaczyć również agentów sprzed wielu linii.
 
 ### Kolejność w `list_sessions`
 
