@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { render, fireEvent, act } from '@testing-library/react';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import type { SessionHistory, SubagentInfo } from '../../types';
-import { SubagentView } from './SubagentView';
+import { RELOAD_DEBOUNCE_MS, SubagentView } from './SubagentView';
 
 vi.mock('./HistoryStream', () => ({
   HistoryStream: ({ blocks }: { blocks: unknown[] }) => <div data-testid="stream">{blocks.length}</div>,
@@ -38,9 +38,18 @@ const sessionTab = {
 describe('SubagentView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     vi.spyOn(tauri, 'onSubagentsChanged').mockResolvedValue(() => {});
     useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1', subagentsBySession: { s1: [agent] } });
   });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const settleDebounce = async () => {
+    await act(async () => { await vi.advanceTimersByTimeAsync(RELOAD_DEBOUNCE_MS); });
+  };
 
   it('heads the transcript with the agent type and description, not the history meta title', async () => {
     vi.spyOn(tauri, 'readSubagentHistory').mockResolvedValue(history);
@@ -90,6 +99,8 @@ describe('SubagentView', () => {
     expect(read).toHaveBeenCalledTimes(1);
 
     await act(async () => { fire?.(); });
+    expect(read).toHaveBeenCalledTimes(1);
+    await settleDebounce();
 
     expect(read).toHaveBeenCalledTimes(2);
     expect(read).toHaveBeenLastCalledWith(1, 's1', 'a1');
@@ -111,9 +122,10 @@ describe('SubagentView', () => {
     });
     const settleNewestFirst = async () => {
       await act(async () => {
-        for (let round = 0; round < 10 && queue.length > 0; round++) {
+        for (let round = 0; round < 10; round++) {
           while (queue.length > 0) queue.pop()!();
-          await new Promise(resolve => setTimeout(resolve, 0));
+          await vi.advanceTimersByTimeAsync(RELOAD_DEBOUNCE_MS);
+          if (queue.length === 0) break;
         }
       });
     };
@@ -147,9 +159,10 @@ describe('SubagentView', () => {
     staged.emit();
     staged.emit();
     staged.emit();
+    expect(staged.read).toHaveBeenCalledTimes(1);
     await staged.settleNewestFirst();
 
-    expect(staged.read).toHaveBeenCalledTimes(3);
+    expect(staged.read).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the last transcript when a live re-read fails', async () => {
@@ -166,6 +179,7 @@ describe('SubagentView', () => {
     read.mockRejectedValue('plik zniknął');
 
     await act(async () => { fire?.(); });
+    await settleDebounce();
 
     expect(queryByText(/plik zniknął/)).toBeNull();
     expect(getByTestId('stream')).toBeTruthy();
@@ -186,6 +200,7 @@ describe('SubagentView', () => {
     read.mockResolvedValue(history);
 
     await act(async () => { fire?.(); });
+    await settleDebounce();
 
     expect(queryByText(/brak pliku agenta/)).toBeNull();
   });

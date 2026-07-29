@@ -9,6 +9,8 @@ import { SubagentHeader } from './SubagentHeader';
 
 type Props = { projectId: number; sessionId: string; agentId: string; tabId: string };
 
+export const RELOAD_DEBOUNCE_MS = 300;
+
 export function SubagentView({ projectId, sessionId, agentId, tabId }: Props) {
   const [data, setData] = useState<SessionHistory | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +21,7 @@ export function SubagentView({ projectId, sessionId, agentId, tabId }: Props) {
     let cancelled = false;
     let inFlight = false;
     let queued = false;
+    let reloadTimer: ReturnType<typeof setTimeout> | null = null;
     let unlisten: (() => void) | null = null;
 
     const load = (initial: boolean) => {
@@ -34,16 +37,23 @@ export function SubagentView({ projectId, sessionId, agentId, tabId }: Props) {
         });
     };
 
+    const scheduleReload = () => {
+      if (cancelled) return;
+      if (reloadTimer) clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(() => { reloadTimer = null; load(false); }, RELOAD_DEBOUNCE_MS);
+    };
+
     setData(null);
     setError(null);
     load(true);
-    tauri.onSubagentsChanged(sessionId, () => load(false)).then(fn => {
+    tauri.onSubagentsChanged(sessionId, scheduleReload).then(fn => {
       if (cancelled) fn();
       else unlisten = fn;
     }).catch(() => {});
 
     return () => {
       cancelled = true;
+      if (reloadTimer) clearTimeout(reloadTimer);
       if (unlisten) unlisten();
     };
   }, [projectId, sessionId, agentId]);
