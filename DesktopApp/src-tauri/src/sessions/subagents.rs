@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use crate::domain::{SubagentInfo, SubagentStatus};
@@ -83,6 +83,38 @@ pub fn scan_dir(dir: &Path, completed: &HashSet<String>, now_ms: i64) -> Vec<Sub
     }
     out.sort_by_key(|s| s.started_at);
     out
+}
+
+pub fn count_agents(dir: &Path, completed: &HashSet<String>, now_ms: i64) -> (u32, u32) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return (0, 0) };
+    let mut started: HashMap<String, i64> = HashMap::new();
+    let mut logs: HashMap<String, i64> = HashMap::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(rest) = name.strip_prefix("agent-") else { continue };
+        let mtime = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if let Some(id) = rest.strip_suffix(".meta.json") {
+            started.insert(id.to_string(), mtime);
+        } else if let Some(id) = rest.strip_suffix(".jsonl") {
+            logs.insert(id.to_string(), mtime);
+        }
+    }
+
+    let running = started
+        .iter()
+        .filter(|(id, started_at)| {
+            let last_seen = logs.get(id.as_str()).copied().unwrap_or(**started_at);
+            !completed.contains(id.as_str()) && now_ms - last_seen <= AGENT_STALE_MS
+        })
+        .count() as u32;
+    (running, started.len() as u32)
 }
 
 pub fn scan_session(session_path: &Path, now_ms: i64) -> AppResult<Vec<SubagentInfo>> {
@@ -229,6 +261,47 @@ mod tests {
 
         let list = scan_session(&session_path, started + 1_000).unwrap();
         assert_eq!(list[0].status, SubagentStatus::Running);
+    }
+
+    #[test]
+    fn count_agents_agrees_with_the_full_scan() {
+        let td = TempDir::new().unwrap();
+        let dir = td.path().join("subagents");
+        let started = write_agent(&dir, "a1", "Explore", "x");
+        write_agent(&dir, "a2", "claude", "y");
+        write_agent(&dir, "a3", "claude", "z");
+        let completed: HashSet<String> = ["a2".to_string()].into_iter().collect();
+        let now = started + 1_000;
+
+        let list = scan_dir(&dir, &completed, now);
+        assert_eq!(count_agents(&dir, &completed, now), (count_running(&list), list.len() as u32));
+        assert_eq!(count_agents(&dir, &completed, now), (2, 3));
+    }
+
+    #[test]
+    fn count_agents_never_parses_the_meta_file() {
+        let td = TempDir::new().unwrap();
+        let dir = td.path().join("subagents");
+        let started = write_agent(&dir, "a1", "Explore", "x");
+        std::fs::write(dir.join("agent-a1.meta.json"), "{ this is not json").unwrap();
+        let now = started + 1_000;
+
+        assert!(scan_dir(&dir, &HashSet::new(), now).is_empty());
+        assert_eq!(count_agents(&dir, &HashSet::new(), now), (1, 1));
+    }
+
+    #[test]
+    fn count_agents_marks_a_silent_agent_as_not_running() {
+        let td = TempDir::new().unwrap();
+        let dir = td.path().join("subagents");
+        let started = write_agent(&dir, "a1", "Explore", "x");
+        assert_eq!(count_agents(&dir, &HashSet::new(), started + AGENT_STALE_MS + 1_000), (0, 1));
+    }
+
+    #[test]
+    fn count_agents_on_a_missing_directory_is_zero() {
+        let td = TempDir::new().unwrap();
+        assert_eq!(count_agents(&td.path().join("nope"), &HashSet::new(), 0), (0, 0));
     }
 
     #[test]

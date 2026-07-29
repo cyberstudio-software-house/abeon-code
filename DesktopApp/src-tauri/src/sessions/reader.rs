@@ -23,8 +23,7 @@ pub fn session_agent_counts(path: &Path, now_ms: i64) -> (u32, u32) {
     }
     let lines = crate::sessions::activity::read_tail_lines(path).unwrap_or_default();
     let completed = crate::sessions::subagents::collect_completed_ids(&lines);
-    let list = crate::sessions::subagents::scan_dir(&dir, &completed, now_ms);
-    (crate::sessions::subagents::count_running(&list), list.len() as u32)
+    crate::sessions::subagents::count_agents(&dir, &completed, now_ms)
 }
 
 /// Build the path to a session's JSONL file. Validates `session_id` first so an
@@ -356,6 +355,35 @@ mod tests {
         let list = list_sessions(1, td.path(), 10, 0).unwrap();
         let s = list.iter().find(|m| m.id == "sess-no-ai").unwrap();
         assert_eq!(s.title, "hello world");
+    }
+
+    fn write_agent_files(session_path: &Path, id: &str) -> PathBuf {
+        let dir = crate::sessions::subagents::subagents_dir(session_path);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join(format!("agent-{id}.meta.json")),
+            r#"{"agentType":"Explore","description":"x","toolUseId":"toolu_x","spawnDepth":1}"#,
+        )
+        .unwrap();
+        fs::write(dir.join(format!("agent-{id}.jsonl")), "{\"type\":\"user\"}\n").unwrap();
+        dir
+    }
+
+    fn mtime_of(path: &Path) -> i64 {
+        path.metadata().unwrap().modified().unwrap()
+            .duration_since(std::time::UNIX_EPOCH).unwrap()
+            .as_millis() as i64
+    }
+
+    #[test]
+    fn session_agent_counts_does_not_depend_on_parsing_the_meta_file() {
+        let td = TempDir::new().unwrap();
+        let p = setup(td.path(), "sess-agents", "{\"type\":\"user\"}\n");
+        let dir = write_agent_files(&p, "a1");
+        fs::write(dir.join("agent-a1.meta.json"), "{ not json at all").unwrap();
+
+        let now = mtime_of(&dir.join("agent-a1.jsonl")) + 1_000;
+        assert_eq!(session_agent_counts(&p, now), (1, 1));
     }
 
     #[test]
