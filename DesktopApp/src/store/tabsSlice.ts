@@ -183,7 +183,11 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
     });
   },
   setSessionMode: (tabId, mode) => set({
-    tabs: get().tabs.map(t => t.id === tabId && t.kind === 'session' ? { ...t, mode, fresh: false, preview: false } : t),
+    tabs: get().tabs.map(t => {
+      if (t.id !== tabId || t.kind !== 'session') return t;
+      const { viewingSubagentId: _drop, ...rest } = t;
+      return { ...rest, mode, fresh: false, preview: false };
+    }),
   }),
   viewSubagent: (tabId, agentId) => {
     set({

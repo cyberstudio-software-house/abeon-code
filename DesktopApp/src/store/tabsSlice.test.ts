@@ -328,6 +328,15 @@ describe('tabsSlice viewSubagent', () => {
     expect('viewingSubagentId' in tab).toBe(false);
   });
 
+  it('setSessionMode leaves the subagent view so the mode switch is visible', () => {
+    useStore.getState().viewSubagent('session:s1', 'agent-7');
+    useStore.getState().setSessionMode('session:s1', 'terminal');
+    const tab = useStore.getState().tabs[0];
+    if (tab.kind !== 'session') throw new Error('expected session tab');
+    expect(tab.mode).toBe('terminal');
+    expect('viewingSubagentId' in tab).toBe(false);
+  });
+
   it('leaves tabs of another kind and non-matching ids untouched', () => {
     useStore.getState().viewSubagent('session:s1-other', 'agent-7');
     useStore.getState().viewSubagent('session:nope', 'agent-7');
