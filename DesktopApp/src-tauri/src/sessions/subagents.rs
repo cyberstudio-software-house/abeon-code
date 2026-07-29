@@ -12,7 +12,7 @@ pub fn subagents_dir(session_path: &Path) -> PathBuf {
     parent.join(stem).join("subagents")
 }
 
-fn mtime_ms(path: &Path) -> Option<i64> {
+pub(crate) fn mtime_ms(path: &Path) -> Option<i64> {
     path.metadata()
         .ok()?
         .modified()
@@ -85,7 +85,12 @@ pub fn scan_dir(dir: &Path, completed: &HashSet<String>, now_ms: i64) -> Vec<Sub
     out
 }
 
-pub fn count_agents(dir: &Path, completed: &HashSet<String>, now_ms: i64) -> (u32, u32) {
+pub fn count_agents(
+    dir: &Path,
+    completed: &HashSet<String>,
+    now_ms: i64,
+    parent_mtime_ms: Option<i64>,
+) -> (u32, u32) {
     let Ok(entries) = std::fs::read_dir(dir) else { return (0, 0) };
     let mut started: HashMap<String, i64> = HashMap::new();
     let mut logs: HashMap<String, i64> = HashMap::new();
@@ -110,8 +115,14 @@ pub fn count_agents(dir: &Path, completed: &HashSet<String>, now_ms: i64) -> (u3
     let running = started
         .iter()
         .filter(|(id, started_at)| {
+            if completed.contains(id.as_str()) {
+                return false;
+            }
             let last_seen = logs.get(id.as_str()).copied().unwrap_or(**started_at);
-            !completed.contains(id.as_str()) && now_ms - last_seen <= AGENT_STALE_MS
+            if parent_mtime_ms.is_some_and(|parent| parent > last_seen) {
+                return false;
+            }
+            now_ms - last_seen <= AGENT_STALE_MS
         })
         .count() as u32;
     (running, started.len() as u32)
@@ -274,8 +285,8 @@ mod tests {
         let now = started + 1_000;
 
         let list = scan_dir(&dir, &completed, now);
-        assert_eq!(count_agents(&dir, &completed, now), (count_running(&list), list.len() as u32));
-        assert_eq!(count_agents(&dir, &completed, now), (2, 3));
+        assert_eq!(count_agents(&dir, &completed, now, None), (count_running(&list), list.len() as u32));
+        assert_eq!(count_agents(&dir, &completed, now, None), (2, 3));
     }
 
     #[test]
@@ -287,7 +298,7 @@ mod tests {
         let now = started + 1_000;
 
         assert!(scan_dir(&dir, &HashSet::new(), now).is_empty());
-        assert_eq!(count_agents(&dir, &HashSet::new(), now), (1, 1));
+        assert_eq!(count_agents(&dir, &HashSet::new(), now, None), (1, 1));
     }
 
     #[test]
@@ -295,13 +306,39 @@ mod tests {
         let td = TempDir::new().unwrap();
         let dir = td.path().join("subagents");
         let started = write_agent(&dir, "a1", "Explore", "x");
-        assert_eq!(count_agents(&dir, &HashSet::new(), started + AGENT_STALE_MS + 1_000), (0, 1));
+        assert_eq!(count_agents(&dir, &HashSet::new(), started + AGENT_STALE_MS + 1_000, None), (0, 1));
+    }
+
+    #[test]
+    fn count_agents_drops_an_agent_whose_log_is_older_than_the_parent_session_log() {
+        let td = TempDir::new().unwrap();
+        let dir = td.path().join("subagents");
+        let started = write_agent(&dir, "a1", "Explore", "x");
+        let agent_log = mtime_ms(&dir.join("agent-a1.jsonl")).unwrap();
+
+        assert_eq!(
+            count_agents(&dir, &HashSet::new(), started + 1_000, Some(agent_log + 5_000)),
+            (0, 1),
+        );
+    }
+
+    #[test]
+    fn count_agents_keeps_an_agent_still_writing_after_the_parent_session_log() {
+        let td = TempDir::new().unwrap();
+        let dir = td.path().join("subagents");
+        let started = write_agent(&dir, "a1", "Explore", "x");
+        let agent_log = mtime_ms(&dir.join("agent-a1.jsonl")).unwrap();
+
+        assert_eq!(
+            count_agents(&dir, &HashSet::new(), started + 1_000, Some(agent_log - 5_000)),
+            (1, 1),
+        );
     }
 
     #[test]
     fn count_agents_on_a_missing_directory_is_zero() {
         let td = TempDir::new().unwrap();
-        assert_eq!(count_agents(&td.path().join("nope"), &HashSet::new(), 0), (0, 0));
+        assert_eq!(count_agents(&td.path().join("nope"), &HashSet::new(), 0, None), (0, 0));
     }
 
     #[test]

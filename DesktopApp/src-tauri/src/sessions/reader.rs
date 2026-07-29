@@ -23,7 +23,8 @@ pub fn session_agent_counts(path: &Path, now_ms: i64) -> (u32, u32) {
     }
     let lines = crate::sessions::activity::read_tail_lines(path).unwrap_or_default();
     let completed = crate::sessions::subagents::collect_completed_ids(&lines);
-    crate::sessions::subagents::count_agents(&dir, &completed, now_ms)
+    let parent_mtime = crate::sessions::subagents::mtime_ms(path);
+    crate::sessions::subagents::count_agents(&dir, &completed, now_ms, parent_mtime)
 }
 
 /// Build the path to a session's JSONL file. Validates `session_id` first so an
@@ -373,6 +374,33 @@ mod tests {
         path.metadata().unwrap().modified().unwrap()
             .duration_since(std::time::UNIX_EPOCH).unwrap()
             .as_millis() as i64
+    }
+
+    fn set_mtime(path: &Path, ms: i64) {
+        let when = std::time::UNIX_EPOCH + std::time::Duration::from_millis(ms as u64);
+        fs::File::options().write(true).open(path).unwrap().set_modified(when).unwrap();
+    }
+
+    #[test]
+    fn session_agent_counts_drops_an_agent_that_went_quiet_before_the_last_parent_write() {
+        let td = TempDir::new().unwrap();
+        let p = setup(td.path(), "sess-phantom", "{\"type\":\"user\"}\n");
+        let dir = write_agent_files(&p, "a1");
+        let agent_log = mtime_of(&dir.join("agent-a1.jsonl"));
+        set_mtime(&p, agent_log + 10_000);
+
+        assert_eq!(session_agent_counts(&p, agent_log + 20_000), (0, 1));
+    }
+
+    #[test]
+    fn session_agent_counts_keeps_an_agent_writing_after_the_last_parent_write() {
+        let td = TempDir::new().unwrap();
+        let p = setup(td.path(), "sess-live", "{\"type\":\"user\"}\n");
+        let dir = write_agent_files(&p, "a1");
+        let agent_log = mtime_of(&dir.join("agent-a1.jsonl"));
+        set_mtime(&p, agent_log - 10_000);
+
+        assert_eq!(session_agent_counts(&p, agent_log + 20_000), (1, 1));
     }
 
     #[test]
