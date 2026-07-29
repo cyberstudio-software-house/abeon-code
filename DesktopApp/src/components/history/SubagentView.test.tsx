@@ -6,7 +6,7 @@ import type { SessionHistory, SubagentInfo } from '../../types';
 import { SubagentView } from './SubagentView';
 
 vi.mock('./HistoryStream', () => ({
-  HistoryStream: () => <div data-testid="stream" />,
+  HistoryStream: ({ blocks }: { blocks: unknown[] }) => <div data-testid="stream">{blocks.length}</div>,
 }));
 
 const history: SessionHistory = {
@@ -17,6 +17,13 @@ const history: SessionHistory = {
   blocks: [],
   hasMoreBefore: false,
 };
+
+const historyWith = (lines: number): SessionHistory => ({
+  ...history,
+  blocks: Array.from({ length: lines }, (_, i) => ({
+    kind: 'assistantText' as const, uuid: `b${i}`, timestamp: i, text: `linia ${i}`,
+  })),
+});
 
 const agent: SubagentInfo = {
   agentId: 'a1', agentType: 'Explore', description: 'Znajdź skróty', status: 'completed',
@@ -86,6 +93,63 @@ describe('SubagentView', () => {
 
     expect(read).toHaveBeenCalledTimes(2);
     expect(read).toHaveBeenLastCalledWith(1, 's1', 'a1');
+  });
+
+  const stagedReads = () => {
+    const queue: Array<() => void> = [];
+    const file = { lines: 1 };
+    const read = vi.spyOn(tauri, 'readSubagentHistory').mockImplementation(
+      () => new Promise<SessionHistory>(resolve => {
+        const snapshot = historyWith(file.lines);
+        queue.push(() => resolve(snapshot));
+      }),
+    );
+    let fire: (() => void) | undefined;
+    vi.spyOn(tauri, 'onSubagentsChanged').mockImplementation(async (_sessionId, cb) => {
+      fire = cb;
+      return () => {};
+    });
+    const settleNewestFirst = async () => {
+      await act(async () => {
+        for (let round = 0; round < 10 && queue.length > 0; round++) {
+          while (queue.length > 0) queue.pop()!();
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+      });
+    };
+    return { read, file, settleNewestFirst, emit: () => act(() => { fire?.(); }) };
+  };
+
+  it('never rolls the transcript back when re-reads resolve out of order', async () => {
+    const staged = stagedReads();
+    const { getByTestId } = render(
+      <SubagentView projectId={1} sessionId="s1" agentId="a1" tabId="session:s1" />,
+    );
+    await staged.settleNewestFirst();
+    expect(getByTestId('stream').textContent).toBe('1');
+
+    staged.file.lines = 2;
+    staged.emit();
+    staged.file.lines = 3;
+    staged.emit();
+    await staged.settleNewestFirst();
+
+    expect(getByTestId('stream').textContent).toBe('3');
+  });
+
+  it('coalesces a burst of agent events into one trailing re-read', async () => {
+    const staged = stagedReads();
+    render(<SubagentView projectId={1} sessionId="s1" agentId="a1" tabId="session:s1" />);
+    await staged.settleNewestFirst();
+    expect(staged.read).toHaveBeenCalledTimes(1);
+
+    staged.emit();
+    staged.emit();
+    staged.emit();
+    staged.emit();
+    await staged.settleNewestFirst();
+
+    expect(staged.read).toHaveBeenCalledTimes(3);
   });
 
   it('keeps the last transcript when a live re-read fails', async () => {

@@ -17,25 +17,31 @@ export function SubagentView({ projectId, sessionId, agentId, tabId }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    setData(null);
-    setError(null);
-    tauri.readSubagentHistory(projectId, sessionId, agentId)
-      .then(h => { if (!cancelled) setData(h); })
-      .catch(e => { if (!cancelled) setError(formatTauriError(e)); });
-    return () => { cancelled = true; };
-  }, [projectId, sessionId, agentId]);
-
-  useEffect(() => {
-    let cancelled = false;
+    let inFlight = false;
+    let queued = false;
     let unlisten: (() => void) | null = null;
-    tauri.onSubagentsChanged(sessionId, () => {
+
+    const load = (initial: boolean) => {
+      if (cancelled) return;
+      if (inFlight) { queued = true; return; }
+      inFlight = true;
       tauri.readSubagentHistory(projectId, sessionId, agentId)
         .then(h => { if (!cancelled) { setData(h); setError(null); } })
-        .catch(() => {});
-    }).then(fn => {
+        .catch(e => { if (!cancelled && initial) setError(formatTauriError(e)); })
+        .finally(() => {
+          inFlight = false;
+          if (queued) { queued = false; load(false); }
+        });
+    };
+
+    setData(null);
+    setError(null);
+    load(true);
+    tauri.onSubagentsChanged(sessionId, () => load(false)).then(fn => {
       if (cancelled) fn();
       else unlisten = fn;
     }).catch(() => {});
+
     return () => {
       cancelled = true;
       if (unlisten) unlisten();
