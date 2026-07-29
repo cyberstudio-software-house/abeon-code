@@ -1,4 +1,3 @@
-use std::io::BufRead;
 use std::panic;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
@@ -114,17 +113,7 @@ pub fn list_subagents(
     let dir = session_dir(&proj)?;
     let path = session_file(&dir, &session_id)?;
     let now = crate::sessions::reader::now_ms();
-    catch(move || {
-        let agents_dir = crate::sessions::subagents::subagents_dir(&path);
-        let file = std::fs::File::open(&path)?;
-        let lines: Vec<String> = std::io::BufReader::new(file)
-            .lines()
-            .map_while(Result::ok)
-            .filter(|l| l.contains("<task-notification>"))
-            .collect();
-        let completed = crate::sessions::subagents::collect_completed_ids(&lines);
-        Ok(crate::sessions::subagents::scan_dir(&agents_dir, &completed, now))
-    })
+    catch(move || crate::sessions::subagents::scan_session(&path, now))
 }
 
 #[tauri::command]

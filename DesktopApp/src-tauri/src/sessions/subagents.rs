@@ -1,6 +1,8 @@
 use std::collections::HashSet;
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use crate::domain::{SubagentInfo, SubagentStatus};
+use crate::error::AppResult;
 
 pub const AGENT_STALE_MS: i64 = 120_000;
 
@@ -81,6 +83,18 @@ pub fn scan_dir(dir: &Path, completed: &HashSet<String>, now_ms: i64) -> Vec<Sub
     }
     out.sort_by_key(|s| s.started_at);
     out
+}
+
+pub fn scan_session(session_path: &Path, now_ms: i64) -> AppResult<Vec<SubagentInfo>> {
+    let dir = subagents_dir(session_path);
+    let file = std::fs::File::open(session_path)?;
+    let lines: Vec<String> = std::io::BufReader::new(file)
+        .lines()
+        .map_while(Result::ok)
+        .filter(|l| l.contains("<task-notification>"))
+        .collect();
+    let completed = collect_completed_ids(&lines);
+    Ok(scan_dir(&dir, &completed, now_ms))
 }
 
 pub fn count_running(list: &[SubagentInfo]) -> u32 {
@@ -178,6 +192,43 @@ mod tests {
         let td = TempDir::new().unwrap();
         let list = scan_dir(&td.path().join("nope"), &HashSet::new(), 0);
         assert!(list.is_empty());
+    }
+
+    #[test]
+    fn scan_session_sees_notification_beyond_the_tail_window() {
+        let td = TempDir::new().unwrap();
+        let session_path = td.path().join("sess.jsonl");
+        let dir = subagents_dir(&session_path);
+        let started = write_agent(&dir, "a1", "Explore", "x");
+
+        let mut log = String::from(
+            r#"{"type":"user","message":{"content":"<task-notification>\n<task-id>a1</task-id>\n<tool-use-id>toolu_1</tool-use-id>\n</task-notification>"}}"#,
+        );
+        log.push('\n');
+        let filler = format!(
+            "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"text\",\"text\":\"{}\"}}]}}}}\n",
+            "f".repeat(200)
+        );
+        while log.len() < 16 * 1024 {
+            log.push_str(&filler);
+        }
+        std::fs::write(&session_path, &log).unwrap();
+
+        let list = scan_session(&session_path, started + 1_000).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].status, SubagentStatus::Completed);
+    }
+
+    #[test]
+    fn scan_session_without_notification_reports_running() {
+        let td = TempDir::new().unwrap();
+        let session_path = td.path().join("sess.jsonl");
+        let dir = subagents_dir(&session_path);
+        let started = write_agent(&dir, "a1", "Explore", "x");
+        std::fs::write(&session_path, "{\"type\":\"user\"}\n").unwrap();
+
+        let list = scan_session(&session_path, started + 1_000).unwrap();
+        assert_eq!(list[0].status, SubagentStatus::Running);
     }
 
     #[test]
