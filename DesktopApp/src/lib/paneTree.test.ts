@@ -109,6 +109,13 @@ describe('paneTree mutations', () => {
     expect(flat(moveTab(root, 'c', 'p1', 0))).toBe('p1(c,a,b)');
   });
 
+  it('leaves the tree untouched when the target pane no longer exists', () => {
+    const root = insertBeside(createLeaf('p1', ['a', 'b'], 'a'), 'p1', 'row', false, createLeaf('p2', ['c'], 'c'), 's1');
+    const next = moveTab(root, 'b', 'gone', 0);
+    expect(next).toBe(root);
+    expect(findLeaf(next, 'p1')?.tabIds).toEqual(['a', 'b']);
+  });
+
   it('collapses an emptied leaf and renormalizes sibling sizes', () => {
     const root = insertBeside(createLeaf('p1', ['a'], 'a'), 'p1', 'row', false, createLeaf('p2', ['b'], 'b'), 's1');
     const emptied = removeTabFromLeaves(root, 'b');
@@ -129,6 +136,7 @@ describe('paneTree mutations', () => {
     root = insertBeside(root, 'p2', 'row', false, createLeaf('p3', ['c'], 'c'), 's2');
     const out = collapseEmpty(removeTabFromLeaves(root, 'a'), 'p1');
     expect(flat(out.root)).toBe('row[p2(b) p3(c)]');
+    expect((out.root as PaneSplit).sizes).toEqual([0.5, 0.5]);
     expect(out.focusedPaneId).toBe('p2');
   });
 });

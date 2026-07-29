@@ -71,6 +71,7 @@ export function insertBeside(
 }
 
 export function moveTab(root: PaneNode, tabId: string, targetPaneId: string, index: number): PaneNode {
+  if (!findLeaf(root, targetPaneId)) return root;
   const stripped = removeTabFromLeaves(root, tabId);
   return mapLeaves(stripped, leaf => {
     if (leaf.id !== targetPaneId) return leaf;
