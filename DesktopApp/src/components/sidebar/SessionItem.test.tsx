@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, waitFor, act } from '@testing-library/react';
 import { SessionItem } from './SessionItem';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
@@ -97,6 +97,37 @@ describe('SessionItem subagents', () => {
 
     fireEvent.click(getByRole('button'));
     expect(listSubagents).toHaveBeenCalledOnce();
+  });
+
+  it('reloads the expanded list when the session agent counters change', async () => {
+    const listSubagents = vi.spyOn(tauri, 'listSubagents').mockResolvedValue([agent()]);
+    const { getByRole, findByTitle, rerender } = render(
+      <ul><SessionItem session={meta('running', 'claude', { runningAgents: 2, totalAgents: 2 })} onClick={() => {}} /></ul>,
+    );
+
+    fireEvent.click(getByRole('button'));
+    await findByTitle('Pracuje · Find shortcuts');
+    expect(listSubagents).toHaveBeenCalledOnce();
+
+    rerender(
+      <ul><SessionItem session={meta('running', 'claude', { runningAgents: 1, totalAgents: 3 })} onClick={() => {}} /></ul>,
+    );
+
+    await waitFor(() => expect(listSubagents).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not reload a collapsed list when the session agent counters change', async () => {
+    const listSubagents = vi.spyOn(tauri, 'listSubagents').mockResolvedValue([agent()]);
+    const { rerender } = render(
+      <ul><SessionItem session={meta('running', 'claude', { runningAgents: 2, totalAgents: 2 })} onClick={() => {}} /></ul>,
+    );
+
+    rerender(
+      <ul><SessionItem session={meta('running', 'claude', { runningAgents: 1, totalAgents: 3 })} onClick={() => {}} /></ul>,
+    );
+    await act(async () => {});
+
+    expect(listSubagents).not.toHaveBeenCalled();
   });
 
   it('does not open the session when the badge is clicked', () => {

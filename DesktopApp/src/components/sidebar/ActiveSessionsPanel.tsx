@@ -71,6 +71,8 @@ function ActiveSessionRowItem({ row, onClick }: { row: ActiveSessionRow; onClick
     sessionId: row.sessionId,
     title: row.title,
     provider: row.provider,
+    runningAgents: row.runningAgents,
+    totalAgents: row.totalAgents,
   });
 
   return (

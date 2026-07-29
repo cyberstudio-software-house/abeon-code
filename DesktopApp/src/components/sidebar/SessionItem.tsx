@@ -24,6 +24,8 @@ export function SessionItem({ session, active, onClick }: Props) {
     sessionId: session.id,
     title: session.title,
     provider: session.provider,
+    runningAgents: session.runningAgents,
+    totalAgents: session.totalAgents,
   });
 
   const commitRename = () => {
