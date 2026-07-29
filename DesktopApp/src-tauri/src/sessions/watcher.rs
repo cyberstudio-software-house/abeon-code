@@ -90,7 +90,7 @@ impl SessionWatchers {
         }
         if let Some(watcher) = w.as_mut() {
             let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or(path.clone());
-            let _ = watcher.watch(&dir, RecursiveMode::NonRecursive);
+            let _ = watcher.watch(&dir, RecursiveMode::Recursive);
         }
         Ok(())
     }
@@ -104,7 +104,19 @@ impl SessionWatchers {
         self.last_activity.lock().remove(session_id);
     }
 
+    fn watched_agents_target(&self, changed: &Path) -> Option<String> {
+        let session_id = subagent_log_owner(changed)?;
+        if self.sessions.lock().contains_key(&session_id) { Some(session_id) } else { None }
+    }
+
     fn handle_change(&self, app: &AppHandle, changed: &Path) {
+        if is_subagent_path(changed) {
+            if let Some(sid) = self.watched_agents_target(changed) {
+                let _ = app.emit(&format!("session:{sid}:agents"), serde_json::json!({}));
+            }
+            return;
+        }
+
         let mut sessions = self.sessions.lock();
         let mut block_updates: Vec<(String, Vec<HistoryBlock>)> = Vec::new();
         let mut title_updates: Vec<(String, String)> = Vec::new();
@@ -200,6 +212,22 @@ impl SessionWatchers {
 
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn is_subagent_path(changed: &Path) -> bool {
+    changed.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()) == Some("subagents")
+}
+
+fn subagent_log_owner(changed: &Path) -> Option<String> {
+    if changed.extension().and_then(|e| e.to_str()) != Some("jsonl") || !is_subagent_path(changed) {
+        return None;
+    }
+    changed
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .map(|s| s.to_string())
 }
 
 fn activity_for_session(provider: Provider, path: &Path, now_ms: i64) -> SessionActivity {
@@ -306,5 +334,48 @@ mod tests {
         let (p, mtime) = write_session(&td, false);
         let now = mtime + 60_000;
         assert_eq!(activity_for_session(Provider::Claude, &p, now), SessionActivity::WaitingUser);
+    }
+
+    #[test]
+    fn subagent_paths_never_reach_the_session_log_branch() {
+        assert!(is_subagent_path(Path::new("/p/enc/s1/subagents/agent-a1.jsonl")));
+        assert!(is_subagent_path(Path::new("/p/enc/s1/subagents/agent-a1.meta.json")));
+        assert!(!is_subagent_path(Path::new("/p/enc/s1.jsonl")));
+        assert!(!is_subagent_path(Path::new("/p/enc/s1/subagents")));
+    }
+
+    #[test]
+    fn subagent_log_owner_is_the_parent_session_not_the_agent() {
+        assert_eq!(
+            subagent_log_owner(Path::new("/p/enc/s1/subagents/agent-a1.jsonl")),
+            Some("s1".to_string()),
+        );
+        assert_eq!(subagent_log_owner(Path::new("/p/enc/s1/subagents/agent-a1.meta.json")), None);
+        assert_eq!(subagent_log_owner(Path::new("/p/enc/s1.jsonl")), None);
+    }
+
+    fn watchers_with(session_id: &str) -> Arc<SessionWatchers> {
+        let w = SessionWatchers::new();
+        w.sessions.lock().insert(
+            session_id.to_string(),
+            OpenSession {
+                path: PathBuf::from(format!("/p/enc/{session_id}.jsonl")),
+                provider: Provider::Claude,
+                last_offset: 0,
+                lines_seen: 0,
+                usage: UsageAccumulator::default(),
+            },
+        );
+        w
+    }
+
+    #[test]
+    fn agents_event_targets_only_watched_sessions() {
+        let w = watchers_with("s1");
+        assert_eq!(
+            w.watched_agents_target(Path::new("/p/enc/s1/subagents/agent-a1.jsonl")),
+            Some("s1".to_string()),
+        );
+        assert_eq!(w.watched_agents_target(Path::new("/p/enc/s2/subagents/agent-a1.jsonl")), None);
     }
 }

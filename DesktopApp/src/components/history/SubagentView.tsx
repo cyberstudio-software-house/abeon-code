@@ -25,6 +25,23 @@ export function SubagentView({ projectId, sessionId, agentId, tabId }: Props) {
     return () => { cancelled = true; };
   }, [projectId, sessionId, agentId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    tauri.onSubagentsChanged(sessionId, () => {
+      tauri.readSubagentHistory(projectId, sessionId, agentId)
+        .then(h => { if (!cancelled) { setData(h); setError(null); } })
+        .catch(() => {});
+    }).then(fn => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+  }, [projectId, sessionId, agentId]);
+
   return (
     <div className="flex flex-col h-full">
       <SubagentHeader

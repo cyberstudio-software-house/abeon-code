@@ -57,6 +57,8 @@ export const tauri = {
     listen<{ activity: SessionActivity }>(`session:${sessionId}:activity`, e => cb(e.payload.activity)),
   onSessionTitle: (sessionId: string, cb: (title: string) => void): Promise<UnlistenFn> =>
     listen<{ title: string }>(`session:${sessionId}:title`, e => cb(e.payload.title)),
+  onSubagentsChanged: (sessionId: string, cb: () => void): Promise<UnlistenFn> =>
+    listen(`session:${sessionId}:agents`, () => cb()),
   sessionUsage: (projectId: number, sessionId: string) =>
     invoke<UsageSummary>('session_usage', { projectId, sessionId }),
   projectUsage: (projectId: number) =>
