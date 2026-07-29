@@ -360,6 +360,8 @@ fn active_from_metas(project_id: i64, project_name: &str, sessions: Vec<SessionM
             activity: s.activity,
             last_modified: s.last_modified,
             provider: s.provider,
+            running_agents: s.running_agents,
+            total_agents: s.total_agents,
         })
         .collect()
 }
@@ -585,6 +587,16 @@ mod active_tests {
             last_modified: 100, git_branch: None, cwd: None, activity, provider,
             running_agents: 0, total_agents: 0,
         }
+    }
+
+    #[test]
+    fn active_from_metas_carries_the_agent_counters() {
+        let mut with_agents = meta("a", Provider::Claude, SessionActivity::Running);
+        with_agents.running_agents = 2;
+        with_agents.total_agents = 5;
+        let rows = active_from_metas(7, "Proj", vec![with_agents]);
+        assert_eq!(rows[0].running_agents, 2);
+        assert_eq!(rows[0].total_agents, 5);
     }
 
     #[test]

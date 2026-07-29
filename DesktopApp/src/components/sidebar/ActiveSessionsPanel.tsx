@@ -66,10 +66,6 @@ export function ActiveSessionsPanel() {
 }
 
 function ActiveSessionRowItem({ row, onClick }: { row: ActiveSessionRow; onClick: () => void }) {
-  const counts = useStore(useShallow(s => {
-    const meta = s.sessionsByProject[row.projectId]?.items.find(i => i.id === row.sessionId);
-    return meta ? { running: meta.runningAgents, total: meta.totalAgents } : { running: 0, total: 0 };
-  }));
   const { expanded, agents, toggleAgents, pickAgent } = useSubagentRow({
     projectId: row.projectId,
     sessionId: row.sessionId,
@@ -95,7 +91,7 @@ function ActiveSessionRowItem({ row, onClick }: { row: ActiveSessionRow; onClick
           </span>
         )}
         <span className="truncate flex-1 min-w-0">{row.title}</span>
-        <SubagentBadge running={counts.running} total={counts.total} expanded={expanded} onToggle={toggleAgents} />
+        <SubagentBadge running={row.runningAgents} total={row.totalAgents} expanded={expanded} onToggle={toggleAgents} />
         <span className="text-[10px] text-muted truncate max-w-[72px] shrink-0">{row.projectName}</span>
         <span className="font-mono text-[10px] text-muted shrink-0">{formatRelative(row.lastModified)}</span>
       </li>

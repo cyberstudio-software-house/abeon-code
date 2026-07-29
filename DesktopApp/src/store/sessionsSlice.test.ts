@@ -231,6 +231,7 @@ describe('sessionsSlice activeSessions', () => {
     const rows = [{
       sessionId: 'a', projectId: 1, projectName: 'P', title: 'T',
       activity: 'running' as const, lastModified: 5, provider: 'claude' as const,
+      runningAgents: 0, totalAgents: 0,
     }];
     const spy = vi.spyOn(tauri, 'listActiveSessions').mockResolvedValue(rows);
     await useStore.getState().refreshActiveSessions();
@@ -243,6 +244,7 @@ describe('sessionsSlice activeSessions', () => {
     const rows = [{
       sessionId: 'a', projectId: 1, projectName: 'P', title: 'T',
       activity: 'running' as const, lastModified: 5, provider: 'claude' as const,
+      runningAgents: 0, totalAgents: 0,
     }];
     const spy = vi.spyOn(tauri, 'listActiveSessions').mockResolvedValue(rows);
     await useStore.getState().refreshActiveSessions();

@@ -9,6 +9,8 @@ export type ActiveSessionRow = {
   activity: SessionActivity;
   lastModified: number;
   provider: Provider;
+  runningAgents: number;
+  totalAgents: number;
   color: string;
   attention: boolean;
 };
@@ -45,6 +47,8 @@ export function buildActiveSessionRows(
       activity: s.activity,
       lastModified: s.lastModified,
       provider: s.provider,
+      runningAgents: s.runningAgents,
+      totalAgents: s.totalAgents,
       color: colorFor(s.projectId),
       attention: attentionSessions.has(s.sessionId),
     });
@@ -63,6 +67,8 @@ export function buildActiveSessionRows(
         activity: found.activity,
         lastModified: found.lastModified,
         provider: found.provider,
+        runningAgents: found.runningAgents,
+        totalAgents: found.totalAgents,
         color: colorFor(found.projectId),
         attention: true,
       });

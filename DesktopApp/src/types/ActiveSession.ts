@@ -2,4 +2,4 @@
 import type { Provider } from "./Provider";
 import type { SessionActivity } from "./SessionActivity";
 
-export type ActiveSession = { sessionId: string, projectId: number, projectName: string, title: string, activity: SessionActivity, lastModified: number, provider: Provider, };
+export type ActiveSession = { sessionId: string, projectId: number, projectName: string, title: string, activity: SessionActivity, lastModified: number, provider: Provider, runningAgents: number, totalAgents: number, };

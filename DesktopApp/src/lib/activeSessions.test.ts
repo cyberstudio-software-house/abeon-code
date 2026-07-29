@@ -3,7 +3,7 @@ import { buildActiveSessionRows } from './activeSessions';
 import type { ActiveSession, Project, SessionMeta } from '../types';
 
 function active(id: string, activity: ActiveSession['activity'], lastModified: number): ActiveSession {
-  return { sessionId: id, projectId: 1, projectName: 'Proj', title: `T-${id}`, activity, lastModified, provider: 'claude' };
+  return { sessionId: id, projectId: 1, projectName: 'Proj', title: `T-${id}`, activity, lastModified, provider: 'claude', runningAgents: 0, totalAgents: 0 };
 }
 function project(id: number, color: string | null): Project {
   return { id, name: `P${id}`, path: `/p${id}`, claudeDir: `d${id}`, color, sortOrder: 0, createdAt: 0 };
@@ -63,6 +63,30 @@ describe('buildActiveSessionRows', () => {
       new Set(),
     );
     expect(rows).toEqual([]);
+  });
+
+  it('carries the subagent counters from the active session', () => {
+    const rows = buildActiveSessionRows(
+      [{ ...active('a', 'running', 1), runningAgents: 2, totalAgents: 5 }],
+      new Set(),
+      {},
+      [project(1, null)],
+      new Set(['a']),
+    );
+    expect(rows[0].runningAgents).toBe(2);
+    expect(rows[0].totalAgents).toBe(5);
+  });
+
+  it('carries the subagent counters for an attention-only session resolved from sessionsByProject', () => {
+    const rows = buildActiveSessionRows(
+      [],
+      new Set(['z']),
+      { 1: { items: [{ ...sessionMeta('z', 1, 'idle'), runningAgents: 1, totalAgents: 4 }], hasMore: false } },
+      [project(1, null)],
+      new Set(['z']),
+    );
+    expect(rows[0].runningAgents).toBe(1);
+    expect(rows[0].totalAgents).toBe(4);
   });
 
   it('keeps only the open-tab subset when some sessions are open and others are not', () => {

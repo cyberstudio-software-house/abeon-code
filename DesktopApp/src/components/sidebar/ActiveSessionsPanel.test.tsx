@@ -5,8 +5,11 @@ import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import type { ActiveSession, Project, SessionMeta, SubagentInfo } from '../../types';
 
-function active(id: string): ActiveSession {
-  return { sessionId: id, projectId: 1, projectName: 'Proj', title: `T-${id}`, activity: 'running', lastModified: 1, provider: 'claude' };
+function active(id: string, over: Partial<ActiveSession> = {}): ActiveSession {
+  return {
+    sessionId: id, projectId: 1, projectName: 'Proj', title: `T-${id}`, activity: 'running',
+    lastModified: 1, provider: 'claude', runningAgents: 0, totalAgents: 0, ...over,
+  };
 }
 function project(): Project {
   return { id: 1, name: 'Proj', path: '/p', claudeDir: 'd', color: null, sortOrder: 0, createdAt: 0 };
@@ -68,9 +71,9 @@ describe('ActiveSessionsPanel subagents', () => {
   beforeEach(() => {
     useStore.setState({
       showActiveSessions: true,
-      activeSessions: [active('a')],
+      activeSessions: [active('a', { runningAgents: 1, totalAgents: 2 })],
       attentionSessions: new Set(),
-      sessionsByProject: { 1: { items: [meta('a', { runningAgents: 1, totalAgents: 2 })], hasMore: false } },
+      sessionsByProject: { 1: { items: [meta('a')], hasMore: false } },
       subagentsBySession: {},
       projects: [project()],
       tabs: [sessionTab('a')],
@@ -80,15 +83,15 @@ describe('ActiveSessionsPanel subagents', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders the badge from the session counters held in sessionsByProject', () => {
+  it('renders the badge from the counters carried by the active session row', () => {
     const { getByRole } = render(<ActiveSessionsPanel />);
     expect(getByRole('button', { name: badgeLabel }).textContent).toContain('1');
   });
 
-  it('renders no badge when the project sessions were never loaded', () => {
+  it('renders the badge for a project whose sessions were never expanded in the sidebar', () => {
     useStore.setState({ sessionsByProject: {} });
-    const { queryByRole } = render(<ActiveSessionsPanel />);
-    expect(queryByRole('button', { name: badgeLabel })).toBeNull();
+    const { getByRole } = render(<ActiveSessionsPanel />);
+    expect(getByRole('button', { name: badgeLabel }).textContent).toContain('1');
   });
 
   it('loads the agents once on expand and not again on collapse', async () => {

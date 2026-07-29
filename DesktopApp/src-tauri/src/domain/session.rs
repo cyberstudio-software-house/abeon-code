@@ -47,6 +47,10 @@ pub struct ActiveSession {
     #[ts(type = "number")]
     pub last_modified: i64,
     pub provider: Provider,
+    #[ts(type = "number")]
+    pub running_agents: u32,
+    #[ts(type = "number")]
+    pub total_agents: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
