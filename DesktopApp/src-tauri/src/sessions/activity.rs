@@ -19,13 +19,7 @@ pub(crate) fn compute_activity_with(
     path: &Path,
     now_ms: i64,
 ) -> SessionActivity {
-    let Ok(meta) = path.metadata() else { return SessionActivity::Idle };
-    let Ok(mtime_st) = meta.modified() else { return SessionActivity::Idle };
-    let mtime_ms = match mtime_st.duration_since(std::time::UNIX_EPOCH) {
-        Ok(d) => d.as_millis() as i64,
-        Err(_) => return SessionActivity::Idle,
-    };
-    let age_ms = now_ms - mtime_ms;
+    let Some(age_ms) = file_age_ms(path, now_ms) else { return SessionActivity::Idle };
 
     if age_ms > IDLE_HARD_CAP_MS {
         return SessionActivity::Idle;
@@ -63,12 +57,23 @@ pub(crate) fn compute_activity_with(
     }
 }
 
+fn file_age_ms(path: &Path, now_ms: i64) -> Option<i64> {
+    let mtime_ms = path
+        .metadata()
+        .ok()?
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_millis() as i64;
+    Some(now_ms - mtime_ms)
+}
+
 pub fn compute_activity_with_agents(path: &Path, running_agents: u32, now_ms: i64) -> SessionActivity {
-    let base = compute_activity(path, now_ms);
-    if running_agents > 0 && base != SessionActivity::Idle {
+    if running_agents > 0 && file_age_ms(path, now_ms).is_some_and(|age| age <= IDLE_HARD_CAP_MS) {
         return SessionActivity::Running;
     }
-    base
+    compute_activity(path, now_ms)
 }
 
 pub fn compute_activity_for(provider: Provider, path: &Path, now_ms: i64) -> SessionActivity {
@@ -535,6 +540,16 @@ mod tests {
 {"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"uruchomilem agenty"}]}}"#);
         assert_eq!(compute_activity_with_agents(&p, 0, mtime + 60_000), SessionActivity::WaitingUser);
         assert_eq!(compute_activity_with_agents(&p, 2, mtime + 60_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn live_agents_survive_the_running_stall_window() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"ok","is_error":false}]}}"#);
+        let twelve_min = 12 * 60 * 1000;
+        assert_eq!(compute_activity(&p, mtime + twelve_min), SessionActivity::Idle);
+        assert_eq!(compute_activity_with_agents(&p, 2, mtime + twelve_min), SessionActivity::Running);
     }
 
     #[test]

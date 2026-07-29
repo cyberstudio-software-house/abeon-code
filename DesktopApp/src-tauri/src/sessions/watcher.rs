@@ -9,7 +9,7 @@ use crate::domain::{HistoryBlock, Provider, SessionActivity};
 use crate::error::AppResult;
 use crate::remote::bus::{RemoteEventBus, SessionBusEvent};
 use crate::sessions::parser::parse_line;
-use crate::sessions::activity::{compute_activity_for};
+use crate::sessions::activity::{compute_activity_for, compute_activity_with_agents};
 use crate::sessions::usage::UsageAccumulator;
 
 struct OpenSession {
@@ -178,7 +178,7 @@ impl SessionWatchers {
             .unwrap_or(0);
         let mut last = self.last_activity.lock();
         for (sid, path, provider) in activity_inputs {
-            let new_activity = compute_activity_for(provider, &path, now);
+            let new_activity = activity_for_session(provider, &path, now);
             let changed_state = last.get(&sid).copied() != Some(new_activity);
             if changed_state {
                 last.insert(sid.clone(), new_activity);
@@ -199,6 +199,16 @@ impl SessionWatchers {
         drop(last);
 
         std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn activity_for_session(provider: Provider, path: &Path, now_ms: i64) -> SessionActivity {
+    match provider {
+        Provider::Claude => {
+            let (running_agents, _) = crate::sessions::reader::session_agent_counts(path, now_ms);
+            compute_activity_with_agents(path, running_agents, now_ms)
+        }
+        Provider::Codex => compute_activity_for(provider, path, now_ms),
     }
 }
 
@@ -245,4 +255,56 @@ fn read_tail(path: &Path, from: u64, to: u64, provider: Provider, usage: &mut Us
         }
     }
     TailResult { blocks, title }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn write_session(td: &TempDir, with_agent: bool) -> (PathBuf, i64) {
+        let p = td.path().join("s.jsonl");
+        std::fs::write(
+            &p,
+            "{\"type\":\"user\",\"uuid\":\"u1\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n\
+{\"type\":\"assistant\",\"uuid\":\"a1\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"odpalam agenty\"}]}}",
+        )
+        .unwrap();
+        if with_agent {
+            let dir = td.path().join("s").join("subagents");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join("agent-ag1.meta.json"),
+                "{\"agentType\":\"Explore\",\"description\":\"x\",\"toolUseId\":\"toolu_x\",\"spawnDepth\":1}",
+            )
+            .unwrap();
+            std::fs::write(dir.join("agent-ag1.jsonl"), "{\"type\":\"user\"}\n").unwrap();
+        }
+        let mtime = p
+            .metadata()
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        (p, mtime)
+    }
+
+    #[test]
+    fn claude_activity_is_agent_aware() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_session(&td, true);
+        let now = mtime + 60_000;
+        assert_eq!(compute_activity_for(Provider::Claude, &p, now), SessionActivity::WaitingUser);
+        assert_eq!(activity_for_session(Provider::Claude, &p, now), SessionActivity::Running);
+    }
+
+    #[test]
+    fn claude_activity_without_subagents_matches_plain_heuristic() {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_session(&td, false);
+        let now = mtime + 60_000;
+        assert_eq!(activity_for_session(Provider::Claude, &p, now), SessionActivity::WaitingUser);
+    }
 }
