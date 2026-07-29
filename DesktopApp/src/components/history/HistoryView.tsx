@@ -27,6 +27,10 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
   const defaultViewMode = useStore(s => s.historyViewMode);
   const [viewMode, setViewMode] = useState<HistoryViewMode>(defaultViewMode);
   const activeTabId = useStore(s => s.activeTabId);
+  const viewingSubagentId = useStore(s => {
+    const tab = s.tabs.find(t => t.id === tabId);
+    return tab?.kind === 'session' ? tab.viewingSubagentId : undefined;
+  });
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchFocusTick, setSearchFocusTick] = useState(0);
@@ -116,7 +120,7 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (tabId !== activeTabId) return;
+      if (tabId !== activeTabId || viewingSubagentId) return;
       if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault();
         e.stopPropagation();
@@ -126,7 +130,7 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
     };
     document.addEventListener('keydown', onKey, { capture: true });
     return () => document.removeEventListener('keydown', onKey, { capture: true });
-  }, [tabId, activeTabId]);
+  }, [tabId, activeTabId, viewingSubagentId]);
 
   if (error) return <div className="p-6 text-danger text-[13px]">Błąd: {error}</div>;
   if (!data || !meta) return <div className="p-6 text-muted text-[13px]">Wczytywanie historii…</div>;
