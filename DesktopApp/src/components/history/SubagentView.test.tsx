@@ -6,7 +6,14 @@ import type { SessionHistory, SubagentInfo } from '../../types';
 import { RELOAD_DEBOUNCE_MS, SubagentView } from './SubagentView';
 
 vi.mock('./HistoryStream', () => ({
-  HistoryStream: ({ blocks }: { blocks: unknown[] }) => <div data-testid="stream">{blocks.length}</div>,
+  HistoryStream: (
+    { blocks, hasMore, onLoadMore }: { blocks: unknown[]; hasMore: boolean; onLoadMore?: () => void },
+  ) => (
+    <div data-testid="stream" data-has-more={String(hasMore)}>
+      <span data-testid="count">{blocks.length}</span>
+      <button type="button" onClick={() => onLoadMore?.()}>doczytaj</button>
+    </div>
+  ),
 }));
 
 const history: SessionHistory = {
@@ -138,7 +145,7 @@ describe('SubagentView', () => {
       <SubagentView projectId={1} sessionId="s1" agentId="a1" tabId="session:s1" />,
     );
     await staged.settleNewestFirst();
-    expect(getByTestId('stream').textContent).toBe('1');
+    expect(getByTestId('count').textContent).toBe('1');
 
     staged.file.lines = 2;
     staged.emit();
@@ -146,7 +153,7 @@ describe('SubagentView', () => {
     staged.emit();
     await staged.settleNewestFirst();
 
-    expect(getByTestId('stream').textContent).toBe('3');
+    expect(getByTestId('count').textContent).toBe('3');
   });
 
   it('coalesces a burst of agent events into one trailing re-read', async () => {
@@ -203,6 +210,88 @@ describe('SubagentView', () => {
     await settleDebounce();
 
     expect(queryByText(/brak pliku agenta/)).toBeNull();
+  });
+
+  const olderPage = (ids: string[]): SessionHistory => ({
+    ...history,
+    blocks: ids.map((uuid, i) => ({
+      kind: 'assistantText' as const, uuid, timestamp: i, text: `starsza ${uuid}`,
+    })),
+    hasMoreBefore: false,
+  });
+
+  it('announces that older blocks are available', async () => {
+    vi.spyOn(tauri, 'readSubagentHistory').mockResolvedValue({ ...historyWith(3), hasMoreBefore: true });
+    const { getByTestId } = render(
+      <SubagentView projectId={1} sessionId="s1" agentId="a1" tabId="session:s1" />,
+    );
+    await act(async () => {});
+
+    expect(getByTestId('stream').getAttribute('data-has-more')).toBe('true');
+  });
+
+  it('prepends the previous page when the stream reaches the top', async () => {
+    const read = vi.spyOn(tauri, 'readSubagentHistory')
+      .mockResolvedValue({ ...historyWith(3), hasMoreBefore: true });
+    const { getByTestId, getByRole } = render(
+      <SubagentView projectId={1} sessionId="s1" agentId="a1" tabId="session:s1" />,
+    );
+    await act(async () => {});
+    read.mockResolvedValue(olderPage(['o0', 'o1']));
+
+    await act(async () => { fireEvent.click(getByRole('button', { name: 'doczytaj' })); });
+
+    expect(read).toHaveBeenLastCalledWith(1, 's1', 'a1', 200, 'b0');
+    expect(getByTestId('count').textContent).toBe('5');
+    expect(getByTestId('stream').getAttribute('data-has-more')).toBe('false');
+  });
+
+  it('keeps the pages already loaded when a live re-read arrives', async () => {
+    const read = vi.spyOn(tauri, 'readSubagentHistory')
+      .mockResolvedValue({ ...historyWith(3), hasMoreBefore: true });
+    let fire: (() => void) | undefined;
+    vi.spyOn(tauri, 'onSubagentsChanged').mockImplementation(async (_sessionId, cb) => {
+      fire = cb;
+      return () => {};
+    });
+    const { getByTestId, getByRole } = render(
+      <SubagentView projectId={1} sessionId="s1" agentId="a1" tabId="session:s1" />,
+    );
+    await act(async () => {});
+    read.mockResolvedValue(olderPage(['o0', 'o1']));
+    await act(async () => { fireEvent.click(getByRole('button', { name: 'doczytaj' })); });
+    expect(getByTestId('count').textContent).toBe('5');
+
+    read.mockResolvedValue({ ...historyWith(4), hasMoreBefore: true });
+    await act(async () => { fire?.(); });
+    await settleDebounce();
+
+    expect(getByTestId('count').textContent).toBe('6');
+    expect(getByTestId('stream').getAttribute('data-has-more')).toBe('false');
+  });
+
+  it('does not start a load-more read while a live re-read is in flight', async () => {
+    let resolveReload: ((h: SessionHistory) => void) | undefined;
+    const read = vi.spyOn(tauri, 'readSubagentHistory')
+      .mockResolvedValueOnce({ ...historyWith(3), hasMoreBefore: true })
+      .mockImplementationOnce(() => new Promise<SessionHistory>(resolve => { resolveReload = resolve; }));
+    let fire: (() => void) | undefined;
+    vi.spyOn(tauri, 'onSubagentsChanged').mockImplementation(async (_sessionId, cb) => {
+      fire = cb;
+      return () => {};
+    });
+    const { getByRole } = render(
+      <SubagentView projectId={1} sessionId="s1" agentId="a1" tabId="session:s1" />,
+    );
+    await act(async () => {});
+    await act(async () => { fire?.(); });
+    await settleDebounce();
+    expect(read).toHaveBeenCalledTimes(2);
+
+    await act(async () => { fireEvent.click(getByRole('button', { name: 'doczytaj' })); });
+
+    expect(read).toHaveBeenCalledTimes(2);
+    await act(async () => { resolveReload?.({ ...historyWith(3), hasMoreBefore: true }); });
   });
 
   it('stops listening for agent changes when the view unmounts', async () => {
