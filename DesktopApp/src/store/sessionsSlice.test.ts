@@ -80,6 +80,37 @@ describe('refreshActivity', () => {
     expect(item.title).toBe('My Rename');
   });
 
+  it('carries fresh subagent counters onto an already loaded session', async () => {
+    useStore.setState({
+      sessionsByProject: {
+        1: { items: [{ ...fakeMeta('a', 1, 'idle'), title: 'My Rename' }], hasMore: false },
+      },
+    });
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([
+      { ...fakeMeta('a', 1, 'running'), runningAgents: 2, totalAgents: 3 },
+    ]);
+    await useStore.getState().refreshActivity(1);
+    const item = useStore.getState().sessionsByProject[1].items[0];
+    expect(item.runningAgents).toBe(2);
+    expect(item.totalAgents).toBe(3);
+    expect(item.title).toBe('My Rename');
+  });
+
+  it('clears subagent counters when the backend no longer reports agents', async () => {
+    useStore.setState({
+      sessionsByProject: {
+        1: { items: [{ ...fakeMeta('a', 1, 'running'), runningAgents: 2, totalAgents: 2 }], hasMore: false },
+      },
+    });
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([
+      { ...fakeMeta('a', 1, 'waitingUser'), runningAgents: 0, totalAgents: 0 },
+    ]);
+    await useStore.getState().refreshActivity(1);
+    const item = useStore.getState().sessionsByProject[1].items[0];
+    expect(item.runningAgents).toBe(0);
+    expect(item.totalAgents).toBe(0);
+  });
+
   it('does nothing when project bucket is missing', async () => {
     const spy = vi.spyOn(tauri, 'listSessions');
     await useStore.getState().refreshActivity(42);
@@ -173,16 +204,23 @@ describe('sessionsSlice subagents', () => {
     vi.restoreAllMocks();
   });
 
-  it('loadSubagents zapisuje listę pod identyfikatorem sesji', async () => {
+  it('loadSubagents stores the list under the session id without dropping other sessions', async () => {
+    const other = [{
+      agentId: 'a0', agentType: 'Explore', description: 'other',
+      status: 'completed' as const, startedAt: 1, endedAt: 2,
+    }];
+    useStore.setState({ subagentsBySession: { 'sess-0': other } });
     const agents = [{
       agentId: 'a1', agentType: 'Explore', description: 'x',
       status: 'running' as const, startedAt: 1, endedAt: null,
     }];
-    vi.spyOn(tauri, 'listSubagents').mockResolvedValue(agents);
+    const spy = vi.spyOn(tauri, 'listSubagents').mockResolvedValue(agents);
 
     await useStore.getState().loadSubagents(1, 'sess-1');
 
+    expect(spy).toHaveBeenCalledWith(1, 'sess-1');
     expect(useStore.getState().subagentsBySession['sess-1']).toEqual(agents);
+    expect(useStore.getState().subagentsBySession['sess-0']).toEqual(other);
   });
 });
 
