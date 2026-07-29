@@ -9,7 +9,7 @@ use super::parser::parse_line;
 const DEFAULT_PAGE: usize = 200;
 const META_SCAN_LIMIT: usize = 100;
 
-fn now_ms() -> i64 {
+pub(crate) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -183,6 +183,15 @@ pub fn read_history(
     before_uuid: Option<&str>,
 ) -> AppResult<SessionHistory> {
     let path = session_file(claude_dir, session_id)?;
+    read_history_at(project_id, &path, limit, before_uuid)
+}
+
+pub fn read_history_at(
+    project_id: i64,
+    path: &Path,
+    limit: Option<usize>,
+    before_uuid: Option<&str>,
+) -> AppResult<SessionHistory> {
     let limit = limit.unwrap_or(DEFAULT_PAGE).min(500);
 
     let file_meta = path.metadata()?;
@@ -196,7 +205,7 @@ pub fn read_history(
         .unwrap_or("unknown")
         .to_string();
 
-    let file = fs::File::open(&path)?;
+    let file = fs::File::open(path)?;
     let mut all_blocks: Vec<HistoryBlock> = Vec::new();
     let mut title = format!("Sesja {}", &id[..8.min(id.len())]);
     let mut has_ai_title = false;
@@ -258,13 +267,13 @@ pub fn read_history(
     let has_more_before = start > 0;
 
     let now = now_ms();
-    let (running_agents, total_agents) = session_agent_counts(&path, now);
+    let (running_agents, total_agents) = session_agent_counts(path, now);
 
     let meta = SessionMeta {
         id, project_id, title,
         message_count: line_count,
         last_modified, git_branch, cwd,
-        activity: compute_activity_with_agents(&path, running_agents, now),
+        activity: compute_activity_with_agents(path, running_agents, now),
         provider: Provider::Claude,
         running_agents,
         total_agents,

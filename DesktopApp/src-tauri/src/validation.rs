@@ -11,6 +11,10 @@ pub fn validate_session_id(id: &str) -> AppResult<()> {
     adapt(abeon_remote_core::validation::validate_session_id(id))
 }
 
+pub fn validate_agent_id(id: &str) -> AppResult<()> {
+    adapt(abeon_remote_core::validation::validate_session_id(id))
+}
+
 pub fn validate_model(model: &str) -> AppResult<()> {
     adapt(abeon_remote_core::validation::validate_model(model))
 }
@@ -29,5 +33,12 @@ mod tests {
     fn accepts_valid_inputs() {
         assert!(validate_session_id("550e8400-e29b-41d4-a716-446655440000").is_ok());
         assert!(validate_model("claude-opus-4-8").is_ok());
+    }
+
+    #[test]
+    fn rejects_agent_id_with_path_separators() {
+        assert!(validate_agent_id("../../etc/passwd").is_err());
+        assert!(validate_agent_id("a/b").is_err());
+        assert!(validate_agent_id("af01e3886643f8b67").is_ok());
     }
 }

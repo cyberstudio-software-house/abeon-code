@@ -76,6 +76,8 @@ pub fn run() {
             commands::sessions::list_sessions,
             commands::sessions::list_active_sessions,
             commands::sessions::read_session_history,
+            commands::sessions::list_subagents,
+            commands::sessions::read_subagent_history,
             commands::sessions::open_session_watch,
             commands::sessions::close_session_watch,
             commands::pty::spawn_pty,

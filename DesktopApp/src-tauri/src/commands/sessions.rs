@@ -1,3 +1,4 @@
+use std::io::BufRead;
 use std::panic;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, State};
@@ -99,6 +100,56 @@ pub fn read_session_history(
         history.meta.title = t;
     }
     Ok(history)
+}
+
+#[tauri::command]
+pub fn list_subagents(
+    state: State<AppState>,
+    project_id: i64,
+    session_id: String,
+) -> AppResult<Vec<crate::domain::SubagentInfo>> {
+    crate::validation::validate_session_id(&session_id)?;
+    let c = state.db.get()?;
+    let proj = projects_repo::get(&c, project_id)?;
+    let dir = session_dir(&proj)?;
+    let path = session_file(&dir, &session_id)?;
+    let now = crate::sessions::reader::now_ms();
+    catch(move || {
+        let agents_dir = crate::sessions::subagents::subagents_dir(&path);
+        let file = std::fs::File::open(&path)?;
+        let lines: Vec<String> = std::io::BufReader::new(file)
+            .lines()
+            .map_while(Result::ok)
+            .filter(|l| l.contains("<task-notification>"))
+            .collect();
+        let completed = crate::sessions::subagents::collect_completed_ids(&lines);
+        Ok(crate::sessions::subagents::scan_dir(&agents_dir, &completed, now))
+    })
+}
+
+#[tauri::command]
+pub fn read_subagent_history(
+    state: State<AppState>,
+    project_id: i64,
+    session_id: String,
+    agent_id: String,
+    limit: Option<usize>,
+    before_uuid: Option<String>,
+) -> AppResult<SessionHistory> {
+    crate::validation::validate_session_id(&session_id)?;
+    crate::validation::validate_agent_id(&agent_id)?;
+    let c = state.db.get()?;
+    let proj = projects_repo::get(&c, project_id)?;
+    let dir = session_dir(&proj)?;
+    let session_path = session_file(&dir, &session_id)?;
+    let agent_path = crate::sessions::subagents::subagents_dir(&session_path)
+        .join(format!("agent-{agent_id}.jsonl"));
+    if !agent_path.exists() {
+        return Err(AppError::NotFound(agent_path.display().to_string()));
+    }
+    catch(move || {
+        crate::sessions::reader::read_history_at(project_id, &agent_path, limit, before_uuid.as_deref())
+    })
 }
 
 #[tauri::command]
