@@ -6,7 +6,7 @@ import type { AppState } from './index';
 import { pushNav, stepBack, stepForward, pruneNav } from '../lib/navHistory';
 
 export type Tab =
-  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider }
+  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider; viewingSubagentId?: string }
   | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number }
   | { kind: 'terminal'; id: string; projectId: number; title: string }
   | { kind: 'providerPicker'; id: string; projectId: number; title: string };
@@ -25,6 +25,7 @@ export type TabsSlice = {
   startSessionTab: (projectId: number, provider: Provider) => void;
   chooseProvider: (tabId: string, provider: Provider) => void;
   setSessionMode: (tabId: string, mode: 'history' | 'terminal') => void;
+  viewSubagent: (tabId: string, agentId: string | null) => void;
   closeTab: (id: string) => void;
   detachTabs: (ids: string[]) => void;
   setActive: (id: string) => void;
@@ -184,6 +185,18 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
   setSessionMode: (tabId, mode) => set({
     tabs: get().tabs.map(t => t.id === tabId && t.kind === 'session' ? { ...t, mode, fresh: false, preview: false } : t),
   }),
+  viewSubagent: (tabId, agentId) => {
+    set({
+      tabs: get().tabs.map(t =>
+        t.id === tabId && t.kind === 'session'
+          ? (agentId ? { ...t, viewingSubagentId: agentId } : (() => {
+              const { viewingSubagentId: _drop, ...rest } = t;
+              return rest;
+            })())
+          : t,
+      ),
+    });
+  },
   closeTab: (id) => {
     const tabs = get().tabs.filter(t => t.id !== id);
     const mruOrder = get().mruOrder.filter(x => x !== id);

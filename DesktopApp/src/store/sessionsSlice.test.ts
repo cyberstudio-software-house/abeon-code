@@ -167,6 +167,25 @@ describe('scheduleNewSessionRefresh', () => {
   });
 });
 
+describe('sessionsSlice subagents', () => {
+  beforeEach(() => {
+    useStore.setState({ subagentsBySession: {} });
+    vi.restoreAllMocks();
+  });
+
+  it('loadSubagents zapisuje listę pod identyfikatorem sesji', async () => {
+    const agents = [{
+      agentId: 'a1', agentType: 'Explore', description: 'x',
+      status: 'running' as const, startedAt: 1, endedAt: null,
+    }];
+    vi.spyOn(tauri, 'listSubagents').mockResolvedValue(agents);
+
+    await useStore.getState().loadSubagents(1, 'sess-1');
+
+    expect(useStore.getState().subagentsBySession['sess-1']).toEqual(agents);
+  });
+});
+
 describe('sessionsSlice activeSessions', () => {
   beforeEach(() => { useStore.setState({ activeSessions: [], showActiveSessions: true }); });
 

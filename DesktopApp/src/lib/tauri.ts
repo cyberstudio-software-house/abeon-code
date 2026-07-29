@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
 import type { ClickUpSpace } from '../types/ClickUpSpace';
@@ -43,6 +43,10 @@ export const tauri = {
     invoke<SessionMeta[]>('list_sessions', { projectId, limit, offset }),
   readSessionHistory: (projectId: number, sessionId: string, provider: Provider = 'claude', limit?: number, beforeUuid?: string) =>
     invoke<SessionHistory>('read_session_history', { projectId, sessionId, provider, limit, beforeUuid }),
+  listSubagents: (projectId: number, sessionId: string) =>
+    invoke<SubagentInfo[]>('list_subagents', { projectId, sessionId }),
+  readSubagentHistory: (projectId: number, sessionId: string, agentId: string, limit?: number, beforeUuid?: string) =>
+    invoke<SessionHistory>('read_subagent_history', { projectId, sessionId, agentId, limit, beforeUuid }),
   openSessionWatch: (projectId: number, sessionId: string, provider: Provider = 'claude') =>
     invoke<void>('open_session_watch', { projectId, sessionId, provider }),
   closeSessionWatch: (sessionId: string) =>

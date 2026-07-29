@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import { tauri } from '../lib/tauri';
-import type { SessionActivity, SessionMeta, ActiveSession } from '../types';
+import type { SessionActivity, SessionMeta, ActiveSession, SubagentInfo } from '../types';
 import type { TabsSlice } from './tabsSlice';
 import type { AppState } from './index';
 
@@ -31,6 +31,8 @@ export type SessionsSlice = {
   refreshActivity: (projectId: number) => Promise<void>;
   activeSessions: ActiveSession[];
   refreshActiveSessions: () => Promise<void>;
+  subagentsBySession: Record<string, SubagentInfo[]>;
+  loadSubagents: (projectId: number, sessionId: string) => Promise<void>;
   scheduleNewSessionRefresh: (projectId: number) => void;
   startActivityPolling: () => void;
   stopActivityPolling: () => void;
@@ -53,6 +55,7 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
   sessionsByProject: {},
   attentionSessions: new Set<string>(),
   activeSessions: [],
+  subagentsBySession: {},
   markAttention: (sessionId) => {
     const cur = get().attentionSessions;
     if (cur.has(sessionId)) return;
@@ -179,6 +182,10 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
     } catch (err) {
       console.error('[sessions] refreshActiveSessions failed', err);
     }
+  },
+  loadSubagents: async (projectId, sessionId) => {
+    const agents = await tauri.listSubagents(projectId, sessionId);
+    set({ subagentsBySession: { ...get().subagentsBySession, [sessionId]: agents } });
   },
   scheduleNewSessionRefresh: (projectId) => {
     if (!get().sessionsByProject[projectId]) {

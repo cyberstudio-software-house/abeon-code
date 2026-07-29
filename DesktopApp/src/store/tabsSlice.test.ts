@@ -307,6 +307,37 @@ describe('tabsSlice preview tabs', () => {
   });
 });
 
+describe('tabsSlice viewSubagent', () => {
+  const sessionTab = { kind: 'session' as const, id: 'session:s1', projectId: 1, sessionId: 's1', title: 'S', mode: 'history' as const };
+
+  beforeEach(() => {
+    useStore.setState({ tabs: [sessionTab, { kind: 'terminal', id: 'session:s1-other', projectId: 1, title: 'T' }] });
+  });
+
+  it('sets viewingSubagentId on the matching session tab', () => {
+    useStore.getState().viewSubagent('session:s1', 'agent-7');
+    const tab = useStore.getState().tabs[0];
+    if (tab.kind !== 'session') throw new Error('expected session tab');
+    expect(tab.viewingSubagentId).toBe('agent-7');
+  });
+
+  it('drops the key entirely when agentId is null', () => {
+    useStore.getState().viewSubagent('session:s1', 'agent-7');
+    useStore.getState().viewSubagent('session:s1', null);
+    const tab = useStore.getState().tabs[0];
+    expect('viewingSubagentId' in tab).toBe(false);
+  });
+
+  it('leaves tabs of another kind and non-matching ids untouched', () => {
+    useStore.getState().viewSubagent('session:s1-other', 'agent-7');
+    useStore.getState().viewSubagent('session:nope', 'agent-7');
+    expect(useStore.getState().tabs).toEqual([
+      sessionTab,
+      { kind: 'terminal', id: 'session:s1-other', projectId: 1, title: 'T' },
+    ]);
+  });
+});
+
 describe('tabsFromGroupMode', () => {
   it('maps the payload back to tabs and stamps the projectId', () => {
     const mode: GroupWindowMode = {
