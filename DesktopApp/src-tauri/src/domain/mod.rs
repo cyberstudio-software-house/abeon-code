@@ -10,6 +10,7 @@ pub mod session_event;
 pub mod roster;
 pub mod provider;
 pub mod clickup;
+pub mod subagent;
 
 pub use project::*;
 pub use action::*;
@@ -20,3 +21,4 @@ pub use editor::*;
 pub use usage::*;
 pub use model::*;
 pub use provider::Provider;
+pub use subagent::*;

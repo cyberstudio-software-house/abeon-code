@@ -4,5 +4,6 @@ pub mod encoding;
 pub mod parser;
 pub mod pricing;
 pub mod reader;
+pub mod subagents;
 pub mod usage;
 pub mod watcher;
