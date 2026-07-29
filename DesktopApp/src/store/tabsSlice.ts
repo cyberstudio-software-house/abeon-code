@@ -36,7 +36,7 @@ export type TabsSlice = {
   upsertActionTab: (tab: Extract<Tab, { kind: 'action' }>) => void;
 };
 
-const sessionTabId = (sessionId: string) => `session:${sessionId}`;
+export const sessionTabId = (sessionId: string) => `session:${sessionId}`;
 
 export function selectActiveSession(
   state: Pick<TabsSlice, 'tabs' | 'activeTabId'>,

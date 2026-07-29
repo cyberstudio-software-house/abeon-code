@@ -6,6 +6,7 @@ import { ACTIVITY_TEXT, ACTIVITY_LABEL } from '../../lib/activity';
 import { PROVIDER_ICON } from '../../lib/providers';
 import { formatRelative } from '../../lib/format';
 import { Icon } from '../shared/Icon';
+import { SubagentBadge } from './SubagentBadge';
 
 export function ActiveSessionsPanel() {
   const showActiveSessions = useStore(s => s.showActiveSessions);
@@ -63,6 +64,11 @@ export function ActiveSessionsPanel() {
 }
 
 function ActiveSessionRowItem({ row, onClick }: { row: ActiveSessionRow; onClick: () => void }) {
+  const counts = useStore(useShallow(s => {
+    const meta = s.sessionsByProject[row.projectId]?.items.find(i => i.id === row.sessionId);
+    return meta ? { running: meta.runningAgents, total: meta.totalAgents } : { running: 0, total: 0 };
+  }));
+
   return (
     <li
       onClick={onClick}
@@ -80,6 +86,7 @@ function ActiveSessionRowItem({ row, onClick }: { row: ActiveSessionRow; onClick
         </span>
       )}
       <span className="truncate flex-1 min-w-0">{row.title}</span>
+      <SubagentBadge running={counts.running} total={counts.total} expanded={false} onToggle={() => {}} />
       <span className="text-[10px] text-muted truncate max-w-[72px] shrink-0">{row.projectName}</span>
       <span className="font-mono text-[10px] text-muted shrink-0">{formatRelative(row.lastModified)}</span>
     </li>
