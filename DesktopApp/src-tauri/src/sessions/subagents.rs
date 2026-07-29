@@ -263,6 +263,30 @@ mod tests {
     }
 
     #[test]
+    fn a_notification_id_from_a_real_line_matches_the_agent_files_on_disk() {
+        const AGENT_ID: &str = "af01e3886643f8b67";
+        let td = TempDir::new().unwrap();
+        let session_path = td.path().join("9f2c1e40-3c7a-4d21-bd5f-1a2b3c4d5e6f.jsonl");
+        let dir = subagents_dir(&session_path);
+        let started = write_agent(&dir, AGENT_ID, "Explore", "Znajdz skroty");
+
+        let line = format!(
+            r#"{{"parentUuid":"3b1d0c6e-1f2a-4c5b-9d8e-7f6a5b4c3d2e","isSidechain":false,"type":"user","message":{{"role":"user","content":"<task-notification>\n<task-id>{AGENT_ID}</task-id>\n<tool-use-id>toolu_01AbCdEfGhIjKlMnOpQrStUv</tool-use-id>\n</task-notification>"}},"uuid":"5c4b3a29-8e7d-4f6a-b1c2-d3e4f5a6b7c8","timestamp":"2026-07-29T10:00:00.000Z"}}"#
+        );
+        std::fs::write(&session_path, format!("{line}\n")).unwrap();
+
+        let completed = collect_completed_ids(&[line]);
+        assert!(completed.contains(AGENT_ID), "notification id did not survive parsing");
+
+        let list = scan_session(&session_path, started + 1_000).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].agent_id, AGENT_ID);
+        assert_eq!(list[0].status, SubagentStatus::Completed);
+        assert_eq!(count_running(&list), 0);
+        assert_eq!(count_agents(&dir, &completed, started + 1_000, None), (0, 1));
+    }
+
+    #[test]
     fn scan_session_without_notification_reports_running() {
         let td = TempDir::new().unwrap();
         let session_path = td.path().join("sess.jsonl");
