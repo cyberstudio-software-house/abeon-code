@@ -83,10 +83,16 @@ w normalnej pracy to jego plik jest młodszy.
 
 Reguła obowiązuje wyłącznie tam, gdzie zestaw zakończonych jest niepełny, czyli na ścieżce
 licznikowej (`session_agent_counts` → `count_agents`). Pełny skan (`scan_session` → `scan_dir`)
-czyta cały log, ma komplet notyfikacji i zostaje bez zmian. Skutek uboczny do zaakceptowania:
-agent milczący krócej niż `AGENT_STALE_MS`, dla którego notyfikacja jeszcze nie przyszła,
-zniknie z licznika, choć lista pokaże go jako `● Pracuje`. To wciąż mniejszy błąd niż
-utrzymywanie sesji w stanie „pracuje" i blokowanie powiadomienia.
+czyta cały log, ma komplet notyfikacji i zostaje bez zmian.
+
+Cena reguły: agent, który naprawdę pracuje, ale akurat milczy (np. odpalił długi bieg testów),
+a w międzyczasie do logu sesji coś dopisano, wypada z licznika przed upływem `AGENT_STALE_MS`.
+Sesja wraca wtedy do zwykłej heurystyki i może zostać opisana jako czekająca na użytkownika,
+razem z powiadomieniem. Ścieżka watchera tego nie odczuwa (przelicza aktywność zaraz po zapisie
+do logu sesji, a plik młodszy niż `LIVE_WINDOW_MS` i tak daje `Running`), ryzyko dotyczy
+pollingu co 10 s. Świadomy kompromis: fałszywe „pracuje" trwało do 120 s przy każdym większym
+`tool_result`, fałszywe „czeka" wymaga zbiegu dwóch rzadszych warunków. Rozwinięta lista pokaże
+takiego agenta jako `● Pracuje`, bo pełny skan nie stosuje tej reguły.
 
 ## Backend
 
