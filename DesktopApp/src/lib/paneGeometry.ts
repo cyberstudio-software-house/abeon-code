@@ -29,6 +29,47 @@ export function computePaneRects(root: PaneNode): Map<string, PaneRect> {
   return out;
 }
 
+export type SplitBoundary = {
+  splitId: string;
+  index: number;
+  dir: 'row' | 'col';
+  sizes: number[];
+  left: number;
+  top: number;
+  length: number;
+  extent: number;
+};
+
+export function computeSplitBoundaries(root: PaneNode): SplitBoundary[] {
+  const out: SplitBoundary[] = [];
+  const walk = (node: PaneNode, rect: PaneRect) => {
+    if (node.kind === 'leaf') return;
+    let offset = 0;
+    node.children.forEach((child, i) => {
+      const share = node.sizes[i];
+      const childRect: PaneRect = node.dir === 'row'
+        ? { left: rect.left + rect.width * offset, top: rect.top, width: rect.width * share, height: rect.height }
+        : { left: rect.left, top: rect.top + rect.height * offset, width: rect.width, height: rect.height * share };
+      walk(child, childRect);
+      offset += share;
+      if (i < node.children.length - 1) {
+        out.push({
+          splitId: node.id,
+          index: i,
+          dir: node.dir,
+          sizes: node.sizes,
+          left: node.dir === 'row' ? rect.left + rect.width * offset : rect.left,
+          top: node.dir === 'row' ? rect.top : rect.top + rect.height * offset,
+          length: node.dir === 'row' ? rect.height : rect.width,
+          extent: node.dir === 'row' ? rect.width : rect.height,
+        });
+      }
+    });
+  };
+  walk(root, { left: 0, top: 0, width: 100, height: 100 });
+  return out;
+}
+
 export function hitTestPane(
   rects: Map<string, PaneRect>,
   container: { width: number; height: number },
@@ -71,7 +112,7 @@ export function insertionIndex(tabRects: Array<{ id: string; left: number; width
 
 export function clampSizes(sizes: number[], index: number, next: number, totalPx: number, minPx: number): number[] {
   const pair = sizes[index] + sizes[index + 1];
-  const min = minPx / totalPx;
+  const min = Math.min(minPx / totalPx, pair / 2);
   const clamped = Math.max(min, Math.min(pair - min, next));
   const out = [...sizes];
   out[index] = clamped;

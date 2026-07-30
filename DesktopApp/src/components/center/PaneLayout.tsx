@@ -1,12 +1,14 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { computePaneRects, TAB_BAR_HEIGHT } from '../../lib/paneGeometry';
 import { leaves } from '../../lib/paneTree';
+import { PaneResizers } from './PaneResizers';
 import { TabBar } from './TabBar';
 import { TabPanel } from './TabContent';
 
 export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number } = {}) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const layout = useStore(s => s.layout);
   const tabs = useStore(useShallow(s => s.tabs));
   const rects = useMemo(() => computePaneRects(layout), [layout]);
@@ -20,7 +22,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   }, [panes]);
 
   return (
-    <div className="flex-1 relative overflow-hidden">
+    <div ref={containerRef} className="flex-1 relative overflow-hidden">
       {panes.map(pane => {
         const rect = rects.get(pane.id);
         if (!rect) return null;
@@ -61,6 +63,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
           </div>
         );
       })}
+      <PaneResizers layout={layout} containerRef={containerRef} />
       {tabs.length === 0 && (
         <div className="absolute inset-0 grid place-items-center text-muted text-[13px]">
           {detachedProjectId != null ? 'Otwórz nową sesję przyciskiem + na pasku zakładek' : 'Wybierz sesję z lewej'}

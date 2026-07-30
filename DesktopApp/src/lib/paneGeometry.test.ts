@@ -5,6 +5,7 @@ import {
   canSplit,
   clampSizes,
   computePaneRects,
+  computeSplitBoundaries,
   dropZone,
   hitTestPane,
   insertionIndex,
@@ -35,6 +36,31 @@ describe('computePaneRects', () => {
     expect(rects.get('p1')).toEqual({ left: 0, top: 0, width: 50, height: 100 });
     expect(rects.get('p2')).toEqual({ left: 50, top: 0, width: 50, height: 25 });
     expect(rects.get('p3')).toEqual({ left: 50, top: 25, width: 50, height: 75 });
+  });
+});
+
+describe('computeSplitBoundaries', () => {
+  it('returns one boundary per gap, positioned at the cumulative size', () => {
+    const bounds = computeSplitBoundaries(tree);
+    expect(bounds).toHaveLength(2);
+    expect(bounds[0]).toMatchObject({ splitId: 's1', index: 0, dir: 'row', left: 50, top: 0, length: 100, extent: 100 });
+    expect(bounds[1]).toMatchObject({ splitId: 's2', index: 0, dir: 'col', left: 50, top: 25, length: 50, extent: 100 });
+  });
+
+  it('reports the extent of a nested split along its own axis', () => {
+    const nested: PaneNode = {
+      kind: 'split', id: 'outer', dir: 'row', sizes: [0.25, 0.75],
+      children: [
+        createLeaf('x', ['a'], 'a'),
+        { kind: 'split', id: 'inner', dir: 'row', sizes: [0.5, 0.5], children: [createLeaf('y', ['b'], 'b'), createLeaf('z', ['c'], 'c')] },
+      ],
+    };
+    const inner = computeSplitBoundaries(nested).find(b => b.splitId === 'inner');
+    expect(inner?.extent).toBe(75);
+  });
+
+  it('returns nothing for a lone leaf', () => {
+    expect(computeSplitBoundaries(createLeaf('p1', ['a'], 'a'))).toEqual([]);
   });
 });
 
@@ -110,5 +136,16 @@ describe('clampSizes', () => {
     expect(out[0]).toBeCloseTo(0.4);
     expect(out[1]).toBeCloseTo(0.5);
     expect(out[2]).toBeCloseTo(0.1);
+  });
+
+  it('splits the pair evenly instead of going negative when the split is narrower than the minimum', () => {
+    const out = clampSizes([0.5, 0.5], 0, 0.9, 200, 240);
+    expect(out[0]).toBeCloseTo(0.5);
+    expect(out[1]).toBeCloseTo(0.5);
+
+    const nested = clampSizes([0.4, 0.3, 0.3], 1, 0.9, 500, 400);
+    expect(nested[0]).toBeCloseTo(0.4);
+    expect(nested[1]).toBeCloseTo(0.3);
+    expect(nested[2]).toBeCloseTo(0.3);
   });
 });
