@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 
 vi.mock('../../lib/processManager', () => ({ processManager: { dismiss: vi.fn(), release: vi.fn() } }));
 vi.mock('../../lib/detachGroup', async (importOriginal) => {
@@ -23,6 +23,9 @@ import { processManager } from '../../lib/processManager';
 import { detachProjectGroup, focusExistingGroupWindow } from '../../lib/detachGroup';
 import { useStore } from '../../store';
 import { TabBar } from './TabBar';
+import { createLeaf, insertBeside } from '../../lib/paneTree';
+import { ROOT_PANE_ID } from '../../store/panesSlice';
+import { getProjectColor } from '../../lib/projectColors';
 
 function seedActionTab(status: 'running' | 'exited', exitCode?: number) {
   useStore.setState({
@@ -179,5 +182,130 @@ describe('TabBar grouping rule', () => {
     expect(screen.queryByText('S2a')).toBeNull();
     expect(screen.queryByText('S2b')).toBeNull();
     expect(screen.getByText('S1')).toBeInTheDocument();
+  });
+});
+
+describe('TabBar lone group', () => {
+  it('renders the only group flat and spaced, ignoring a stale collapse', () => {
+    useStore.setState({
+      tabs: [
+        { kind: 'session', id: 'session:s2a', projectId: 2, sessionId: 's2a', title: 'S2a', mode: 'history' },
+        { kind: 'session', id: 'session:s2b', projectId: 2, sessionId: 's2b', title: 'S2b', mode: 'history' },
+        { kind: 'session', id: 'session:s1', projectId: 1, sessionId: 's1', title: 'S1', mode: 'history' },
+      ],
+      activeTabId: 'session:s2a',
+      mruOrder: ['session:s2a'],
+      navHistory: ['session:s2a'],
+      navIndex: 0,
+      runningActions: {},
+      projects: [{ id: 1, name: 'Alfa', path: '/a' }, { id: 2, name: 'Beta', path: '/b' }] as never,
+      layout: createLeaf(ROOT_PANE_ID, ['session:s2a', 'session:s2b', 'session:s1'], 'session:s2a'),
+      focusedPaneId: ROOT_PANE_ID,
+    });
+    const { container } = render(<TabBar />);
+    fireEvent.click(screen.getByText('Beta'));
+    expect(screen.queryByText('S2a')).toBeNull();
+    expect(screen.queryByText('S2b')).toBeNull();
+
+    act(() => {
+      useStore.setState({ tabs: useStore.getState().tabs.filter(t => t.projectId === 2) });
+    });
+
+    expect(screen.queryByText('Beta')).toBeNull();
+    expect(screen.getByText('S2a')).toBeInTheDocument();
+    expect(screen.getByText('S2b')).toBeInTheDocument();
+    const strip = container.querySelector('[data-tab-id="session:s2a"]')!.parentElement!;
+    expect(strip.style.borderBottom).toBe('');
+    expect(strip.className).toContain('gap-0.5');
+  });
+});
+
+describe('TabBar per pane', () => {
+  it('renders only the tabs of its own pane', () => {
+    useStore.setState({
+      tabs: [
+        { kind: 'terminal', id: 't1', projectId: 1, title: 'Lewy' },
+        { kind: 'terminal', id: 't2', projectId: 1, title: 'Prawy' },
+      ],
+      activeTabId: 't1',
+      projects: [{ id: 1, name: 'P', path: '/p' }] as never,
+      layout: insertBeside(createLeaf(ROOT_PANE_ID, ['t1'], 't1'), ROOT_PANE_ID, 'row', false, createLeaf('p2', ['t2'], 't2'), 's1'),
+      focusedPaneId: ROOT_PANE_ID,
+    });
+    render(<TabBar paneId="p2" />);
+    expect(screen.queryByText('Lewy')).toBeNull();
+    expect(screen.getByText('Prawy')).toBeTruthy();
+  });
+
+  it('paints every tab with its project colour on the left edge', () => {
+    useStore.setState({
+      tabs: [{ kind: 'terminal', id: 't1', projectId: 1, title: 'Lewy' }],
+      activeTabId: 't1',
+      projects: [{ id: 1, name: 'P', path: '/p', color: '#ff0000' }] as never,
+      layout: createLeaf(ROOT_PANE_ID, ['t1'], 't1'),
+      focusedPaneId: ROOT_PANE_ID,
+    });
+    const { container } = render(<TabBar />);
+    const el = container.querySelector('[data-tab-id="t1"]') as HTMLElement;
+    expect(el.style.borderLeftColor).toBe('rgb(255, 0, 0)');
+    expect(getProjectColor({ id: 1, color: '#ff0000' } as never)).toBe('#ff0000');
+  });
+
+  it('dims the active tab of a pane that does not hold the focus', () => {
+    useStore.setState({
+      tabs: [
+        { kind: 'terminal', id: 't1', projectId: 1, title: 'Lewy' },
+        { kind: 'terminal', id: 't2', projectId: 1, title: 'Prawy' },
+      ],
+      activeTabId: 't1',
+      projects: [{ id: 1, name: 'P', path: '/p' }] as never,
+      layout: insertBeside(createLeaf(ROOT_PANE_ID, ['t1'], 't1'), ROOT_PANE_ID, 'row', false, createLeaf('p2', ['t2'], 't2'), 's1'),
+      focusedPaneId: ROOT_PANE_ID,
+    });
+    const { container } = render(<TabBar paneId="p2" />);
+    const el = container.querySelector('[data-tab-id="t2"]') as HTMLElement;
+    expect(el.className).toContain('bg-bg-elev');
+    expect(el.className).toContain('text-muted');
+    expect(el.className).not.toContain('text-fg');
+  });
+
+  it('activates a tab through its own pane', () => {
+    useStore.setState({
+      tabs: [
+        { kind: 'terminal', id: 't1', projectId: 1, title: 'Lewy' },
+        { kind: 'terminal', id: 't2', projectId: 1, title: 'Prawy' },
+      ],
+      activeTabId: 't1',
+      projects: [{ id: 1, name: 'P', path: '/p' }] as never,
+      layout: insertBeside(createLeaf(ROOT_PANE_ID, ['t1'], 't1'), ROOT_PANE_ID, 'row', false, createLeaf('p2', ['t2'], 't2'), 's1'),
+      focusedPaneId: ROOT_PANE_ID,
+    });
+    render(<TabBar paneId="p2" />);
+    fireEvent.click(screen.getByText('Prawy'));
+    expect(useStore.getState().focusedPaneId).toBe('p2');
+    expect(useStore.getState().activeTabId).toBe('t2');
+  });
+
+  it('appends a replaced preview tab at the end of the pane strip', () => {
+    useStore.setState({
+      tabs: [
+        { kind: 'session', id: 'session:a', projectId: 1, sessionId: 'a', title: 'A', mode: 'history' },
+        { kind: 'session', id: 'session:p', projectId: 1, sessionId: 'p', title: 'P', mode: 'history', preview: true },
+        { kind: 'session', id: 'session:c', projectId: 1, sessionId: 'c', title: 'C', mode: 'history' },
+      ],
+      activeTabId: 'session:p',
+      mruOrder: ['session:p'],
+      navHistory: ['session:p'],
+      navIndex: 0,
+      runningActions: {},
+      projects: [{ id: 1, name: 'P', path: '/p' }] as never,
+      layout: createLeaf(ROOT_PANE_ID, ['session:a', 'session:p', 'session:c'], 'session:p'),
+      focusedPaneId: ROOT_PANE_ID,
+    });
+    const { container } = render(<TabBar />);
+    act(() => { useStore.getState().openSessionTab(1, 'n', 'N'); });
+    expect(useStore.getState().tabs.map(t => t.id)).toEqual(['session:a', 'session:n', 'session:c']);
+    expect([...container.querySelectorAll('[data-tab-id]')].map(el => el.getAttribute('data-tab-id')))
+      .toEqual(['session:a', 'session:c', 'session:n']);
   });
 });

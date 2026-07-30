@@ -14,6 +14,8 @@ import { TabContextMenu } from './TabContextMenu';
 import { GroupContextMenu } from './GroupContextMenu';
 import { detachSessionTab } from '../../lib/detachSession';
 import { detachProjectGroup, focusExistingGroupWindow, summarizeDetach, detachSummaryMessage } from '../../lib/detachGroup';
+import { findLeaf } from '../../lib/paneTree';
+import { getProjectColor } from '../../lib/projectColors';
 import type { Tab } from '../../store/tabsSlice';
 import { Icon } from '../shared/Icon';
 
@@ -57,10 +59,18 @@ function TabIcon({ tab, actionColor }: { tab: Tab; actionColor?: string }) {
   return <span className={actionColor ?? 'text-muted'}>▶</span>;
 }
 
-export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {}) {
-  const tabs = useStore(s => s.tabs);
+export function TabBar({ detachedProjectId, paneId }: { detachedProjectId?: number; paneId?: string } = {}) {
+  const allTabs = useStore(s => s.tabs);
+  const focusedPaneId = useStore(s => s.focusedPaneId);
+  const resolvedPaneId = paneId ?? focusedPaneId;
+  const paneTabIds = useStore(useShallow(s => findLeaf(s.layout, resolvedPaneId)?.tabIds ?? []));
+  const tabs = useMemo(
+    () => paneTabIds.map(id => allTabs.find(t => t.id === id)).filter((t): t is Tab => !!t),
+    [paneTabIds, allTabs],
+  );
+  const paneActiveTabId = useStore(s => findLeaf(s.layout, resolvedPaneId)?.activeTabId ?? null);
   const active = useStore(s => s.activeTabId);
-  const setActive = useStore(s => s.setActive);
+  const setPaneActiveTab = useStore(s => s.setPaneActiveTab);
   const closeTab = useStore(s => s.closeTab);
   const detachTabs = useStore(s => s.detachTabs);
   const renameTab = useStore(s => s.renameTab);
@@ -82,6 +92,9 @@ export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {
 
   const items = useMemo(() => layoutTabBar(tabs, projects), [tabs, projects]);
   const showHeaders = items.length > 1;
+
+  const projectColor = (projectId: number) =>
+    getProjectColor(projects.find(p => p.id === projectId) ?? { id: projectId, color: null });
 
   const toggleCollapse = (projectId: number) =>
     setCollapsed(prev => {
@@ -199,7 +212,7 @@ export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {
     <div
       key={t.id}
       data-tab-id={t.id}
-      onClick={() => setActive(t.id)}
+      onClick={() => setPaneActiveTab(resolvedPaneId, t.id)}
       onMouseDown={(e) => {
         if (e.button === 1) {
           e.preventDefault();
@@ -211,9 +224,12 @@ export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {
         e.preventDefault();
         setCtxMenu({ tab: t, x: e.clientX, y: e.clientY });
       }}
+      style={{ borderLeftWidth: 2, borderLeftStyle: 'solid', borderLeftColor: projectColor(t.projectId) }}
       className={`group relative flex items-center px-3 py-1 text-[11px] border-x border-t cursor-pointer shrink-0 ${
-        t.id === active
-          ? 'bg-bg-elev border-border text-fg'
+        t.id === paneActiveTabId
+          ? (resolvedPaneId === focusedPaneId
+              ? 'bg-bg-elev border-border text-fg'
+              : 'bg-bg-elev border-border text-muted')
           : 'bg-bg border-transparent text-muted hover:text-fg'
       }`}
     >
@@ -281,7 +297,7 @@ export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {
                 renderTab(item.tab)
               ) : (
                 <div
-                  className="flex items-end shrink-0"
+                  className={`flex items-end shrink-0 ${showHeaders ? '' : 'gap-0.5'}`}
                   style={showHeaders ? { borderBottom: `2px solid ${item.color}` } : undefined}
                 >
                   {showHeaders && (
