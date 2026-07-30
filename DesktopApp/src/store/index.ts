@@ -392,7 +392,14 @@ export let adoptedActions: Promise<unknown> = Promise.resolve();
 
 if (windowMode?.view === 'session') {
   const tab = sessionTabFromMode(windowMode);
-  useStore.setState({ tabs: [tab], activeTabId: tab.id, navHistory: [tab.id], navIndex: 0 });
+  useStore.setState({
+    tabs: [tab],
+    activeTabId: tab.id,
+    navHistory: [tab.id],
+    navIndex: 0,
+    layout: createLeaf(ROOT_PANE_ID, [tab.id], tab.id),
+    focusedPaneId: ROOT_PANE_ID,
+  });
 } else if (windowMode?.view === 'group') {
   const tabs = tabsFromGroupMode(windowMode);
   const activeTabId = tabs.some(t => t.id === windowMode.activeTabId)
@@ -404,6 +411,8 @@ if (windowMode?.view === 'session') {
     mruOrder: activeTabId ? [activeTabId] : [],
     navHistory: activeTabId ? [activeTabId] : [],
     navIndex: 0,
+    layout: createLeaf(ROOT_PANE_ID, tabs.map(t => t.id), activeTabId),
+    focusedPaneId: ROOT_PANE_ID,
   });
   adoptedActions = Promise.all(
     windowMode.tabs

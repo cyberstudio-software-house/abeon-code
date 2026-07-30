@@ -1,6 +1,7 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { ROOT_PANE_ID } from './panesSlice';
 import { findLeaf, leaves, type PaneNode, type PaneSplit } from '../lib/paneTree';
+import { buildGroupWindowUrl, buildSessionWindowUrl } from '../lib/windowMode';
 
 // Re-importing `./index` re-runs its boot IPC calls; jsdom has no Tauri host, so
 // stub just that boundary to keep the layout assertions free of transport noise.
@@ -24,6 +25,7 @@ describe('store boot', () => {
   beforeEach(() => {
     vi.resetModules();
     localStorage.clear();
+    window.history.replaceState({}, '', '/');
   });
 
   it('folds tabs restored from localStorage into the root pane', async () => {
@@ -122,6 +124,38 @@ describe('store boot', () => {
     expect(findLeaf(restored.layout, paneIds[0])?.tabIds).toEqual(['session:a']);
     expect(findLeaf(restored.layout, paneIds[1])?.tabIds).toEqual(['session:b']);
     expect(restored.focusedPaneId).toBe(focusedPaneId);
+  });
+
+  it('gives a detached session window one pane holding its tab', async () => {
+    window.history.replaceState({}, '', '/' + buildSessionWindowUrl({
+      projectId: 1, sessionId: 's1', title: 'S1', fresh: false,
+    }));
+
+    const { useStore } = await import('./index');
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(1);
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.tabIds).toEqual(['session:s1']);
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.activeTabId).toBe('session:s1');
+    expect(useStore.getState().focusedPaneId).toBe(ROOT_PANE_ID);
+  });
+
+  it('gives a detached group window one pane holding every handed-over tab', async () => {
+    window.history.replaceState({}, '', '/' + buildGroupWindowUrl({
+      projectId: 1,
+      tabs: [
+        { kind: 'session', id: 'session:a', sessionId: 'a', title: 'A', mode: 'terminal' },
+        { kind: 'terminal', id: 'terminal:t1', title: 'Terminal' },
+      ],
+      activeTabId: 'terminal:t1',
+    }));
+
+    const { useStore } = await import('./index');
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(1);
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.tabIds).toEqual(['session:a', 'terminal:t1']);
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.activeTabId).toBe('terminal:t1');
+    expect(useStore.getState().focusedPaneId).toBe(ROOT_PANE_ID);
+    expect(localStorage.getItem('abeoncode.tabs')).toBeNull();
   });
 
   it('prunes non-session tabs out of the persisted layout', async () => {

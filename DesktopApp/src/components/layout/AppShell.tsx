@@ -12,6 +12,7 @@ import type { AttentionEvent } from '../../lib/tauri';
 import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
 import { shouldNotify } from '../../lib/attention';
+import { visibleSessionIds } from '../../lib/visibleTabs';
 import { useMouseNavigation } from '../../hooks/useMouseNavigation';
 import { openProjectPath } from '../../lib/openProject';
 import { DragHandle, clamp } from './DragHandle';
@@ -102,11 +103,8 @@ export function AppShell() {
 
     const handle = (e: AttentionEvent) => {
       const state = useStore.getState();
-      const activeTab = state.tabs.find(t => t.id === state.activeTabId);
-      const activeSessionId = activeTab?.kind === 'session'
-        ? (activeTab.linkedSessionId ?? activeTab.sessionId)
-        : null;
-      const isActiveFocused = document.hasFocus() && activeSessionId === e.sessionId;
+      const visible = visibleSessionIds(state.layout, state.tabs);
+      const isActiveFocused = document.hasFocus() && visible.includes(e.sessionId);
 
       if (isActiveFocused) return;
 
@@ -149,10 +147,7 @@ export function AppShell() {
   useEffect(() => {
     if (!document.hasFocus()) return;
     const state = useStore.getState();
-    const activeTab = state.tabs.find(t => t.id === state.activeTabId);
-    if (activeTab?.kind === 'session') {
-      state.clearAttention(activeTab.linkedSessionId ?? activeTab.sessionId);
-    }
+    for (const sessionId of visibleSessionIds(state.layout, state.tabs)) state.clearAttention(sessionId);
   }, [activeTabId]);
 
   useMouseNavigation();

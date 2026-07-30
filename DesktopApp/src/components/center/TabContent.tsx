@@ -1,4 +1,3 @@
-import { useStore } from '../../store';
 import { HistoryView } from '../history/HistoryView';
 import { SubagentView } from '../history/SubagentView';
 import { TerminalView } from '../terminal/TerminalView';
@@ -79,25 +78,4 @@ export function TabPanel({ tab, visible, focused = true }: { tab: Tab; visible: 
     );
   }
   return null;
-}
-
-export function TabContent({ detached = false }: { detached?: boolean } = {}) {
-  const tabs = useStore(s => s.tabs);
-  const active = useStore(s => s.activeTabId);
-
-  if (tabs.length === 0) {
-    return (
-      <div className="flex-1 grid place-items-center text-muted text-[13px]">
-        {detached ? 'Otwórz nową sesję przyciskiem + na pasku zakładek' : 'Wybierz sesję z lewej'}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex-1 relative">
-      {tabs.map(t => (
-        <TabPanel key={t.id} tab={t} visible={t.id === active} />
-      ))}
-    </div>
-  );
 }

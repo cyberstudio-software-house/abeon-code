@@ -2,8 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { TitleBar } from './TitleBar';
-import { TabBar } from '../center/TabBar';
-import { TabContent } from '../center/TabContent';
+import { PaneLayout } from '../center/PaneLayout';
 import { RightPanel } from '../right/RightPanel';
 import { DragHandle, clamp } from './DragHandle';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
@@ -12,6 +11,7 @@ import { tauri } from '../../lib/tauri';
 import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
 import { isTabLiveProcess } from '../../lib/tabProcess';
+import { visibleSessionIds } from '../../lib/visibleTabs';
 import type { WindowMode } from '../../lib/windowMode';
 
 const RIGHT_MIN = 220;
@@ -53,11 +53,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
     let unlisten: (() => void) | null = null;
     tauri.onSessionAttention((e) => {
       const state = useStore.getState();
-      const activeTab = state.tabs.find(t => t.id === state.activeTabId);
-      const activeSessionId = activeTab?.kind === 'session'
-        ? (activeTab.linkedSessionId ?? activeTab.sessionId)
-        : null;
-      if (document.hasFocus() && activeSessionId === e.sessionId) return;
+      if (document.hasFocus() && visibleSessionIds(state.layout, state.tabs).includes(e.sessionId)) return;
       state.markAttention(e.sessionId);
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
@@ -75,8 +71,8 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
   }, [isGroup]);
 
   // Closing the window ends every session in it. Prompt when any PTY is live; the
-  // confirm path unmounts TabContent (flushSync) so TerminalView's cleanup kills
-  // the PTYs before the window closes — otherwise the processes orphan.
+  // confirm path unmounts the pane layers (flushSync) so TerminalView's cleanup
+  // kills the PTYs before the window closes — otherwise the processes orphan.
   useEffect(() => {
     const win = getCurrentWebviewWindow();
     let unlisten: (() => void) | null = null;
@@ -112,8 +108,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
       <TitleBar />
       <div className="flex flex-1 min-h-0">
         <main className="flex-1 h-full min-w-0 bg-bg flex flex-col">
-          {mode.view === 'group' && <TabBar detachedProjectId={mode.projectId} />}
-          <TabContent detached={isGroup} />
+          <PaneLayout detachedProjectId={isGroup ? projectId : undefined} />
         </main>
         <DragHandle onDrag={onRightDrag} ariaLabel="Resize right panel" />
         <div style={{ width: rightWidth }} className="h-full flex-shrink-0">

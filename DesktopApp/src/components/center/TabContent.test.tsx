@@ -18,8 +18,21 @@ vi.mock('../history/SubagentView', () => ({
   SubagentView: () => <div data-testid="subagent" />,
 }));
 
+import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
-import { TabContent } from './TabContent';
+import { TabPanel } from './TabContent';
+
+// Stands in for the layer stack PaneLayout renders: every tab mounted at once,
+// only the pane's active one visible.
+function TabPanels() {
+  const tabs = useStore(useShallow(s => s.tabs));
+  const active = useStore(s => s.activeTabId);
+  return (
+    <div className="relative">
+      {tabs.map(t => <TabPanel key={t.id} tab={t} visible={t.id === active} />)}
+    </div>
+  );
+}
 
 const sessionTab: Extract<Tab, { kind: 'session' }> = {
   kind: 'session',
@@ -30,7 +43,7 @@ const sessionTab: Extract<Tab, { kind: 'session' }> = {
   mode: 'terminal',
 };
 
-describe('TabContent and the subagent view', () => {
+describe('TabPanel and the subagent view', () => {
   beforeEach(() => {
     counters.terminalMounts = 0;
     useStore.setState({ tabs: [], activeTabId: null, mruOrder: [] });
@@ -38,7 +51,7 @@ describe('TabContent and the subagent view', () => {
 
   it('keeps TerminalView mounted while the subagent is shown', () => {
     useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1' });
-    const { getByTestId } = render(<TabContent />);
+    const { getByTestId } = render(<TabPanels />);
     expect(getByTestId('terminal')).toBeTruthy();
 
     act(() => { useStore.setState({ tabs: [{ ...sessionTab, viewingSubagentId: 'a1' }] }); });
@@ -49,7 +62,7 @@ describe('TabContent and the subagent view', () => {
 
   it('never remounts TerminalView when the subagent view opens and closes', () => {
     useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1' });
-    render(<TabContent />);
+    render(<TabPanels />);
     expect(counters.terminalMounts).toBe(1);
 
     act(() => { useStore.getState().viewSubagent('session:s1', 'a1'); });
@@ -61,7 +74,7 @@ describe('TabContent and the subagent view', () => {
 
   it('hides the live view from the user while the subagent covers it', () => {
     useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1' });
-    const { getByTestId, queryByTestId } = render(<TabContent />);
+    const { getByTestId, queryByTestId } = render(<TabPanels />);
     expect(getByTestId('terminal').dataset.visible).toBe('true');
 
     act(() => { useStore.getState().viewSubagent('session:s1', 'a1'); });
@@ -77,7 +90,7 @@ describe('TabContent and the subagent view', () => {
       tabs: [{ ...sessionTab, mode: 'history', viewingSubagentId: 'a1' }],
       activeTabId: 'session:s1',
     });
-    const { getByTestId } = render(<TabContent />);
+    const { getByTestId } = render(<TabPanels />);
     expect(getByTestId('history')).toBeTruthy();
     expect(getByTestId('subagent')).toBeTruthy();
   });
@@ -90,7 +103,7 @@ describe('TabContent and the subagent view', () => {
       ],
       activeTabId: 'terminal:t1',
     });
-    const { getByTestId, getAllByTestId } = render(<TabContent />);
+    const { getByTestId, getAllByTestId } = render(<TabPanels />);
     const overlay = getByTestId('subagent').parentElement;
     expect(overlay?.className).toContain('invisible');
     expect(overlay?.className).toContain('pointer-events-none');
