@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from './index';
 import { ROOT_PANE_ID } from './panesSlice';
-import { createLeaf, findLeaf, leaves } from '../lib/paneTree';
+import { createLeaf, findLeaf, findLeafOfTab, leaves } from '../lib/paneTree';
 import type { Tab } from './tabsSlice';
 
 const sessionTab = (id: string): Tab => ({
@@ -46,6 +46,24 @@ describe('panesSlice', () => {
     useStore.getState().closeTab('t2');
     expect(leaves(useStore.getState().layout)).toHaveLength(1);
     expect(useStore.getState().activeTabId).toBe('t1');
+  });
+
+  it('ignores a split whose target pane no longer exists', () => {
+    useStore.setState({ tabs: [sessionTab('t1'), sessionTab('t2')], activeTabId: 't2' });
+    const layout = useStore.getState().layout;
+    useStore.getState().splitPaneWithTab('gone', 'row', false, 't2');
+    expect(useStore.getState().layout).toBe(layout);
+    expect(useStore.getState().focusedPaneId).toBe(ROOT_PANE_ID);
+    expect(findLeafOfTab(useStore.getState().layout, 't2')?.id).toBe(ROOT_PANE_ID);
+  });
+
+  it('ignores a move whose target pane no longer exists', () => {
+    useStore.setState({ tabs: [sessionTab('t1'), sessionTab('t2')], activeTabId: 't2' });
+    const layout = useStore.getState().layout;
+    useStore.getState().moveTabToPane('t2', 'gone', 0);
+    expect(useStore.getState().layout).toBe(layout);
+    expect(useStore.getState().focusedPaneId).toBe(ROOT_PANE_ID);
+    expect(findLeafOfTab(useStore.getState().layout, 't2')?.id).toBe(ROOT_PANE_ID);
   });
 
   it('moves focus to the pane owning a tab activated from elsewhere', () => {

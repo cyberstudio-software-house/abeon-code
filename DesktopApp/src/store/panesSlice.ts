@@ -47,6 +47,7 @@ export const createPanesSlice: StateCreator<PanesSlice & TabsSlice, [], [], Pane
     get().setActive(tabId);
   },
   splitPaneWithTab: (targetPaneId, dir, before, tabId) => {
+    if (!findLeaf(get().layout, targetPaneId)) return;
     const source = findLeafOfTab(get().layout, tabId);
     if (!source) return;
     if (source.id === targetPaneId && source.tabIds.length < 2) return;
@@ -57,6 +58,7 @@ export const createPanesSlice: StateCreator<PanesSlice & TabsSlice, [], [], Pane
     set({ layout: collapsed.root, focusedPaneId: collapsed.focusedPaneId, activeTabId: tabId });
   },
   moveTabToPane: (tabId, targetPaneId, index) => {
+    if (!findLeaf(get().layout, targetPaneId)) return;
     const source = findLeafOfTab(get().layout, tabId);
     if (!source) return;
     const moved = moveTab(get().layout, tabId, targetPaneId, index);

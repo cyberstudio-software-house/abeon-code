@@ -356,11 +356,9 @@ if (windowMode?.view === 'session') {
 // --- prevSnapshot tracks last persisted state for diffing ---
 let prevSnapshot: Persisted = pickPersistedFields(useStore.getState());
 
-// Registered before the persistence subscriber below so that persistence always
-// observes an already-reconciled layout.
 let prevActiveTabId = useStore.getState().activeTabId;
 
-useStore.subscribe((state) => {
+function reconcileLayout(state: AppState) {
   const next = reconcilePanes({
     layout: state.layout,
     activeTabId: state.activeTabId,
@@ -375,7 +373,15 @@ useStore.subscribe((state) => {
     && next.focusedPaneId === state.focusedPaneId
   ) return;
   useStore.setState(next);
-});
+}
+
+// Registered before the persistence subscriber below so that persistence always
+// observes an already-reconciled layout.
+useStore.subscribe(reconcileLayout);
+
+// The boot blocks above seeded tabs before this subscriber existed, so fold them
+// into the layout once — nothing else guarantees a state change before React mounts.
+reconcileLayout(useStore.getState());
 
 // --- Subscribe: on any state change, diff + write localStorage + SQLite ---
 let prevTabsJson = JSON.stringify(useStore.getState().tabs) + '|' + (useStore.getState().activeTabId ?? '');
