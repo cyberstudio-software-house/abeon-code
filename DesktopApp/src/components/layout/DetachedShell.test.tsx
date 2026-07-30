@@ -29,10 +29,22 @@ import { ROOT_PANE_ID } from '../../store/panesSlice';
 import { DetachedShell } from './DetachedShell';
 
 const groupMode = { view: 'group' as const, projectId: 1, tabs: [], activeTabId: 'session:s1' };
+const sessionMode = { view: 'session' as const, projectId: 1, sessionId: 's1', title: 'S1', fresh: false };
+
+const DETACHED_HINT = 'Otwórz nową sesję przyciskiem + na pasku zakładek';
 
 const sessionTab = (id: string, sessionId: string) => ({
   kind: 'session' as const, id, projectId: 1, sessionId, title: sessionId, mode: 'history' as const,
 });
+
+function seedSessionWindow() {
+  useStore.setState({
+    tabs: [sessionTab('session:s1', 's1')],
+    activeTabId: 'session:s1',
+    layout: createLeaf(ROOT_PANE_ID, ['session:s1'], 'session:s1'),
+    focusedPaneId: ROOT_PANE_ID,
+  });
+}
 
 function splitTwoSessions() {
   useStore.setState({
@@ -165,6 +177,51 @@ describe('DetachedShell', () => {
 
     const opened = useStore.getState().activeTabId!;
     expect(findLeaf(useStore.getState().layout, 'right')?.tabIds).toContain(opened);
+  });
+
+  it('offers the new-tab strip in a single-session window', () => {
+    seedSessionWindow();
+    const { container } = render(<DetachedShell mode={sessionMode} />);
+
+    expect(container.querySelector('button[title="Nowa sesja"]')).toBeTruthy();
+    expect(container.querySelector('button[title="Nowy terminal"]')).toBeTruthy();
+  });
+
+  it('stays recoverable when the close shortcut empties a single-session window', () => {
+    seedSessionWindow();
+    const { container, getByText, queryByText } = render(<DetachedShell mode={sessionMode} />);
+
+    fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
+
+    expect(useStore.getState().tabs).toHaveLength(0);
+    expect(container.querySelector('button[title="Nowa sesja"]')).toBeTruthy();
+    expect(getByText(DETACHED_HINT)).toBeTruthy();
+    expect(queryByText('Wybierz sesję z lewej')).toBeNull();
+  });
+
+  it('hides the detach entries from the tab menu of a detached window', () => {
+    seedSessionWindow();
+    const { container, getByText, queryByText } = render(<DetachedShell mode={sessionMode} />);
+
+    fireEvent.contextMenu(container.querySelector('[data-tab-id="session:s1"]') as HTMLElement);
+
+    expect(queryByText('Wydziel projekt do nowego okna')).toBeNull();
+    expect(getByText('Otwórz w nowym oknie').closest('button')).toBeDisabled();
+  });
+
+  it('tracks activity in a single-session window so its dot is not stuck on idle', async () => {
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([{
+      id: 's1', projectId: 1, title: 'S1', messageCount: 3, lastModified: 0,
+      gitBranch: null, cwd: null, activity: 'running', provider: 'claude',
+      runningAgents: 0, totalAgents: 0,
+    }]);
+    seedSessionWindow();
+    const { container } = render(<DetachedShell mode={sessionMode} />);
+
+    await waitFor(() => expect(tauri.listSessions).toHaveBeenCalledWith(1, expect.any(Number), 0));
+    await waitFor(() =>
+      expect(container.querySelector('[title="Aktywna — agent pracuje"]')).toBeTruthy(),
+    );
   });
 
   it('keeps attention off a session visible in another pane but marks a hidden one', async () => {

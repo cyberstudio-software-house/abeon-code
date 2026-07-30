@@ -39,12 +39,12 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
 
   // Without the session list this window's activity dots would be stuck on
   // 'idle'; polling refreshActivity also links codex `new-` tabs to their rollout.
+  // Both detached modes show a tab strip, so both need it.
   useEffect(() => {
-    if (!isGroup) return;
     void loadInitialSessions(projectId);
     startActivityPolling();
     return () => stopActivityPolling();
-  }, [isGroup, projectId, loadInitialSessions, startActivityPolling, stopActivityPolling]);
+  }, [projectId, loadInitialSessions, startActivityPolling, stopActivityPolling]);
 
   // Attention state only — the system notification stays the main window's job,
   // since the Rust event is broadcast to every webview and would fire twice.
@@ -108,7 +108,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
       <TitleBar />
       <div className="flex flex-1 min-h-0">
         <main className="flex-1 h-full min-w-0 bg-bg flex flex-col">
-          <PaneLayout detachedProjectId={isGroup ? projectId : undefined} />
+          <PaneLayout detachedProjectId={projectId} />
         </main>
         <DragHandle onDrag={onRightDrag} ariaLabel="Resize right panel" />
         <div style={{ width: rightWidth }} className="h-full flex-shrink-0">
