@@ -14,14 +14,14 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 ## Folder map
 
 ### Frontend (`src/`)
-- `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `actionsSlice`, `gitSlice`. Composed in `store/index.ts`.
+- `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `panesSlice`, `actionsSlice`, `gitSlice`. Composed in `store/index.ts`.
 - `lib/tauri.ts` — **single typed wrapper** over `invoke()`/`listen()`. Every IPC call lives here; do not call `invoke` directly from components.
 - `types/` — TS types, several are ts-rs-generated from Rust (`PtyKind.ts`, `GitStatus.ts`, etc.) — do not edit by hand.
 - `components/`
   - `layout/AppShell.tsx` — three-column shell with draggable resizers; persists widths via store.
   - `layout/TitleBar.tsx` — custom titlebar.
   - `sidebar/` — left column: project list, sessions, sort menu, search.
-  - `center/` — middle column: `TabBar` + `TabContent` + `CenterPanel`. **Tabs are managed here.**
+  - `center/` — middle column: `CenterPanel` → `PaneLayout` (renders the pane tree: one `TabBar` per pane, one `TabPanel` content layer per tab, `PaneResizers`, `PaneDragOverlay` + `usePaneDrag` for the tab-drag gesture). **Tabs and panes are managed here.**
   - `right/` — right column: Git status, Actions list, runnable scripts.
   - `terminal/TerminalView.tsx` — xterm wrapper for any PTY (claude, action, shell).
   - `history/` — session history viewer (markdown blocks).
@@ -56,7 +56,15 @@ A `subscribe` handler diffs persisted fields and writes both layers. `PERSISTED_
 
 ## Tabs system
 
-`src/store/tabsSlice.ts` is the source of truth. Three tab kinds:
+Two slices, neither complete on its own: `src/store/tabsSlice.ts` owns the flat tab list, and
+`src/store/panesSlice.ts` owns the pane tree (`layout` + `focusedPaneId`) that decides **which**
+tab is visible and where. A tab exists in `tabs[]` but renders only where `layout` puts it.
+`reconcilePanes` (`lib/paneTree.ts`, run from a `store/index.ts` subscriber) is the only thing
+keeping them in sync: it attaches orphaned tabs to the focused pane, drops unknown ids, collapses
+emptied panes and keeps `activeTabId === focusedLeaf.activeTabId`. Actions that open tabs therefore
+need to know nothing about panes.
+
+Three tab kinds:
 - `session` — Claude session, has `mode: 'history' | 'terminal'` (resume vs. live).
 - `action` — running script with `status: 'running' | 'exited'`.
 - `terminal` — bare shell PTY.
@@ -68,7 +76,9 @@ Closing a tab with an active process (`session+terminal`, `action`, `terminal`) 
 Two window modes beyond the main shell, both routed by `lib/windowMode.ts` (`?view=…` in the
 webview URL) and rendered by `layout/DetachedShell.tsx`:
 
-- `session` — one session tab (`lib/detachSession.ts`, label `session-<id>`).
+- `session` — seeded with one session tab (`lib/detachSession.ts`, label `session-<id>`), but the
+  window is a full pane host: its per-pane tab bar carries the `+`/`$` buttons and splits work
+  exactly as in the main window.
 - `group` — every tab of one project (`lib/detachGroup.ts`, label `project-<id>`); the tab list
   travels as base64 JSON in the query string.
 
@@ -108,6 +118,7 @@ Pattern when adding a new global shortcut that may conflict with xterm: register
 ## Gotchas
 
 - **Never call `term.dispose()`** in `TerminalView.tsx` — triggers a webkit2gtk crash. The cleanup path kills the PTY, detaches listeners, and lets the `Terminal` object be GC'd with its container. See note around line 127.
+- **Content layers must never change DOM parent** — `PaneLayout` keeps every tab layer a direct sibling in one container and only moves it via inline `left/top/width/height`. Wrapping layers per pane (or re-keying them) remounts `TerminalView`, whose cleanup kills the live PTY.
 - **Middle-click on tabs needs `e.preventDefault()` in `onMouseDown`** — otherwise webview activates autoscroll cursor.
 - **xterm input is base64-encoded** over IPC (`pty_write` / `pty:*:output`). The encoding/decoding is centralized in `lib/tauri.ts` — components never deal with base64 directly.
 - **PTY output during hidden tabs is buffered** in `TerminalView.pendingWrites` and flushed on `visible` change. Don't bypass this — writing to an un-fitted xterm corrupts layout.
