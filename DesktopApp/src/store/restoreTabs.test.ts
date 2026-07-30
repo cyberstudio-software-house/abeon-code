@@ -117,6 +117,14 @@ describe('sanitizeRestoredLayout', () => {
       kind: 'split', id: 's1', dir: 'row', sizes: [1],
       children: [createLeaf('p1', ['a', 'b'], 'a')],
     }],
+    ['sizes that do not sum to one', {
+      kind: 'split', id: 's1', dir: 'row', sizes: [5, 5],
+      children: [createLeaf('p1', ['a'], 'a'), createLeaf('p2', ['b'], 'b')],
+    }],
+    ['the same tab in two leaves', {
+      kind: 'split', id: 's1', dir: 'row', sizes: [0.5, 0.5],
+      children: [createLeaf('p1', ['a', 'b'], 'a'), createLeaf('p2', ['b'], 'b')],
+    }],
     ['a malformed nested child', {
       kind: 'split', id: 's1', dir: 'row', sizes: [0.5, 0.5],
       children: [createLeaf('p1', ['a'], 'a'), { kind: 'leaf', id: 'p2', tabIds: ['b'], activeTabId: 5 }],

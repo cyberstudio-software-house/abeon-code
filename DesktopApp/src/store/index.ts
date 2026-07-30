@@ -298,6 +298,8 @@ function isPaneNode(raw: unknown): raw is PaneNode {
     && (node.dir === 'row' || node.dir === 'col')
     && Array.isArray(node.sizes)
     && node.sizes.every(s => typeof s === 'number' && s > 0)
+    // Sizes are fractions of the pane rect; a sum other than 1 would push panes off-screen.
+    && Math.abs((node.sizes as number[]).reduce((a, b) => a + b, 0) - 1) < 1e-6
     && Array.isArray(node.children)
     && node.children.length >= 2
     && node.children.length === node.sizes.length
@@ -318,7 +320,9 @@ export function sanitizeRestoredLayout(
   if (!isPaneNode(raw)) return fallback;
 
   const pruned = pruneLeavesToTabs(raw, new Set(tabIds));
-  const placed = new Set(leaves(pruned).flatMap(l => l.tabIds));
+  const placedTabs = leaves(pruned).flatMap(l => l.tabIds);
+  const placed = new Set(placedTabs);
+  if (placed.size !== placedTabs.length) return fallback;
   if (tabIds.some(id => !placed.has(id))) return fallback;
 
   const ids = leaves(pruned).map(l => l.id);

@@ -146,7 +146,10 @@ export function reconcilePanes(
   let focusedPaneId = collapsed.focusedPaneId;
 
   let activeTabId = input.activeTabId;
-  if (activeTabId !== input.prevActiveTabId) {
+  // Only an activation may move the focus: when the previous active tab was closed,
+  // the surviving focused pane keeps it (and collapseEmpty picked its successor).
+  const prevStillOpen = input.prevActiveTabId !== null && known.has(input.prevActiveTabId);
+  if (activeTabId !== input.prevActiveTabId && prevStillOpen) {
     const owner = activeTabId ? findLeafOfTab(layout, activeTabId) : null;
     if (owner) focusedPaneId = owner.id;
   }

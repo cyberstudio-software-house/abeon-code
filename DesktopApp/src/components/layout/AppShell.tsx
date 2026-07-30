@@ -31,6 +31,7 @@ export function AppShell() {
   const setRightWidth = useStore(s => s.setRightWidth);
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
+  const layout = useStore(s => s.layout);
   const hasActiveProject = tabs.some(t => t.id === activeTabId);
   const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
   const activeProjectName = useStore(s => {
@@ -148,7 +149,7 @@ export function AppShell() {
     if (!document.hasFocus()) return;
     const state = useStore.getState();
     for (const sessionId of visibleSessionIds(state.layout, state.tabs)) state.clearAttention(sessionId);
-  }, [activeTabId]);
+  }, [activeTabId, layout]);
 
   useMouseNavigation();
 

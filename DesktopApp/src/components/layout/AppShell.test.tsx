@@ -72,6 +72,35 @@ describe('AppShell attention across panes', () => {
     expect(tauri.showAttentionNotification).toHaveBeenCalledWith('s3', expect.any(String), expect.any(String));
   });
 
+  it('clears attention for a session revealed by closing a tab in another pane', () => {
+    act(() => {
+      useStore.setState({
+        tabs: [
+          sessionTab('session:s1', 's1'), sessionTab('session:s2', 's2'),
+          sessionTab('session:s3', 's3'), sessionTab('session:s4', 's4'),
+        ],
+        activeTabId: 'session:s1',
+        layout: {
+          kind: 'split' as const,
+          id: 'outer',
+          dir: 'row' as const,
+          sizes: [0.5, 0.5],
+          children: [
+            createLeaf('left', ['session:s1', 'session:s3'], 'session:s1'),
+            createLeaf('right', ['session:s2', 'session:s4'], 'session:s4'),
+          ],
+        },
+        focusedPaneId: 'left',
+      });
+    });
+    act(() => { useStore.setState({ attentionSessions: new Set(['s2']) }); });
+
+    act(() => { useStore.getState().closeTab('session:s4'); });
+
+    expect(useStore.getState().activeTabId).toBe('session:s1');
+    expect(useStore.getState().attentionSessions.has('s2')).toBe(false);
+  });
+
   it('clears attention for every visible pane when the active tab changes', () => {
     act(() => { useStore.setState({ attentionSessions: new Set(['s1', 's2', 's3']) }); });
 

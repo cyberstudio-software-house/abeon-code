@@ -48,6 +48,38 @@ describe('panesSlice', () => {
     expect(useStore.getState().activeTabId).toBe('t1');
   });
 
+  it('keeps focus in the pane that survives closing its active tab', () => {
+    useStore.setState({ tabs: [sessionTab('a1'), sessionTab('a2'), sessionTab('b1')], activeTabId: 'a1' });
+    useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 'b1');
+    const [, second] = leaves(useStore.getState().layout).map(l => l.id);
+    useStore.getState().setActive('a2');
+    expect(useStore.getState().focusedPaneId).toBe(ROOT_PANE_ID);
+
+    useStore.getState().closeTab('a2');
+
+    expect(useStore.getState().focusedPaneId).toBe(ROOT_PANE_ID);
+    expect(useStore.getState().activeTabId).toBe('a1');
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.tabIds).toEqual(['a1']);
+    expect(findLeaf(useStore.getState().layout, second)?.tabIds).toEqual(['b1']);
+  });
+
+  it('moves focus to the previous sibling when the focused pane loses its last tab', () => {
+    useStore.setState({ tabs: [sessionTab('t1'), sessionTab('t2'), sessionTab('t3')], activeTabId: 't1' });
+    useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2');
+    const middle = useStore.getState().focusedPaneId;
+    useStore.getState().splitPaneWithTab(middle, 'row', false, 't3');
+    expect(leaves(useStore.getState().layout).map(l => l.id)).toEqual([
+      ROOT_PANE_ID, middle, useStore.getState().focusedPaneId,
+    ]);
+    useStore.getState().setActive('t2');
+    expect(useStore.getState().focusedPaneId).toBe(middle);
+
+    useStore.getState().closeTab('t2');
+
+    expect(useStore.getState().focusedPaneId).toBe(ROOT_PANE_ID);
+    expect(useStore.getState().activeTabId).toBe('t1');
+  });
+
   it('ignores a split whose target pane no longer exists', () => {
     useStore.setState({ tabs: [sessionTab('t1'), sessionTab('t2')], activeTabId: 't2' });
     const layout = useStore.getState().layout;

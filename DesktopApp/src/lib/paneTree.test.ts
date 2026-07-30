@@ -190,6 +190,13 @@ describe('reconcilePanes', () => {
     expect(out.activeTabId).toBe('c');
   });
 
+  it('does not follow the active tab into another pane when the previous one was closed', () => {
+    const root = insertBeside(createLeaf('p1', ['a1', 'a2'], 'a2'), 'p1', 'row', false, createLeaf('p2', ['b1'], 'b1'), 's1');
+    const out = reconcilePanes({ layout: root, activeTabId: 'b1', focusedPaneId: 'p1', tabIds: ['a1', 'b1'], prevActiveTabId: 'a2' });
+    expect(out.focusedPaneId).toBe('p1');
+    expect(out.activeTabId).toBe('a1');
+  });
+
   it('repoints a pane active tab to the last survivor when it disappears', () => {
     const root = insertBeside(createLeaf('p1', ['a', 'b'], 'b'), 'p1', 'row', false, createLeaf('p2', ['c'], 'c'), 's1');
     const out = reconcilePanes({ layout: root, activeTabId: 'c', focusedPaneId: 'p2', tabIds: ['a', 'c'], prevActiveTabId: 'c' });
