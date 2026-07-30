@@ -41,7 +41,7 @@ function SessionBody({ tab, visible }: { tab: SessionTab; visible: boolean }) {
   );
 }
 
-function TabPanel({ tab, visible }: { tab: Tab; visible: boolean }) {
+export function TabPanel({ tab, visible }: { tab: Tab; visible: boolean }) {
   if (tab.kind === 'providerPicker') {
     return (
       <div className={layer(visible)}>

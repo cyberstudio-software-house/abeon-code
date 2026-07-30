@@ -1,11 +1,9 @@
-import { TabBar } from './TabBar';
-import { TabContent } from './TabContent';
+import { PaneLayout } from './PaneLayout';
 
 export function CenterPanel() {
   return (
     <main className="h-full bg-bg flex flex-col">
-      <TabBar />
-      <TabContent />
+      <PaneLayout />
     </main>
   );
 }

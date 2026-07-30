@@ -182,6 +182,9 @@ export function TabBar({ detachedProjectId, paneId }: { detachedProjectId?: numb
       const overrides = useStore.getState().shortcutOverrides;
       if (!matchesShortcut(e, 'closeTab', overrides)) return;
       if (!active) return;
+      // Every pane mounts this listener; only the owner of the active tab may act,
+      // otherwise the close guards below run against a tab this strip does not hold.
+      if (!tabs.some(t => t.id === active)) return;
       e.preventDefault();
       e.stopPropagation();
       closeWithGuard(active);

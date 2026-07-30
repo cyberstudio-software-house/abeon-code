@@ -286,6 +286,35 @@ describe('TabBar per pane', () => {
     expect(useStore.getState().activeTabId).toBe('t2');
   });
 
+  it('lets only the pane owning the active tab react to the close shortcut', () => {
+    vi.clearAllMocks();
+    useStore.setState({
+      tabs: [
+        { kind: 'action', id: 'action:1', projectId: 1, actionId: 1, title: 'build', status: 'running' },
+        { kind: 'terminal', id: 't2', projectId: 1, title: 'Prawy' },
+      ],
+      activeTabId: 'action:1',
+      mruOrder: ['action:1'],
+      navHistory: ['action:1'],
+      navIndex: 0,
+      runningActions: { 1: { actionId: 1, ptyId: 'p', status: 'running' } },
+      projects: [{ id: 1, name: 'P', path: '/p' }] as never,
+      layout: insertBeside(createLeaf(ROOT_PANE_ID, ['action:1'], 'action:1'), ROOT_PANE_ID, 'row', false, createLeaf('p2', ['t2'], 't2'), 's1'),
+      focusedPaneId: ROOT_PANE_ID,
+    });
+    render(<><TabBar paneId={ROOT_PANE_ID} /><TabBar paneId="p2" /></>);
+
+    fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
+
+    expect(screen.getAllByText('Zamknąć aktywny tab?')).toHaveLength(1);
+    expect(useStore.getState().tabs).toHaveLength(2);
+    expect(processManager.dismiss).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText('Zamknij'));
+    expect(processManager.dismiss).toHaveBeenCalledExactlyOnceWith(1);
+    expect(useStore.getState().tabs.map(t => t.id)).toEqual(['t2']);
+  });
+
   it('appends a replaced preview tab at the end of the pane strip', () => {
     useStore.setState({
       tabs: [
