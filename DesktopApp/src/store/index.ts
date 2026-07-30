@@ -6,6 +6,8 @@ import { createTabsSlice, type TabsSlice } from './tabsSlice';
 import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 import { createGitSlice, type GitSlice } from './gitSlice';
 import { createClickUpSlice, type ClickUpSlice } from './clickupSlice';
+import { createPanesSlice, type PanesSlice } from './panesSlice';
+import { reconcilePanes } from '../lib/paneTree';
 import { tauri } from '../lib/tauri';
 import { parseWindowMode } from '../lib/windowMode';
 import { processManager } from '../lib/processManager';
@@ -20,7 +22,7 @@ const isDetachedWindow = new URLSearchParams(window.location.search).has('view')
 import type { Provider } from '../types';
 import { isProvider } from '../lib/providers';
 
-export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice;
+export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice;
 
 export const useStore = create<AppState>()((...a) => ({
   ...createSettingsSlice(...a),
@@ -30,6 +32,7 @@ export const useStore = create<AppState>()((...a) => ({
   ...createActionsSlice(...a),
   ...createGitSlice(...a),
   ...createClickUpSlice(...a),
+  ...createPanesSlice(...a),
 }));
 
 const PERSIST_KEY = 'abeoncode.settings';
@@ -352,6 +355,27 @@ if (windowMode?.view === 'session') {
 
 // --- prevSnapshot tracks last persisted state for diffing ---
 let prevSnapshot: Persisted = pickPersistedFields(useStore.getState());
+
+// Registered before the persistence subscriber below so that persistence always
+// observes an already-reconciled layout.
+let prevActiveTabId = useStore.getState().activeTabId;
+
+useStore.subscribe((state) => {
+  const next = reconcilePanes({
+    layout: state.layout,
+    activeTabId: state.activeTabId,
+    focusedPaneId: state.focusedPaneId,
+    tabIds: state.tabs.map(t => t.id),
+    prevActiveTabId,
+  });
+  prevActiveTabId = next.activeTabId;
+  if (
+    next.layout === state.layout
+    && next.activeTabId === state.activeTabId
+    && next.focusedPaneId === state.focusedPaneId
+  ) return;
+  useStore.setState(next);
+});
 
 // --- Subscribe: on any state change, diff + write localStorage + SQLite ---
 let prevTabsJson = JSON.stringify(useStore.getState().tabs) + '|' + (useStore.getState().activeTabId ?? '');

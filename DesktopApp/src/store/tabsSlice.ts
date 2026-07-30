@@ -4,6 +4,7 @@ import type { Provider } from '../types';
 import type { SettingsSlice } from './settingsSlice';
 import type { AppState } from './index';
 import { pushNav, stepBack, stepForward, pruneNav } from '../lib/navHistory';
+import { findLeaf } from '../lib/paneTree';
 
 export type Tab =
   | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider; viewingSubagentId?: string }
@@ -114,7 +115,8 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
     const existing = get().tabs.find(t => t.id === id || (t.kind === 'session' && t.linkedSessionId === sessionId));
     if (existing) { set({ activeTabId: existing.id, mruOrder: moveToFront(get().mruOrder, existing.id), ...withNav(get, existing.id) }); return; }
     const tab: Tab = { kind: 'session', id, projectId, sessionId, title, mode: 'history', preview: true, ...(provider ? { provider } : {}) };
-    const preview = get().tabs.find(t => t.kind === 'session' && t.preview);
+    const focused = findLeaf((get() as AppState).layout, (get() as AppState).focusedPaneId);
+    const preview = get().tabs.find(t => t.kind === 'session' && t.preview && (focused?.tabIds.includes(t.id) ?? true));
     if (preview) {
       const nav = pushNav(pruneNav({ history: get().navHistory, index: get().navIndex }, preview.id), id);
       set({

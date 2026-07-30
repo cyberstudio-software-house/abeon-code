@@ -61,7 +61,10 @@ describe('HistoryView search shortcut', () => {
   });
 
   it('ignores Ctrl+F for a tab that is not the active one', async () => {
-    useStore.setState({ activeTabId: 'session:other' });
+    useStore.setState({
+      tabs: [sessionTab, { ...sessionTab, id: 'session:other', sessionId: 'other' }],
+      activeTabId: 'session:other',
+    });
     const { queryByTestId } = render(<HistoryView projectId={1} sessionId="s1" tabId="session:s1" />);
     await act(async () => {});
 
