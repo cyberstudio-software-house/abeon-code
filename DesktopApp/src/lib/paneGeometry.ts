@@ -8,24 +8,28 @@ const EDGE_BAND = 0.25;
 export type PaneRect = { left: number; top: number; width: number; height: number };
 export type DropZone = 'left' | 'right' | 'top' | 'bottom' | 'center';
 
-export function computePaneRects(root: PaneNode): Map<string, PaneRect> {
-  const out = new Map<string, PaneRect>();
+function descend(root: PaneNode, visit: (node: PaneNode, rect: PaneRect) => void) {
   const walk = (node: PaneNode, rect: PaneRect) => {
-    if (node.kind === 'leaf') {
-      out.set(node.id, rect);
-      return;
-    }
+    visit(node, rect);
+    if (node.kind === 'leaf') return;
     let offset = 0;
     node.children.forEach((child, i) => {
       const share = node.sizes[i];
-      const next: PaneRect = node.dir === 'row'
+      const childRect: PaneRect = node.dir === 'row'
         ? { left: rect.left + rect.width * offset, top: rect.top, width: rect.width * share, height: rect.height }
         : { left: rect.left, top: rect.top + rect.height * offset, width: rect.width, height: rect.height * share };
-      walk(child, next);
+      walk(child, childRect);
       offset += share;
     });
   };
   walk(root, { left: 0, top: 0, width: 100, height: 100 });
+}
+
+export function computePaneRects(root: PaneNode): Map<string, PaneRect> {
+  const out = new Map<string, PaneRect>();
+  descend(root, (node, rect) => {
+    if (node.kind === 'leaf') out.set(node.id, rect);
+  });
   return out;
 }
 
@@ -42,31 +46,23 @@ export type SplitBoundary = {
 
 export function computeSplitBoundaries(root: PaneNode): SplitBoundary[] {
   const out: SplitBoundary[] = [];
-  const walk = (node: PaneNode, rect: PaneRect) => {
+  descend(root, (node, rect) => {
     if (node.kind === 'leaf') return;
     let offset = 0;
-    node.children.forEach((child, i) => {
-      const share = node.sizes[i];
-      const childRect: PaneRect = node.dir === 'row'
-        ? { left: rect.left + rect.width * offset, top: rect.top, width: rect.width * share, height: rect.height }
-        : { left: rect.left, top: rect.top + rect.height * offset, width: rect.width, height: rect.height * share };
-      walk(child, childRect);
-      offset += share;
-      if (i < node.children.length - 1) {
-        out.push({
-          splitId: node.id,
-          index: i,
-          dir: node.dir,
-          sizes: node.sizes,
-          left: node.dir === 'row' ? rect.left + rect.width * offset : rect.left,
-          top: node.dir === 'row' ? rect.top : rect.top + rect.height * offset,
-          length: node.dir === 'row' ? rect.height : rect.width,
-          extent: node.dir === 'row' ? rect.width : rect.height,
-        });
-      }
-    });
-  };
-  walk(root, { left: 0, top: 0, width: 100, height: 100 });
+    for (let i = 0; i < node.children.length - 1; i++) {
+      offset += node.sizes[i];
+      out.push({
+        splitId: node.id,
+        index: i,
+        dir: node.dir,
+        sizes: node.sizes,
+        left: node.dir === 'row' ? rect.left + rect.width * offset : rect.left,
+        top: node.dir === 'row' ? rect.top : rect.top + rect.height * offset,
+        length: node.dir === 'row' ? rect.height : rect.width,
+        extent: node.dir === 'row' ? rect.width : rect.height,
+      });
+    }
+  });
   return out;
 }
 
