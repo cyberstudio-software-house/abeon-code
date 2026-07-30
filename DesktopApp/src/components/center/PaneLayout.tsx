@@ -3,9 +3,11 @@ import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { computePaneRects, TAB_BAR_HEIGHT } from '../../lib/paneGeometry';
 import { leaves } from '../../lib/paneTree';
+import { PaneDragOverlay } from './PaneDragOverlay';
 import { PaneResizers } from './PaneResizers';
 import { TabBar } from './TabBar';
 import { TabPanel } from './TabContent';
+import { usePaneDrag } from './usePaneDrag';
 
 export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number } = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -13,6 +15,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   const tabs = useStore(useShallow(s => s.tabs));
   const focusedPaneId = useStore(s => s.focusedPaneId);
   const focusPane = useStore(s => s.focusPane);
+  const { drag, beginDrag } = usePaneDrag(containerRef);
   const rects = useMemo(() => computePaneRects(layout), [layout]);
   const panes = useMemo(() => leaves(layout), [layout]);
   const ownerOf = useMemo(() => {
@@ -41,7 +44,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
               height: `${TAB_BAR_HEIGHT}px`,
             }}
           >
-            <TabBar paneId={pane.id} detachedProjectId={detachedProjectId} />
+            <TabBar paneId={pane.id} detachedProjectId={detachedProjectId} onTabPointerDown={beginDrag} />
           </div>
         );
       })}
@@ -75,6 +78,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
           {detachedProjectId != null ? 'Otwórz nową sesję przyciskiem + na pasku zakładek' : 'Wybierz sesję z lewej'}
         </div>
       )}
+      <PaneDragOverlay drag={drag} />
     </div>
   );
 }

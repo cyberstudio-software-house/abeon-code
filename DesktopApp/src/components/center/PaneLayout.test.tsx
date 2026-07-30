@@ -25,11 +25,14 @@ vi.stubGlobal('ResizeObserver', class {
   unobserve() {}
   disconnect() {}
 });
+// jsdom ships no PointerEvent, so fireEvent.pointerDown would drop clientX/button on a plain Event.
+vi.stubGlobal('PointerEvent', class extends MouseEvent {});
 Element.prototype.scrollIntoView = vi.fn();
 
 import { useStore } from '../../store';
 import { PaneLayout } from './PaneLayout';
-import { createLeaf, leaves, type PaneNode, type PaneSplit } from '../../lib/paneTree';
+import { MIN_PANE_WIDTH, TAB_BAR_HEIGHT } from '../../lib/paneGeometry';
+import { createLeaf, findLeaf, leaves, type PaneNode, type PaneSplit } from '../../lib/paneTree';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
 import type { Tab } from '../../store/tabsSlice';
 
@@ -314,5 +317,188 @@ describe('PaneLayout', () => {
 
     expect(useStore.getState().focusedPaneId).toBe(ids[1]);
     expect(writes).toBe(0);
+  });
+
+  const pointerAt = (x: number, y: number) => ({ clientX: x, clientY: y, pointerId: 1, button: 0 });
+
+  const stubContainerBox = (container: HTMLElement) => {
+    const root = container.firstElementChild as HTMLElement;
+    root.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800, toJSON: () => ({}) });
+  };
+
+  const stubTabBoxes = (container: HTMLElement, paneId: string, firstLeft: number, width: number) => {
+    const bar = container.querySelector(`[data-pane-id="${paneId}"]`) as HTMLElement;
+    Array.from(bar.querySelectorAll('[data-tab-id]')).forEach((el, i) => {
+      const left = firstLeft + i * width;
+      (el as HTMLElement).getBoundingClientRect = () => ({
+        x: left, y: 0, left, top: 0, right: left + width, bottom: TAB_BAR_HEIGHT,
+        width, height: TAB_BAR_HEIGHT, toJSON: () => ({}),
+      });
+    });
+  };
+
+  it('splits the pane when a tab is dropped on its right edge', () => {
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    const tab = container.querySelector('[data-tab-id="t2"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(10, 10));
+    fireEvent.pointerMove(window, pointerAt(960, 400));
+    fireEvent.pointerUp(window, pointerAt(960, 400));
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(2);
+    expect(useStore.getState().activeTabId).toBe('t2');
+  });
+
+  it('ignores a pointer movement below the drag threshold', () => {
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    const tab = container.querySelector('[data-tab-id="t2"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(10, 10));
+    fireEvent.pointerMove(window, pointerAt(12, 11));
+    expect(container.querySelector('[data-drop-preview]')).toBeNull();
+    fireEvent.pointerUp(window, pointerAt(12, 11));
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(1);
+    expect(useStore.getState().activeTabId).toBe('t1');
+  });
+
+  it('moves the tab without splitting when dropped in the centre of another pane', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    const ids = leaves(useStore.getState().layout).map(l => l.id);
+    const tab = container.querySelector('[data-tab-id="t1"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(10, 10));
+    fireEvent.pointerMove(window, pointerAt(750, 400));
+    fireEvent.pointerUp(window, pointerAt(750, 400));
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(1);
+    expect(useStore.getState().layout).toMatchObject({ id: ids[1] });
+  });
+
+  it('never starts a drag from a middle-click on a tab', () => {
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    const tab = container.querySelector('[data-tab-id="t2"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, { ...pointerAt(10, 10), button: 1 });
+    fireEvent.pointerMove(window, pointerAt(960, 400));
+    fireEvent.pointerUp(window, pointerAt(960, 400));
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(1);
+  });
+
+  it('offers no edge zone when the split would fall below the minimum pane width', () => {
+    const { container } = render(<PaneLayout />);
+    stubBox(container.firstElementChild as HTMLElement, MIN_PANE_WIDTH * 2 - 40, 800);
+    const tab = container.querySelector('[data-tab-id="t2"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(10, 10));
+    fireEvent.pointerMove(window, pointerAt(MIN_PANE_WIDTH * 2 - 45, 400));
+    expect(container.querySelector('[data-drop-preview]')).toBeNull();
+    fireEvent.pointerUp(window, pointerAt(MIN_PANE_WIDTH * 2 - 45, 400));
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(1);
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.tabIds).toEqual(['t1', 't2']);
+  });
+
+  it('drops a stale tab drag when another tab is pressed', () => {
+    act(() => {
+      useStore.setState({
+        tabs: [terminalTab('t1', 'Jeden'), terminalTab('t2', 'Dwa'), terminalTab('t3', 'Trzy')],
+        activeTabId: 't1',
+        layout: createLeaf(ROOT_PANE_ID, ['t1', 't2', 't3'], 't1'),
+        focusedPaneId: ROOT_PANE_ID,
+      });
+    });
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+
+    fireEvent.pointerDown(container.querySelector('[data-tab-id="t1"]') as HTMLElement, pointerAt(10, 10));
+    fireEvent.pointerDown(container.querySelector('[data-tab-id="t2"]') as HTMLElement, pointerAt(50, 10));
+    fireEvent.pointerMove(window, pointerAt(960, 400));
+    fireEvent.pointerUp(window, pointerAt(960, 400));
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(2);
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.tabIds).toEqual(['t1', 't3']);
+  });
+
+  it('cancels the drag when the tab is dropped outside the container', () => {
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    const tab = container.querySelector('[data-tab-id="t2"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(10, 10));
+    fireEvent.pointerMove(window, pointerAt(1400, 400));
+    fireEvent.pointerUp(window, pointerAt(1400, 400));
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(1);
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.tabIds).toEqual(['t1', 't2']);
+  });
+
+  it('previews the half a pane edge drop would create and clears it on release', () => {
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    const tab = container.querySelector('[data-tab-id="t2"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(10, 10));
+    fireEvent.pointerMove(window, pointerAt(960, 400));
+
+    const preview = container.querySelector('[data-drop-preview]') as HTMLElement;
+    expect(preview.style.left).toBe('50%');
+    expect(preview.style.width).toBe('50%');
+    expect(preview.style.height).toBe('100%');
+
+    fireEvent.pointerUp(window, pointerAt(960, 400));
+
+    expect(container.querySelector('[data-drop-preview]')).toBeNull();
+  });
+
+  it('inserts a tab dropped on another pane tab bar at the pointed slot', () => {
+    act(() => {
+      useStore.setState({
+        tabs: [terminalTab('t1', 'Jeden'), terminalTab('t2', 'Dwa'), terminalTab('t3', 'Trzy')],
+        activeTabId: 't1',
+        layout: {
+          kind: 'split', id: 'outer', dir: 'row', sizes: [0.5, 0.5],
+          children: [createLeaf('left', ['t1'], 't1'), createLeaf('right', ['t2', 't3'], 't2')],
+        },
+        focusedPaneId: 'left',
+      });
+    });
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    stubTabBoxes(container, 'right', 500, 100);
+    const tab = container.querySelector('[data-tab-id="t1"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(50, 10));
+    fireEvent.pointerMove(window, pointerAt(600, 10));
+    fireEvent.pointerUp(window, pointerAt(600, 10));
+
+    expect(findLeaf(useStore.getState().layout, 'right')?.tabIds).toEqual(['t2', 't1', 't3']);
+  });
+
+  it('drops a tab reordered inside its own pane at the slot the indicator showed', () => {
+    act(() => {
+      useStore.setState({
+        tabs: [terminalTab('t1', 'Jeden'), terminalTab('t2', 'Dwa'), terminalTab('t3', 'Trzy')],
+        activeTabId: 't1',
+        layout: createLeaf(ROOT_PANE_ID, ['t1', 't2', 't3'], 't1'),
+        focusedPaneId: ROOT_PANE_ID,
+      });
+    });
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    stubTabBoxes(container, ROOT_PANE_ID, 0, 100);
+    const tab = container.querySelector('[data-tab-id="t1"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(50, 10));
+    fireEvent.pointerMove(window, pointerAt(200, 10));
+    fireEvent.pointerUp(window, pointerAt(200, 10));
+
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.tabIds).toEqual(['t2', 't1', 't3']);
   });
 });

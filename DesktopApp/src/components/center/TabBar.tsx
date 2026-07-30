@@ -59,7 +59,11 @@ function TabIcon({ tab, actionColor }: { tab: Tab; actionColor?: string }) {
   return <span className={actionColor ?? 'text-muted'}>▶</span>;
 }
 
-export function TabBar({ detachedProjectId, paneId }: { detachedProjectId?: number; paneId?: string } = {}) {
+export function TabBar({ detachedProjectId, paneId, onTabPointerDown }: {
+  detachedProjectId?: number;
+  paneId?: string;
+  onTabPointerDown?: (tabId: string, e: React.PointerEvent) => void;
+} = {}) {
   const allTabs = useStore(s => s.tabs);
   const focusedPaneId = useStore(s => s.focusedPaneId);
   const resolvedPaneId = paneId ?? focusedPaneId;
@@ -216,6 +220,7 @@ export function TabBar({ detachedProjectId, paneId }: { detachedProjectId?: numb
       key={t.id}
       data-tab-id={t.id}
       onClick={() => setPaneActiveTab(resolvedPaneId, t.id)}
+      onPointerDown={(e) => onTabPointerDown?.(t.id, e)}
       onMouseDown={(e) => {
         if (e.button === 1) {
           e.preventDefault();
