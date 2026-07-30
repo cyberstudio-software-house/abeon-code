@@ -10,11 +10,35 @@ import {
   type DropZone,
   type PaneRect,
 } from '../../lib/paneGeometry';
-import { findLeaf, findLeafOfTab, type PaneNode } from '../../lib/paneTree';
+import { findLeaf, findLeafOfTab, type PaneLeaf, type PaneNode } from '../../lib/paneTree';
 
 const DRAG_THRESHOLD = 4;
 
-export type PaneDragState = { tabId: string; target: { paneId: string; zone: DropZone; rect: PaneRect } | null };
+type TabRect = { id: string; left: number; width: number };
+
+export type PaneDragState = {
+  tabId: string;
+  target: { paneId: string; zone: DropZone; overTabBar: boolean; rect: PaneRect } | null;
+};
+
+function measureTabRects(container: HTMLDivElement | null, paneId: string): TabRect[] {
+  const bar = container?.querySelector(`[data-pane-id="${paneId}"]`);
+  if (!bar) return [];
+  return Array.from(bar.querySelectorAll('[data-tab-id]')).map(el => {
+    const box = (el as HTMLElement).getBoundingClientRect();
+    return { id: (el as HTMLElement).dataset.tabId ?? '', left: box.left, width: box.width };
+  });
+}
+
+// The strip renders in DOM order, which layoutTabBar's hoisting and collapsed groups make diverge
+// from tabIds, so the measured slot is translated back through the tab it points at.
+function barSlotIndex(leaf: PaneLeaf, tabRects: TabRect[], x: number): number {
+  if (tabRects.length === 0) return leaf.tabIds.length;
+  const slot = insertionIndex(tabRects, x);
+  if (slot === tabRects.length) return leaf.tabIds.length;
+  const at = leaf.tabIds.indexOf(tabRects[slot].id);
+  return at === -1 ? leaf.tabIds.length : at;
+}
 
 // moveTab splices the tab in after pulling it out, so an index measured on the strip the user
 // still sees is one too far right whenever the tab travels rightwards inside its own pane.
@@ -62,7 +86,7 @@ export function usePaneDrag(containerRef: RefObject<HTMLDivElement | null>) {
       const overTabBar = hit.local.y <= TAB_BAR_HEIGHT;
       const zone: DropZone = overTabBar ? 'center' : dropZone(hit.local);
       if (zone !== 'center' && !canSplit(zone, { width: hit.local.width, height: hit.local.height })) return null;
-      return { paneId: hit.paneId, zone, rect };
+      return { paneId: hit.paneId, zone, overTabBar, rect };
     };
 
     const move = (ev: PointerEvent) => {
@@ -81,14 +105,9 @@ export function usePaneDrag(containerRef: RefObject<HTMLDivElement | null>) {
       if (dropped.zone === 'center') {
         const leaf = findLeaf(state.layout, dropped.paneId);
         if (!leaf) return;
-        const bar = containerRef.current?.querySelector(`[data-pane-id="${dropped.paneId}"]`);
-        const tabRects = bar
-          ? Array.from(bar.querySelectorAll('[data-tab-id]')).map(el => {
-              const box = (el as HTMLElement).getBoundingClientRect();
-              return { id: (el as HTMLElement).dataset.tabId ?? '', left: box.left, width: box.width };
-            })
-          : [];
-        const measured = tabRects.length > 0 ? insertionIndex(tabRects, ev.clientX) : leaf.tabIds.length;
+        const measured = dropped.overTabBar
+          ? barSlotIndex(leaf, measureTabRects(containerRef.current, dropped.paneId), ev.clientX)
+          : leaf.tabIds.length;
         state.moveTabToPane(tabId, dropped.paneId, postRemovalIndex(state.layout, tabId, dropped.paneId, measured));
         return;
       }

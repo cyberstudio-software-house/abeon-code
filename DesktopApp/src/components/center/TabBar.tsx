@@ -220,7 +220,10 @@ export function TabBar({ detachedProjectId, paneId, onTabPointerDown }: {
       key={t.id}
       data-tab-id={t.id}
       onClick={() => setPaneActiveTab(resolvedPaneId, t.id)}
-      onPointerDown={(e) => onTabPointerDown?.(t.id, e)}
+      onPointerDown={(e) => {
+        if (editingId === t.id) return;
+        onTabPointerDown?.(t.id, e);
+      }}
       onMouseDown={(e) => {
         if (e.button === 1) {
           e.preventDefault();

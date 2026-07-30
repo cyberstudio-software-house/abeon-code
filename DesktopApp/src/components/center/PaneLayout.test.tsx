@@ -37,6 +37,7 @@ import { ROOT_PANE_ID } from '../../store/panesSlice';
 import type { Tab } from '../../store/tabsSlice';
 
 const terminalTab = (id: string, title: string): Tab => ({ kind: 'terminal', id, projectId: 1, title });
+const terminalTabIn = (id: string, title: string, projectId: number): Tab => ({ kind: 'terminal', id, projectId, title });
 
 function stubBox(el: HTMLElement, width: number, height: number) {
   el.getBoundingClientRect = () => ({
@@ -479,6 +480,81 @@ describe('PaneLayout', () => {
     fireEvent.pointerUp(window, pointerAt(600, 10));
 
     expect(findLeaf(useStore.getState().layout, 'right')?.tabIds).toEqual(['t2', 't1', 't3']);
+  });
+
+  it('appends a tab dropped deep in a pane body, ignoring the horizontal position', () => {
+    act(() => {
+      useStore.setState({
+        tabs: [terminalTab('t1', 'Jeden'), terminalTab('t2', 'Dwa'), terminalTab('t3', 'Trzy')],
+        activeTabId: 't1',
+        layout: {
+          kind: 'split', id: 'outer', dir: 'row', sizes: [0.5, 0.5],
+          children: [createLeaf('left', ['t1'], 't1'), createLeaf('right', ['t2', 't3'], 't2')],
+        },
+        focusedPaneId: 'left',
+      });
+    });
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    stubTabBoxes(container, 'right', 500, 100);
+    const tab = container.querySelector('[data-tab-id="t1"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(50, 10));
+    fireEvent.pointerMove(window, pointerAt(640, 400));
+    fireEvent.pointerUp(window, pointerAt(640, 400));
+
+    expect(findLeaf(useStore.getState().layout, 'right')?.tabIds).toEqual(['t2', 't3', 't1']);
+  });
+
+  it('maps a slot measured over a bar with a collapsed group back onto the tab list', () => {
+    act(() => {
+      useStore.setState({
+        tabs: [
+          terminalTabIn('drag', 'Przenoszony', 3),
+          terminalTabIn('g1', 'G1', 1),
+          terminalTabIn('g2', 'G2', 1),
+          terminalTabIn('solo', 'Solo', 2),
+        ],
+        activeTabId: 'drag',
+        projects: [
+          { id: 1, name: 'Grupa', path: '/g' },
+          { id: 2, name: 'Pojedynczy', path: '/p' },
+          { id: 3, name: 'Zrodlo', path: '/z' },
+        ] as never,
+        layout: {
+          kind: 'split', id: 'outer', dir: 'row', sizes: [0.5, 0.5],
+          children: [createLeaf('left', ['drag'], 'drag'), createLeaf('right', ['g1', 'g2', 'solo'], 'solo')],
+        },
+        focusedPaneId: 'left',
+      });
+    });
+    const { container, getByText } = render(<PaneLayout />);
+    fireEvent.click(getByText('Grupa'));
+    expect(container.querySelectorAll('[data-pane-id="right"] [data-tab-id]')).toHaveLength(1);
+    stubContainerBox(container);
+    stubTabBoxes(container, 'right', 500, 100);
+    const tab = container.querySelector('[data-tab-id="drag"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(50, 10));
+    fireEvent.pointerMove(window, pointerAt(520, 10));
+    fireEvent.pointerUp(window, pointerAt(520, 10));
+
+    expect(findLeaf(useStore.getState().layout, 'right')?.tabIds).toEqual(['g1', 'g2', 'drag', 'solo']);
+  });
+
+  it('never starts a drag from a pointer press inside the rename input', () => {
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    const tab = container.querySelector('[data-tab-id="t2"]') as HTMLElement;
+
+    fireEvent.doubleClick(tab.querySelector('span.truncate') as HTMLElement);
+    const input = tab.querySelector('input') as HTMLInputElement;
+    fireEvent.pointerDown(input, pointerAt(30, 10));
+    fireEvent.pointerMove(window, pointerAt(960, 400));
+    fireEvent.pointerUp(window, pointerAt(960, 400));
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(1);
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.tabIds).toEqual(['t1', 't2']);
   });
 
   it('drops a tab reordered inside its own pane at the slot the indicator showed', () => {
