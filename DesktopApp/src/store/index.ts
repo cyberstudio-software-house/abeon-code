@@ -6,8 +6,8 @@ import { createTabsSlice, type TabsSlice } from './tabsSlice';
 import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 import { createGitSlice, type GitSlice } from './gitSlice';
 import { createClickUpSlice, type ClickUpSlice } from './clickupSlice';
-import { createPanesSlice, type PanesSlice } from './panesSlice';
-import { reconcilePanes } from '../lib/paneTree';
+import { createPanesSlice, ROOT_PANE_ID, type PanesSlice } from './panesSlice';
+import { collapseEmpty, createLeaf, leaves, mapLeaves, reconcilePanes, type PaneNode } from '../lib/paneTree';
 import { tauri } from '../lib/tauri';
 import { parseWindowMode } from '../lib/windowMode';
 import { processManager } from '../lib/processManager';
@@ -255,6 +255,8 @@ type PersistedTab = {
 type PersistedTabs = {
   tabs: PersistedTab[];
   activeTabId: string | null;
+  layout?: unknown;
+  focusedPaneId?: unknown;
 };
 
 // Drops malformed entries and orphaned `new-` placeholders that were never linked
@@ -271,6 +273,62 @@ export function sanitizeRestoredTabs(tabs: PersistedTab[]): PersistedTab[] {
     .map(t => t.provider !== undefined && !isProvider(t.provider) ? { ...t, provider: undefined } : t);
 }
 
+function pruneLeavesToTabs(layout: PaneNode, keep: Set<string>): PaneNode {
+  return mapLeaves(layout, leaf => {
+    const tabIds = leaf.tabIds.filter(id => keep.has(id));
+    if (tabIds.length === leaf.tabIds.length) return leaf;
+    const activeTabId = leaf.activeTabId !== null && tabIds.includes(leaf.activeTabId)
+      ? leaf.activeTabId
+      : (tabIds[tabIds.length - 1] ?? null);
+    return { ...leaf, tabIds, activeTabId };
+  });
+}
+
+function isPaneNode(raw: unknown): raw is PaneNode {
+  if (!raw || typeof raw !== 'object') return false;
+  const node = raw as Record<string, unknown>;
+  if (node.kind === 'leaf') {
+    return typeof node.id === 'string'
+      && Array.isArray(node.tabIds)
+      && node.tabIds.every(id => typeof id === 'string')
+      && (node.activeTabId === null || typeof node.activeTabId === 'string');
+  }
+  if (node.kind !== 'split') return false;
+  return typeof node.id === 'string'
+    && (node.dir === 'row' || node.dir === 'col')
+    && Array.isArray(node.sizes)
+    && node.sizes.every(s => typeof s === 'number' && s > 0)
+    && Array.isArray(node.children)
+    && node.children.length >= 2
+    && node.children.length === node.sizes.length
+    && node.children.every(isPaneNode);
+}
+
+// Any deviation from a well-formed tree degrades to one root leaf holding every
+// tab: losing the arrangement is acceptable, losing a tab is not.
+export function sanitizeRestoredLayout(
+  raw: unknown,
+  tabIds: string[],
+  focusedPaneId: unknown,
+): { layout: PaneNode; focusedPaneId: string } {
+  const fallback = {
+    layout: createLeaf(ROOT_PANE_ID, tabIds, tabIds[tabIds.length - 1] ?? null),
+    focusedPaneId: ROOT_PANE_ID,
+  };
+  if (!isPaneNode(raw)) return fallback;
+
+  const pruned = pruneLeavesToTabs(raw, new Set(tabIds));
+  const placed = new Set(leaves(pruned).flatMap(l => l.tabIds));
+  if (tabIds.some(id => !placed.has(id))) return fallback;
+
+  const ids = leaves(pruned).map(l => l.id);
+  if (new Set(ids).size !== ids.length) return fallback;
+
+  const focus = typeof focusedPaneId === 'string' && ids.includes(focusedPaneId) ? focusedPaneId : ids[0];
+  const collapsed = collapseEmpty(pruned, focus);
+  return { layout: collapsed.root, focusedPaneId: collapsed.focusedPaneId };
+}
+
 function loadTabsFromLocalStorage(): PersistedTabs | null {
   try {
     const raw = localStorage.getItem(TABS_PERSIST_KEY);
@@ -281,7 +339,7 @@ function loadTabsFromLocalStorage(): PersistedTabs | null {
     const activeTabId = tabs.some(t => t.id === parsed.activeTabId)
       ? parsed.activeTabId
       : (tabs[tabs.length - 1]?.id ?? null);
-    return { tabs, activeTabId };
+    return { tabs, activeTabId, layout: parsed.layout, focusedPaneId: parsed.focusedPaneId };
   } catch {
     return null;
   }
@@ -302,8 +360,19 @@ function writeTabsToLocalStorage(state: AppState) {
   const activeTabId = sessionTabs.some(t => t.id === state.activeTabId)
     ? state.activeTabId
     : (sessionTabs[sessionTabs.length - 1]?.id ?? null);
+  // Only session tabs come back, so the stored tree must already be free of the
+  // other kinds — otherwise the restore path would see panes it cannot fill.
+  const prunedLayout = collapseEmpty(
+    pruneLeavesToTabs(state.layout, new Set(sessionTabs.map(t => t.id))),
+    state.focusedPaneId,
+  );
   try {
-    localStorage.setItem(TABS_PERSIST_KEY, JSON.stringify({ tabs: sessionTabs, activeTabId }));
+    localStorage.setItem(TABS_PERSIST_KEY, JSON.stringify({
+      tabs: sessionTabs,
+      activeTabId,
+      layout: prunedLayout.root,
+      focusedPaneId: prunedLayout.focusedPaneId,
+    }));
   } catch { /* storage full */ }
 }
 
@@ -344,11 +413,15 @@ if (windowMode?.view === 'session') {
 } else {
   const savedTabs = loadTabsFromLocalStorage();
   if (savedTabs && savedTabs.tabs.length > 0) {
+    const tabs = savedTabs.tabs.map(t => ({ ...t, mode: 'history' as const }));
+    const panes = sanitizeRestoredLayout(savedTabs.layout, tabs.map(t => t.id), savedTabs.focusedPaneId);
     useStore.setState({
-      tabs: savedTabs.tabs.map(t => ({ ...t, mode: 'history' as const })),
+      tabs,
       activeTabId: savedTabs.activeTabId,
       navHistory: savedTabs.activeTabId ? [savedTabs.activeTabId] : [],
       navIndex: 0,
+      layout: panes.layout,
+      focusedPaneId: panes.focusedPaneId,
     });
   }
 }
@@ -384,7 +457,10 @@ useStore.subscribe(reconcileLayout);
 reconcileLayout(useStore.getState());
 
 // --- Subscribe: on any state change, diff + write localStorage + SQLite ---
-let prevTabsJson = JSON.stringify(useStore.getState().tabs) + '|' + (useStore.getState().activeTabId ?? '');
+const tabsChangeKey = (state: AppState) =>
+  JSON.stringify(state.tabs) + '|' + (state.activeTabId ?? '') + '|' + JSON.stringify(state.layout);
+
+let prevTabsJson = tabsChangeKey(useStore.getState());
 
 useStore.subscribe((state) => {
   // Detached windows are ephemeral consumers: never persist tabs or settings
@@ -405,8 +481,8 @@ useStore.subscribe((state) => {
     prevSnapshot = next;
   }
 
-  // Tabs persistence (tabs array or activeTabId change)
-  const tabsJson = JSON.stringify(state.tabs) + '|' + (state.activeTabId ?? '');
+  // Tabs persistence (tabs array, activeTabId or layout change)
+  const tabsJson = tabsChangeKey(state);
   if (tabsJson !== prevTabsJson) {
     prevTabsJson = tabsJson;
     writeTabsToLocalStorage(state);
