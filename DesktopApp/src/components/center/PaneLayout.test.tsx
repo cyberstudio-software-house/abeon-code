@@ -5,9 +5,16 @@ import { act, fireEvent, render } from '@testing-library/react';
 const counters = vi.hoisted(() => ({ terminalMounts: 0 }));
 
 vi.mock('../terminal/TerminalView', () => ({
-  TerminalView: ({ visible }: { visible?: boolean }) => {
+  TerminalView: ({ visible, focused }: { visible?: boolean; focused?: boolean }) => {
     useEffect(() => { counters.terminalMounts += 1; }, []);
-    return <div data-testid="terminal" data-visible={String(visible)} />;
+    return (
+      <div
+        data-testid="terminal"
+        data-visible={String(visible)}
+        data-focused={String(!!focused)}
+        onMouseDown={e => e.stopPropagation()}
+      />
+    );
   },
 }));
 vi.mock('../history/HistoryView', () => ({ HistoryView: () => <div data-testid="history" /> }));
@@ -221,5 +228,91 @@ describe('PaneLayout', () => {
     });
     const { getByText } = render(<PaneLayout />);
     expect(getByText('Wybierz sesję z lewej')).toBeTruthy();
+  });
+
+  it('focuses a pane when its content area is clicked', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const ids = leaves(useStore.getState().layout).map(l => l.id);
+    act(() => { useStore.getState().focusPane(ids[1]); });
+    const { container } = render(<PaneLayout />);
+
+    fireEvent.mouseDown(container.querySelector(`[data-pane-content="${ids[0]}"]`) as HTMLElement);
+
+    expect(useStore.getState().focusedPaneId).toBe(ids[0]);
+    expect(useStore.getState().activeTabId).toBe('t1');
+  });
+
+  it('focuses a pane when its tab bar region is clicked', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const ids = leaves(useStore.getState().layout).map(l => l.id);
+    const { container } = render(<PaneLayout />);
+
+    fireEvent.mouseDown(container.querySelector(`[data-pane-id="${ids[0]}"]`) as HTMLElement);
+
+    expect(useStore.getState().focusedPaneId).toBe(ids[0]);
+    expect(useStore.getState().activeTabId).toBe('t1');
+  });
+
+  it('focuses a pane even when the terminal swallows the mousedown', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const ids = leaves(useStore.getState().layout).map(l => l.id);
+    const { container } = render(<PaneLayout />);
+
+    fireEvent.mouseDown(
+      container.querySelector(`[data-pane-content="${ids[0]}"] [data-testid="terminal"]`) as HTMLElement,
+    );
+
+    expect(useStore.getState().focusedPaneId).toBe(ids[0]);
+  });
+
+  it('marks only the focused pane terminal as focused', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const { container } = render(<PaneLayout />);
+    const focused = container.querySelectorAll('[data-testid="terminal"][data-focused="true"]');
+    expect(focused).toHaveLength(1);
+  });
+
+  it('moves the focused terminal flag to the pane the user clicks into', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const ids = leaves(useStore.getState().layout).map(l => l.id);
+    const { container } = render(<PaneLayout />);
+    const flagOf = (tabId: string) =>
+      container.querySelector(`[data-tab-layer="${tabId}"] [data-testid="terminal"]`)?.getAttribute('data-focused');
+    expect(flagOf('t2')).toBe('true');
+    expect(flagOf('t1')).toBe('false');
+
+    fireEvent.mouseDown(container.querySelector(`[data-pane-content="${ids[0]}"]`) as HTMLElement);
+
+    expect(flagOf('t1')).toBe('true');
+    expect(flagOf('t2')).toBe('false');
+  });
+
+  it('records a cross-pane focus move in the MRU order and the navigation history', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const ids = leaves(useStore.getState().layout).map(l => l.id);
+    act(() => { useStore.setState({ mruOrder: ['t2'], navHistory: ['t2'], navIndex: 0 }); });
+    const { container } = render(<PaneLayout />);
+
+    fireEvent.mouseDown(container.querySelector(`[data-pane-content="${ids[0]}"]`) as HTMLElement);
+
+    expect(useStore.getState().mruOrder).toEqual(['t1', 't2']);
+    expect(useStore.getState().navHistory).toEqual(['t2', 't1']);
+    expect(useStore.getState().navIndex).toBe(1);
+  });
+
+  it('writes nothing to the store when clicking inside the already focused pane', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const ids = leaves(useStore.getState().layout).map(l => l.id);
+    const { container } = render(<PaneLayout />);
+    const layer = container.querySelector(`[data-pane-content="${ids[1]}"]`) as HTMLElement;
+    let writes = 0;
+    const unsubscribe = useStore.subscribe(() => { writes += 1; });
+
+    fireEvent.mouseDown(layer);
+    fireEvent.mouseDown(layer);
+    unsubscribe();
+
+    expect(useStore.getState().focusedPaneId).toBe(ids[1]);
+    expect(writes).toBe(0);
   });
 });

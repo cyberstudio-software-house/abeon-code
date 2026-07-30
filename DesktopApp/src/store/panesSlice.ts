@@ -38,9 +38,11 @@ export const createPanesSlice: StateCreator<PanesSlice & TabsSlice, [], [], Pane
   layout: createLeaf(ROOT_PANE_ID),
   focusedPaneId: ROOT_PANE_ID,
   focusPane: (paneId) => {
+    if (paneId === get().focusedPaneId) return;
     const leaf = findLeaf(get().layout, paneId);
     if (!leaf) return;
-    set({ focusedPaneId: paneId, ...(leaf.activeTabId ? { activeTabId: leaf.activeTabId } : {}) });
+    set({ focusedPaneId: paneId });
+    if (leaf.activeTabId) get().setActive(leaf.activeTabId);
   },
   setPaneActiveTab: (paneId, tabId) => {
     set({ focusedPaneId: paneId });

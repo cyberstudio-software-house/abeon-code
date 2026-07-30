@@ -19,6 +19,7 @@ type Props = {
   actionId?: number;
   tabId?: string;
   visible?: boolean;
+  focused?: boolean;
 };
 
 const FILE_PATH_RE = /((?:\.\.?\/|~\/|\/|[\w@.-]+\/)[\w@.\/-]*\.\w{1,10})(?::(\d+)(?::(\d+))?|\((\d+)[,:](\d+)\))?/g;
@@ -95,7 +96,7 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
   };
 }
 
-export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, visible = true }: Props) {
+export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, visible = true, focused = true }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const customModels = useStore(s => s.customModels);
   const codexModelId = useStore(s => s.codexModelId);
@@ -113,6 +114,8 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
   const pendingWrites = useRef<Uint8Array[]>([]);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -145,7 +148,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     });
     term.registerLinkProvider(createFilePathProvider(term, projectPathRef));
     fit.fit();
-    if (visibleRef.current) term.focus();
+    if (visibleRef.current && focusedRef.current) term.focus();
     termRef.current = term;
     fitRef.current = fit;
 
@@ -306,14 +309,14 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     }
     pendingWrites.current = [];
     fit.fit();
-    term.focus();
-  }, [visible]);
+    if (focused) term.focus();
+  }, [visible, focused]);
 
   useEffect(() => {
-    if (kind !== 'agent' || !agentPtyId || !visible) return;
+    if (kind !== 'agent' || !agentPtyId || !visible || !focused) return;
     setActiveAgentPtyId(agentPtyId);
     return () => setActiveAgentPtyId(null);
-  }, [kind, agentPtyId, visible, setActiveAgentPtyId]);
+  }, [kind, agentPtyId, visible, focused, setActiveAgentPtyId]);
 
   useEffect(() => {
     const container = containerRef.current;

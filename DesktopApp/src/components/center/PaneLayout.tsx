@@ -11,6 +11,8 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   const containerRef = useRef<HTMLDivElement>(null);
   const layout = useStore(s => s.layout);
   const tabs = useStore(useShallow(s => s.tabs));
+  const focusedPaneId = useStore(s => s.focusedPaneId);
+  const focusPane = useStore(s => s.focusPane);
   const rects = useMemo(() => computePaneRects(layout), [layout]);
   const panes = useMemo(() => leaves(layout), [layout]);
   const ownerOf = useMemo(() => {
@@ -30,6 +32,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
           <div
             key={pane.id}
             data-pane-id={pane.id}
+            onMouseDownCapture={() => focusPane(pane.id)}
             className="absolute"
             style={{
               left: `${rect.left}%`,
@@ -51,6 +54,9 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
           <div
             key={tab.id}
             data-tab-layer={tab.id}
+            data-pane-content={owner.paneId}
+            // Capture phase: xterm's textarea swallows mousedown before it bubbles out.
+            onMouseDownCapture={() => focusPane(owner.paneId)}
             className={`absolute ${owner.active ? '' : 'invisible pointer-events-none'}`}
             style={{
               left: `${rect.left}%`,
@@ -59,7 +65,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
               height: `calc(${rect.height}% - ${TAB_BAR_HEIGHT}px)`,
             }}
           >
-            <TabPanel tab={tab} visible={owner.active} />
+            <TabPanel tab={tab} visible={owner.active} focused={owner.paneId === focusedPaneId} />
           </div>
         );
       })}
