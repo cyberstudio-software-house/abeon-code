@@ -177,6 +177,44 @@ describe('PaneLayout', () => {
     expect(root.sizes[0]).toBeCloseTo(0.6);
   });
 
+  it('drops a stale drag when another handle is pressed', () => {
+    act(() => {
+      useStore.setState({
+        tabs: [terminalTab('t1', 'Lewy'), terminalTab('t2', 'Środek'), terminalTab('t3', 'Prawy')],
+        activeTabId: 't1',
+        layout: {
+          kind: 'split', id: 'outer', dir: 'row', sizes: [0.25, 0.75],
+          children: [
+            createLeaf('left', ['t1'], 't1'),
+            {
+              kind: 'split', id: 'inner', dir: 'row', sizes: [0.5, 0.5],
+              children: [createLeaf('mid', ['t2'], 't2'), createLeaf('right', ['t3'], 't3')],
+            },
+          ],
+        },
+        focusedPaneId: 'left',
+      });
+    });
+    const { container } = render(<PaneLayout />);
+    stubBox(container.firstElementChild as HTMLElement, 1000, 800);
+    const handles = Array.from(container.querySelectorAll('[role="separator"]')) as HTMLElement[];
+    const outerHandle = handles.find(el => el.style.left === '25%') as HTMLElement;
+    const innerHandle = handles.find(el => el.style.left === '62.5%') as HTMLElement;
+
+    fireEvent.mouseDown(outerHandle, { clientX: 250, clientY: 400 });
+    fireEvent.mouseDown(innerHandle, { clientX: 625, clientY: 400 });
+    fireEvent.mouseMove(window, { clientX: 700, clientY: 400 });
+    fireEvent.mouseUp(window);
+    fireEvent.mouseMove(window, { clientX: 900, clientY: 400 });
+
+    const layout = useStore.getState().layout;
+    const outer = findSplit(layout, 'outer') as PaneSplit;
+    const inner = findSplit(layout, 'inner') as PaneSplit;
+    expect(outer.sizes[0]).toBeCloseTo(0.25);
+    expect(outer.sizes[1]).toBeCloseTo(0.75);
+    expect(inner.sizes[0]).toBeCloseTo(0.6);
+  });
+
   it('renders the empty-state hint when no tab is open', () => {
     act(() => {
       useStore.setState({ tabs: [], activeTabId: null, layout: createLeaf(ROOT_PANE_ID), focusedPaneId: ROOT_PANE_ID });

@@ -25,6 +25,7 @@ export function PaneResizers({ layout, containerRef }: { layout: PaneNode; conta
   useEffect(() => detach, [detach]);
 
   const startDrag = useCallback((e: React.MouseEvent, boundary: SplitBoundary) => {
+    detach();
     e.preventDefault();
     const container = containerRef.current;
     if (!container) return;
