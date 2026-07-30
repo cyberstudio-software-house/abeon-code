@@ -81,13 +81,20 @@ describe('TabBar group detach', () => {
   });
 
   it('detaches the project group from the group header context menu', async () => {
+    useStore.setState({
+      tabs: [
+        { kind: 'session', id: 'session:s1', projectId: 1, sessionId: 's1', title: 'S1', mode: 'history' },
+        { kind: 'session', id: 'session:s1b', projectId: 1, sessionId: 's1b', title: 'S1b', mode: 'history' },
+        { kind: 'session', id: 'session:s2', projectId: 2, sessionId: 's2', title: 'S2', mode: 'history' },
+      ],
+    });
     render(<TabBar />);
     fireEvent.contextMenu(screen.getByText('Alfa'));
     fireEvent.click(screen.getByText('Wydziel do nowego okna'));
     await waitFor(() => expect(detachProjectGroup).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: 1, projectName: 'Alfa' }),
     ));
-    expect(vi.mocked(detachProjectGroup).mock.calls[0][0].tabs.map(t => t.id)).toEqual(['session:s1']);
+    expect(vi.mocked(detachProjectGroup).mock.calls[0][0].tabs.map(t => t.id)).toEqual(['session:s1', 'session:s1b']);
   });
 
   it('detaches the project group from the tab context menu', async () => {
@@ -138,5 +145,39 @@ describe('TabBar group detach', () => {
     render(<TabBar detachedProjectId={1} />);
     expect(screen.getByTitle('Nowa sesja')).toBeInTheDocument();
     expect(screen.getByTitle('Nowy terminal')).toBeInTheDocument();
+  });
+});
+
+describe('TabBar grouping rule', () => {
+  beforeEach(() => {
+    useStore.setState({
+      tabs: [
+        { kind: 'session', id: 'session:s2a', projectId: 2, sessionId: 's2a', title: 'S2a', mode: 'history' },
+        { kind: 'session', id: 'session:s1', projectId: 1, sessionId: 's1', title: 'S1', mode: 'history' },
+        { kind: 'session', id: 'session:s2b', projectId: 2, sessionId: 's2b', title: 'S2b', mode: 'history' },
+      ],
+      activeTabId: 'session:s1',
+      mruOrder: ['session:s1'],
+      navHistory: ['session:s1'],
+      navIndex: 0,
+      runningActions: {},
+      projects: [{ id: 1, name: 'Alfa', path: '/a' }, { id: 2, name: 'Beta', path: '/b' }] as never,
+    });
+  });
+
+  it('renders the single-tab project first and without a group header', () => {
+    const { container } = render(<TabBar />);
+    expect([...container.querySelectorAll('[data-tab-id]')].map(el => el.getAttribute('data-tab-id')))
+      .toEqual(['session:s1', 'session:s2a', 'session:s2b']);
+    expect(screen.getByText('Beta')).toBeInTheDocument();
+    expect(screen.queryByText('Alfa')).toBeNull();
+  });
+
+  it('collapses only the real group, leaving the hoisted tab visible', () => {
+    render(<TabBar />);
+    fireEvent.click(screen.getByText('Beta'));
+    expect(screen.queryByText('S2a')).toBeNull();
+    expect(screen.queryByText('S2b')).toBeNull();
+    expect(screen.getByText('S1')).toBeInTheDocument();
   });
 });

@@ -5,7 +5,7 @@ import { ACTIVITY_DOT, ACTIVITY_LABEL } from '../../lib/activity';
 import { selectSessionActivity } from '../../store/sessionsSlice';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { matchesShortcut } from '../../lib/shortcuts';
-import { groupTabsByProject } from '../../lib/tabGrouping';
+import { layoutTabBar } from '../../lib/tabGrouping';
 import { processManager } from '../../lib/processManager';
 import type { RunningAction } from '../../store/actionsSlice';
 import { actionTone } from '../../lib/actionStatus';
@@ -80,8 +80,8 @@ export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
-  const groups = useMemo(() => groupTabsByProject(tabs, projects), [tabs, projects]);
-  const showGroups = groups.length > 1;
+  const items = useMemo(() => layoutTabBar(tabs, projects), [tabs, projects]);
+  const showHeaders = items.length > 1;
 
   const toggleCollapse = (projectId: number) =>
     setCollapsed(prev => {
@@ -274,38 +274,43 @@ export function TabBar({ detachedProjectId }: { detachedProjectId?: number } = {
           }}
           className="flex items-end h-full px-2 gap-0.5 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
         >
-          {showGroups ? (
-            groups.map((group, gi) => (
-              <div key={group.projectId} className="contents">
-                {gi > 0 && <div className="w-2 shrink-0" />}
-                <div className="flex items-end shrink-0" style={{ borderBottom: `2px solid ${group.color}` }}>
-                  <div
-                    onClick={() => toggleCollapse(group.projectId)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setCtxMenu(null);
-                      setGroupMenu({ projectId: group.projectId, x: e.clientX, y: e.clientY });
-                    }}
-                    className="flex items-center px-2 py-1 cursor-pointer text-[10px] shrink-0 select-none"
-                  >
-                    <span className="mr-1 text-[8px]">{collapsed.has(group.projectId) ? '▶' : '▼'}</span>
-                    <span className="font-semibold" style={{ color: group.color }}>{group.name}</span>
-                    {collapsed.has(group.projectId) && (
-                      <span
-                        className="ml-1 px-1.5 rounded-full text-[9px]"
-                        style={{ backgroundColor: `${group.color}33`, color: group.color }}
-                      >
-                        {group.tabs.length}
-                      </span>
-                    )}
-                  </div>
-                  {!collapsed.has(group.projectId) && group.tabs.map(renderTab)}
+          {items.map((item, i) => (
+            <div key={item.kind === 'single' ? item.tab.id : `group:${item.projectId}`} className="contents">
+              {i > 0 && <div className="w-2 shrink-0" />}
+              {item.kind === 'single' ? (
+                renderTab(item.tab)
+              ) : (
+                <div
+                  className="flex items-end shrink-0"
+                  style={showHeaders ? { borderBottom: `2px solid ${item.color}` } : undefined}
+                >
+                  {showHeaders && (
+                    <div
+                      onClick={() => toggleCollapse(item.projectId)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setCtxMenu(null);
+                        setGroupMenu({ projectId: item.projectId, x: e.clientX, y: e.clientY });
+                      }}
+                      className="flex items-center px-2 py-1 cursor-pointer text-[10px] shrink-0 select-none"
+                    >
+                      <span className="mr-1 text-[8px]">{collapsed.has(item.projectId) ? '▶' : '▼'}</span>
+                      <span className="font-semibold" style={{ color: item.color }}>{item.name}</span>
+                      {collapsed.has(item.projectId) && (
+                        <span
+                          className="ml-1 px-1.5 rounded-full text-[9px]"
+                          style={{ backgroundColor: `${item.color}33`, color: item.color }}
+                        >
+                          {item.tabs.length}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {(!showHeaders || !collapsed.has(item.projectId)) && item.tabs.map(renderTab)}
                 </div>
-              </div>
-            ))
-          ) : (
-            tabs.map(renderTab)
-          )}
+              )}
+            </div>
+          ))}
           {detachedProjectId != null && (
             <div className="flex items-end shrink-0 ml-1 gap-0.5">
               <button

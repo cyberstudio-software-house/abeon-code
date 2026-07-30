@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { groupTabsByProject } from './tabGrouping';
+import { groupTabsByProject, layoutTabBar } from './tabGrouping';
 import { getProjectColor } from './projectColors';
 import type { Tab } from '../store/tabsSlice';
 
@@ -67,5 +67,34 @@ describe('group color', () => {
   it('still assigns a color for an unknown project', () => {
     const groups = groupTabsByProject([tab('x', 999)], projects);
     expect(groups[0].color).toBe(getProjectColor({ id: 999, color: null }));
+  });
+});
+
+describe('layoutTabBar', () => {
+  it('hoists single-tab projects to the front, outside groups', () => {
+    const tabs = [tab('a', 1), tab('b', 2), tab('c', 1)];
+    const items = layoutTabBar(tabs, projects);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ kind: 'single' });
+    expect(items[0].kind === 'single' && items[0].tab.id).toBe('b');
+    expect(items[1]).toMatchObject({ kind: 'group', projectId: 1 });
+    expect(items[1].kind === 'group' && items[1].tabs.map(t => t.id)).toEqual(['a', 'c']);
+  });
+
+  it('emits two singles when two projects have one tab each', () => {
+    const items = layoutTabBar([tab('a', 1), tab('b', 2)], projects);
+    expect(items.map(i => i.kind)).toEqual(['single', 'single']);
+    expect(items[0].kind === 'single' && items[0].color).toBe(getProjectColor(projects[0]));
+    expect(items[1].kind === 'single' && items[1].color).toBe(getProjectColor(projects[1]));
+  });
+
+  it('emits a single group when everything belongs to one project', () => {
+    const items = layoutTabBar([tab('a', 1), tab('c', 1)], projects);
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('group');
+  });
+
+  it('returns an empty array for no tabs', () => {
+    expect(layoutTabBar([], projects)).toEqual([]);
   });
 });
