@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
-import { formatTokens, formatCost } from '../../lib/formatUsage';
-import { IconBtn } from '../shared/IconBtn';
+import { formatTokens, formatCost, formatDuration } from '../../lib/formatUsage';
 import type { UsageSummary } from '../../types';
 
 function totalTokens(u: UsageSummary): number {
@@ -35,6 +34,17 @@ function UsageLine({ label, usage }: { label: string; usage: UsageSummary | null
   );
 }
 
+function DurationLine({ label, ms }: { label: string; ms: number | null | undefined }) {
+  return (
+    <div className="flex items-center justify-between text-[12px]">
+      <span className="text-muted">{label}</span>
+      <span className={ms != null ? 'text-fg-secondary tabular-nums' : 'text-muted'}>
+        {ms != null ? formatDuration(ms) : '—'}
+      </span>
+    </div>
+  );
+}
+
 export function UsageSection() {
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
@@ -43,7 +53,6 @@ export function UsageSection() {
   const sessionId = activeTab?.kind === 'session' ? activeTab.sessionId : null;
 
   const [sessionUsage, setSessionUsage] = useState<UsageSummary | null>(null);
-  const [projectUsage, setProjectUsage] = useState<UsageSummary | null>(null);
 
   useEffect(() => {
     setSessionUsage(null);
@@ -54,30 +63,15 @@ export function UsageSection() {
     return () => { if (unlisten) unlisten(); };
   }, [projectId, sessionId]);
 
-  const refreshProject = () => {
-    if (projectId == null) return;
-    tauri.projectUsage(projectId).then(setProjectUsage).catch(() => {});
-  };
-  useEffect(() => {
-    setProjectUsage(null);
-    if (projectId == null) return;
-    const fetchUsage = () => tauri.projectUsage(projectId).then(setProjectUsage).catch(() => {});
-    fetchUsage();
-    window.addEventListener('focus', fetchUsage);
-    return () => window.removeEventListener('focus', fetchUsage);
-  }, [projectId]);
-
   return (
     <section className="shrink-0">
-      <div className="flex items-center justify-between mb-2">
+      <div className="mb-2">
         <span className="text-[10px] text-muted font-medium uppercase tracking-wider">Zużycie</span>
-        {projectId != null && (
-          <IconBtn icon="refresh" label="Odśwież" tone="ghost" size="sm" onClick={refreshProject} />
-        )}
       </div>
       <div className="flex flex-col gap-1">
         <UsageLine label="Sesja" usage={sessionUsage} />
-        <UsageLine label="Projekt" usage={projectUsage} />
+        <DurationLine label="Czas sesji" ms={sessionUsage?.durationMs} />
+        <DurationLine label="Czas aktywny" ms={sessionUsage?.activeMs} />
       </div>
     </section>
   );
