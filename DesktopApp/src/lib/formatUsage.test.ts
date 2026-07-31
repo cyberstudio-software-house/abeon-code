@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatTokens, formatCost } from './formatUsage';
+import { formatTokens, formatCost, formatDuration } from './formatUsage';
 
 describe('formatTokens', () => {
   it('formats small numbers verbatim', () => {
@@ -22,5 +22,18 @@ describe('formatCost', () => {
   });
   it('keeps two decimals above a dollar', () => {
     expect(formatCost(12.5)).toBe('$12.50');
+  });
+});
+
+describe('formatDuration', () => {
+  it('formats seconds', () => {
+    expect(formatDuration(0)).toBe('0s');
+    expect(formatDuration(45_000)).toBe('45s');
+  });
+  it('formats minutes with seconds', () => {
+    expect(formatDuration(200_000)).toBe('3m 20s');
+  });
+  it('formats hours with minutes', () => {
+    expect(formatDuration(8_040_000)).toBe('2h 14m');
   });
 });
