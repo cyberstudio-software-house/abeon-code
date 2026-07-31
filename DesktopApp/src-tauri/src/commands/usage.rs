@@ -65,12 +65,7 @@ pub fn project_usage(
     let dir = claude_root()?.join(&proj.claude_dir);
 
     if !dir.exists() {
-        return Ok(UsageSummary {
-            tokens: Default::default(),
-            cost_usd: 0.0,
-            by_model: vec![],
-            unknown_models: vec![],
-        });
+        return Ok(UsageAccumulator::default().finalize());
     }
 
     let files: Vec<PathBuf> = fs::read_dir(&dir)?

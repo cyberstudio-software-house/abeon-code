@@ -3,6 +3,8 @@ use serde_json::Value;
 use crate::domain::{ModelUsage, TokenTotals, UsageSummary};
 use crate::sessions::pricing::{price_for, ModelPrice};
 
+const ACTIVE_GAP_MS: i64 = 5 * 60 * 1000;
+
 /// Raw per-model tally with the 5m/1h cache split kept for accurate pricing.
 #[derive(Debug, Clone, Copy, Default)]
 struct RawTokens {
@@ -34,6 +36,13 @@ impl RawTokens {
 
 fn u64_at(v: &Value, key: &str) -> u64 {
     v.get(key).and_then(|x| x.as_u64()).unwrap_or(0)
+}
+
+fn ts_ms(line: &Value) -> Option<i64> {
+    line.get("timestamp")
+        .and_then(|v| v.as_str())
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|d| d.timestamp_millis())
 }
 
 /// Reads `message.model` + `message.usage` from one parsed JSONL line.
@@ -70,10 +79,14 @@ fn extract_usage(line: &Value) -> Option<(String, String, RawTokens)> {
 pub struct UsageAccumulator {
     seen: HashSet<String>,
     by_model: HashMap<String, RawTokens>,
+    timestamps: Vec<i64>,
 }
 
 impl UsageAccumulator {
     pub fn add_line(&mut self, line: &Value) {
+        if let Some(ms) = ts_ms(line) {
+            self.timestamps.push(ms);
+        }
         if let Some((model, key, tokens)) = extract_usage(line) {
             if !key.is_empty() && !self.seen.insert(key) {
                 return;
@@ -104,13 +117,28 @@ impl UsageAccumulator {
         by_model.sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal));
         unknown_models.sort();
 
+        let (duration_ms, active_ms) = duration_of(&self.timestamps);
+
         UsageSummary {
             tokens: total.display(),
             cost_usd: cost_total,
             by_model,
             unknown_models,
+            duration_ms,
+            active_ms,
         }
     }
+}
+
+fn duration_of(timestamps: &[i64]) -> (Option<i64>, Option<i64>) {
+    if timestamps.is_empty() {
+        return (None, None);
+    }
+    let mut ts = timestamps.to_vec();
+    ts.sort_unstable();
+    let span = ts[ts.len() - 1] - ts[0];
+    let active = ts.windows(2).map(|w| w[1] - w[0]).filter(|g| *g <= ACTIVE_GAP_MS).sum();
+    (Some(span), Some(active))
 }
 
 /// Cost in USD for one model's raw token tally given its price.
@@ -218,5 +246,30 @@ mod tests {
         acc.add_line(&assistant("y", "claude-opus-4-7", 0, 0, 1_000_000, 0));
         let s = acc.finalize();
         assert!((s.cost_usd - 30.0).abs() < 1e-6, "got {}", s.cost_usd);
+    }
+
+    #[test]
+    fn session_span_and_active_time_from_timestamps() {
+        let mut acc = UsageAccumulator::default();
+        for ts in [
+            "2026-07-31T10:00:00Z",
+            "2026-07-31T10:02:00Z",
+            "2026-07-31T10:30:00Z",
+            "2026-07-31T10:31:00Z",
+        ] {
+            acc.add_line(&json!({ "type": "user", "timestamp": ts }));
+        }
+        let s = acc.finalize();
+        assert_eq!(s.duration_ms, Some(31 * 60 * 1000));
+        assert_eq!(s.active_ms, Some(3 * 60 * 1000));
+    }
+
+    #[test]
+    fn duration_none_without_timestamps() {
+        let mut acc = UsageAccumulator::default();
+        acc.add_line(&assistant("a", "claude-opus-4-7", 100, 10, 0, 0));
+        let s = acc.finalize();
+        assert_eq!(s.duration_ms, None);
+        assert_eq!(s.active_ms, None);
     }
 }

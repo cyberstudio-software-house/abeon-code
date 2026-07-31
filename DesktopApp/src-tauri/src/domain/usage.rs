@@ -35,4 +35,8 @@ pub struct UsageSummary {
     pub cost_usd: f64,
     pub by_model: Vec<ModelUsage>,
     pub unknown_models: Vec<String>,
+    #[ts(type = "number | null")]
+    pub duration_ms: Option<i64>,
+    #[ts(type = "number | null")]
+    pub active_ms: Option<i64>,
 }
