@@ -5,4 +5,4 @@ import type { TokenTotals } from "./TokenTotals";
 /**
  * Aggregate usage for a session or a whole project (dimension 1 + 2).
  */
-export type UsageSummary = { tokens: TokenTotals, costUsd: number, byModel: Array<ModelUsage>, unknownModels: Array<string>, };
+export type UsageSummary = { tokens: TokenTotals, costUsd: number, byModel: Array<ModelUsage>, unknownModels: Array<string>, durationMs: number | null, activeMs: number | null, };
