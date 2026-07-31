@@ -7,6 +7,7 @@ import { Icon } from '../shared/Icon';
 import { tauri } from '../../lib/tauri';
 import { ProjectManageMenu } from './ProjectManageMenu';
 import { EditProjectDialog } from '../dialogs/EditProjectDialog';
+import { ProjectSummaryDialog } from '../dialogs/ProjectSummaryDialog';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { getProjectColor } from '../../lib/projectColors';
 
@@ -22,6 +23,7 @@ export function ProjectItem({ project }: Props) {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [manageOpen, setManageOpen] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const manageRef = useRef<HTMLDivElement | null>(null);
   const removeProject = useStore(s => s.removeProject);
@@ -87,6 +89,7 @@ export function ProjectItem({ project }: Props) {
         {manageOpen && (
           <div className="absolute right-1 top-full z-30 mt-0.5 w-44 rounded-md border border-border bg-bg shadow-lg">
             <ProjectManageMenu
+              onSummary={() => setSummaryOpen(true)}
               onEdit={() => setEditing(true)}
               onDelete={() => setConfirmingDelete(true)}
               onClose={() => setManageOpen(false)}
@@ -145,6 +148,7 @@ export function ProjectItem({ project }: Props) {
         </div>
       )}
       {editing && <EditProjectDialog project={project} onClose={() => setEditing(false)} />}
+      {summaryOpen && <ProjectSummaryDialog project={project} onClose={() => setSummaryOpen(false)} />}
       {confirmingDelete && (
         <ConfirmDialog
           title="Usuń projekt"
