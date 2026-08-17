@@ -348,13 +348,50 @@ pub fn read_clipboard_image(
     read_clipboard_image_inner(&state, pty_id)
 }
 
-#[tauri::command]
-pub fn write_clipboard_text(text: String) -> AppResult<()> {
+#[cfg(target_os = "linux")]
+fn write_clipboard_text_subprocess(text: &str) -> bool {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let feed = |mut cmd: Command| -> bool {
+        let mut child = match cmd.stdin(Stdio::piped()).spawn() {
+            Ok(child) => child,
+            Err(_) => return false,
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            if stdin.write_all(text.as_bytes()).is_err() {
+                return false;
+            }
+        }
+        child.wait().map(|s| s.success()).unwrap_or(false)
+    };
+
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() && feed(Command::new("wl-copy")) {
+        return true;
+    }
+
+    let mut xclip = Command::new("xclip");
+    xclip.args(["-selection", "clipboard"]);
+    feed(xclip)
+}
+
+fn write_clipboard_text_inner(text: &str) -> AppResult<()> {
+    #[cfg(target_os = "linux")]
+    {
+        if write_clipboard_text_subprocess(text) {
+            return Ok(());
+        }
+    }
     let mut clipboard = arboard::Clipboard::new()
         .map_err(|e| AppError::Other(format!("clipboard: {e}")))?;
-    clipboard.set_text(text)
+    clipboard.set_text(text.to_owned())
         .map_err(|e| AppError::Other(format!("clipboard: {e}")))?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn write_clipboard_text(text: String) -> AppResult<()> {
+    write_clipboard_text_inner(&text)
 }
 
 #[tauri::command]
@@ -542,6 +579,44 @@ mod tests {
         assert!(!Path::new(&path1).exists());
         assert!(!Path::new(&path2).exists());
         assert!(state.clipboard_images.lock().get(&pty_id).is_none());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn write_clipboard_text_roundtrips_via_subprocess() {
+        if std::env::var_os("ABEON_CLIPBOARD_IT").is_none() {
+            return;
+        }
+
+        let sentinel = format!("abeon-clip-{}", Uuid::new_v4());
+        write_clipboard_text_inner(&sentinel).expect("write_clipboard_text_inner");
+
+        let read_back = || -> Option<String> {
+            use std::process::Command;
+            if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+                if let Ok(o) = Command::new("wl-paste").arg("--no-newline").output() {
+                    if o.status.success() {
+                        return Some(String::from_utf8_lossy(&o.stdout).into_owned());
+                    }
+                }
+            }
+            Command::new("xclip")
+                .args(["-selection", "clipboard", "-o"])
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        };
+
+        let mut got = None;
+        for _ in 0..20 {
+            got = read_back();
+            if got.as_deref() == Some(sentinel.as_str()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(got.as_deref(), Some(sentinel.as_str()));
     }
 
     #[test]
