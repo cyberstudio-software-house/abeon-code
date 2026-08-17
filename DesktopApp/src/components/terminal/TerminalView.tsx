@@ -134,17 +134,29 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
       if (isModClick(event)) openUrl(uri);
     }));
     term.open(container);
+    const copySelection = () => {
+      const selection = term.getSelection();
+      if (selection) {
+        tauri.writeClipboardText(selection).catch(err =>
+          console.warn('[copy] write_clipboard_text failed:', err)
+        );
+      }
+    };
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
       if (e.type === 'keydown' && e.ctrlKey && e.shiftKey && e.key === 'C') {
-        const selection = term.getSelection();
-        if (selection) {
-          tauri.writeClipboardText(selection).catch(err =>
-            console.warn('[copy] write_clipboard_text failed:', err)
-          );
-        }
+        copySelection();
         return false;
       }
       return true;
+    });
+    let copyOnSelectTimer: ReturnType<typeof setTimeout> | undefined;
+    const offSelectionChange = term.onSelectionChange(() => {
+      if (copyOnSelectTimer !== undefined) clearTimeout(copyOnSelectTimer);
+      copyOnSelectTimer = setTimeout(copySelection, 120);
+    });
+    unlistenRefs.current.push(() => {
+      if (copyOnSelectTimer !== undefined) clearTimeout(copyOnSelectTimer);
+      offSelectionChange.dispose();
     });
     term.registerLinkProvider(createFilePathProvider(term, projectPathRef));
     fit.fit();

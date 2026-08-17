@@ -6,6 +6,9 @@ const probe = vi.hoisted(() => ({
   writes: [] as Uint8Array[],
   sinks: [] as Array<(bytes: Uint8Array) => void>,
   spawned: 0,
+  selection: '',
+  selectionCbs: [] as Array<() => void>,
+  keyHandlers: [] as Array<(e: KeyboardEvent) => boolean>,
 }));
 
 vi.mock('@xterm/xterm', () => ({
@@ -16,9 +19,10 @@ vi.mock('@xterm/xterm', () => ({
     buffer = { active: { getLine: () => null } };
     loadAddon() {}
     open() {}
-    attachCustomKeyEventHandler() {}
+    attachCustomKeyEventHandler(cb: (e: KeyboardEvent) => boolean) { probe.keyHandlers.push(cb); }
     registerLinkProvider() {}
-    getSelection() { return ''; }
+    getSelection() { return probe.selection; }
+    onSelectionChange(cb: () => void) { probe.selectionCbs.push(cb); return { dispose() {} }; }
     reset() {}
     focus() { probe.focusCalls += 1; }
     write(bytes: Uint8Array) { probe.writes.push(bytes); }
@@ -40,6 +44,9 @@ vi.mock('../../lib/tauri', () => ({
     ptyKill: vi.fn(async () => {}),
     ptyWrite: vi.fn(async () => {}),
     ptyResize: vi.fn(async () => {}),
+    writeClipboardText: vi.fn(async () => {}),
+    readClipboardText: vi.fn(async () => null),
+    readClipboardImage: vi.fn(async () => null),
     getAllSettings: vi.fn(async () => ({})),
     setSetting: vi.fn(async () => {}),
     detectDefaultShell: vi.fn(async () => ''),
@@ -120,5 +127,71 @@ describe('TerminalView focus', () => {
 
     expect(probe.writes).toEqual([new Uint8Array([104, 105])]);
     expect(probe.focusCalls).toBe(0);
+  });
+});
+
+describe('TerminalView clipboard copy', () => {
+  beforeEach(() => {
+    probe.selection = '';
+    probe.selectionCbs = [];
+    probe.keyHandlers = [];
+    probe.spawned = 0;
+    vi.clearAllMocks();
+    useStore.setState({ projects: [{ id: 1, name: 'P', path: '/p' }] as never });
+  });
+
+  it('copies the selection to the clipboard on Ctrl+Shift+C', async () => {
+    const { tauri } = await import('../../lib/tauri');
+    await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+
+    probe.selection = 'copied via shortcut';
+    const handled = probe.keyHandlers.map(h =>
+      h({ type: 'keydown', ctrlKey: true, shiftKey: true, key: 'C' } as KeyboardEvent)
+    );
+
+    expect(tauri.writeClipboardText).toHaveBeenCalledWith('copied via shortcut');
+    expect(handled).toContain(false);
+  });
+
+  it('copies to the clipboard shortly after a selection settles', async () => {
+    const { tauri } = await import('../../lib/tauri');
+    await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+
+    probe.selection = 'hello world';
+    await act(async () => {
+      probe.selectionCbs.forEach(cb => cb());
+      await new Promise(r => setTimeout(r, 160));
+    });
+
+    expect(tauri.writeClipboardText).toHaveBeenCalledWith('hello world');
+  });
+
+  it('coalesces rapid selection changes into a single clipboard write', async () => {
+    const { tauri } = await import('../../lib/tauri');
+    await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+
+    await act(async () => {
+      probe.selection = 'partial';
+      probe.selectionCbs.forEach(cb => cb());
+      probe.selection = 'partial selection final';
+      probe.selectionCbs.forEach(cb => cb());
+      await new Promise(r => setTimeout(r, 160));
+    });
+
+    expect(tauri.writeClipboardText).toHaveBeenCalledTimes(1);
+    expect(tauri.writeClipboardText).toHaveBeenCalledWith('partial selection final');
+  });
+
+  it('does not write to the clipboard when the selection is cleared', async () => {
+    const { tauri } = await import('../../lib/tauri');
+    await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+
+    probe.selection = '';
+    await act(async () => {
+      probe.selectionCbs.forEach(cb => cb());
+      await new Promise(r => setTimeout(r, 160));
+    });
+
+    expect(tauri.writeClipboardText).not.toHaveBeenCalled();
   });
 });
