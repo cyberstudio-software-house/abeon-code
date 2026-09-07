@@ -22,7 +22,7 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
   - `layout/TitleBar.tsx` — custom titlebar.
   - `sidebar/` — left column: project list, sessions, sort menu, search.
   - `center/` — middle column: `CenterPanel` → `PaneLayout` (renders the pane tree: one `TabBar` per pane, one `TabPanel` content layer per tab, `PaneResizers`, `PaneDragOverlay` + `usePaneDrag` for the tab-drag gesture). **Tabs and panes are managed here.**
-  - `right/` — right column: Git status, Actions list, runnable scripts.
+  - `right/` — right column: Git panel (`GitSection` with tabs: working-tree changes / commit history via `GitHistory` + `CommitDiffDialog`), Actions list, runnable scripts.
   - `terminal/TerminalView.tsx` — xterm wrapper for any PTY (claude, action, shell).
   - `history/` — session history viewer (markdown blocks).
   - `dialogs/` — modal dialogs (`ConfirmDialog`, `SettingsDialog`, `AddProjectDialog`, `AddActionDialog`).
@@ -33,7 +33,7 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 - `db/` — SQLite migrations + queries.
 - `pty/` — PTY spawning and lifecycle (claude / action / shell variants).
 - `sessions/` — JSONL session reading and watch; Claude Code format at top level, `sessions/codex/` holds the OpenAI Codex rollout reader/parser/activity.
-- `git/` — git2 wrappers.
+- `git/` — git2 wrappers: `mod.rs` (status + working-tree diff), `history.rs` (branches, log, commit detail, per-commit file diff).
 - `detectors/` — script detection (npm/cargo/etc).
 - `domain/` — shared structs (ts-rs derives live here).
 

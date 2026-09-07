@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
 import type { ClickUpSpace } from '../types/ClickUpSpace';
@@ -98,6 +98,14 @@ export const tauri = {
   gitStatus: (projectId: number) => invoke<GitStatus>('git_status', { projectId }),
   gitDiffFile: (projectId: number, repoLabel: string, filePath: string) =>
     invoke<DiffResult>('git_diff_file', { projectId, repoLabel, filePath }),
+  gitBranches: (projectId: number, repoLabel: string) =>
+    invoke<GitBranch[]>('git_branches', { projectId, repoLabel }),
+  gitLog: (projectId: number, repoLabel: string, branch: string, skip: number, limit: number) =>
+    invoke<GitCommit[]>('git_log', { projectId, repoLabel, branch, skip, limit }),
+  gitCommitDetail: (projectId: number, repoLabel: string, hash: string) =>
+    invoke<GitCommitDetail>('git_commit_detail', { projectId, repoLabel, hash }),
+  gitDiffCommitFile: (projectId: number, repoLabel: string, hash: string, filePath: string) =>
+    invoke<DiffResult>('git_diff_commit_file', { projectId, repoLabel, hash, filePath }),
   getGitUser: () => invoke<GitUser>('get_git_user'),
   renameSession: (projectId: number, sessionId: string, title: string) =>
     invoke<void>('rename_session', { projectId, sessionId, title }),

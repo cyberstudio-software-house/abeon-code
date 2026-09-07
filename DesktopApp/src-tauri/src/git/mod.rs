@@ -3,6 +3,10 @@ use git2::{Repository, StatusOptions, Status};
 use crate::domain::{DiffHunk, DiffLine, DiffResult, GitFile, GitRepo, GitStatus};
 use crate::error::AppResult;
 
+pub mod history;
+#[cfg(test)]
+pub(crate) mod test_support;
+
 pub fn status(path: &Path) -> AppResult<GitStatus> {
     let repos = discover_repos(path)?;
     let is_repo = !repos.is_empty();
@@ -149,7 +153,10 @@ pub fn diff_file(repo_path: &Path, file_path: &str) -> AppResult<DiffResult> {
     let mut opts = git2::DiffOptions::new();
     opts.pathspec(file_path).include_untracked(true);
     let diff = repo.diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))?;
+    collect_hunks(&diff)
+}
 
+pub(super) fn collect_hunks(diff: &git2::Diff) -> AppResult<DiffResult> {
     let is_binary = std::cell::Cell::new(false);
     let hunks: std::cell::RefCell<Vec<DiffHunk>> = std::cell::RefCell::new(Vec::new());
     diff.foreach(
@@ -267,23 +274,7 @@ mod tests {
         assert_eq!(st.repos[0].label, "frontend");
     }
 
-    use std::process::Command;
-
-    fn run_git(dir: &Path, args: &[&str]) {
-        let out = Command::new("git").current_dir(dir).args(args).output().expect("git");
-        if !out.status.success() {
-            panic!("git {:?} failed: {}", args, String::from_utf8_lossy(&out.stderr));
-        }
-    }
-
-    fn init_repo_with_commit(dir: &Path) {
-        run_git(dir, &["init", "-q", "-b", "main"]);
-        run_git(dir, &["config", "user.email", "t@t"]);
-        run_git(dir, &["config", "user.name", "t"]);
-        fs::write(dir.join("seed.txt"), "x\n").unwrap();
-        run_git(dir, &["add", "."]);
-        run_git(dir, &["commit", "-q", "-m", "seed"]);
-    }
+    use super::test_support::{init_repo_with_commit, run_git};
 
     #[test]
     fn diff_file_modified_returns_add_and_del_lines() {

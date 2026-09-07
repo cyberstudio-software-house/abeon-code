@@ -70,3 +70,33 @@ pub struct DiffLine {
     pub new_lineno: Option<usize>,
     pub content: String,
 }
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranch {
+    pub name: String,
+    pub is_remote: bool,
+    pub is_head: bool,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommit {
+    pub hash: String,
+    pub short_hash: String,
+    pub subject: String,
+    pub author: String,
+    #[ts(type = "number")]
+    pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct GitCommitDetail {
+    pub commit: GitCommit,
+    pub body: String,
+    pub files: Vec<GitFile>,
+}

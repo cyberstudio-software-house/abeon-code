@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
 import { Icon } from '../shared/Icon';
+import { TabButton } from '../shared/TabButton';
 import { BUILTIN_MODELS, detectedClaudeModels, getModelDisplayLabel, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
 import type { ThemeMode } from '../../styles/theme';
 import { tauri } from '../../lib/tauri';
@@ -76,25 +77,6 @@ export function SettingsDialog() {
         </div>
       </div>
     </div>
-  );
-}
-
-function TabButton({ active, onClick, children }: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`px-3 py-2 text-[12px] font-medium border-b-2 transition-colors -mb-px ${
-        active
-          ? 'border-accent text-fg'
-          : 'border-transparent text-muted hover:text-fg-secondary'
-      }`}
-    >
-      {children}
-    </button>
   );
 }
 

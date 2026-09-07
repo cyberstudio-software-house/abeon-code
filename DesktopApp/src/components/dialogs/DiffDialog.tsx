@@ -1,18 +1,18 @@
-import { useEffect, useState } from 'react';
-import { tauri } from '../../lib/tauri';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { GitFile, DiffResult } from '../../types';
 import { GitFileList } from '../right/GitFileList';
 import { Icon } from '../shared/Icon';
 
 type Props = {
-  projectId: number;
   repoLabel: string;
   files: GitFile[];
   initialFilePath: string;
+  loadDiff: (filePath: string) => Promise<DiffResult>;
+  summary?: ReactNode;
   onClose: () => void;
 };
 
-export function DiffDialog({ projectId, repoLabel, files, initialFilePath, onClose }: Props) {
+export function DiffDialog({ repoLabel, files, initialFilePath, loadDiff, summary, onClose }: Props) {
   const [activeFile, setActiveFile] = useState<string>(initialFilePath);
   const [result, setResult] = useState<DiffResult | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -23,7 +23,7 @@ export function DiffDialog({ projectId, repoLabel, files, initialFilePath, onClo
     setLoading(true);
     setResult(null);
     setError(null);
-    tauri.gitDiffFile(projectId, repoLabel, activeFile).then(res => {
+    loadDiff(activeFile).then(res => {
       if (cancelled) return;
       setResult(res);
       setLoading(false);
@@ -33,7 +33,7 @@ export function DiffDialog({ projectId, repoLabel, files, initialFilePath, onClo
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [projectId, repoLabel, activeFile]);
+  }, [loadDiff, activeFile]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -77,6 +77,11 @@ export function DiffDialog({ projectId, repoLabel, files, initialFilePath, onClo
             <Icon name="close" className="w-4 h-4" />
           </button>
         </div>
+        {summary && (
+          <div className="px-5 py-3 border-b border-border bg-bg">
+            {summary}
+          </div>
+        )}
         <div className="flex-1 min-h-0 flex">
           <aside className="w-[280px] shrink-0 border-r border-border overflow-auto">
             {repoLabel !== '.' && (

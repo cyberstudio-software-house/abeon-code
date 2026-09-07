@@ -1,13 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useStore } from '../../store';
+import { tauri } from '../../lib/tauri';
 import { GitFileList } from './GitFileList';
+import { GitHistory } from './GitHistory';
 import { GitRepoGroup } from './GitRepoGroup';
 import { DiffDialog } from '../dialogs/DiffDialog';
 import { Icon } from '../shared/Icon';
 import { IconBtn } from '../shared/IconBtn';
+import { TabButton } from '../shared/TabButton';
 import type { GitFile } from '../../types';
 
 type DiffTarget = { repoLabel: string; filePath: string; files: GitFile[] };
+type GitTab = 'changes' | 'history';
+
+const TAB_CLASS = 'px-1.5 py-0.5 text-[10px] uppercase tracking-wider';
 
 export function GitSection() {
   const tabs = useStore(s => s.tabs);
@@ -17,9 +23,17 @@ export function GitSection() {
   const status = useStore(s => projectId != null ? s.gitByProject[projectId] : null);
   const refresh = useStore(s => s.refreshGit);
 
+  const [tab, setTab] = useState<GitTab>('changes');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [diffTarget, setDiffTarget] = useState<DiffTarget | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [historyReloadToken, setHistoryReloadToken] = useState(0);
+
+  const diffRepoLabel = diffTarget?.repoLabel ?? null;
+  const loadWorkdirDiff = useCallback(
+    (filePath: string) => tauri.gitDiffFile(projectId!, diffRepoLabel!, filePath),
+    [projectId, diffRepoLabel],
+  );
 
   useEffect(() => {
     if (projectId == null) return;
@@ -34,11 +48,21 @@ export function GitSection() {
   const totalFiles = status?.repos.reduce((n, r) => n + r.files.length, 0) ?? 0;
   const repos = status?.repos ?? [];
 
+  const onRefresh = () => {
+    if (tab === 'history') {
+      setHistoryReloadToken(t => t + 1);
+      return;
+    }
+    setRefreshing(true);
+    refresh(projectId).finally(() => setRefreshing(false));
+  };
+
   return (
-    <section className="flex-1 min-h-0 overflow-auto">
+    <section className="flex-1 min-h-0 overflow-auto flex flex-col">
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-muted font-medium uppercase tracking-wider">Zmiany</span>
+        <div className="flex items-center gap-1.5" role="tablist">
+          <TabButton active={tab === 'changes'} onClick={() => setTab('changes')} className={TAB_CLASS}>Zmiany</TabButton>
+          <TabButton active={tab === 'history'} onClick={() => setTab('history')} className={TAB_CLASS}>Historia</TabButton>
           {status && status.isRepo && (
             <IconBtn
               icon="refresh"
@@ -46,20 +70,23 @@ export function GitSection() {
               tone="ghost"
               size="sm"
               loading={refreshing}
-              onClick={() => {
-                setRefreshing(true);
-                refresh(projectId!).finally(() => setRefreshing(false));
-              }}
+              onClick={onRefresh}
             />
           )}
         </div>
-        {status && status.isRepo && <span className="text-[10px] text-muted">{totalFiles} plików</span>}
+        {tab === 'changes' && status && status.isRepo && (
+          <span className="text-[10px] text-muted">{totalFiles} plików</span>
+        )}
       </div>
 
       {!status && <div className="text-[12px] text-muted">Wczytywanie…</div>}
       {status && !status.isRepo && <div className="text-[12px] text-muted">Nie jest repozytorium git</div>}
 
-      {repos.length === 1 && (
+      {tab === 'history' && status && status.isRepo && (
+        <GitHistory key={projectId} projectId={projectId} repos={repos} reloadToken={historyReloadToken} />
+      )}
+
+      {tab === 'changes' && repos.length === 1 && (
         <>
           {repos[0].branch && (
             <div className="flex items-center gap-2 bg-bg-elev px-3 py-1.5 mb-3 text-[11px]">
@@ -77,7 +104,7 @@ export function GitSection() {
         </>
       )}
 
-      {repos.length >= 2 && repos.map(repo => (
+      {tab === 'changes' && repos.length >= 2 && repos.map(repo => (
         <GitRepoGroup
           key={repo.label}
           repo={repo}
@@ -87,12 +114,12 @@ export function GitSection() {
         />
       ))}
 
-      {diffTarget && projectId != null && (
+      {diffTarget && (
         <DiffDialog
-          projectId={projectId}
           repoLabel={diffTarget.repoLabel}
           files={diffTarget.files}
           initialFilePath={diffTarget.filePath}
+          loadDiff={loadWorkdirDiff}
           onClose={() => setDiffTarget(null)}
         />
       )}
