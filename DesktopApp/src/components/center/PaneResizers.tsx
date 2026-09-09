@@ -5,13 +5,14 @@ import {
   computeSplitBoundaries,
   MIN_PANE_HEIGHT,
   MIN_PANE_WIDTH,
-  TAB_BAR_HEIGHT,
+  tabBarHeight,
   type SplitBoundary,
 } from '../../lib/paneGeometry';
 import type { PaneNode } from '../../lib/paneTree';
 
 export function PaneResizers({ layout, containerRef }: { layout: PaneNode; containerRef: RefObject<HTMLDivElement | null> }) {
   const resizeSplit = useStore(s => s.resizeSplit);
+  const tabLayoutMode = useStore(s => s.tabLayoutMode);
   const boundaries = computeSplitBoundaries(layout);
   const handlersRef = useRef<{ move: (e: MouseEvent) => void; up: () => void } | null>(null);
 
@@ -35,7 +36,7 @@ export function PaneResizers({ layout, containerRef }: { layout: PaneNode; conta
     if (totalPx <= 0) return;
     const startPx = horizontal ? e.clientX : e.clientY;
     const startFraction = boundary.sizes[boundary.index];
-    const minPx = horizontal ? MIN_PANE_WIDTH : MIN_PANE_HEIGHT + TAB_BAR_HEIGHT;
+    const minPx = horizontal ? MIN_PANE_WIDTH : MIN_PANE_HEIGHT + tabBarHeight(tabLayoutMode);
 
     const move = (ev: MouseEvent) => {
       const delta = (horizontal ? ev.clientX : ev.clientY) - startPx;
@@ -46,7 +47,7 @@ export function PaneResizers({ layout, containerRef }: { layout: PaneNode; conta
     handlersRef.current = { move, up };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
-  }, [containerRef, detach, resizeSplit]);
+  }, [containerRef, detach, resizeSplit, tabLayoutMode]);
 
   return (
     <>

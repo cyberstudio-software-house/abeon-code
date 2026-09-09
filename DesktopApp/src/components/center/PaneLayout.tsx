@@ -1,11 +1,12 @@
 import { useMemo, useRef } from 'react';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
-import { computePaneRects, TAB_BAR_HEIGHT } from '../../lib/paneGeometry';
+import { computePaneRects, tabBarHeight } from '../../lib/paneGeometry';
 import { leaves } from '../../lib/paneTree';
 import { PaneDragOverlay } from './PaneDragOverlay';
 import { PaneResizers } from './PaneResizers';
 import { TabBar } from './TabBar';
+import { StackedTabBar } from './StackedTabBar';
 import { TabPanel } from './TabContent';
 import { usePaneDrag } from './usePaneDrag';
 
@@ -15,6 +16,9 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   const tabs = useStore(useShallow(s => s.tabs));
   const focusedPaneId = useStore(s => s.focusedPaneId);
   const focusPane = useStore(s => s.focusPane);
+  const tabLayoutMode = useStore(s => s.tabLayoutMode);
+  const barHeight = tabBarHeight(tabLayoutMode);
+  const Bar = tabLayoutMode === 'stacked' ? StackedTabBar : TabBar;
   const { drag, beginDrag } = usePaneDrag(containerRef);
   const rects = useMemo(() => computePaneRects(layout), [layout]);
   const panes = useMemo(() => leaves(layout), [layout]);
@@ -41,10 +45,10 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
               left: `${rect.left}%`,
               top: `${rect.top}%`,
               width: `${rect.width}%`,
-              height: `${TAB_BAR_HEIGHT}px`,
+              height: `${barHeight}px`,
             }}
           >
-            <TabBar paneId={pane.id} detachedProjectId={detachedProjectId} onTabPointerDown={beginDrag} />
+            <Bar paneId={pane.id} detachedProjectId={detachedProjectId} onTabPointerDown={beginDrag} />
           </div>
         );
       })}
@@ -63,9 +67,9 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
             className={`absolute ${owner.active ? '' : 'invisible pointer-events-none'}`}
             style={{
               left: `${rect.left}%`,
-              top: `calc(${rect.top}% + ${TAB_BAR_HEIGHT}px)`,
+              top: `calc(${rect.top}% + ${barHeight}px)`,
               width: `${rect.width}%`,
-              height: `calc(${rect.height}% - ${TAB_BAR_HEIGHT}px)`,
+              height: `calc(${rect.height}% - ${barHeight}px)`,
             }}
           >
             <TabPanel tab={tab} visible={owner.active} focused={owner.paneId === focusedPaneId} />

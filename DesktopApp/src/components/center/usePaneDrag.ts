@@ -6,7 +6,7 @@ import {
   dropZone,
   hitTestPane,
   insertionIndex,
-  TAB_BAR_HEIGHT,
+  tabBarHeight,
   type DropZone,
   type PaneRect,
 } from '../../lib/paneGeometry';
@@ -83,9 +83,10 @@ export function usePaneDrag(containerRef: RefObject<HTMLDivElement | null>) {
       if (!hit) return null;
       const rect = rects.get(hit.paneId);
       if (!rect) return null;
-      const overTabBar = hit.local.y <= TAB_BAR_HEIGHT;
+      const barHeight = tabBarHeight(useStore.getState().tabLayoutMode);
+      const overTabBar = hit.local.y <= barHeight;
       const zone: DropZone = overTabBar ? 'center' : dropZone(hit.local);
-      if (zone !== 'center' && !canSplit(zone, { width: hit.local.width, height: hit.local.height })) return null;
+      if (zone !== 'center' && !canSplit(zone, { width: hit.local.width, height: hit.local.height }, barHeight)) return null;
       return { paneId: hit.paneId, zone, overTabBar, rect };
     };
 

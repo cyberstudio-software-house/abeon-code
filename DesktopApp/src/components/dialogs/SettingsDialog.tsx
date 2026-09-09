@@ -8,6 +8,7 @@ import { Icon } from '../shared/Icon';
 import { TabButton } from '../shared/TabButton';
 import { BUILTIN_MODELS, detectedClaudeModels, getModelDisplayLabel, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
 import type { ThemeMode } from '../../styles/theme';
+import type { TabLayoutMode } from '../../store/settingsSlice';
 import { tauri } from '../../lib/tauri';
 import type { ShellInfo, EditorInfo, DetectedModel, ProviderInfo } from '../../types';
 import type { ClickUpConnectionStatus } from '../../types/ClickUpConnectionStatus';
@@ -20,6 +21,11 @@ import type { NotificationTrigger } from '../../lib/attention';
 
 const SELECT_BASE =
   'bg-bg-elev-2 border border-border rounded text-fg cursor-pointer transition-colors hover:border-muted focus:outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed';
+
+const TAB_LAYOUT_OPTIONS: { value: TabLayoutMode; label: string }[] = [
+  { value: 'classic', label: 'Klasyczny' },
+  { value: 'stacked', label: 'Dwuwierszowy' },
+];
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'light', label: 'Jasny' },
@@ -344,6 +350,8 @@ function GeneralTab() {
   const setHistoryViewMode = useStore(s => s.setHistoryViewMode);
   const showActiveSessions = useStore(s => s.showActiveSessions);
   const setShowActiveSessions = useStore(s => s.setShowActiveSessions);
+  const tabLayoutMode = useStore(s => s.tabLayoutMode);
+  const setTabLayoutMode = useStore(s => s.setTabLayoutMode);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [editors, setEditors] = useState<EditorInfo[]>([]);
   const [detectedName, setDetectedName] = useState<string | null>(null);
@@ -463,6 +471,31 @@ function GeneralTab() {
           />
           Pokaż aktywne sesje nad projektami
         </label>
+      </div>
+
+      <div>
+        <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">
+          Układ zakładek
+        </label>
+        <div className="flex gap-1">
+          {TAB_LAYOUT_OPTIONS.map(o => (
+            <button
+              key={o.value}
+              onClick={() => setTabLayoutMode(o.value)}
+              className={`px-3 py-1.5 text-[12px] font-medium border transition-colors ${
+                tabLayoutMode === o.value
+                  ? 'bg-fg text-bg border-fg'
+                  : 'bg-bg border-border text-muted hover:text-fg'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted mt-2">
+          Tryb „Dwuwierszowy" ukrywa górny pasek z nazwą projektu i dzieli zakładki na wiersz
+          projektów oraz wiersz sesji wybranego projektu.
+        </p>
       </div>
 
       <NotificationsSection />

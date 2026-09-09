@@ -13,7 +13,7 @@ vi.mock('../terminal/TerminalView', () => ({ TerminalView: () => <div data-testi
 vi.mock('../history/HistoryView', () => ({ HistoryView: () => <div data-testid="history" /> }));
 vi.mock('../history/SubagentView', () => ({ SubagentView: () => <div data-testid="subagent" /> }));
 vi.mock('../right/RightPanel', () => ({ RightPanel: () => <div /> }));
-vi.mock('./TitleBar', () => ({ TitleBar: () => <div /> }));
+vi.mock('./TitleBar', () => ({ TitleBar: () => <div data-testid="titlebar" /> }));
 vi.stubGlobal('ResizeObserver', class {
   observe() {}
   unobserve() {}

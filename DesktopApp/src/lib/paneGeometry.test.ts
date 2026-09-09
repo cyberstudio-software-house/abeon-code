@@ -11,7 +11,9 @@ import {
   insertionIndex,
   MIN_PANE_HEIGHT,
   MIN_PANE_WIDTH,
+  STACKED_TAB_BAR_HEIGHT,
   TAB_BAR_HEIGHT,
+  tabBarHeight,
 } from './paneGeometry';
 
 const tree: PaneNode = {
@@ -103,6 +105,20 @@ describe('hitTestPane and dropZone', () => {
     expect(canSplit('top', { width: 800, height: half * 2 - 1 })).toBe(false);
     expect(canSplit('bottom', { width: 800, height: half * 2 })).toBe(true);
     expect(canSplit('top', { width: 800, height: MIN_PANE_HEIGHT * 2 })).toBe(false);
+  });
+
+  it('demands room for the taller bar when a stacked one is passed in', () => {
+    const half = MIN_PANE_HEIGHT + STACKED_TAB_BAR_HEIGHT;
+    expect(canSplit('top', { width: 800, height: half * 2 - 1 }, STACKED_TAB_BAR_HEIGHT)).toBe(false);
+    expect(canSplit('top', { width: 800, height: half * 2 }, STACKED_TAB_BAR_HEIGHT)).toBe(true);
+  });
+});
+
+describe('tabBarHeight', () => {
+  it('reserves a taller strip for the stacked layout', () => {
+    expect(tabBarHeight('classic')).toBe(TAB_BAR_HEIGHT);
+    expect(tabBarHeight('stacked')).toBe(STACKED_TAB_BAR_HEIGHT);
+    expect(STACKED_TAB_BAR_HEIGHT).toBeGreaterThan(TAB_BAR_HEIGHT);
   });
 });
 

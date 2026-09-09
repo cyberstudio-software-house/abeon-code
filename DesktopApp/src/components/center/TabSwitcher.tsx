@@ -3,7 +3,7 @@ import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { groupTabsByProject } from '../../lib/tabGrouping';
 import { orderTabsByMru, wrapIndex } from '../../lib/tabSwitcher';
-import { TabActivityDot } from './TabBar';
+import { TabActivityDot } from './TabItem';
 import type { Tab } from '../../store/tabsSlice';
 
 function SwitcherIcon({ tab }: { tab: Tab }) {

@@ -19,6 +19,8 @@ import { DragHandle, clamp } from './DragHandle';
 import { checkForUpdate, type AvailableUpdate } from '../../lib/updater';
 import { UpdateDialog } from '../dialogs/UpdateDialog';
 
+const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
+
 const LEFT_MIN = 200;
 const LEFT_MAX = 420;
 const RIGHT_MIN = 220;
@@ -32,6 +34,7 @@ export function AppShell() {
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
   const layout = useStore(s => s.layout);
+  const tabLayoutMode = useStore(s => s.tabLayoutMode);
   const hasActiveProject = tabs.some(t => t.id === activeTabId);
   const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
   const activeProjectName = useStore(s => {
@@ -191,7 +194,9 @@ export function AppShell() {
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
-      <TitleBar />
+      {tabLayoutMode === 'classic'
+        ? <TitleBar />
+        : IS_MAC && <div data-tauri-drag-region className="h-7 bg-bg shrink-0" />}
       <div className="flex flex-1 min-h-0">
         <div style={{ width: leftWidth }} className="h-full flex-shrink-0">
           <Sidebar />

@@ -7,6 +7,7 @@ import type { Provider } from '../types';
 
 export type SortMode = 'manual' | 'alpha' | 'activity';
 export type HistoryViewMode = 'communication' | 'full';
+export type TabLayoutMode = 'classic' | 'stacked';
 
 export type SettingsSlice = {
   theme: ThemeMode;
@@ -27,6 +28,7 @@ export type SettingsSlice = {
   editorPath: string;
   shortcutOverrides: Record<string, string>;
   historyViewMode: HistoryViewMode;
+  tabLayoutMode: TabLayoutMode;
   notificationsEnabled: boolean;
   notificationTrigger: NotificationTrigger;
   showActiveSessions: boolean;
@@ -57,6 +59,7 @@ export type SettingsSlice = {
   setShortcutOverride: (id: string, binding: string) => void;
   resetShortcutOverrides: () => void;
   setHistoryViewMode: (mode: HistoryViewMode) => void;
+  setTabLayoutMode: (mode: TabLayoutMode) => void;
   setNotificationsEnabled: (v: boolean) => void;
   setNotificationTrigger: (t: NotificationTrigger) => void;
   setShowActiveSessions: (v: boolean) => void;
@@ -87,6 +90,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   editorPath: '',
   shortcutOverrides: {},
   historyViewMode: 'full',
+  tabLayoutMode: 'classic',
   notificationsEnabled: true,
   notificationTrigger: 'both',
   showActiveSessions: true,
@@ -124,6 +128,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
     set({ shortcutOverrides: { ...get().shortcutOverrides, [id]: binding } }),
   resetShortcutOverrides: () => set({ shortcutOverrides: {} }),
   setHistoryViewMode: (historyViewMode) => set({ historyViewMode }),
+  setTabLayoutMode: (tabLayoutMode) => set({ tabLayoutMode }),
   setNotificationsEnabled: (notificationsEnabled) => set({ notificationsEnabled }),
   setNotificationTrigger: (notificationTrigger) => set({ notificationTrigger }),
   setShowActiveSessions: (showActiveSessions) => set({ showActiveSessions }),

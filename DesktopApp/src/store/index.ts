@@ -60,6 +60,7 @@ type Persisted = {
   editorPath?: string;
   shortcutOverrides?: Record<string, string>;
   historyViewMode?: 'communication' | 'full';
+  tabLayoutMode?: 'classic' | 'stacked';
   notificationsEnabled?: boolean;
   notificationTrigger?: 'turnEnd' | 'questionsOnly' | 'both';
   showActiveSessions?: boolean;
@@ -79,6 +80,7 @@ const PERSISTED_KEYS = [
   'editorPath',
   'shortcutOverrides',
   'historyViewMode',
+  'tabLayoutMode',
   'notificationsEnabled',
   'notificationTrigger',
   'showActiveSessions',
@@ -112,6 +114,7 @@ function pickPersistedFields(state: AppState): Persisted {
     editorPath: state.editorPath,
     shortcutOverrides: state.shortcutOverrides,
     historyViewMode: state.historyViewMode,
+    tabLayoutMode: state.tabLayoutMode,
     notificationsEnabled: state.notificationsEnabled,
     notificationTrigger: state.notificationTrigger,
     showActiveSessions: state.showActiveSessions,
@@ -205,6 +208,9 @@ function applyPersistedToState(p: Persisted) {
   }
   if (p.historyViewMode === 'communication' || p.historyViewMode === 'full') {
     patch.historyViewMode = p.historyViewMode;
+  }
+  if (p.tabLayoutMode === 'classic' || p.tabLayoutMode === 'stacked') {
+    patch.tabLayoutMode = p.tabLayoutMode;
   }
   if (p.notificationsEnabled !== undefined) patch.notificationsEnabled = p.notificationsEnabled;
   if (p.showActiveSessions !== undefined) patch.showActiveSessions = p.showActiveSessions;

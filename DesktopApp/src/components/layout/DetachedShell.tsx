@@ -14,6 +14,8 @@ import { isTabLiveProcess } from '../../lib/tabProcess';
 import { visibleSessionIds } from '../../lib/visibleTabs';
 import type { WindowMode } from '../../lib/windowMode';
 
+const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
+
 const RIGHT_MIN = 220;
 const RIGHT_MAX = 480;
 
@@ -21,6 +23,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
   const isGroup = mode.view === 'group';
   const projectId = mode.projectId;
   const rightWidth = useStore(s => s.rightWidth);
+  const tabLayoutMode = useStore(s => s.tabLayoutMode);
   const setRightWidth = useStore(s => s.setRightWidth);
   const loadProjects = useStore(s => s.loadProjects);
   const loadInitialSessions = useStore(s => s.loadInitialSessions);
@@ -105,7 +108,9 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
-      <TitleBar />
+      {tabLayoutMode === 'classic'
+        ? <TitleBar />
+        : IS_MAC && <div data-tauri-drag-region className="h-7 bg-bg shrink-0" />}
       <div className="flex flex-1 min-h-0">
         <main className="flex-1 h-full min-w-0 bg-bg flex flex-col">
           <PaneLayout detachedProjectId={projectId} />

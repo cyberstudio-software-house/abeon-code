@@ -21,7 +21,7 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
   - `layout/AppShell.tsx` — three-column shell with draggable resizers; persists widths via store.
   - `layout/TitleBar.tsx` — custom titlebar.
   - `sidebar/` — left column: project list, sessions, sort menu, search.
-  - `center/` — middle column: `CenterPanel` → `PaneLayout` (renders the pane tree: one `TabBar` per pane, one `TabPanel` content layer per tab, `PaneResizers`, `PaneDragOverlay` + `usePaneDrag` for the tab-drag gesture). **Tabs and panes are managed here.**
+  - `center/` — middle column: `CenterPanel` → `PaneLayout` (renders the pane tree: one tab bar per pane, one `TabPanel` content layer per tab, `PaneResizers`, `PaneDragOverlay` + `usePaneDrag` for the tab-drag gesture). **Tabs and panes are managed here.**
   - `right/` — right column: Git panel (`GitSection` with tabs: working-tree changes / commit history via `GitHistory` + `CommitDiffDialog`), Actions list, runnable scripts.
   - `terminal/TerminalView.tsx` — xterm wrapper for any PTY (claude, action, shell).
   - `history/` — session history viewer (markdown blocks).
@@ -69,7 +69,27 @@ Three tab kinds:
 - `action` — running script with `status: 'running' | 'exited'`.
 - `terminal` — bare shell PTY.
 
-Closing a tab with an active process (`session+terminal`, `action`, `terminal`) **must** route through the `ConfirmDialog` in `TabBar.tsx`. Helpers there: `isActiveProcess()` + `closeWithGuard()`. Close triggers: X button, middle-click on tab, Ctrl/Cmd+W (global capture-phase listener).
+Closing a tab with an active process (`session+terminal`, `action`, `terminal`) **must** route through
+the `ConfirmDialog` owned by `useTabBarActions.tsx`. Helpers there: `isActiveProcess()` +
+`closeWithGuard()`. Close triggers: X button, middle-click on tab, Ctrl/Cmd+W (global capture-phase
+listener).
+
+### Tab bar layout modes
+
+Setting `tabLayoutMode` (`'classic' | 'stacked'`, persisted) picks the renderer `PaneLayout` mounts
+per pane:
+
+- `classic` — `TabBar.tsx`: one 32 px row, projects collapsed into inline groups; `TitleBar` visible.
+- `stacked` — `StackedTabBar.tsx`: 60 px, projects on the top row and the sessions of the active
+  tab's project below (with `+`/`$`); `TitleBar` hidden so the side columns reach the top of the
+  window (on macOS a 28 px `data-tauri-drag-region` strip replaces it, because `titleBarStyle:
+  "Overlay"` floats the traffic lights over the content).
+
+Both renderers share `useTabBarActions.tsx` (close guards, rename, context menus, detach, Ctrl+W)
+and `TabItem.tsx`. The bar's height is **not** a constant: `tabBarHeight(mode)` in
+`lib/paneGeometry.ts` feeds `PaneLayout` (content-layer offsets), `usePaneDrag` (`overTabBar`,
+`canSplit`) and `PaneResizers` (minimum pane height). A new renderer must be added there too, or
+content layers will overlap the bar.
 
 ## Detached windows
 

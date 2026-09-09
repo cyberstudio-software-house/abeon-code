@@ -31,7 +31,7 @@ Element.prototype.scrollIntoView = vi.fn();
 
 import { useStore } from '../../store';
 import { PaneLayout } from './PaneLayout';
-import { MIN_PANE_WIDTH, TAB_BAR_HEIGHT } from '../../lib/paneGeometry';
+import { MIN_PANE_HEIGHT, MIN_PANE_WIDTH, STACKED_TAB_BAR_HEIGHT, TAB_BAR_HEIGHT } from '../../lib/paneGeometry';
 import { createLeaf, findLeaf, leaves, type PaneNode, type PaneSplit } from '../../lib/paneTree';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
 import type { Tab } from '../../store/tabsSlice';
@@ -65,6 +65,7 @@ describe('PaneLayout', () => {
       projects: [{ id: 1, name: 'P', path: '/p' }] as never,
       layout: createLeaf(ROOT_PANE_ID, ['t1', 't2'], 't1'),
       focusedPaneId: ROOT_PANE_ID,
+      tabLayoutMode: 'classic',
     });
   });
 
@@ -351,6 +352,35 @@ describe('PaneLayout', () => {
     expect(useStore.getState().activeTabId).toBe('t2');
   });
 
+  it('treats a drop inside the taller stacked bar as a reorder, not a split', () => {
+    act(() => { useStore.setState({ tabLayoutMode: 'stacked' }); });
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    const tab = container.querySelector('[data-tab-id="t2"]') as HTMLElement;
+
+    fireEvent.pointerDown(tab, pointerAt(10, 45));
+    fireEvent.pointerMove(window, pointerAt(500, 45));
+    fireEvent.pointerUp(window, pointerAt(500, 45));
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(1);
+  });
+
+  it('clamps a vertical resize to leave room for the stacked bar', () => {
+    act(() => {
+      useStore.setState({ tabLayoutMode: 'stacked' });
+      useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'col', false, 't2');
+    });
+    const { container } = render(<PaneLayout />);
+    stubBox(container.firstElementChild as HTMLElement, 1000, 800);
+    const handle = container.querySelector('[role="separator"]') as HTMLElement;
+
+    fireEvent.mouseDown(handle, { clientX: 500, clientY: 400 });
+    fireEvent.mouseMove(window, { clientX: 500, clientY: 10 });
+
+    const root = useStore.getState().layout as PaneSplit;
+    expect(root.sizes[0]).toBeCloseTo((MIN_PANE_HEIGHT + STACKED_TAB_BAR_HEIGHT) / 800);
+  });
+
   it('ignores a pointer movement below the drag threshold', () => {
     const { container } = render(<PaneLayout />);
     stubContainerBox(container);
@@ -576,5 +606,34 @@ describe('PaneLayout', () => {
     fireEvent.pointerUp(window, pointerAt(200, 10));
 
     expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.tabIds).toEqual(['t2', 't1', 't3']);
+  });
+});
+
+describe('PaneLayout tab layout mode', () => {
+  beforeEach(() => {
+    useStore.setState({
+      tabs: [terminalTab('t1', 'Lewy')],
+      activeTabId: 't1',
+      mruOrder: ['t1'],
+      projects: [{ id: 1, name: 'P', path: '/p' }] as never,
+      layout: createLeaf(ROOT_PANE_ID, ['t1'], 't1'),
+      focusedPaneId: ROOT_PANE_ID,
+      tabLayoutMode: 'classic',
+    });
+  });
+
+  it('keeps the single-row bar and its height in the classic mode', () => {
+    const { container } = render(<PaneLayout />);
+    expect(container.querySelector('[data-project-tab-id]')).toBeNull();
+    const layer = container.querySelector('[data-tab-layer="t1"]') as HTMLElement;
+    expect(layer.style.top).toBe(`calc(0% + ${TAB_BAR_HEIGHT}px)`);
+  });
+
+  it('renders the stacked bar and reserves its taller height', () => {
+    act(() => { useStore.setState({ tabLayoutMode: 'stacked' }); });
+    const { container } = render(<PaneLayout />);
+    expect(container.querySelector('[data-project-tab-id="1"]')).not.toBeNull();
+    const layer = container.querySelector('[data-tab-layer="t1"]') as HTMLElement;
+    expect(layer.style.top).toBe(`calc(0% + ${STACKED_TAB_BAR_HEIGHT}px)`);
   });
 });

@@ -61,3 +61,16 @@ describe('settingsSlice showActiveSessions', () => {
     expect(useStore.getState().showActiveSessions).toBe(false);
   });
 });
+
+describe('settingsSlice tabLayoutMode', () => {
+  it('defaults to the classic single-row tab bar', () => {
+    expect(useStore.getState().tabLayoutMode).toBe('classic');
+  });
+
+  it('setTabLayoutMode switches to the stacked layout', () => {
+    useStore.getState().setTabLayoutMode('stacked');
+    expect(useStore.getState().tabLayoutMode).toBe('stacked');
+    useStore.getState().setTabLayoutMode('classic');
+    expect(useStore.getState().tabLayoutMode).toBe('classic');
+  });
+});

@@ -4,7 +4,7 @@ import { act, render, waitFor } from '@testing-library/react';
 vi.mock('../sidebar/Sidebar', () => ({ Sidebar: () => <div /> }));
 vi.mock('../center/CenterPanel', () => ({ CenterPanel: () => <div /> }));
 vi.mock('../right/RightPanel', () => ({ RightPanel: () => <div /> }));
-vi.mock('./TitleBar', () => ({ TitleBar: () => <div /> }));
+vi.mock('./TitleBar', () => ({ TitleBar: () => <div data-testid="titlebar" /> }));
 vi.mock('../center/TabSwitcher', () => ({ TabSwitcher: () => <div /> }));
 vi.mock('../center/ProjectLauncher', () => ({ ProjectLauncher: () => <div /> }));
 vi.mock('../../lib/updater', () => ({ checkForUpdate: async () => null }));
@@ -110,5 +110,28 @@ describe('AppShell attention across panes', () => {
     expect(attention.has('s3')).toBe(false);
     expect(attention.has('s2')).toBe(false);
     expect(attention.has('s1')).toBe(true);
+  });
+});
+
+describe('AppShell tab layout mode', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(tauri, 'setWindowTitle').mockResolvedValue(undefined);
+    vi.spyOn(tauri, 'onCliOpenPath').mockResolvedValue(() => {});
+    vi.spyOn(tauri, 'onNotificationActivate').mockResolvedValue(() => {});
+    vi.spyOn(tauri, 'onSessionAttention').mockResolvedValue(() => {});
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([]);
+    useStore.setState({ tabs: [], activeTabId: null, tabLayoutMode: 'classic' });
+  });
+
+  it('keeps the header row in the classic mode', () => {
+    const { queryByTestId } = render(<AppShell />);
+    expect(queryByTestId('titlebar')).not.toBeNull();
+  });
+
+  it('drops the header row in the stacked mode so the side panels reach the top', () => {
+    act(() => { useStore.setState({ tabLayoutMode: 'stacked' }); });
+    const { queryByTestId } = render(<AppShell />);
+    expect(queryByTestId('titlebar')).toBeNull();
   });
 });
