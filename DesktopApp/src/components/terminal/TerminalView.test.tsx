@@ -9,6 +9,7 @@ const probe = vi.hoisted(() => ({
   selection: '',
   selectionCbs: [] as Array<() => void>,
   keyHandlers: [] as Array<(e: KeyboardEvent) => boolean>,
+  openedContainers: [] as HTMLElement[],
 }));
 
 vi.mock('@xterm/xterm', () => ({
@@ -18,7 +19,7 @@ vi.mock('@xterm/xterm', () => ({
     options: Record<string, unknown> = {};
     buffer = { active: { getLine: () => null } };
     loadAddon() {}
-    open() {}
+    open(container: HTMLElement) { probe.openedContainers.push(container); }
     attachCustomKeyEventHandler(cb: (e: KeyboardEvent) => boolean) { probe.keyHandlers.push(cb); }
     registerLinkProvider() {}
     getSelection() { return probe.selection; }
@@ -81,6 +82,7 @@ describe('TerminalView focus', () => {
     probe.writes = [];
     probe.sinks = [];
     probe.spawned = 0;
+    probe.openedContainers = [];
     useStore.setState({
       projects: [{ id: 1, name: 'P', path: '/p' }] as never,
       activeAgentPtyId: null,
@@ -127,6 +129,15 @@ describe('TerminalView focus', () => {
 
     expect(probe.writes).toEqual([new Uint8Array([104, 105])]);
     expect(probe.focusCalls).toBe(0);
+  });
+
+  it('keeps terminal padding outside the element measured by FitAddon', async () => {
+    await act(async () => { render(<TerminalView projectId={1} kind="agent" sessionId="s1" visible focused />); });
+
+    const container = probe.openedContainers[0];
+    expect(container).toHaveClass('h-full', 'w-full');
+    expect(container).not.toHaveClass('p-4', 'pb-6');
+    expect(container.parentElement).toHaveClass('h-full', 'w-full', 'p-4', 'pb-6');
   });
 });
 

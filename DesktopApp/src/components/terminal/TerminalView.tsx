@@ -351,5 +351,9 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     };
   }, []);
 
-  return <div ref={containerRef} className="h-full w-full bg-bg-elev p-4 pb-6" />;
+  return (
+    <div className="h-full w-full bg-bg-elev p-4 pb-6">
+      <div ref={containerRef} className="h-full w-full" />
+    </div>
+  );
 }
