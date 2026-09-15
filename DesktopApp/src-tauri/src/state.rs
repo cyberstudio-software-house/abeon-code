@@ -46,6 +46,18 @@ impl OpenCodeStartRegistry {
         }
     }
 
+    pub fn release_after(
+        self: Arc<Self>,
+        project_id: i64,
+        token: String,
+        delay: std::time::Duration,
+    ) {
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(delay).await;
+            self.release(project_id, &token);
+        });
+    }
+
     pub fn resolve_pty(&self, pty_id: &str) {
         self.pending
             .lock()
@@ -142,6 +154,19 @@ mod tests {
         registry.release(1, &first);
         assert!(registry.claim(1).is_err());
         registry.release(1, &second);
+        assert!(registry.claim(1).is_ok());
+    }
+
+    #[tokio::test]
+    async fn opencode_start_release_waits_for_discovery_grace_period() {
+        let registry = Arc::new(OpenCodeStartRegistry::default());
+        let token = registry.claim(1).unwrap();
+        registry
+            .clone()
+            .release_after(1, token, std::time::Duration::from_millis(20));
+
+        assert!(registry.claim(1).is_err());
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         assert!(registry.claim(1).is_ok());
     }
 }

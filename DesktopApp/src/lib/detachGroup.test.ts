@@ -25,6 +25,7 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
 
 import { summarizeDetach, detachSummaryMessage, buildDetachPayload, detachProjectGroup, focusExistingGroupWindow } from './detachGroup';
+import { detachSessionTab } from './detachSession';
 import { processManager } from './processManager';
 import { tauri } from './tauri';
 import type { Tab } from '../store/tabsSlice';
@@ -92,6 +93,18 @@ describe('detachProjectGroup', () => {
     expect(detachTabs).not.toHaveBeenCalled();
   });
 
+  it('does not detach a group with an unresolved OpenCode session', async () => {
+    const detachTabs = vi.fn();
+    const pendingTabs: Tab[] = [
+      { kind: 'session', id: 'new-open', projectId: 5, sessionId: 'new-open', title: 'OpenCode', mode: 'terminal', provider: 'opencode', fresh: true, ptyId: 'pty-open' },
+    ];
+
+    await detachProjectGroup({ projectId: 5, projectName: 'P', tabs: pendingTabs, activeTabId: 'new-open', runningActions, detachTabs });
+
+    expect(windowCtor).not.toHaveBeenCalled();
+    expect(detachTabs).not.toHaveBeenCalled();
+  });
+
   it('removes non-action tabs on created, and action tabs only after the new window is ready', async () => {
     const detachTabs = vi.fn();
     await detachProjectGroup({ projectId: 5, projectName: 'P', tabs, activeTabId: 'action:4', runningActions, detachTabs });
@@ -112,6 +125,25 @@ describe('detachProjectGroup', () => {
     await detachProjectGroup({ projectId: 5, projectName: 'P', tabs, activeTabId: null, runningActions, detachTabs });
     readyCb('project-99');
     expect(processManager.release).not.toHaveBeenCalled();
+  });
+});
+
+describe('detachSessionTab', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getByLabel.mockResolvedValue(null);
+  });
+
+  it('does not detach an unresolved OpenCode session', async () => {
+    const closeTab = vi.fn();
+    const tab: Extract<Tab, { kind: 'session' }> = {
+      kind: 'session', id: 'new-open', projectId: 5, sessionId: 'new-open', title: 'OpenCode', mode: 'terminal', provider: 'opencode', fresh: true, ptyId: 'pty-open',
+    };
+
+    await detachSessionTab(tab, closeTab);
+
+    expect(windowCtor).not.toHaveBeenCalled();
+    expect(closeTab).not.toHaveBeenCalled();
   });
 });
 

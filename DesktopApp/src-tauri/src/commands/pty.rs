@@ -9,6 +9,8 @@ use crate::state::AppState;
 use crate::db::{projects_repo, actions_repo};
 use crate::remote::dispatch::session_to_bind;
 
+const OPENCODE_DISCOVERY_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(15);
+
 #[derive(Deserialize, TS)]
 #[ts(export, export_to = "../../src/types/")]
 #[serde(rename_all = "camelCase", tag = "kind")]
@@ -233,7 +235,11 @@ pub fn spawn_pty(
             rows,
             &env,
             Some(std::sync::Arc::new(move |_| {
-                registry.release(project_id, &release_token);
+                registry.clone().release_after(
+                    project_id,
+                    release_token.clone(),
+                    OPENCODE_DISCOVERY_GRACE_PERIOD,
+                );
             })),
         )
     } else {

@@ -5,6 +5,7 @@ import type { RunningAction } from '../store/actionsSlice';
 import { buildGroupWindowUrl, groupWindowLabel, type DetachedTab } from './windowMode';
 import { processManager } from './processManager';
 import { tauri } from './tauri';
+import { isPendingOpenCodeSession } from './detachSession';
 
 export type DetachSummary = { sessions: number; terminals: number; runningActions: number };
 
@@ -98,6 +99,13 @@ export async function detachProjectGroup(args: {
 }): Promise<void> {
   const { projectId, projectName, tabs, activeTabId, runningActions, detachTabs } = args;
   if (tabs.length === 0) return;
+  const hasPendingOpenCodeSession = tabs.some(
+    (tab) => tab.kind === 'session' && isPendingOpenCodeSession(tab),
+  );
+  if (hasPendingOpenCodeSession) {
+    toast.info('Poczekaj na powiązanie sesji OpenCode przed odłączeniem projektu');
+    return;
+  }
   if (await focusExistingGroupWindow(projectId)) return;
 
   const label = groupWindowLabel(projectId);

@@ -3,10 +3,18 @@ import { toast } from 'sonner';
 import type { Tab } from '../store/tabsSlice';
 import { buildSessionWindowUrl, sessionWindowLabel } from './windowMode';
 
+export function isPendingOpenCodeSession(tab: Extract<Tab, { kind: 'session' }>): boolean {
+  return tab.provider === 'opencode' && tab.fresh === true && !tab.linkedSessionId;
+}
+
 export async function detachSessionTab(
   tab: Extract<Tab, { kind: 'session' }>,
   closeTab: (id: string) => void,
 ): Promise<void> {
+  if (isPendingOpenCodeSession(tab)) {
+    toast.info('Poczekaj na powiązanie sesji OpenCode przed odłączeniem karty');
+    return;
+  }
   const label = sessionWindowLabel(tab.sessionId);
 
   // Guard against two PTYs for the same session: focus an existing window.
