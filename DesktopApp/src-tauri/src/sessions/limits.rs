@@ -114,6 +114,7 @@ pub fn read_provider_limits(home: &Path, provider: Provider) -> ProviderLimits {
     match provider {
         Provider::Claude => claude_limits_root(home),
         Provider::Codex => codex_limits_root(home),
+        Provider::Opencode => ProviderLimits::default(),
     }
 }
 

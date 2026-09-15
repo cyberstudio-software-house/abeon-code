@@ -7,6 +7,7 @@ use ts_rs::TS;
 pub enum Provider {
     Claude,
     Codex,
+    Opencode,
 }
 
 impl Provider {
@@ -14,6 +15,7 @@ impl Provider {
         match self {
             Provider::Claude => "claude",
             Provider::Codex => "codex",
+            Provider::Opencode => "opencode",
         }
     }
 }
@@ -26,12 +28,15 @@ mod tests {
     fn serializes_camel_case() {
         assert_eq!(serde_json::to_string(&Provider::Claude).unwrap(), "\"claude\"");
         assert_eq!(serde_json::to_string(&Provider::Codex).unwrap(), "\"codex\"");
+        assert_eq!(serde_json::to_string(&Provider::Opencode).unwrap(), "\"opencode\"");
     }
 
     #[test]
     fn deserializes_camel_case() {
         assert_eq!(serde_json::from_str::<Provider>("\"codex\"").unwrap(), Provider::Codex);
         assert_eq!(serde_json::from_str::<Provider>("\"claude\"").unwrap(), Provider::Claude);
+        assert_eq!(serde_json::from_str::<Provider>("\"opencode\"").unwrap(), Provider::Opencode);
+        assert_eq!(Provider::Opencode.id(), "opencode");
     }
 
     #[test]

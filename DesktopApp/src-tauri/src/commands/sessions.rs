@@ -4,7 +4,7 @@ use tauri::{AppHandle, State};
 use crate::domain::{Project, Provider, SessionMeta, SessionHistory, SessionActivity, ActiveSession};
 use crate::error::{AppError, AppResult};
 use crate::sessions::encoding::encode_project_path;
-use crate::sessions::{codex, reader};
+use crate::sessions::{codex, opencode, reader};
 use crate::sessions::reader::session_file;
 use crate::state::AppState;
 use crate::db::{projects_repo, session_titles_repo};
@@ -48,7 +48,20 @@ fn list_project_sessions(
     let codex_dir = codex::reader::codex_root()?;
     let proj_path = proj.path.clone();
     let codex_list = catch(move || Ok(codex::reader::list_for_cwd(&codex_dir, &proj_path, project_id, window)))?;
-    let mut sessions = merge_session_lists(claude, codex_list, window, 0);
+    let opencode_list = match opencode::reader::database_path() {
+        Some(database_path) => {
+            let project_path = proj.path.clone();
+            catch(move || {
+                opencode::reader::list_for_directory(&database_path, &project_path, window).map(|rows| {
+                    rows.into_iter()
+                        .map(|row| opencode::reader::into_session_meta(row, project_id))
+                        .collect()
+                })
+            })?
+        }
+        None => Vec::new(),
+    };
+    let mut sessions = merge_session_lists(claude, codex_list, opencode_list, window, 0);
     let titles = session_titles_repo::get_all(c, project_id);
     for s in &mut sessions {
         if let Some(t) = titles.get(&s.id) {
@@ -93,6 +106,15 @@ pub fn read_session_history(
             let codex_dir = codex::reader::codex_root()?;
             let sid = session_id.clone();
             catch(move || codex::reader::read_history(&codex_dir, project_id, &sid, limit, before_uuid.as_deref()))?
+        }
+        Provider::Opencode => {
+            let database_path = opencode::reader::database_path()
+                .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
+            let sid = session_id.clone();
+            catch(move || {
+                opencode::reader::read_history(&database_path, &sid, limit, before_uuid.as_deref())
+                    .map(|history| opencode::reader::into_session_history(history, project_id))
+            })?
         }
     };
     if let Some(t) = session_titles_repo::get(&c, project_id, &session_id) {
@@ -150,6 +172,11 @@ pub fn open_session_watch(
     provider: Option<Provider>,
 ) -> AppResult<()> {
     let prov = provider.unwrap_or(Provider::Claude);
+    if prov == Provider::Opencode {
+        let database_path = opencode::reader::database_path()
+            .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
+        return state.session_watchers.open_opencode(app, &session_id, database_path);
+    }
     let path = match prov {
         Provider::Claude => {
             let c = state.db.get()?;
@@ -162,6 +189,7 @@ pub fn open_session_watch(
             codex::reader::find_session(&codex_dir, &session_id)
                 .ok_or_else(|| AppError::NotFound(session_id.clone()))?
         }
+        Provider::Opencode => unreachable!(),
     };
     state.session_watchers.open(app, &session_id, path, prov)
 }
@@ -191,7 +219,11 @@ pub fn count_sessions(
     let codex_count = codex::reader::codex_root()
         .map(|root| codex::reader::count_for_cwd(&root, &proj.path))
         .unwrap_or(0);
-    Ok(claude_count + codex_count)
+    let opencode_count = opencode::reader::database_path()
+        .map(|path| opencode::reader::count_for_directory(&path, &proj.path))
+        .transpose()?
+        .unwrap_or(0);
+    Ok(claude_count + codex_count + opencode_count)
 }
 
 #[tauri::command]
@@ -214,6 +246,15 @@ pub fn export_session(
             let codex_dir = codex::reader::codex_root()?;
             let sid = session_id.clone();
             catch(move || codex::reader::read_history(&codex_dir, project_id, &sid, None, None))?
+        }
+        Provider::Opencode => {
+            let database_path = opencode::reader::database_path()
+                .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
+            let sid = session_id.clone();
+            catch(move || {
+                opencode::reader::read_history(&database_path, &sid, None, None)
+                    .map(|history| opencode::reader::into_session_history(history, project_id))
+            })?
         }
     };
     match format.as_str() {
@@ -268,6 +309,11 @@ pub async fn generate_session_title(
                 let path = codex::reader::find_session(&codex_dir, &session_id)
                     .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
                 codex::reader::first_user_prompt(&path)?
+            }
+            Provider::Opencode => {
+                let database_path = opencode::reader::database_path()
+                    .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
+                opencode::reader::first_user_prompt(&database_path, &session_id)?
             }
         };
         (proj.path.clone(), first)
@@ -345,6 +391,7 @@ pub(crate) async fn run_agent_prompt(
             let _ = std::fs::remove_file(&out_file);
             raw.map_err(|e| AppError::Other(format!("codex exec: nie można odczytać pliku wyjściowego: {e}")))
         }
+        Provider::Opencode => opencode::runner::run_prompt(model.as_deref(), &prompt).await,
     }
 }
 
@@ -369,10 +416,11 @@ fn active_from_metas(project_id: i64, project_name: &str, sessions: Vec<SessionM
 fn merge_session_lists(
     claude: Vec<SessionMeta>,
     codex: Vec<SessionMeta>,
+    opencode: Vec<SessionMeta>,
     limit: usize,
     offset: usize,
 ) -> Vec<SessionMeta> {
-    let mut all: Vec<SessionMeta> = claude.into_iter().chain(codex).collect();
+    let mut all: Vec<SessionMeta> = claude.into_iter().chain(codex).chain(opencode).collect();
     all.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
     all.into_iter().skip(offset).take(limit).collect()
 }
@@ -505,13 +553,14 @@ mod merge_tests {
     fn merge_interleaves_by_mtime_desc_with_offset() {
         let claude = vec![meta("c1", Provider::Claude, 300), meta("c2", Provider::Claude, 100)];
         let codex = vec![meta("x1", Provider::Codex, 200)];
-        let merged = merge_session_lists(claude.clone(), codex.clone(), 10, 0);
+        let opencode = vec![meta("o1", Provider::Opencode, 250)];
+        let merged = merge_session_lists(claude.clone(), codex.clone(), opencode.clone(), 10, 0);
         let ids: Vec<&str> = merged.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(ids, vec!["c1", "x1", "c2"]);
+        assert_eq!(ids, vec!["c1", "o1", "x1", "c2"]);
 
-        let page2 = merge_session_lists(claude, codex, 2, 1);
+        let page2 = merge_session_lists(claude, codex, opencode, 2, 1);
         let ids2: Vec<&str> = page2.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(ids2, vec!["x1", "c2"]);
+        assert_eq!(ids2, vec!["o1", "x1"]);
     }
 }
 

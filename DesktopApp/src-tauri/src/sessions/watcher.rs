@@ -13,11 +13,21 @@ use crate::sessions::activity::{compute_activity_for, compute_activity_with_agen
 use crate::sessions::usage::UsageAccumulator;
 
 struct OpenSession {
-    path: PathBuf,
     provider: Provider,
-    last_offset: u64,
-    lines_seen: usize,
-    usage: UsageAccumulator,
+    source: WatchSource,
+}
+
+enum WatchSource {
+    File {
+        path: PathBuf,
+        last_offset: u64,
+        lines_seen: usize,
+        usage: UsageAccumulator,
+    },
+    OpenCode {
+        database_path: PathBuf,
+        revision: i64,
+    },
 }
 
 pub struct SessionWatchers {
@@ -63,14 +73,17 @@ impl SessionWatchers {
                         }
                     }
                 }
+                Provider::Opencode => {}
             }
             let mut s = self.sessions.lock();
             s.insert(session_id.to_string(), OpenSession {
-                path: path.clone(),
                 provider,
-                last_offset: size,
-                lines_seen,
-                usage: acc,
+                source: WatchSource::File {
+                    path: path.clone(),
+                    last_offset: size,
+                    lines_seen,
+                    usage: acc,
+                },
             });
         }
         let mut w = self.watcher.lock();
@@ -91,6 +104,47 @@ impl SessionWatchers {
         if let Some(watcher) = w.as_mut() {
             let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or(path.clone());
             let _ = watcher.watch(&dir, RecursiveMode::Recursive);
+        }
+        Ok(())
+    }
+
+    pub fn open_opencode(
+        self: &Arc<Self>,
+        app: AppHandle,
+        session_id: &str,
+        database_path: PathBuf,
+    ) -> AppResult<()> {
+        let revision = crate::sessions::opencode::reader::session_revision(&database_path, session_id)?
+            .ok_or_else(|| crate::error::AppError::NotFound(session_id.to_string()))?;
+        self.last_activity.lock().insert(session_id.to_string(), revision.activity);
+        self.sessions.lock().insert(
+            session_id.to_string(),
+            OpenSession {
+                provider: Provider::Opencode,
+                source: WatchSource::OpenCode {
+                    database_path: database_path.clone(),
+                    revision: revision.updated_at,
+                },
+            },
+        );
+
+        let mut watcher = self.watcher.lock();
+        if watcher.is_none() {
+            let self_clone = self.clone();
+            let app_clone = app.clone();
+            let created = notify::recommended_watcher(move |result: notify::Result<Event>| {
+                if let Ok(event) = result {
+                    if matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_)) {
+                        for path in event.paths {
+                            self_clone.handle_change(&app_clone, &path);
+                        }
+                    }
+                }
+            }).map_err(|error| crate::error::AppError::Other(format!("notify: {error}")))?;
+            *watcher = Some(created);
+        }
+        if let (Some(watcher), Some(parent)) = (watcher.as_mut(), database_path.parent()) {
+            let _ = watcher.watch(parent, RecursiveMode::NonRecursive);
         }
         Ok(())
     }
@@ -121,20 +175,34 @@ impl SessionWatchers {
         let mut block_updates: Vec<(String, Vec<HistoryBlock>)> = Vec::new();
         let mut title_updates: Vec<(String, String)> = Vec::new();
         let mut activity_inputs: Vec<(String, PathBuf, Provider)> = Vec::new();
+        let mut opencode_activity: Vec<(String, SessionActivity)> = Vec::new();
+        let mut sync_updates: Vec<String> = Vec::new();
         let mut usage_updates: Vec<(String, crate::domain::UsageSummary)> = Vec::new();
 
         for (sid, sess) in sessions.iter_mut() {
-            if sess.path != changed { continue; }
-            let new_size = match std::fs::metadata(&sess.path) {
+            let WatchSource::File { path, last_offset, lines_seen, usage } = &mut sess.source else {
+                let WatchSource::OpenCode { database_path, revision } = &mut sess.source else { unreachable!() };
+                if !is_opencode_database_event(database_path, changed) { continue; }
+                let Ok(Some(current)) = crate::sessions::opencode::reader::session_revision(database_path, sid) else { continue; };
+                if current.updated_at != *revision {
+                    *revision = current.updated_at;
+                    sync_updates.push(sid.clone());
+                    title_updates.push((sid.clone(), current.title));
+                    opencode_activity.push((sid.clone(), current.activity));
+                }
+                continue;
+            };
+            if path != changed { continue; }
+            let new_size = match std::fs::metadata(&*path) {
                 Ok(m) => m.len(),
                 Err(_) => continue,
             };
-            if new_size <= sess.last_offset {
-                activity_inputs.push((sid.clone(), sess.path.clone(), sess.provider));
+            if new_size <= *last_offset {
+                activity_inputs.push((sid.clone(), path.clone(), sess.provider));
                 continue;
             }
-            let prev_offset = sess.last_offset;
-            let path = sess.path.clone();
+            let prev_offset = *last_offset;
+            let path = path.clone();
             let provider = sess.provider;
 
             // For Codex zst files, byte-offset seeking into a zstd stream is not valid.
@@ -142,16 +210,16 @@ impl SessionWatchers {
             // activity only. For plain .jsonl Codex files we parse appended lines normally.
             let is_zst = path.extension().map(|e| e == "zst").unwrap_or(false);
             let tail = if provider == Provider::Codex && is_zst {
-                sess.last_offset = new_size;
+                *last_offset = new_size;
                 TailResult { blocks: vec![], title: None }
             } else {
-                let tail = read_tail(&path, prev_offset, new_size, provider, &mut sess.usage, &mut sess.lines_seen);
-                sess.last_offset = new_size;
+                let tail = read_tail(&path, prev_offset, new_size, provider, usage, lines_seen);
+                *last_offset = new_size;
                 tail
             };
 
             if provider == Provider::Claude {
-                usage_updates.push((sid.clone(), sess.usage.finalize()));
+                usage_updates.push((sid.clone(), usage.finalize()));
             }
             if !tail.blocks.is_empty() {
                 block_updates.push((sid.clone(), tail.blocks));
@@ -159,11 +227,14 @@ impl SessionWatchers {
             if let Some(title) = tail.title {
                 title_updates.push((sid.clone(), title));
             }
-            activity_inputs.push((sid.clone(), sess.path.clone(), provider));
+            activity_inputs.push((sid.clone(), path, provider));
         }
         drop(sessions);
 
         let bus = self.bus.lock().clone();
+        for sid in sync_updates {
+            let _ = app.emit(&format!("session:{sid}:sync"), serde_json::json!({}));
+        }
         for (sid, blocks) in block_updates {
             let blocks_json = serde_json::json!({ "blocks": &blocks });
             let _ = app.emit(&format!("session:{sid}:append"), &blocks_json);
@@ -189,8 +260,11 @@ impl SessionWatchers {
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
         let mut last = self.last_activity.lock();
-        for (sid, path, provider) in activity_inputs {
-            let new_activity = activity_for_session(provider, &path, now);
+        let mut activity_updates = opencode_activity;
+        activity_updates.extend(activity_inputs.into_iter().map(|(sid, path, provider)| {
+            (sid, activity_for_session(provider, &path, now))
+        }));
+        for (sid, new_activity) in activity_updates {
             let changed_state = last.get(&sid).copied() != Some(new_activity);
             if changed_state {
                 last.insert(sid.clone(), new_activity);
@@ -230,6 +304,12 @@ fn subagent_log_owner(changed: &Path) -> Option<String> {
         .map(|s| s.to_string())
 }
 
+fn is_opencode_database_event(database_path: &Path, changed: &Path) -> bool {
+    if changed == database_path { return true; }
+    let Some(file_name) = database_path.file_name().and_then(|name| name.to_str()) else { return false; };
+    changed == database_path.with_file_name(format!("{file_name}-wal"))
+}
+
 fn activity_for_session(provider: Provider, path: &Path, now_ms: i64) -> SessionActivity {
     match provider {
         Provider::Claude => {
@@ -237,6 +317,7 @@ fn activity_for_session(provider: Provider, path: &Path, now_ms: i64) -> Session
             compute_activity_with_agents(path, running_agents, now_ms)
         }
         Provider::Codex => compute_activity_for(provider, path, now_ms),
+        Provider::Opencode => SessionActivity::Idle,
     }
 }
 
@@ -280,6 +361,7 @@ fn read_tail(path: &Path, from: u64, to: u64, provider: Provider, usage: &mut Us
                     blocks.extend(bs);
                 }
             }
+            Provider::Opencode => {}
         }
     }
     TailResult { blocks, title }
@@ -354,16 +436,27 @@ mod tests {
         assert_eq!(subagent_log_owner(Path::new("/p/enc/s1.jsonl")), None);
     }
 
+    #[test]
+    fn opencode_database_events_accept_database_and_wal_only() {
+        let database = Path::new("/data/opencode/opencode.db");
+        assert!(is_opencode_database_event(database, database));
+        assert!(is_opencode_database_event(database, Path::new("/data/opencode/opencode.db-wal")));
+        assert!(!is_opencode_database_event(database, Path::new("/data/opencode/opencode.db-shm")));
+        assert!(!is_opencode_database_event(database, Path::new("/other/opencode.db-wal")));
+    }
+
     fn watchers_with(session_id: &str) -> Arc<SessionWatchers> {
         let w = SessionWatchers::new();
         w.sessions.lock().insert(
             session_id.to_string(),
             OpenSession {
-                path: PathBuf::from(format!("/p/enc/{session_id}.jsonl")),
                 provider: Provider::Claude,
-                last_offset: 0,
-                lines_seen: 0,
-                usage: UsageAccumulator::default(),
+                source: WatchSource::File {
+                    path: PathBuf::from(format!("/p/enc/{session_id}.jsonl")),
+                    last_offset: 0,
+                    lines_seen: 0,
+                    usage: UsageAccumulator::default(),
+                },
             },
         );
         w

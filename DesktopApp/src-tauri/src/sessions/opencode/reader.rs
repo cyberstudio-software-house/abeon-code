@@ -1,4 +1,4 @@
-use crate::domain::{HistoryBlock, SessionActivity};
+use crate::domain::{HistoryBlock, Provider, SessionActivity, SessionHistory, SessionMeta};
 use crate::error::{AppError, AppResult};
 use crate::sessions::opencode::parser::parse_part;
 use rusqlite::{params, Connection, OpenFlags};
@@ -36,6 +36,30 @@ pub struct SessionRevision {
     pub updated_at: i64,
     pub title: String,
     pub activity: SessionActivity,
+}
+
+pub fn into_session_meta(record: StoredSession, project_id: i64) -> SessionMeta {
+    SessionMeta {
+        id: record.id,
+        project_id,
+        title: record.title,
+        message_count: record.message_count,
+        last_modified: record.updated_at,
+        git_branch: None,
+        cwd: Some(record.directory),
+        activity: record.activity,
+        provider: Provider::Opencode,
+        running_agents: 0,
+        total_agents: 0,
+    }
+}
+
+pub fn into_session_history(history: StoredHistory, project_id: i64) -> SessionHistory {
+    SessionHistory {
+        meta: into_session_meta(history.session, project_id),
+        blocks: history.blocks,
+        has_more_before: history.has_more_before,
+    }
 }
 
 #[derive(Clone, Copy)]

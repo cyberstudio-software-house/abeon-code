@@ -81,6 +81,24 @@ fn build_codex_command(
     cmd
 }
 
+fn build_opencode_command(
+    session_id: Option<&str>,
+    model: Option<&str>,
+    skip_permissions: bool,
+    fresh: bool,
+) -> String {
+    let mut cmd = String::from("opencode");
+    if let Some(id) = session_id.filter(|_| !fresh) {
+        cmd.push_str(&format!(" --session {id}"));
+    } else if let Some(model) = model {
+        cmd.push_str(&format!(" --model {model}"));
+    }
+    if skip_permissions {
+        cmd.push_str(" --auto");
+    }
+    cmd
+}
+
 fn build_agent_command(
     provider: Provider,
     session_id: Option<&str>,
@@ -91,6 +109,7 @@ fn build_agent_command(
     match provider {
         Provider::Claude => build_claude_command(session_id, model, skip_permissions, fresh),
         Provider::Codex => build_codex_command(session_id, model, skip_permissions, fresh),
+        Provider::Opencode => build_opencode_command(session_id, model, skip_permissions, fresh),
     }
 }
 
@@ -632,6 +651,28 @@ mod tests {
         assert_eq!(
             build_agent_command(Provider::Codex, Some("uuid-1"), Some("gpt-x"), false, true),
             "codex -m gpt-x"
+        );
+    }
+
+    #[test]
+    fn opencode_commands_cover_fresh_resume_model_and_permissions() {
+        assert_eq!(
+            build_agent_command(Provider::Opencode, None, None, false, true),
+            "opencode"
+        );
+        assert_eq!(
+            build_agent_command(Provider::Opencode, Some("ses_123"), None, false, false),
+            "opencode --session ses_123"
+        );
+        assert_eq!(
+            build_agent_command(
+                Provider::Opencode,
+                None,
+                Some("anthropic/claude-sonnet-4-5"),
+                true,
+                true,
+            ),
+            "opencode --model anthropic/claude-sonnet-4-5 --auto"
         );
     }
 }

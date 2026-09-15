@@ -55,7 +55,7 @@ pub fn detect_opencode_models(state: State<AppState>) -> Vec<String> {
 
 #[tauri::command]
 pub fn detect_providers(state: State<AppState>) -> Vec<ProviderInfo> {
-    [Provider::Claude, Provider::Codex]
+    [Provider::Claude, Provider::Codex, Provider::Opencode]
         .into_iter()
         .map(|p| ProviderInfo {
             provider: p,

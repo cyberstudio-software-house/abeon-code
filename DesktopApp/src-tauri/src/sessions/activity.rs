@@ -85,6 +85,7 @@ pub fn compute_activity_for(provider: Provider, path: &Path, now_ms: i64) -> Ses
             path,
             now_ms,
         ),
+        Provider::Opencode => SessionActivity::Idle,
     }
 }
 
