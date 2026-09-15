@@ -1,5 +1,5 @@
 use std::path::Path;
-use git2::{Repository, StatusOptions, Status};
+use git2::{BranchType, Repository, StatusOptions, Status};
 use crate::domain::{DiffHunk, DiffLine, DiffResult, GitFile, GitRepo, GitStatus};
 use crate::error::AppResult;
 
@@ -52,11 +52,15 @@ fn repo_status(repo: Repository, label: &str) -> AppResult<GitRepo> {
     let branch = head.as_ref().and_then(|h| h.shorthand().map(String::from));
 
     let (ahead, behind) = match (head.as_ref().and_then(|h| h.target()), branch.as_deref()) {
-        (Some(local_oid), Some(b)) => {
-            let upstream_name = format!("refs/remotes/origin/{b}");
-            match repo.refname_to_id(&upstream_name) {
-                Ok(remote_oid) => repo.graph_ahead_behind(local_oid, remote_oid).unwrap_or((0, 0)),
-                Err(_) => (0, 0),
+        (Some(local_oid), Some(branch_name)) => {
+            let upstream_oid = repo
+                .find_branch(branch_name, BranchType::Local)
+                .ok()
+                .and_then(|branch| branch.upstream().ok())
+                .and_then(|upstream| upstream.get().target());
+            match upstream_oid {
+                Some(remote_oid) => repo.graph_ahead_behind(local_oid, remote_oid).unwrap_or((0, 0)),
+                None => (0, 0),
             }
         }
         _ => (0, 0),
@@ -274,7 +278,25 @@ mod tests {
         assert_eq!(st.repos[0].label, "frontend");
     }
 
-    use super::test_support::{init_repo_with_commit, run_git};
+    use super::test_support::{commit_all, init_repo_with_commit, run_git};
+
+    #[test]
+    fn status_uses_configured_branch_upstream() {
+        let tmp = TempDir::new().unwrap();
+        init_repo_with_commit(tmp.path());
+        run_git(tmp.path(), &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+        fs::write(tmp.path().join("second.txt"), "second\n").unwrap();
+        commit_all(tmp.path(), "second");
+        run_git(tmp.path(), &["update-ref", "refs/remotes/bitbucket/main", "HEAD"]);
+        run_git(tmp.path(), &["config", "branch.main.remote", "bitbucket"]);
+        run_git(tmp.path(), &["config", "branch.main.merge", "refs/heads/main"]);
+
+        let result = status(tmp.path()).unwrap();
+
+        assert_eq!(result.repos[0].ahead, 0);
+        assert_eq!(result.repos[0].behind, 0);
+    }
 
     #[test]
     fn diff_file_modified_returns_add_and_del_lines() {
