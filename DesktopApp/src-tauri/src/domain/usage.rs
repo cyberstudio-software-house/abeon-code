@@ -40,3 +40,22 @@ pub struct UsageSummary {
     #[ts(type = "number | null")]
     pub active_ms: Option<i64>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct RateLimitWindow {
+    pub used_percent: f64,
+    #[ts(type = "number")]
+    pub window_minutes: u64,
+    #[ts(type = "number | null")]
+    pub resets_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderLimits {
+    pub short_window: Option<RateLimitWindow>,
+    pub weekly: Option<RateLimitWindow>,
+}

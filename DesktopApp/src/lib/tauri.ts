@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, DetectedModel, Provider, ProviderInfo } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, DetectedModel, Provider, ProviderInfo } from '../types';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
 import type { ClickUpSpace } from '../types/ClickUpSpace';
@@ -63,6 +63,8 @@ export const tauri = {
     invoke<UsageSummary>('session_usage', { projectId, sessionId }),
   projectUsage: (projectId: number) =>
     invoke<UsageSummary>('project_usage', { projectId }),
+  providerLimits: (provider: Provider) =>
+    invoke<ProviderLimits>('provider_limits', { provider }),
   detectModels: (force?: boolean) =>
     invoke<DetectedModel[]>('detect_models', { force }),
   onSessionUsage: (sessionId: string, cb: (usage: UsageSummary) => void): Promise<UnlistenFn> =>

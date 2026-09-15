@@ -27,6 +27,8 @@ export type { GitCommitDetail } from './GitCommitDetail';
 export type { TokenTotals } from './TokenTotals';
 export type { ModelUsage } from './ModelUsage';
 export type { UsageSummary } from './UsageSummary';
+export type { ProviderLimits } from './ProviderLimits';
+export type { RateLimitWindow } from './RateLimitWindow';
 export type { ProviderInfo } from './ProviderInfo';
 export type { SubagentInfo } from './SubagentInfo';
 export type { SubagentStatus } from './SubagentStatus';

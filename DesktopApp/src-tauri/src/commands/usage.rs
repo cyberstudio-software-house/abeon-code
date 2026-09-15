@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use tauri::State;
-use crate::domain::UsageSummary;
+use crate::domain::{Provider, ProviderLimits, UsageSummary};
 use crate::error::{AppError, AppResult};
 use crate::sessions::usage::UsageAccumulator;
 use crate::state::AppState;
@@ -93,4 +93,10 @@ pub fn project_usage(
 
     state.project_usage_cache.lock().insert(project_id, (max_mtime, summary.clone()));
     Ok(summary)
+}
+
+#[tauri::command]
+pub fn provider_limits(provider: Provider) -> AppResult<ProviderLimits> {
+    let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home".into()))?;
+    Ok(crate::sessions::limits::read_provider_limits(&home, provider))
 }

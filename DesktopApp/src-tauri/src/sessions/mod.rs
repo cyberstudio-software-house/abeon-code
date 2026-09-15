@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod codex;
 pub mod encoding;
+pub mod limits;
 pub mod parser;
 pub mod pricing;
 pub mod reader;
