@@ -10,6 +10,7 @@ target/
 .env.local
 .playwright-mcp/
 .superpowers/
+.worktrees/
 # local secrets — never commit (Centrifugo token secret etc.)
 docs/centrifungo.md
 *.secret
