@@ -117,6 +117,7 @@ pub fn run() {
             commands::models::detect_models,
             commands::providers::detect_providers,
             commands::providers::detect_codex_models,
+            commands::providers::detect_opencode_models,
             commands::settings::open_in_editor,
             commands::settings::list_available_editors,
             commands::settings::open_project_in_editor,

@@ -1,8 +1,9 @@
-use serde::Serialize;
-use tauri::State;
-use ts_rs::TS;
 use crate::domain::Provider;
 use crate::state::AppState;
+use serde::Serialize;
+use std::collections::HashSet;
+use tauri::State;
+use ts_rs::TS;
 
 #[derive(Serialize, TS)]
 #[ts(export, export_to = "../../src/types/")]
@@ -20,6 +21,38 @@ pub fn detect_codex_models() -> Vec<String> {
     }
 }
 
+pub(crate) fn parse_opencode_models(output: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|model| !model.is_empty())
+        .filter(|model| seen.insert((*model).to_string()))
+        .map(str::to_string)
+        .collect()
+}
+
+#[tauri::command]
+pub fn detect_opencode_models(state: State<AppState>) -> Vec<String> {
+    let Some(binary) = crate::commands::models::locate_binary(&state, "opencode") else {
+        return Vec::new();
+    };
+    let connection = match state.db.get() {
+        Ok(connection) => connection,
+        Err(_) => return Vec::new(),
+    };
+    let shell = crate::commands::settings::resolve_shell(&connection);
+    let environment = crate::commands::settings::ensure_shell_env(&state, &shell);
+    std::process::Command::new(binary)
+        .arg("models")
+        .envs(environment)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| parse_opencode_models(&String::from_utf8_lossy(&output.stdout)))
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub fn detect_providers(state: State<AppState>) -> Vec<ProviderInfo> {
     [Provider::Claude, Provider::Codex]
@@ -29,4 +62,19 @@ pub fn detect_providers(state: State<AppState>) -> Vec<ProviderInfo> {
             available: crate::commands::models::locate_binary(&state, p.id()).is_some(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_opencode_models_by_line() {
+        assert_eq!(
+            parse_opencode_models(
+                "anthropic/claude-sonnet-4-5\nopenai/gpt-5.4\nanthropic/claude-sonnet-4-5\n"
+            ),
+            vec!["anthropic/claude-sonnet-4-5", "openai/gpt-5.4"]
+        );
+    }
 }
