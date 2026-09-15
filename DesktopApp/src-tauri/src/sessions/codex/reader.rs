@@ -148,6 +148,7 @@ pub(crate) fn is_meta_codex_text(text: &str) -> bool {
         || t.starts_with("<environment_context>")
         || t.starts_with("<ENVIRONMENT_CONTEXT>")
         || t.starts_with("<turn_context>")
+        || t.starts_with("# AGENTS.md instructions for ")
 }
 
 fn read_first_user_text(path: &Path) -> Option<String> {
@@ -377,6 +378,22 @@ mod tests {
         assert_eq!(m.provider, crate::domain::Provider::Codex);
         assert_eq!(m.title, "fix the login bug");
         assert_eq!(m.cwd.as_deref(), Some("/proj/match"));
+    }
+
+    #[test]
+    fn list_for_cwd_uses_first_real_prompt_after_project_instructions() {
+        let td = TempDir::new().unwrap();
+        let content = format!(
+            "{}\n{}\n{}\n",
+            meta_line("dddd5555-dddd-dddd-dddd-dddddddddddd", "/proj/match"),
+            r##"{"timestamp":"2026-09-15T10:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions for /proj/match\n\n<INSTRUCTIONS>\nProject rules\n</INSTRUCTIONS>"},{"type":"input_text","text":"<environment_context>\n<cwd>/proj/match</cwd>\n</environment_context>"}]}}"##,
+            r#"{"timestamp":"2026-09-15T10:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Fix the session title"}]}}"#,
+        );
+        write_rollout(td.path(), "15", "rollout-instructions.jsonl", &content);
+
+        let list = list_for_cwd(td.path(), "/proj/match", 7, 50);
+
+        assert_eq!(list[0].title, "Fix the session title");
     }
 
     #[test]
