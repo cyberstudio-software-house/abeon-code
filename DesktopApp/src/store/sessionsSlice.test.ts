@@ -172,8 +172,10 @@ describe('refreshActivity', () => {
         mode: 'terminal',
         fresh: true,
         provider: 'opencode',
+        ptyId: 'pty-open',
       }],
     });
+    const resolveStart = vi.spyOn(tauri, 'resolveOpencodeStart').mockResolvedValue(undefined);
     vi.spyOn(tauri, 'listSessions').mockResolvedValue([
       { ...fakeMeta('ses_claude', 1, 'running'), provider: 'claude', title: 'Claude session' },
       { ...fakeMeta('ses_open', 1, 'running'), provider: 'opencode', title: 'OpenCode session' },
@@ -183,6 +185,31 @@ describe('refreshActivity', () => {
 
     const tab = useStore.getState().tabs[0];
     expect(tab.kind === 'session' && tab.linkedSessionId).toBe('ses_open');
+    expect(resolveStart).toHaveBeenCalledWith('pty-open');
+  });
+
+  it('does not link an OpenCode placeholder whose PTY failed to start', async () => {
+    useStore.setState({
+      sessionsByProject: { 1: { items: [], hasMore: false } },
+      tabs: [{
+        kind: 'session',
+        id: 'session:new-opencode',
+        projectId: 1,
+        sessionId: 'new-opencode',
+        title: 'New session',
+        mode: 'terminal',
+        fresh: true,
+        provider: 'opencode',
+      }],
+    });
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([
+      { ...fakeMeta('ses_open', 1), provider: 'opencode', title: 'OpenCode session' },
+    ]);
+
+    await useStore.getState().refreshActivity(1);
+
+    const tab = useStore.getState().tabs[0];
+    expect(tab.kind === 'session' && tab.linkedSessionId).toBeUndefined();
   });
 
   it('links concurrent OpenCode placeholders from oldest to oldest', async () => {
@@ -198,6 +225,7 @@ describe('refreshActivity', () => {
           mode: 'terminal',
           fresh: true,
           provider: 'opencode',
+          ptyId: 'pty-first',
         },
         {
           kind: 'session',
@@ -208,6 +236,7 @@ describe('refreshActivity', () => {
           mode: 'terminal',
           fresh: true,
           provider: 'opencode',
+          ptyId: 'pty-second',
         },
       ],
     });

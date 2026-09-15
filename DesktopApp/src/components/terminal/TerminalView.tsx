@@ -9,6 +9,7 @@ import { useStore } from '../../store';
 import { processManager } from '../../lib/processManager';
 import { getCliModelString } from '../../lib/models';
 import type { Provider } from '../../types';
+import { formatTauriError } from '../../lib/errors';
 
 type Props = {
   projectId: number;
@@ -96,13 +97,14 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
   };
 }
 
-export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, visible = true, focused = true }: Props) {
+export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, tabId, visible = true, focused = true }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const customModels = useStore(s => s.customModels);
   const codexModelId = useStore(s => s.codexModelId);
   const opencodeModelId = useStore(s => s.opencodeModelId);
   const skipPermissions = useStore(s => s.skipPermissions);
   const setActiveAgentPtyId = useStore(s => s.setActiveAgentPtyId);
+  const markSessionPtyStarted = useStore(s => s.markSessionPtyStarted);
   const [agentPtyId, setAgentPtyId] = useState<string | null>(null);
   const projectPath = useStore(s => s.projects.find(p => p.id === projectId)?.path ?? '');
   const projectPathRef = useRef(projectPath);
@@ -197,6 +199,9 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
       }
       ptyRef.current = id;
       if (kind === 'agent') setAgentPtyId(id);
+      if (kind === 'agent' && agentProvider === 'opencode' && fresh && tabId) {
+        markSessionPtyStarted(tabId, id);
+      }
       const offOut = await tauri.onPtyOutput(id, (bytes) => {
         if (cancelled) return;
         if (visibleRef.current) {
@@ -256,6 +261,10 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
           container.removeEventListener('keydown', onKeyDown, { capture: true })
         );
       }
+    }).catch(error => {
+      if (!cancelled) {
+        term.write(`\r\n\x1b[31m${formatTauriError(error)}\x1b[0m\r\n`);
+      }
     });
     }
 
@@ -271,7 +280,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
       // React removes the DOM container; PTY is killed; listeners detached.
       // xterm internal state will be GC'd with the Terminal object.
     };
-  }, [projectId, kind, provider, sessionId, fresh, actionId]);
+  }, [projectId, kind, provider, sessionId, fresh, actionId, tabId, markSessionPtyStarted]);
 
   useEffect(() => {
     const root = document.documentElement;

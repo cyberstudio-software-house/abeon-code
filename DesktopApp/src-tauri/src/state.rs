@@ -6,12 +6,59 @@ use crate::db::DbPool;
 use crate::sessions::watcher::SessionWatchers;
 use crate::pty::PtyManager;
 use crate::remote::registry::SessionPtyRegistry;
+use crate::error::{AppError, AppResult};
+
+#[derive(Default)]
+pub struct OpenCodeStartRegistry {
+    pending: Mutex<HashMap<i64, OpenCodeStart>>,
+}
+
+struct OpenCodeStart {
+    token: String,
+    pty_id: Option<String>,
+}
+
+impl OpenCodeStartRegistry {
+    pub fn claim(&self, project_id: i64) -> AppResult<String> {
+        let mut pending = self.pending.lock();
+        if pending.contains_key(&project_id) {
+            return Err(AppError::Other(
+                "Poczekaj na powiązanie uruchamianej sesji OpenCode".into(),
+            ));
+        }
+        let token = uuid::Uuid::new_v4().to_string();
+        pending.insert(project_id, OpenCodeStart { token: token.clone(), pty_id: None });
+        Ok(token)
+    }
+
+    pub fn bind(&self, project_id: i64, token: &str, pty_id: &str) {
+        if let Some(start) = self.pending.lock().get_mut(&project_id) {
+            if start.token == token {
+                start.pty_id = Some(pty_id.to_string());
+            }
+        }
+    }
+
+    pub fn release(&self, project_id: i64, token: &str) {
+        let mut pending = self.pending.lock();
+        if pending.get(&project_id).map(|start| start.token.as_str()) == Some(token) {
+            pending.remove(&project_id);
+        }
+    }
+
+    pub fn resolve_pty(&self, pty_id: &str) {
+        self.pending
+            .lock()
+            .retain(|_, start| start.pty_id.as_deref() != Some(pty_id));
+    }
+}
 
 pub struct AppState {
     pub db: DbPool,
     pub session_watchers: Arc<SessionWatchers>,
     pub pty: Arc<PtyManager>,
     pub session_pty: Arc<SessionPtyRegistry>,
+    pub opencode_starts: Arc<OpenCodeStartRegistry>,
     pub shell_env: Mutex<Option<HashMap<String, String>>>,
     pub clipboard_images: Mutex<HashMap<String, Vec<PathBuf>>>,
     /// Cached project usage keyed by project_id: (max session-file mtime seen, summary).
@@ -29,6 +76,7 @@ impl AppState {
             session_watchers: SessionWatchers::new(),
             pty: PtyManager::new(),
             session_pty: Arc::new(SessionPtyRegistry::new()),
+            opencode_starts: Arc::new(OpenCodeStartRegistry::default()),
             shell_env: Mutex::new(None),
             clipboard_images: Mutex::new(HashMap::new()),
             project_usage_cache: Mutex::new(HashMap::new()),
@@ -80,5 +128,20 @@ mod tests {
         let state = test_state();
         state.session_pty.bind("sess-1", "pty-a");
         assert_eq!(state.session_pty.pty_for("sess-1"), Some("pty-a".to_string()));
+    }
+
+    #[test]
+    fn opencode_start_tokens_do_not_release_a_newer_claim() {
+        let registry = OpenCodeStartRegistry::default();
+        let first = registry.claim(1).unwrap();
+        assert!(registry.claim(1).is_err());
+        registry.bind(1, &first, "pty-first");
+        registry.resolve_pty("pty-first");
+
+        let second = registry.claim(1).unwrap();
+        registry.release(1, &first);
+        assert!(registry.claim(1).is_err());
+        registry.release(1, &second);
+        assert!(registry.claim(1).is_ok());
     }
 }

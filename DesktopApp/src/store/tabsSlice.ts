@@ -7,7 +7,7 @@ import { pushNav, stepBack, stepForward, pruneNav } from '../lib/navHistory';
 import { findLeaf } from '../lib/paneTree';
 
 export type Tab =
-  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider; viewingSubagentId?: string }
+  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; ptyId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider; viewingSubagentId?: string }
   | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number }
   | { kind: 'terminal'; id: string; projectId: number; title: string }
   | { kind: 'providerPicker'; id: string; projectId: number; title: string };
@@ -34,6 +34,7 @@ export type TabsSlice = {
   goForward: () => void;
   renameTab: (id: string, title: string) => void;
   linkNewSession: (tabId: string, realSessionId: string) => void;
+  markSessionPtyStarted: (tabId: string, ptyId: string) => void;
   upsertActionTab: (tab: Extract<Tab, { kind: 'action' }>) => void;
 };
 
@@ -271,6 +272,11 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
   linkNewSession: (tabId, realSessionId) => set({
     tabs: get().tabs.map(t =>
       t.id === tabId && t.kind === 'session' ? { ...t, linkedSessionId: realSessionId } : t
+    ),
+  }),
+  markSessionPtyStarted: (tabId, ptyId) => set({
+    tabs: get().tabs.map(t =>
+      t.id === tabId && t.kind === 'session' ? { ...t, ptyId } : t
     ),
   }),
   upsertActionTab: (tab) => {

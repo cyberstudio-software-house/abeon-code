@@ -25,6 +25,7 @@ function SessionBody({ tab, visible, focused = true }: { tab: SessionTab; visibl
           projectId={tab.projectId}
           kind="agent"
           provider={provider}
+          tabId={tab.id}
           sessionId={provider === 'claude' ? tab.sessionId : undefined}
           fresh
           visible={visible}
@@ -36,7 +37,7 @@ function SessionBody({ tab, visible, focused = true }: { tab: SessionTab; visibl
   const resumeId = tab.linkedSessionId ?? (tab.sessionId.startsWith('new-') ? undefined : tab.sessionId);
   return (
     <div className={layer(visible)}>
-      <TerminalView projectId={tab.projectId} kind="agent" provider={provider} sessionId={resumeId} visible={visible} focused={focused} />
+      <TerminalView projectId={tab.projectId} kind="agent" provider={provider} tabId={tab.id} sessionId={resumeId} visible={visible} focused={focused} />
     </div>
   );
 }

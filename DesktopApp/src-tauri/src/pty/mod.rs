@@ -32,8 +32,34 @@ impl PtyManager {
         rows: u16,
         env: &HashMap<String, String>,
     ) -> AppResult<String> {
+        self.spawn_with_exit_hook(app, program, args, cwd, cols, rows, env, None)
+    }
+
+    pub fn spawn_with_exit_hook(
+        &self,
+        app: AppHandle,
+        program: &str,
+        args: &[&str],
+        cwd: &std::path::Path,
+        cols: u16,
+        rows: u16,
+        env: &HashMap<String, String>,
+        local_exit_hook: Option<Arc<dyn Fn(String) + Send + Sync>>,
+    ) -> AppResult<String> {
         let id = Uuid::new_v4().to_string();
-        let hook = self.exit_hook.lock().clone();
+        let global_exit_hook = self.exit_hook.lock().clone();
+        let hook = if global_exit_hook.is_some() || local_exit_hook.is_some() {
+            Some(Arc::new(move |pty_id: String| {
+                if let Some(global) = &global_exit_hook {
+                    global(pty_id.clone());
+                }
+                if let Some(local) = &local_exit_hook {
+                    local(pty_id);
+                }
+            }) as Arc<dyn Fn(String) + Send + Sync>)
+        } else {
+            None
+        };
         let h = PtyHandle::spawn(app, id.clone(), program, args, cwd, cols, rows, env, hook)?;
         self.inner.lock().insert(id.clone(), Arc::new(h));
         Ok(id)

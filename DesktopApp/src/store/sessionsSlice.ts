@@ -160,6 +160,7 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
       (t): t is Extract<typeof t, { kind: 'session' }> =>
         t.kind === 'session' && t.projectId === projectId
         && t.sessionId.startsWith('new-') && !t.linkedSessionId
+        && ((t.provider ?? 'claude') !== 'opencode' || !!t.ptyId)
     );
     if (unlinkedNewTabs.length > 0 && newSessions.length > 0) {
       const pool = [...newSessions].sort(
@@ -171,6 +172,9 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
         const [s] = pool.splice(idx, 1);
         linkNewSession(tab.id, s.id);
         renameTab(tab.id, s.title);
+        if (s.provider === 'opencode' && tab.ptyId) {
+          tauri.resolveOpencodeStart(tab.ptyId).catch(() => {});
+        }
       }
     }
 

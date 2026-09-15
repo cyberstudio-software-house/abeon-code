@@ -212,11 +212,55 @@ pub fn spawn_pty(
             env.insert("PATH".into(), format!("{}:{current}", parent.display()));
         }
     }
-    let pty_id = state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows, &env)?;
+    let is_fresh_opencode = matches!(
+        &kind,
+        PtyKind::Agent { provider: Provider::Opencode, fresh: true, .. }
+    );
+    let start_token = if is_fresh_opencode {
+        Some(state.opencode_starts.claim(project_id)?)
+    } else {
+        None
+    };
+    let spawn_result = if let Some(token) = start_token.as_ref() {
+        let registry = state.opencode_starts.clone();
+        let release_token = token.clone();
+        state.pty.spawn_with_exit_hook(
+            app,
+            &program,
+            &args_ref,
+            &cwd,
+            cols,
+            rows,
+            &env,
+            Some(std::sync::Arc::new(move |_| {
+                registry.release(project_id, &release_token);
+            })),
+        )
+    } else {
+        state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows, &env)
+    };
+    let pty_id = match spawn_result {
+        Ok(pty_id) => pty_id,
+        Err(error) => {
+            if let Some(token) = start_token.as_deref() {
+                state.opencode_starts.release(project_id, token);
+            }
+            return Err(error);
+        }
+    };
+    if let Some(token) = start_token.as_deref() {
+        state.opencode_starts.bind(project_id, token, &pty_id);
+    }
     if let Some(session_id) = session_to_bind(&kind) {
         state.session_pty.bind(&session_id, &pty_id);
     }
     Ok(pty_id)
+}
+
+#[tauri::command]
+pub fn resolve_opencode_start(state: State<AppState>, pty_id: String) -> AppResult<()> {
+    state.opencode_starts.resolve_pty(&pty_id);
+    Ok(())
 }
 
 #[tauri::command]
