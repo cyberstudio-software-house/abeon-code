@@ -222,6 +222,17 @@ describe('tabsSlice provider picker', () => {
     expect(tab.sessionId.startsWith('new-')).toBe(true);
   });
 
+  it('allows only one unresolved OpenCode start per project', () => {
+    useStore.setState({ enabledProviders: ['opencode'] });
+
+    useStore.getState().openNewSessionTab(1);
+    const firstId = useStore.getState().tabs[0].id;
+    useStore.getState().openNewSessionTab(1);
+
+    expect(useStore.getState().tabs).toHaveLength(1);
+    expect(useStore.getState().activeTabId).toBe(firstId);
+  });
+
   it('multiple providers: New session opens a picker tab', () => {
     useStore.setState({ enabledProviders: ['claude', 'codex'] });
     useStore.getState().openNewSessionTab(1);
@@ -268,6 +279,20 @@ describe('tabsSlice provider picker', () => {
     expect(state.tabs[1]).toMatchObject({ kind: 'session', provider: 'opencode' });
     expect(state.navHistory).not.toContain(pickerId);
     expect(state.navHistory).toContain(state.tabs[1].id);
+  });
+
+  it('reuses an unresolved OpenCode tab chosen from another picker', () => {
+    useStore.setState({ enabledProviders: ['claude', 'opencode'] });
+    useStore.getState().openNewSessionTab(1);
+    useStore.getState().chooseProvider(useStore.getState().tabs[0].id, 'opencode');
+    const pendingId = useStore.getState().tabs[0].id;
+    useStore.getState().openNewSessionTab(1);
+    const pickerId = useStore.getState().tabs[1].id;
+
+    useStore.getState().chooseProvider(pickerId, 'opencode');
+
+    expect(useStore.getState().tabs).toHaveLength(1);
+    expect(useStore.getState().activeTabId).toBe(pendingId);
   });
 });
 

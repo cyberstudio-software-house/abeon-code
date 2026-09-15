@@ -38,7 +38,13 @@ fn catch<T, F: FnOnce() -> AppResult<T> + panic::UnwindSafe>(f: F) -> AppResult<
 }
 
 fn isolate_optional_provider<T: Default>(result: AppResult<T>) -> T {
-    result.unwrap_or_default()
+    match result {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("OpenCode provider unavailable: {error}");
+            T::default()
+        }
+    }
 }
 
 fn validate_opencode_session_directory(
@@ -195,8 +201,13 @@ pub fn open_session_watch(
 ) -> AppResult<()> {
     let prov = provider.unwrap_or(Provider::Claude);
     if prov == Provider::Opencode {
+        let c = state.db.get()?;
+        let proj = projects_repo::get(&c, project_id)?;
         let database_path = opencode::reader::database_path()
             .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
+        let directory = opencode::reader::session_directory(&database_path, &session_id)?
+            .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
+        validate_opencode_session_directory(&session_id, &directory, &proj.path)?;
         return state.session_watchers.open_opencode(app, &session_id, database_path);
     }
     let path = match prov {
@@ -433,9 +444,11 @@ pub(crate) async fn run_agent_prompt(
         Provider::Opencode => {
             let binary = crate::commands::models::locate_binary(state, "opencode")
                 .ok_or_else(|| AppError::Other("Nie znaleziono programu OpenCode".into()))?;
-            let connection = state.db.get()?;
-            let shell = crate::commands::settings::resolve_shell(&connection);
-            let environment = crate::commands::settings::ensure_shell_env(state, &shell);
+            let environment = {
+                let connection = state.db.get()?;
+                let shell = crate::commands::settings::resolve_shell(&connection);
+                crate::commands::settings::ensure_shell_env(state, &shell)
+            };
             opencode::runner::run_prompt_with_environment(
                 model.as_deref(),
                 &prompt,

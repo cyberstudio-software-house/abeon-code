@@ -11,7 +11,7 @@ import { HistorySearchBar } from './HistorySearchBar';
 import { useHistorySearch } from './useHistorySearch';
 import { ReadOnlyPill } from './ReadOnlyPill';
 import { SessionFooter } from './SessionFooter';
-import { mergeHistoryWindow } from '../../lib/historySync';
+import { mergeHistoryWindow, prependHistoryPage } from '../../lib/historySync';
 
 type Props = { projectId: number; sessionId: string; tabId: string; provider?: Provider };
 
@@ -123,11 +123,11 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
     if (!data || !data.hasMoreBefore || data.blocks.length === 0) return;
     const firstUuid = blockUuid(data.blocks[0]);
     const more = await tauri.readSessionHistory(projectId, sessionId, provider, 200, firstUuid);
-    setData({
-      meta: more.meta,
-      blocks: [...more.blocks, ...data.blocks],
+    setData(previous => previous ? {
+      meta: previous.meta,
+      blocks: prependHistoryPage(previous.blocks, more.blocks),
       hasMoreBefore: more.hasMoreBefore,
-    });
+    } : previous);
   };
 
   const storeTitle = useStore(s => {

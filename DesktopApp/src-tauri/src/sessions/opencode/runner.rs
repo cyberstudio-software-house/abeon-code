@@ -3,15 +3,15 @@ use crate::sessions::opencode::reader;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
+use std::process::Stdio;
 use std::time::Duration;
+use tokio::io::AsyncReadExt;
 
 #[derive(Debug, PartialEq)]
 pub struct RunOutput {
     pub session_id: Option<String>,
     pub text: Option<String>,
 }
-
-const MAX_ERROR_CHARS: usize = 500;
 
 pub fn parse_run_output(output: &str) -> RunOutput {
     let mut session_id = None;
@@ -43,6 +43,23 @@ pub async fn run_prompt_with_environment(
     binary: &Path,
     environment: Option<&HashMap<String, String>>,
 ) -> AppResult<String> {
+    run_prompt_with_timeout(
+        model,
+        prompt,
+        binary,
+        environment,
+        Duration::from_secs(90),
+    )
+    .await
+}
+
+async fn run_prompt_with_timeout(
+    model: Option<&str>,
+    prompt: &str,
+    binary: &Path,
+    environment: Option<&HashMap<String, String>>,
+    timeout: Duration,
+) -> AppResult<String> {
     let mut command = tokio::process::Command::new(binary);
     command.arg("run").arg("--format").arg("json");
     if let Some(model) = model.filter(|value| !value.is_empty()) {
@@ -51,20 +68,49 @@ pub async fn run_prompt_with_environment(
     command.arg(prompt);
     command.current_dir(std::env::temp_dir());
     command.kill_on_drop(true);
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(environment) = environment {
         command.envs(environment);
     }
 
-    let output = tokio::time::timeout(Duration::from_secs(90), command.output())
-        .await
-        .map_err(|_| AppError::Other("Generowanie tytułu przekroczyło limit 90s".into()))?
+    let mut child = command
+        .spawn()
         .map_err(|error| AppError::Other(format!("opencode run: {error}")))?;
-    let parsed = parse_run_output(&String::from_utf8_lossy(&output.stdout));
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AppError::Other("OpenCode nie udostępnił stdout".into()))?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| AppError::Other("OpenCode nie udostępnił stderr".into()))?;
+    let stdout_task = tokio::spawn(async move {
+        let mut bytes = Vec::new();
+        let _ = stdout.read_to_end(&mut bytes).await;
+        bytes
+    });
+    let stderr_task = tokio::spawn(async move {
+        let mut bytes = Vec::new();
+        let _ = stderr.read_to_end(&mut bytes).await;
+        bytes
+    });
+    let completion = match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(Ok(status)) => Ok(status),
+        Ok(Err(error)) => Err(AppError::Other(format!("opencode run: {error}"))),
+        Err(_) => {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            Err(AppError::Other("Generowanie tytułu przekroczyło limit 90s".into()))
+        }
+    };
+    let stdout = stdout_task.await.unwrap_or_default();
+    let _stderr = stderr_task.await.unwrap_or_default();
+    let parsed = parse_run_output(&String::from_utf8_lossy(&stdout));
     let session_id = parsed.session_id.clone();
-    let result = if output.status.success() {
-        resolve_run_text(&parsed)
-    } else {
-        Err(AppError::Other(opencode_failure_message(&output.stderr)))
+    let result = match completion {
+        Ok(status) if status.success() => resolve_run_text(&parsed),
+        Ok(_) => Err(AppError::Other(opencode_failure_message())),
+        Err(error) => Err(error),
     };
     if let Some(session_id) = session_id {
         if let Err(error) = cleanup_session(&session_id, binary, environment).await {
@@ -105,24 +151,51 @@ async fn cleanup_session(
     if output.status.success() {
         Ok(())
     } else {
-        Err(AppError::Other(opencode_failure_message(&output.stderr)))
+        Err(AppError::Other(opencode_failure_message()))
     }
 }
 
-fn opencode_failure_message(stderr: &[u8]) -> String {
-    let value = String::from_utf8_lossy(stderr);
-    let trimmed = value.trim();
-    let excerpt = trimmed.chars().take(MAX_ERROR_CHARS).collect::<String>();
-    if excerpt.is_empty() {
-        "Polecenie OpenCode zakończyło się błędem".into()
-    } else {
-        format!("OpenCode: {excerpt}")
-    }
+fn opencode_failure_message() -> String {
+    "Polecenie OpenCode zakończyło się błędem".into()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cleans_a_partial_session_after_timeout() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::TempDir::new().unwrap();
+        let binary = directory.path().join("opencode-test");
+        let marker = directory.path().join("cleanup-marker");
+        std::fs::write(
+            &binary,
+            "#!/bin/sh\nif [ \"$1\" = \"run\" ]; then\n  printf '%s\\n' '{\"type\":\"step_start\",\"sessionID\":\"temporary\"}'\n  while true; do :; done\nfi\nif [ \"$1\" = \"session\" ] && [ \"$2\" = \"delete\" ]; then\n  printf '%s' \"$3\" > \"$CLEANUP_MARKER\"\n  exit 0\nfi\nexit 1\n",
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&binary, permissions).unwrap();
+        let environment = HashMap::from([(
+            "CLEANUP_MARKER".to_string(),
+            marker.display().to_string(),
+        )]);
+
+        let result = run_prompt_with_timeout(
+            None,
+            "prompt",
+            &binary,
+            Some(&environment),
+            Duration::from_millis(50),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(marker).unwrap(), "temporary");
+    }
 
     #[test]
     fn parses_last_text_and_session_from_jsonl() {
@@ -164,10 +237,10 @@ mod tests {
     }
 
     #[test]
-    fn bounds_cli_error_output() {
-        let message = opencode_failure_message("x".repeat(800).as_bytes());
+    fn does_not_expose_cli_error_output() {
+        let message = opencode_failure_message();
 
-        assert_eq!(message.chars().count(), "OpenCode: ".chars().count() + MAX_ERROR_CHARS);
-        assert!(!message.contains("xxx\n"));
+        assert_eq!(message, "Polecenie OpenCode zakończyło się błędem");
+        assert!(!message.contains("token"));
     }
 }

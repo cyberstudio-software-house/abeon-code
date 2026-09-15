@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryBlock } from '../types';
-import { mergeHistoryWindow } from './historySync';
+import { mergeHistoryWindow, prependHistoryPage } from './historySync';
 
 const text = (uuid: string, value: string): HistoryBlock => ({
   kind: 'assistantText',
@@ -37,5 +37,18 @@ describe('mergeHistoryWindow', () => {
       [text('first', 'partial'), text('stale', 'stale')],
       [text('first', 'complete')],
     )).toEqual([text('first', 'complete')]);
+  });
+});
+
+describe('prependHistoryPage', () => {
+  it('keeps the latest tail while prepending an older page without duplicates', () => {
+    const current = [text('first', 'current'), text('tail', 'latest')];
+    const older = [text('old', 'older'), text('first', 'stale')];
+
+    expect(prependHistoryPage(current, older)).toEqual([
+      text('old', 'older'),
+      text('first', 'current'),
+      text('tail', 'latest'),
+    ]);
   });
 });

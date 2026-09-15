@@ -39,12 +39,14 @@ pub async fn detect_opencode_models(state: State<'_, AppState>) -> AppResult<Vec
     let Some(binary) = crate::commands::models::locate_binary(&state, "opencode") else {
         return Ok(Vec::new());
     };
-    let connection = match state.db.get() {
-        Ok(connection) => connection,
-        Err(_) => return Ok(Vec::new()),
+    let environment = {
+        let connection = match state.db.get() {
+            Ok(connection) => connection,
+            Err(_) => return Ok(Vec::new()),
+        };
+        let shell = crate::commands::settings::resolve_shell(&connection);
+        crate::commands::settings::ensure_shell_env(&state, &shell)
     };
-    let shell = crate::commands::settings::resolve_shell(&connection);
-    let environment = crate::commands::settings::ensure_shell_env(&state, &shell);
     let mut command = tokio::process::Command::new(binary);
     command.arg("models").envs(environment).kill_on_drop(true);
     Ok(tokio::time::timeout(Duration::from_secs(15), command.output())

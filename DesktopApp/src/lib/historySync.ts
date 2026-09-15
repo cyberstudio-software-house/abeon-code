@@ -7,3 +7,8 @@ export function mergeHistoryWindow(current: HistoryBlock[], incoming: HistoryBlo
   if (!overlap) return [...current, ...incoming];
   return [...current.slice(0, currentIndex.get(overlap.uuid)), ...incoming];
 }
+
+export function prependHistoryPage(current: HistoryBlock[], older: HistoryBlock[]): HistoryBlock[] {
+  const currentIds = new Set(current.map(block => block.uuid));
+  return [...older.filter(block => !currentIds.has(block.uuid)), ...current];
+}
