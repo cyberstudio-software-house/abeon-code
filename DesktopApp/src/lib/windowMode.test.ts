@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { parseWindowMode, buildSessionWindowUrl, buildGroupWindowUrl, sessionWindowLabel, groupWindowLabel, type DetachedTab } from './windowMode';
+import { isProvider } from './providers';
+
+describe('provider validation', () => {
+  it('accepts OpenCode', () => {
+    expect(isProvider('opencode')).toBe(true);
+  });
+});
 
 describe('parseWindowMode', () => {
   it('returns null when no view param', () => {
@@ -38,6 +45,20 @@ describe('parseWindowMode', () => {
     const search = url.slice(url.indexOf('?'));
     expect(parseWindowMode(search)).toEqual({
       view: 'session', projectId: 7, sessionId: 's1', linkedSessionId: 's2', title: 'My session', fresh: false,
+    });
+  });
+
+  it('round-trips an OpenCode provider', () => {
+    const url = buildSessionWindowUrl({ projectId: 7, sessionId: 's-open', title: 'OpenCode', fresh: true, provider: 'opencode' });
+    const search = url.slice(url.indexOf('?'));
+    expect(parseWindowMode(search)).toEqual({
+      view: 'session', projectId: 7, sessionId: 's-open', title: 'OpenCode', fresh: true, provider: 'opencode',
+    });
+  });
+
+  it('discards an unknown provider', () => {
+    expect(parseWindowMode('?view=session&projectId=3&sessionId=abc&provider=invalid')).toEqual({
+      view: 'session', projectId: 3, sessionId: 'abc', title: 'Sesja', fresh: false,
     });
   });
 });

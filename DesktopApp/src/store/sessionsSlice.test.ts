@@ -159,6 +159,31 @@ describe('refreshActivity', () => {
     expect(codexTab?.kind === 'session' && codexTab.linkedSessionId).toBe('real-codex-id');
     expect(claudeTab?.kind === 'session' && claudeTab.linkedSessionId).toBe('real-claude-id');
   });
+
+  it('links an OpenCode placeholder only to a new OpenCode session', async () => {
+    useStore.setState({
+      sessionsByProject: { 1: { items: [], hasMore: false } },
+      tabs: [{
+        kind: 'session',
+        id: 'session:new-opencode',
+        projectId: 1,
+        sessionId: 'new-opencode',
+        title: 'New session',
+        mode: 'terminal',
+        fresh: true,
+        provider: 'opencode',
+      }],
+    });
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([
+      { ...fakeMeta('ses_claude', 1, 'running'), provider: 'claude', title: 'Claude session' },
+      { ...fakeMeta('ses_open', 1, 'running'), provider: 'opencode', title: 'OpenCode session' },
+    ]);
+
+    await useStore.getState().refreshActivity(1);
+
+    const tab = useStore.getState().tabs[0];
+    expect(tab.kind === 'session' && tab.linkedSessionId).toBe('ses_open');
+  });
 });
 
 describe('scheduleNewSessionRefresh', () => {

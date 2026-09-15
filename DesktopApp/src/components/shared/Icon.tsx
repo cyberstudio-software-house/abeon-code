@@ -37,6 +37,7 @@ const paths: Record<string, ReactNode> = {
   bell:     <g><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></g>,
   claudeLogo: <g><path d="M12 3v18"/><path d="M3 12h18"/><path d="M5.6 5.6l12.8 12.8"/><path d="M18.4 5.6L5.6 18.4"/></g>,
   openaiLogo: <polygon points="12 2.5 20.2 7.25 20.2 16.75 12 21.5 3.8 16.75 3.8 7.25"/>,
+  opencodeLogo: <g><path d="M9.5 5H6a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3h3.5"/><path d="M14.5 5H18a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-3.5"/><path d="m10 9-3 3 3 3"/><path d="m14 9 3 3-3 3"/></g>,
 };
 
 export type IconName = keyof typeof paths;

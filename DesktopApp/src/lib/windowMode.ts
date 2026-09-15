@@ -1,4 +1,5 @@
 import type { Provider } from '../types';
+import { isProvider } from './providers';
 
 export type DetachedTab =
   | { kind: 'session'; id: string; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider }
@@ -46,7 +47,8 @@ function parseSessionMode(q: URLSearchParams): SessionWindowMode | null {
   const linkedSessionId = q.get('linkedSessionId') ?? undefined;
   const title = q.get('title') ?? 'Sesja';
   const fresh = q.get('fresh') === 'true';
-  const provider: Provider | undefined = q.get('provider') === 'codex' ? 'codex' : undefined;
+  const rawProvider = q.get('provider');
+  const provider = isProvider(rawProvider) ? rawProvider : undefined;
   return {
     view: 'session',
     projectId,

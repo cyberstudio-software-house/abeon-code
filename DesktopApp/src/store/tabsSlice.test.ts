@@ -213,6 +213,15 @@ describe('tabsSlice provider picker', () => {
     expect(tab.sessionId.startsWith('new-')).toBe(true);
   });
 
+  it('single OpenCode provider: fresh tab uses a new- placeholder id', () => {
+    useStore.setState({ enabledProviders: ['opencode'] });
+    useStore.getState().openNewSessionTab(1);
+    const tab = useStore.getState().tabs[0];
+    if (tab.kind !== 'session') throw new Error('expected session tab');
+    expect(tab.provider).toBe('opencode');
+    expect(tab.sessionId.startsWith('new-')).toBe(true);
+  });
+
   it('multiple providers: New session opens a picker tab', () => {
     useStore.setState({ enabledProviders: ['claude', 'codex'] });
     useStore.getState().openNewSessionTab(1);
@@ -246,6 +255,19 @@ describe('tabsSlice provider picker', () => {
     const tabs = useStore.getState().tabs;
     expect(tabs).toHaveLength(3);
     expect(tabs[1].kind).toBe('session');
+  });
+
+  it('choosing OpenCode preserves picker position and navigation history', () => {
+    useStore.setState({ enabledProviders: ['claude', 'codex', 'opencode'] });
+    useStore.getState().openNewTerminalTab(1);
+    useStore.getState().openNewSessionTab(1);
+    useStore.getState().openNewTerminalTab(1);
+    const pickerId = useStore.getState().tabs[1].id;
+    useStore.getState().chooseProvider(pickerId, 'opencode');
+    const state = useStore.getState();
+    expect(state.tabs[1]).toMatchObject({ kind: 'session', provider: 'opencode' });
+    expect(state.navHistory).not.toContain(pickerId);
+    expect(state.navHistory).toContain(state.tabs[1].id);
   });
 });
 
