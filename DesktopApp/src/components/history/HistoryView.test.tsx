@@ -41,6 +41,41 @@ describe('HistoryView search shortcut', () => {
     useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1', sessionsByProject: {} });
   });
 
+  it('debounces a burst of OpenCode synchronization events', async () => {
+    vi.useFakeTimers();
+    const opencodeHistory: SessionHistory = {
+      ...history,
+      meta: { ...history.meta, provider: 'opencode' },
+    };
+    const updatedHistory: SessionHistory = {
+      ...opencodeHistory,
+      blocks: [
+        { kind: 'assistantText', uuid: 'b0', timestamp: 0, text: 'updated' },
+        { kind: 'assistantText', uuid: 'b1', timestamp: 1, text: 'new' },
+      ],
+    };
+    const read = vi.spyOn(tauri, 'readSessionHistory')
+      .mockResolvedValueOnce(opencodeHistory)
+      .mockResolvedValue(updatedHistory);
+    let sync: (() => void) | undefined;
+    vi.spyOn(tauri, 'onSessionSync').mockImplementation(async (_sessionId, callback) => {
+      sync = callback;
+      return () => {};
+    });
+
+    render(<HistoryView projectId={1} sessionId="s1" tabId="session:s1" provider="opencode" />);
+    await act(async () => {});
+    act(() => {
+      sync?.();
+      sync?.();
+      vi.advanceTimersByTime(150);
+    });
+    await act(async () => {});
+
+    expect(read).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
   it('opens the search bar on Ctrl+F for the active tab', async () => {
     const { queryByTestId } = render(<HistoryView projectId={1} sessionId="s1" tabId="session:s1" />);
     await act(async () => {});

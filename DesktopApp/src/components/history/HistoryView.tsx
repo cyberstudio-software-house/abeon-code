@@ -11,6 +11,7 @@ import { HistorySearchBar } from './HistorySearchBar';
 import { useHistorySearch } from './useHistorySearch';
 import { ReadOnlyPill } from './ReadOnlyPill';
 import { SessionFooter } from './SessionFooter';
+import { mergeHistoryWindow } from '../../lib/historySync';
 
 type Props = { projectId: number; sessionId: string; tabId: string; provider?: Provider };
 
@@ -48,6 +49,9 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
     let unlistenAppend: (() => void) | null = null;
     let unlistenActivity: (() => void) | null = null;
     let unlistenTitle: (() => void) | null = null;
+    let unlistenSync: (() => void) | null = null;
+    let syncTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
     tauri.openSessionWatch(projectId, sessionId, provider).catch(() => {});
     tauri.onSessionAppend(sessionId, (blocks) => {
       setData(prev => prev ? ({ ...prev, blocks: [...prev.blocks, ...blocks] }) : prev);
@@ -59,13 +63,35 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
       renameTab(`session:${sessionId}`, title);
       setData(prev => prev ? ({ ...prev, meta: { ...prev.meta, title } }) : prev);
     }).then(fn => { unlistenTitle = fn; });
+    if (provider === 'opencode') {
+      tauri.onSessionSync(sessionId, () => {
+        if (syncTimer) clearTimeout(syncTimer);
+        syncTimer = setTimeout(async () => {
+          try {
+            const latest = await tauri.readSessionHistory(projectId, sessionId, provider);
+            if (cancelled) return;
+            setData(previous => previous ? {
+              meta: latest.meta,
+              blocks: mergeHistoryWindow(previous.blocks, latest.blocks),
+              hasMoreBefore: previous.hasMoreBefore || latest.hasMoreBefore,
+            } : latest);
+            renameTab(tabId, latest.meta.title);
+          } catch {
+            return;
+          }
+        }, 150);
+      }).then(fn => { unlistenSync = fn; });
+    }
     return () => {
+      cancelled = true;
+      if (syncTimer) clearTimeout(syncTimer);
       if (unlistenAppend) unlistenAppend();
       if (unlistenActivity) unlistenActivity();
       if (unlistenTitle) unlistenTitle();
+      if (unlistenSync) unlistenSync();
       tauri.closeSessionWatch(sessionId).catch(() => {});
     };
-  }, [projectId, sessionId, provider, patchActivity, renameTab]);
+  }, [projectId, sessionId, tabId, provider, patchActivity, renameTab]);
 
   const loadMore = async () => {
     if (!data || !data.hasMoreBefore || data.blocks.length === 0) return;

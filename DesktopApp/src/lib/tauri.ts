@@ -53,6 +53,8 @@ export const tauri = {
     invoke<void>('close_session_watch', { sessionId }),
   onSessionAppend: (sessionId: string, cb: (blocks: HistoryBlock[]) => void): Promise<UnlistenFn> =>
     listen<{ blocks: HistoryBlock[] }>(`session:${sessionId}:append`, e => cb(e.payload.blocks)),
+  onSessionSync: (sessionId: string, cb: () => void): Promise<UnlistenFn> =>
+    listen(`session:${sessionId}:sync`, () => cb()),
   onSessionActivity: (sessionId: string, cb: (activity: SessionActivity) => void): Promise<UnlistenFn> =>
     listen<{ activity: SessionActivity }>(`session:${sessionId}:activity`, e => cb(e.payload.activity)),
   onSessionTitle: (sessionId: string, cb: (title: string) => void): Promise<UnlistenFn> =>
