@@ -264,9 +264,8 @@ pub fn spawn_pty(
 }
 
 #[tauri::command]
-pub fn resolve_opencode_start(state: State<AppState>, pty_id: String) -> AppResult<()> {
-    state.opencode_starts.resolve_pty(&pty_id);
-    Ok(())
+pub fn resolve_opencode_start(state: State<AppState>, pty_id: String) -> AppResult<bool> {
+    Ok(state.opencode_starts.resolve_pty(&pty_id))
 }
 
 #[tauri::command]

@@ -169,12 +169,14 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
       for (const tab of unlinkedNewTabs) {
         const idx = pool.findIndex(s => s.provider === (tab.provider ?? 'claude'));
         if (idx < 0) continue;
+        const candidate = pool[idx];
+        if (candidate.provider === 'opencode' && tab.ptyId) {
+          const isCurrentStart = await tauri.resolveOpencodeStart(tab.ptyId).catch(() => false);
+          if (!isCurrentStart) continue;
+        }
         const [s] = pool.splice(idx, 1);
         linkNewSession(tab.id, s.id);
         renameTab(tab.id, s.title);
-        if (s.provider === 'opencode' && tab.ptyId) {
-          tauri.resolveOpencodeStart(tab.ptyId).catch(() => {});
-        }
       }
     }
 

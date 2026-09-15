@@ -58,10 +58,12 @@ impl OpenCodeStartRegistry {
         });
     }
 
-    pub fn resolve_pty(&self, pty_id: &str) {
-        self.pending
-            .lock()
-            .retain(|_, start| start.pty_id.as_deref() != Some(pty_id));
+    pub fn resolve_pty(&self, pty_id: &str) -> bool {
+        let mut pending = self.pending.lock();
+        let project_id = pending.iter().find_map(|(project_id, start)| {
+            (start.pty_id.as_deref() == Some(pty_id)).then_some(*project_id)
+        });
+        project_id.and_then(|id| pending.remove(&id)).is_some()
     }
 }
 
@@ -148,7 +150,8 @@ mod tests {
         let first = registry.claim(1).unwrap();
         assert!(registry.claim(1).is_err());
         registry.bind(1, &first, "pty-first");
-        registry.resolve_pty("pty-first");
+        assert!(registry.resolve_pty("pty-first"));
+        assert!(!registry.resolve_pty("pty-first"));
 
         let second = registry.claim(1).unwrap();
         registry.release(1, &first);
@@ -158,9 +161,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn opencode_start_release_waits_for_discovery_grace_period() {
+    async fn expired_opencode_start_cannot_be_resolved() {
         let registry = Arc::new(OpenCodeStartRegistry::default());
         let token = registry.claim(1).unwrap();
+        registry.bind(1, &token, "pty-expired");
         registry
             .clone()
             .release_after(1, token, std::time::Duration::from_millis(20));
@@ -168,5 +172,6 @@ mod tests {
         assert!(registry.claim(1).is_err());
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
         assert!(registry.claim(1).is_ok());
+        assert!(!registry.resolve_pty("pty-expired"));
     }
 }

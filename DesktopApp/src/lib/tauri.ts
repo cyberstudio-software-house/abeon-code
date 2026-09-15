@@ -77,7 +77,7 @@ export const tauri = {
   ptyResize: (ptyId: string, cols: number, rows: number) =>
     invoke<void>('pty_resize', { ptyId, cols, rows }),
   ptyKill: (ptyId: string) => invoke<void>('pty_kill', { ptyId }),
-  resolveOpencodeStart: (ptyId: string) => invoke<void>('resolve_opencode_start', { ptyId }),
+  resolveOpencodeStart: (ptyId: string) => invoke<boolean>('resolve_opencode_start', { ptyId }),
   saveClipboardImage: (ptyId: string, data: string) =>
     invoke<string>('save_clipboard_image', { ptyId, data }),
   readClipboardImage: (ptyId: string) =>

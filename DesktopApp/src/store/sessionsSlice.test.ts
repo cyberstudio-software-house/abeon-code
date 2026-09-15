@@ -175,7 +175,7 @@ describe('refreshActivity', () => {
         ptyId: 'pty-open',
       }],
     });
-    const resolveStart = vi.spyOn(tauri, 'resolveOpencodeStart').mockResolvedValue(undefined);
+    const resolveStart = vi.spyOn(tauri, 'resolveOpencodeStart').mockResolvedValue(true);
     vi.spyOn(tauri, 'listSessions').mockResolvedValue([
       { ...fakeMeta('ses_claude', 1, 'running'), provider: 'claude', title: 'Claude session' },
       { ...fakeMeta('ses_open', 1, 'running'), provider: 'opencode', title: 'OpenCode session' },
@@ -212,7 +212,7 @@ describe('refreshActivity', () => {
     expect(tab.kind === 'session' && tab.linkedSessionId).toBeUndefined();
   });
 
-  it('links concurrent OpenCode placeholders from oldest to oldest', async () => {
+  it('skips an expired OpenCode placeholder when a later start creates a session', async () => {
     useStore.setState({
       sessionsByProject: { 1: { items: [], hasMore: false } },
       tabs: [
@@ -240,16 +240,18 @@ describe('refreshActivity', () => {
         },
       ],
     });
+    vi.spyOn(tauri, 'resolveOpencodeStart').mockImplementation(
+      async (ptyId) => (ptyId === 'pty-second') as never,
+    );
     vi.spyOn(tauri, 'listSessions').mockResolvedValue([
-      { ...fakeMeta('ses-newer', 1), provider: 'opencode', lastModified: 200 },
-      { ...fakeMeta('ses-older', 1), provider: 'opencode', lastModified: 100 },
+      { ...fakeMeta('ses-current', 1), provider: 'opencode', lastModified: 200 },
     ]);
 
     await useStore.getState().refreshActivity(1);
 
     const [first, second] = useStore.getState().tabs;
-    expect(first.kind === 'session' && first.linkedSessionId).toBe('ses-older');
-    expect(second.kind === 'session' && second.linkedSessionId).toBe('ses-newer');
+    expect(first.kind === 'session' && first.linkedSessionId).toBeUndefined();
+    expect(second.kind === 'session' && second.linkedSessionId).toBe('ses-current');
   });
 });
 
