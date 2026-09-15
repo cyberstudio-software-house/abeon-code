@@ -68,6 +68,9 @@ type Persisted = {
   codexModelId?: string;
   codexTitleGenModelId?: string;
   codexCustomModels?: string[];
+  opencodeModelId?: string;
+  opencodeTitleGenModelId?: string;
+  opencodeCustomModels?: string[];
 };
 
 const PERSISTED_KEYS = [
@@ -88,6 +91,9 @@ const PERSISTED_KEYS = [
   'codexModelId',
   'codexTitleGenModelId',
   'codexCustomModels',
+  'opencodeModelId',
+  'opencodeTitleGenModelId',
+  'opencodeCustomModels',
 ] as const satisfies readonly (keyof Persisted)[];
 
 type PersistedKey = typeof PERSISTED_KEYS[number];
@@ -122,6 +128,9 @@ function pickPersistedFields(state: AppState): Persisted {
     codexModelId: state.codexModelId,
     codexTitleGenModelId: state.codexTitleGenModelId,
     codexCustomModels: state.codexCustomModels,
+    opencodeModelId: state.opencodeModelId,
+    opencodeTitleGenModelId: state.opencodeTitleGenModelId,
+    opencodeCustomModels: state.opencodeCustomModels,
   };
 }
 
@@ -142,6 +151,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'shortcutOverrides':
     case 'enabledProviders':
     case 'codexCustomModels':
+    case 'opencodeCustomModels':
       return JSON.stringify(value);
     default:
       return String(value);
@@ -166,6 +176,7 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
     case 'shortcutOverrides':
     case 'enabledProviders':
     case 'codexCustomModels':
+    case 'opencodeCustomModels':
       try { return JSON.parse(raw); } catch { return undefined; }
     default:
       return raw;
@@ -225,6 +236,11 @@ function applyPersistedToState(p: Persisted) {
   if (typeof p.codexTitleGenModelId === 'string') patch.codexTitleGenModelId = p.codexTitleGenModelId;
   if (Array.isArray(p.codexCustomModels)) {
     patch.codexCustomModels = p.codexCustomModels.filter((x): x is string => typeof x === 'string');
+  }
+  if (typeof p.opencodeModelId === 'string') patch.opencodeModelId = p.opencodeModelId;
+  if (typeof p.opencodeTitleGenModelId === 'string') patch.opencodeTitleGenModelId = p.opencodeTitleGenModelId;
+  if (Array.isArray(p.opencodeCustomModels)) {
+    patch.opencodeCustomModels = p.opencodeCustomModels.filter((x): x is string => typeof x === 'string');
   }
   if (Object.keys(patch).length > 0) useStore.setState(patch);
 }

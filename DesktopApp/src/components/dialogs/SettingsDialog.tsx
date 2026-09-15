@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, type ReactElement } from 'react';
 import { PairingDialog } from './PairingDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -225,13 +225,23 @@ function TitleGenSection() {
   const setCodexTitleGenModel = useStore(s => s.setCodexTitleGenModel);
   const codexCustomModels = useStore(useShallow(s => s.codexCustomModels));
   const [detectedCodex, setDetectedCodex] = useState<string[]>([]);
+  const opencodeTitleGenModelId = useStore(s => s.opencodeTitleGenModelId);
+  const setOpencodeTitleGenModel = useStore(s => s.setOpencodeTitleGenModel);
+  const opencodeCustomModels = useStore(useShallow(s => s.opencodeCustomModels));
+  const [detectedOpencode, setDetectedOpencode] = useState<string[]>([]);
 
   useEffect(() => {
     tauri.detectCodexModels().then(setDetectedCodex).catch(() => setDetectedCodex([]));
   }, []);
 
+  useEffect(() => {
+    tauri.detectOpencodeModels().then(setDetectedOpencode).catch(() => setDetectedOpencode([]));
+  }, []);
+
   const codexOptions = Array.from(new Set([...detectedCodex, ...codexCustomModels]));
   const codexTitleGenInList = codexTitleGenModelId === '' || codexOptions.includes(codexTitleGenModelId);
+  const opencodeOptions = Array.from(new Set([...detectedOpencode, ...opencodeCustomModels]));
+  const opencodeTitleGenInList = opencodeTitleGenModelId === '' || opencodeOptions.includes(opencodeTitleGenModelId);
 
   return (
     <div>
@@ -268,7 +278,7 @@ function TitleGenSection() {
       )}
 
       {enabledProviders.includes('codex') && (
-        <div>
+        <div className="mb-3">
           <div className="flex items-center gap-2 mb-2">
             <Icon name="openaiLogo" className="w-3.5 h-3.5" />
             <span className="text-[12px] text-fg-secondary">Codex</span>
@@ -284,6 +294,28 @@ function TitleGenSection() {
             ))}
             {!codexTitleGenInList && (
               <option value={codexTitleGenModelId}>{codexTitleGenModelId}</option>
+            )}
+          </select>
+        </div>
+      )}
+
+      {enabledProviders.includes('opencode') && (
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <Icon name="opencodeLogo" className="w-3.5 h-3.5" />
+            <span className="text-[12px] text-fg-secondary">OpenCode</span>
+          </div>
+          <select
+            value={opencodeTitleGenModelId}
+            onChange={event => setOpencodeTitleGenModel(event.target.value)}
+            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
+          >
+            <option value="">Auto (konfiguracja OpenCode)</option>
+            {opencodeOptions.map(model => (
+              <option key={model} value={model}>{model}</option>
+            ))}
+            {!opencodeTitleGenInList && (
+              <option value={opencodeTitleGenModelId}>{opencodeTitleGenModelId}</option>
             )}
           </select>
         </div>
@@ -953,50 +985,65 @@ function ClaudeModelsSection() {
   );
 }
 
-function CodexModelsSection() {
-  const codexModelId = useStore(s => s.codexModelId);
-  const setCodexModel = useStore(s => s.setCodexModel);
-  const codexCustomModels = useStore(useShallow(s => s.codexCustomModels));
-  const addCustom = useStore(s => s.addCodexCustomModel);
-  const removeCustom = useStore(s => s.removeCodexCustomModel);
-  const [detected, setDetected] = useState<string[]>([]);
+type PlainModelSectionProps = {
+  label: string;
+  description: string;
+  radioName: string;
+  autoLabel: string;
+  placeholder: string;
+  selected: string;
+  detected: string[];
+  custom: string[];
+  onSelect: (model: string) => void;
+  onAdd: (model: string) => void;
+  onRemove: (model: string) => void;
+};
+
+function PlainModelSection({
+  label,
+  description,
+  radioName,
+  autoLabel,
+  placeholder,
+  selected,
+  detected,
+  custom,
+  onSelect,
+  onAdd,
+  onRemove,
+}: PlainModelSectionProps) {
   const [newModel, setNewModel] = useState('');
+  const options = Array.from(new Set([...detected, ...custom, ...(selected ? [selected] : [])]));
+  const icon = label === 'Codex' ? 'openaiLogo' : 'opencodeLogo';
 
-  useEffect(() => {
-    tauri.detectCodexModels().then(setDetected).catch(() => setDetected([]));
-  }, []);
-
-  const options = Array.from(new Set([
-    ...detected,
-    ...codexCustomModels,
-    ...(codexModelId ? [codexModelId] : []),
-  ]));
+  const submit = () => {
+    onAdd(newModel);
+    setNewModel('');
+  };
 
   return (
     <div>
       <div className="flex items-center gap-2 mb-2">
-        <Icon name="openaiLogo" className="w-3.5 h-3.5" />
-        <label className="block text-[10px] text-muted uppercase tracking-wider">Codex</label>
+        <Icon name={icon} className="w-3.5 h-3.5" />
+        <label className="block text-[10px] text-muted uppercase tracking-wider">{label}</label>
       </div>
-      <p className="text-[11px] text-muted mb-3">
-        Model używany przy tworzeniu nowych sesji Codex. „Auto" pozostawia wybór konfiguracji Codexa.
-      </p>
+      <p className="text-[11px] text-muted mb-3">{description}</p>
       <div className="space-y-0.5 mb-4">
-        <label className={`flex items-center gap-3 py-1.5 px-2 cursor-pointer ${codexModelId === '' ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}>
-          <input type="radio" name="codex-model" checked={codexModelId === ''} onChange={() => setCodexModel('')} className="accent-accent" />
-          <span className="text-[13px]">Auto (konfiguracja Codexa)</span>
+        <label className={`flex items-center gap-3 py-1.5 px-2 cursor-pointer ${selected === '' ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}>
+          <input type="radio" name={radioName} checked={selected === ''} onChange={() => onSelect('')} className="accent-accent" />
+          <span className="text-[13px]">{autoLabel}</span>
         </label>
-        {options.map(m => (
-          <div key={m} className="flex items-center gap-2">
-            <label className={`flex-1 flex items-center gap-3 py-1.5 px-2 cursor-pointer ${codexModelId === m ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}>
-              <input type="radio" name="codex-model" checked={codexModelId === m} onChange={() => setCodexModel(m)} className="accent-accent" />
-              <span className="text-[13px] font-mono">{m}</span>
-              {detected.includes(m) && !codexCustomModels.includes(m) && (
+        {options.map(model => (
+          <div key={model} className="flex items-center gap-2">
+            <label className={`flex-1 flex items-center gap-3 py-1.5 px-2 cursor-pointer ${selected === model ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}>
+              <input type="radio" name={radioName} checked={selected === model} onChange={() => onSelect(model)} className="accent-accent" />
+              <span className="text-[13px] font-mono">{model}</span>
+              {detected.includes(model) && !custom.includes(model) && (
                 <span className="text-[10px] text-muted border border-border px-1.5 py-0.5 rounded">wykryty</span>
               )}
             </label>
-            {codexCustomModels.includes(m) && (
-              <button onClick={() => removeCustom(m)} className="text-muted hover:text-danger transition-colors p-1" aria-label="Usuń model">
+            {custom.includes(model) && (
+              <button onClick={() => onRemove(model)} className="text-muted hover:text-danger transition-colors p-1" aria-label="Usuń model">
                 <Icon name="trash" className="w-3 h-3" />
               </button>
             )}
@@ -1006,13 +1053,13 @@ function CodexModelsSection() {
       <div className="flex gap-2">
         <input
           value={newModel}
-          onChange={e => setNewModel(e.target.value)}
-          placeholder="np. gpt-5.5-codex"
+          onChange={event => setNewModel(event.target.value)}
+          placeholder={placeholder}
           className="flex-1 bg-bg border border-border px-3 py-1.5 text-[13px] font-mono placeholder:text-muted/60"
-          onKeyDown={e => { if (e.key === 'Enter') { addCustom(newModel); setNewModel(''); } }}
+          onKeyDown={event => { if (event.key === 'Enter') submit(); }}
         />
         <button
-          onClick={() => { addCustom(newModel); setNewModel(''); }}
+          onClick={submit}
           disabled={!newModel.trim()}
           className="px-3 py-1.5 border border-border bg-bg-elev-2 text-[12px] text-fg-secondary hover:text-fg disabled:opacity-40 shrink-0"
         >
@@ -1023,18 +1070,82 @@ function CodexModelsSection() {
   );
 }
 
+function CodexModelsSection() {
+  const codexModelId = useStore(s => s.codexModelId);
+  const setCodexModel = useStore(s => s.setCodexModel);
+  const codexCustomModels = useStore(useShallow(s => s.codexCustomModels));
+  const addCustom = useStore(s => s.addCodexCustomModel);
+  const removeCustom = useStore(s => s.removeCodexCustomModel);
+  const [detected, setDetected] = useState<string[]>([]);
+
+  useEffect(() => {
+    tauri.detectCodexModels().then(setDetected).catch(() => setDetected([]));
+  }, []);
+
+  return (
+    <PlainModelSection
+      label="Codex"
+      description="Model używany przy tworzeniu nowych sesji Codex. „Auto” pozostawia wybór konfiguracji Codexa."
+      radioName="codex-model"
+      autoLabel="Auto (konfiguracja Codexa)"
+      placeholder="np. gpt-5.5-codex"
+      selected={codexModelId}
+      detected={detected}
+      custom={codexCustomModels}
+      onSelect={setCodexModel}
+      onAdd={addCustom}
+      onRemove={removeCustom}
+    />
+  );
+}
+
+function OpencodeModelsSection() {
+  const selected = useStore(s => s.opencodeModelId);
+  const setSelected = useStore(s => s.setOpencodeModel);
+  const custom = useStore(useShallow(s => s.opencodeCustomModels));
+  const addCustom = useStore(s => s.addOpencodeCustomModel);
+  const removeCustom = useStore(s => s.removeOpencodeCustomModel);
+  const [detected, setDetected] = useState<string[]>([]);
+
+  useEffect(() => {
+    tauri.detectOpencodeModels().then(setDetected).catch(() => setDetected([]));
+  }, []);
+
+  return (
+    <PlainModelSection
+      label="OpenCode"
+      description="Model używany przy tworzeniu nowych sesji OpenCode. „Auto” pozostawia wybór konfiguracji OpenCode."
+      radioName="opencode-model"
+      autoLabel="Auto (konfiguracja OpenCode)"
+      placeholder="np. anthropic/claude-sonnet-4-5"
+      selected={selected}
+      detected={detected}
+      custom={custom}
+      onSelect={setSelected}
+      onAdd={addCustom}
+      onRemove={removeCustom}
+    />
+  );
+}
+
 function ModelsTab() {
   const enabledProviders = useStore(useShallow(s => s.enabledProviders));
   const showClaude = enabledProviders.includes('claude');
   const showCodex = enabledProviders.includes('codex');
+  const showOpencode = enabledProviders.includes('opencode');
+  const sections = [
+    showClaude ? <ClaudeModelsSection key="claude" /> : null,
+    showCodex ? <CodexModelsSection key="codex" /> : null,
+    showOpencode ? <OpencodeModelsSection key="opencode" /> : null,
+  ].filter((section): section is ReactElement => section !== null);
 
   return (
     <div>
-      {showClaude && <ClaudeModelsSection />}
-      {showClaude && showCodex && (
-        <div className="border-t border-border pt-4 mt-4" />
-      )}
-      {showCodex && <CodexModelsSection />}
+      {sections.map((section, index) => (
+        <div key={section.key} className={index > 0 ? 'border-t border-border pt-4 mt-4' : ''}>
+          {section}
+        </div>
+      ))}
     </div>
   );
 }

@@ -37,6 +37,9 @@ export type SettingsSlice = {
   codexModelId: string;
   codexTitleGenModelId: string;
   codexCustomModels: string[];
+  opencodeModelId: string;
+  opencodeTitleGenModelId: string;
+  opencodeCustomModels: string[];
 
   toggleProvider: (p: Provider) => void;
   setTheme: (t: ThemeMode) => void;
@@ -69,6 +72,10 @@ export type SettingsSlice = {
   setCodexTitleGenModel: (modelId: string) => void;
   addCodexCustomModel: (modelId: string) => void;
   removeCodexCustomModel: (modelId: string) => void;
+  setOpencodeModel: (modelId: string) => void;
+  setOpencodeTitleGenModel: (modelId: string) => void;
+  addOpencodeCustomModel: (modelId: string) => void;
+  removeOpencodeCustomModel: (modelId: string) => void;
 };
 
 export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
@@ -99,6 +106,9 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   codexModelId: '',
   codexTitleGenModelId: '',
   codexCustomModels: [],
+  opencodeModelId: '',
+  opencodeTitleGenModelId: '',
+  opencodeCustomModels: [],
 
   toggleProvider: (p) => {
     const cur = get().enabledProviders;
@@ -152,6 +162,20 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
       codexCustomModels: get().codexCustomModels.filter(m => m !== modelId),
       ...(get().codexModelId === modelId ? { codexModelId: '' } : {}),
       ...(get().codexTitleGenModelId === modelId ? { codexTitleGenModelId: '' } : {}),
+    });
+  },
+  setOpencodeModel: (opencodeModelId) => set({ opencodeModelId }),
+  setOpencodeTitleGenModel: (opencodeTitleGenModelId) => set({ opencodeTitleGenModelId }),
+  addOpencodeCustomModel: (modelId) => {
+    const trimmed = modelId.trim();
+    if (!trimmed || get().opencodeCustomModels.includes(trimmed)) return;
+    set({ opencodeCustomModels: [...get().opencodeCustomModels, trimmed] });
+  },
+  removeOpencodeCustomModel: (modelId) => {
+    set({
+      opencodeCustomModels: get().opencodeCustomModels.filter(model => model !== modelId),
+      ...(get().opencodeModelId === modelId ? { opencodeModelId: '' } : {}),
+      ...(get().opencodeTitleGenModelId === modelId ? { opencodeTitleGenModelId: '' } : {}),
     });
   },
 });

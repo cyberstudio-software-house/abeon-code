@@ -100,6 +100,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
   const defaultModelId = useStore(s => s.defaultModelId);
   const customModels = useStore(s => s.customModels);
   const codexModelId = useStore(s => s.codexModelId);
+  const opencodeModelId = useStore(s => s.opencodeModelId);
   const skipPermissions = useStore(s => s.skipPermissions);
   const setActiveAgentPtyId = useStore(s => s.setActiveAgentPtyId);
   const [agentPtyId, setAgentPtyId] = useState<string | null>(null);
@@ -179,6 +180,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
             ...(sessionId ? { session_id: sessionId } : {}),
             ...(agentProvider === 'claude' && cliModel ? { model: cliModel } : {}),
             ...(agentProvider === 'codex' && !isResume && codexModelId ? { model: codexModelId } : {}),
+            ...(agentProvider === 'opencode' && !isResume && opencodeModelId ? { model: opencodeModelId } : {}),
             ...(fresh ? { fresh: true } : {}),
             ...(skipPermissions ? { skip_permissions: true } : {}),
           }

@@ -52,6 +52,39 @@ describe('settingsSlice codex models', () => {
   });
 });
 
+describe('settingsSlice OpenCode models', () => {
+  beforeEach(() => {
+    useStore.setState({ opencodeModelId: '', opencodeTitleGenModelId: '', opencodeCustomModels: [] });
+  });
+
+  it('trims and deduplicates custom models', () => {
+    useStore.getState().addOpencodeCustomModel('  anthropic/claude-sonnet-4-5  ');
+    useStore.getState().addOpencodeCustomModel('anthropic/claude-sonnet-4-5');
+    expect(useStore.getState().opencodeCustomModels).toEqual(['anthropic/claude-sonnet-4-5']);
+  });
+
+  it('resets both selections when their custom model is removed', () => {
+    useStore.getState().addOpencodeCustomModel('openai/gpt-5.4');
+    useStore.getState().setOpencodeModel('openai/gpt-5.4');
+    useStore.getState().setOpencodeTitleGenModel('openai/gpt-5.4');
+    useStore.getState().removeOpencodeCustomModel('openai/gpt-5.4');
+    expect(useStore.getState().opencodeModelId).toBe('');
+    expect(useStore.getState().opencodeTitleGenModelId).toBe('');
+  });
+
+  it('persists all OpenCode model fields', () => {
+    useStore.getState().addOpencodeCustomModel('openai/gpt-5.4');
+    useStore.getState().setOpencodeModel('openai/gpt-5.4');
+    useStore.getState().setOpencodeTitleGenModel('openai/gpt-5.4');
+    const persisted = JSON.parse(localStorage.getItem('abeoncode.settings') ?? '{}');
+    expect(persisted).toMatchObject({
+      opencodeModelId: 'openai/gpt-5.4',
+      opencodeTitleGenModelId: 'openai/gpt-5.4',
+      opencodeCustomModels: ['openai/gpt-5.4'],
+    });
+  });
+});
+
 describe('settingsSlice showActiveSessions', () => {
   beforeEach(() => { useStore.setState({ showActiveSessions: true }); });
 

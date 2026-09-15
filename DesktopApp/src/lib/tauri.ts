@@ -148,6 +148,7 @@ export const tauri = {
   attentionHookStatus: () => invoke<boolean>('attention_hook_status'),
   detectProviders: () => invoke<ProviderInfo[]>('detect_providers'),
   detectCodexModels: () => invoke<string[]>('detect_codex_models'),
+  detectOpencodeModels: () => invoke<string[]>('detect_opencode_models'),
   clickupSetToken: (token: string) => invoke<void>('clickup_set_token', { token }),
   clickupClearToken: () => invoke<void>('clickup_clear_token'),
   clickupConnectionStatus: () =>
