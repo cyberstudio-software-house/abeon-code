@@ -32,7 +32,7 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 - `commands/` — Tauri command handlers grouped by domain: `projects.rs`, `sessions.rs`, `pty.rs`, `actions.rs`, `git.rs`, `settings.rs`, `activity.rs`. Registered in `lib.rs`.
 - `db/` — SQLite migrations + queries.
 - `pty/` — PTY spawning and lifecycle (claude / action / shell variants).
-- `sessions/` — JSONL session reading and watch; Claude Code format at top level, `sessions/codex/` holds the OpenAI Codex rollout reader/parser/activity.
+- `sessions/` — session reading and watch; Claude Code JSONL format at top level, `sessions/codex/` holds the OpenAI Codex rollout adapter, and `sessions/opencode/` holds the read-only OpenCode SQLite adapter.
 - `git/` — git2 wrappers: `mod.rs` (status + working-tree diff), `history.rs` (branches, log, commit detail, per-commit file diff).
 - `detectors/` — script detection (npm/cargo/etc).
 - `domain/` — shared structs (ts-rs derives live here).
@@ -120,13 +120,13 @@ respawns them, while action PTYs must survive:
 
 ## Providers
 
-The app drives two AI CLIs, selected per session via `domain::Provider` (`claude` | `codex`):
+The app drives three AI CLIs, selected per session via `domain::Provider` (`claude` | `codex` | `opencode`):
 
-- **Spawn**: `PtyKind::Agent { provider, … }` → `build_agent_command` in `commands/pty.rs`. Claude pre-assigns ids (`--session-id`/`--resume`); Codex cannot (`codex` / `codex resume <id>`), so fresh Codex tabs use a `new-<uuid>` placeholder linked later by `sessionsSlice.refreshActivity` (provider-matched).
-- **Discovery**: Claude reads `~/.claude/projects/<encoded>/`; Codex reads global `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl(.zst)` filtered by `session_meta.cwd == project.path` (`sessions/codex/reader.rs`, mtime-keyed meta+title caches).
-- **History**: codex rollout `response_item`s map to the shared `HistoryBlock`; codex block uuids are synthetic `cx-<physical_line>-<block_idx>` (append-only stable; watcher counts physical lines to match).
-- **Settings**: `enabledProviders` (persisted); >1 enabled → "New session" opens a `providerPicker` tab. The CLI settings tab holds provider toggles (`detect_providers` checks binaries on the shell PATH) and per-provider title-gen models; the Models tab shows a section per enabled provider (Codex: `codexModelId`/`codexCustomModels`, '' = Auto; detection via `detect_codex_models` scanning recent rollouts' `turn_context.model`).
-- **v1 limits (by design)**: remote bridge/roster is Claude-only; usage/cost tracking Claude-only; codex `.zst` watcher appends update activity only (no block parsing). Title generation dispatches per provider (`claude -p` / `codex exec --ephemeral` from a temp dir so no rollout is persisted).
+- **Spawn**: `PtyKind::Agent { provider, … }` → `build_agent_command` in `commands/pty.rs`. Claude pre-assigns ids (`--session-id`/`--resume`); Codex and OpenCode cannot, so fresh tabs for those providers use a `new-<uuid>` placeholder linked later by `sessionsSlice.refreshActivity` (provider-matched). OpenCode resumes with `opencode --session <id>` and bypasses permissions with `--auto`.
+- **Discovery**: Claude reads `~/.claude/projects/<encoded>/`; Codex reads global `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl(.zst)` filtered by `session_meta.cwd == project.path`; OpenCode 1.18.31 reads `~/.local/share/opencode/opencode.db` in read-only mode, filters by exact `session.directory == project.path`, and excludes rows with `parent_id` from the top-level list.
+- **History**: Codex rollout `response_item`s map to the shared `HistoryBlock`; Codex block UUIDs are synthetic `cx-<physical_line>-<block_idx>`. OpenCode maps `message` and `part` rows to stable `oc-<part_id>` blocks. OpenCode history is mutable, so DB/WAL changes emit `session:<id>:sync` and the frontend replaces the overlapping tail instead of using append offsets.
+- **Settings**: `enabledProviders` is persisted; more than one enabled provider opens a `providerPicker` tab for a new session. Provider detection checks binaries on the shell PATH. Codex and OpenCode model IDs are persisted as opaque strings; OpenCode keeps the native `provider/model` form and discovers values through `opencode models`.
+- **v1 limits (by design)**: OpenCode remote bridge control, usage/cost, limits, and subagent presentation are unsupported. Codex `.zst` watcher updates activity only, without appended block parsing. Title generation dispatches per provider (`claude -p`, `codex exec --ephemeral`, or `opencode run --format json`) from a temporary directory; temporary OpenCode title sessions are deleted best-effort.
 
 ## Keyboard shortcuts (global)
 

@@ -115,6 +115,7 @@ export function UsageSection() {
   const projectId = activeTab?.projectId ?? null;
   const sessionId = activeTab?.kind === 'session' ? activeTab.sessionId : null;
   const provider = activeTab?.kind === 'session' ? (activeTab.provider ?? 'claude') : null;
+  const supportsUsage = provider !== 'opencode';
 
   const [tab, setTab] = useState<UsageTab>('limits');
   const [sessionUsage, setSessionUsage] = useState<UsageSummary | null>(null);
@@ -122,7 +123,7 @@ export function UsageSection() {
 
   useEffect(() => {
     setSessionUsage(null);
-    if (tab !== 'usage' || projectId == null || sessionId == null) return;
+    if (!supportsUsage || tab !== 'usage' || projectId == null || sessionId == null) return;
     let unlisten: (() => void) | null = null;
     let disposed = false;
     tauri.sessionUsage(projectId, sessionId).then(setSessionUsage).catch(() => {});
@@ -134,11 +135,11 @@ export function UsageSection() {
       disposed = true;
       if (unlisten) unlisten();
     };
-  }, [projectId, sessionId, tab]);
+  }, [projectId, sessionId, supportsUsage, tab]);
 
   useEffect(() => {
     setLimits(undefined);
-    if (tab !== 'limits' || provider == null) {
+    if (!supportsUsage || tab !== 'limits' || provider == null) {
       setLimits(null);
       return;
     }
@@ -154,7 +155,7 @@ export function UsageSection() {
       disposed = true;
       window.clearInterval(interval);
     };
-  }, [provider, tab]);
+  }, [provider, supportsUsage, tab]);
 
   const hasLimits = limits?.shortWindow != null || limits?.weekly != null;
 
@@ -166,11 +167,17 @@ export function UsageSection() {
       </div>
 
       {tab === 'usage' ? (
-        <div className="flex flex-col gap-1">
-          <UsageLine label="Sesja" usage={sessionUsage} />
-          <DurationLine label="Czas sesji" ms={sessionUsage?.durationMs} />
-          <DurationLine label="Czas aktywny" ms={sessionUsage?.activeMs} />
-        </div>
+        supportsUsage ? (
+          <div className="flex flex-col gap-1">
+            <UsageLine label="Sesja" usage={sessionUsage} />
+            <DurationLine label="Czas sesji" ms={sessionUsage?.durationMs} />
+            <DurationLine label="Czas aktywny" ms={sessionUsage?.activeMs} />
+          </div>
+        ) : (
+          <div className="text-[12px] text-muted">Brak danych o zużyciu dla OpenCode</div>
+        )
+      ) : !supportsUsage ? (
+        <div className="text-[12px] text-muted">Brak danych o limitach dla OpenCode</div>
       ) : limits === undefined ? (
         <div className="text-[12px] text-muted">Wczytywanie…</div>
       ) : hasLimits ? (

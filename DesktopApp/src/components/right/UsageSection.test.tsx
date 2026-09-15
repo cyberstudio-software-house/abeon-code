@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { UsageSection } from './UsageSection';
+import { tauri } from '../../lib/tauri';
 
 type MockState = Record<string, unknown>;
 let mockState: MockState;
@@ -70,5 +71,29 @@ describe('UsageSection', () => {
     render(<UsageSection />);
 
     expect(screen.getByText('Brak danych o limitach')).toBeInTheDocument();
+  });
+
+  it('shows unsupported states without requesting OpenCode usage or limits', async () => {
+    mockState = {
+      tabs: [{
+        kind: 'session',
+        id: 'session:open',
+        projectId: 1,
+        sessionId: 'open',
+        title: 'OpenCode session',
+        mode: 'terminal',
+        provider: 'opencode',
+      }],
+      activeTabId: 'session:open',
+    };
+
+    render(<UsageSection />);
+
+    expect(await screen.findByText('Brak danych o limitach dla OpenCode')).toBeInTheDocument();
+    expect(vi.mocked(tauri.providerLimits)).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Zużycie' }));
+    expect(screen.getByText('Brak danych o zużyciu dla OpenCode')).toBeInTheDocument();
+    expect(vi.mocked(tauri.sessionUsage)).not.toHaveBeenCalled();
   });
 });
