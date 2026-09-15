@@ -37,6 +37,22 @@ fn catch<T, F: FnOnce() -> AppResult<T> + panic::UnwindSafe>(f: F) -> AppResult<
     }
 }
 
+fn isolate_optional_provider<T: Default>(result: AppResult<T>) -> T {
+    result.unwrap_or_default()
+}
+
+fn validate_opencode_session_directory(
+    session_id: &str,
+    actual: &str,
+    expected: &str,
+) -> AppResult<()> {
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(AppError::NotFound(session_id.to_string()))
+    }
+}
+
 fn list_project_sessions(
     c: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
     proj: &Project,
@@ -51,13 +67,13 @@ fn list_project_sessions(
     let opencode_list = match opencode::reader::database_path() {
         Some(database_path) => {
             let project_path = proj.path.clone();
-            catch(move || {
+            isolate_optional_provider(catch(move || {
                 opencode::reader::list_for_directory(&database_path, &project_path, window).map(|rows| {
                     rows.into_iter()
                         .map(|row| opencode::reader::into_session_meta(row, project_id))
                         .collect()
                 })
-            })?
+            }))
         }
         None => Vec::new(),
     };
@@ -108,13 +124,19 @@ pub fn read_session_history(
             catch(move || codex::reader::read_history(&codex_dir, project_id, &sid, limit, before_uuid.as_deref()))?
         }
         Provider::Opencode => {
+            let proj = projects_repo::get(&c, project_id)?;
             let database_path = opencode::reader::database_path()
                 .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
             let sid = session_id.clone();
-            catch(move || {
+            let history = catch(move || {
                 opencode::reader::read_history(&database_path, &sid, limit, before_uuid.as_deref())
-                    .map(|history| opencode::reader::into_session_history(history, project_id))
-            })?
+            })?;
+            validate_opencode_session_directory(
+                &session_id,
+                &history.session.directory,
+                &proj.path,
+            )?;
+            opencode::reader::into_session_history(history, project_id)
         }
     };
     if let Some(t) = session_titles_repo::get(&c, project_id, &session_id) {
@@ -221,7 +243,7 @@ pub fn count_sessions(
         .unwrap_or(0);
     let opencode_count = opencode::reader::database_path()
         .map(|path| opencode::reader::count_for_directory(&path, &proj.path))
-        .transpose()?
+        .map(isolate_optional_provider)
         .unwrap_or(0);
     Ok(claude_count + codex_count + opencode_count)
 }
@@ -248,13 +270,19 @@ pub fn export_session(
             catch(move || codex::reader::read_history(&codex_dir, project_id, &sid, None, None))?
         }
         Provider::Opencode => {
+            let proj = projects_repo::get(&c, project_id)?;
             let database_path = opencode::reader::database_path()
                 .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
             let sid = session_id.clone();
-            catch(move || {
+            let stored = catch(move || {
                 opencode::reader::read_history(&database_path, &sid, None, None)
-                    .map(|history| opencode::reader::into_session_history(history, project_id))
-            })?
+            })?;
+            validate_opencode_session_directory(
+                &session_id,
+                &stored.session.directory,
+                &proj.path,
+            )?;
+            opencode::reader::into_session_history(stored, project_id)
         }
     };
     match format.as_str() {
@@ -313,6 +341,9 @@ pub async fn generate_session_title(
             Provider::Opencode => {
                 let database_path = opencode::reader::database_path()
                     .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
+                let directory = opencode::reader::session_directory(&database_path, &session_id)?
+                    .ok_or_else(|| AppError::NotFound(session_id.clone()))?;
+                validate_opencode_session_directory(&session_id, &directory, &proj.path)?;
                 opencode::reader::first_user_prompt(&database_path, &session_id)?
             }
         };
@@ -330,7 +361,14 @@ pub async fn generate_session_title(
         User's first prompt:\n<<<\n{truncated}\n>>>"
     );
 
-    let raw = run_agent_prompt(prov, model, prompt, std::path::PathBuf::from(proj_path)).await?;
+    let raw = run_agent_prompt(
+        &state,
+        prov,
+        model,
+        prompt,
+        std::path::PathBuf::from(proj_path),
+    )
+    .await?;
     let cleaned = clean_title(&raw);
     if cleaned.is_empty() {
         return Err(AppError::Other("Pusta odpowiedź modelu".into()));
@@ -339,6 +377,7 @@ pub async fn generate_session_title(
 }
 
 pub(crate) async fn run_agent_prompt(
+    state: &AppState,
     provider: Provider,
     model: Option<String>,
     prompt: String,
@@ -391,7 +430,46 @@ pub(crate) async fn run_agent_prompt(
             let _ = std::fs::remove_file(&out_file);
             raw.map_err(|e| AppError::Other(format!("codex exec: nie można odczytać pliku wyjściowego: {e}")))
         }
-        Provider::Opencode => opencode::runner::run_prompt(model.as_deref(), &prompt).await,
+        Provider::Opencode => {
+            let binary = crate::commands::models::locate_binary(state, "opencode")
+                .ok_or_else(|| AppError::Other("Nie znaleziono programu OpenCode".into()))?;
+            let connection = state.db.get()?;
+            let shell = crate::commands::settings::resolve_shell(&connection);
+            let environment = crate::commands::settings::ensure_shell_env(state, &shell);
+            opencode::runner::run_prompt_with_environment(
+                model.as_deref(),
+                &prompt,
+                &binary,
+                Some(&environment),
+            ).await
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn optional_provider_errors_do_not_block_aggregate_results() {
+        let sessions: Vec<SessionMeta> = isolate_optional_provider(Err(AppError::Other(
+            "unsupported OpenCode schema".into(),
+        )));
+        let count: usize = isolate_optional_provider(Err(AppError::Other(
+            "unsupported OpenCode schema".into(),
+        )));
+
+        assert!(sessions.is_empty());
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn opencode_history_must_belong_to_the_requested_project() {
+        assert!(validate_opencode_session_directory("session", "/project", "/project").is_ok());
+        assert!(matches!(
+            validate_opencode_session_directory("session", "/other", "/project"),
+            Err(AppError::NotFound(id)) if id == "session"
+        ));
     }
 }
 

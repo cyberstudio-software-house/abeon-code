@@ -37,59 +37,85 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
   const [searchFocusTick, setSearchFocusTick] = useState(0);
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
 
-  useEffect(() => {
-    tauri.readSessionHistory(projectId, sessionId, provider)
-      .then(setData)
-      .catch(e => setError(formatTauriError(e)));
-  }, [projectId, sessionId, provider]);
-
   const renameTab = useStore(s => s.renameTab);
 
   useEffect(() => {
-    let unlistenAppend: (() => void) | null = null;
-    let unlistenActivity: (() => void) | null = null;
-    let unlistenTitle: (() => void) | null = null;
-    let unlistenSync: (() => void) | null = null;
+    const unlisteners: Array<() => void> = [];
     let syncTimer: ReturnType<typeof setTimeout> | null = null;
     let cancelled = false;
-    tauri.openSessionWatch(projectId, sessionId, provider).catch(() => {});
-    tauri.onSessionAppend(sessionId, (blocks) => {
-      setData(prev => prev ? ({ ...prev, blocks: [...prev.blocks, ...blocks] }) : prev);
-    }).then(fn => { unlistenAppend = fn; });
-    tauri.onSessionActivity(sessionId, (activity) => {
-      patchActivity(sessionId, activity);
-    }).then(fn => { unlistenActivity = fn; });
-    tauri.onSessionTitle(sessionId, (title) => {
-      renameTab(`session:${sessionId}`, title);
-      setData(prev => prev ? ({ ...prev, meta: { ...prev.meta, title } }) : prev);
-    }).then(fn => { unlistenTitle = fn; });
-    if (provider === 'opencode') {
-      tauri.onSessionSync(sessionId, () => {
-        if (syncTimer) clearTimeout(syncTimer);
-        syncTimer = setTimeout(async () => {
-          try {
-            const latest = await tauri.readSessionHistory(projectId, sessionId, provider);
-            if (cancelled) return;
-            setData(previous => previous ? {
-              meta: latest.meta,
-              blocks: mergeHistoryWindow(previous.blocks, latest.blocks),
-              hasMoreBefore: previous.hasMoreBefore || latest.hasMoreBefore,
-            } : latest);
-            renameTab(tabId, latest.meta.title);
-          } catch {
-            return;
-          }
-        }, 150);
-      }).then(fn => { unlistenSync = fn; });
-    }
+    let watchOpened = false;
+    let requestGeneration = 0;
+    setData(null);
+    setError(null);
+
+    const readLatest = async (merge: boolean) => {
+      const generation = ++requestGeneration;
+      try {
+        const latest = await tauri.readSessionHistory(projectId, sessionId, provider);
+        if (cancelled || generation !== requestGeneration) return;
+        setData(previous => merge && previous ? {
+          meta: latest.meta,
+          blocks: mergeHistoryWindow(previous.blocks, latest.blocks),
+          hasMoreBefore: previous.hasMoreBefore || latest.hasMoreBefore,
+        } : latest);
+        renameTab(tabId, latest.meta.title);
+      } catch (reason) {
+        if (!cancelled && generation === requestGeneration) {
+          setError(formatTauriError(reason));
+        }
+      }
+    };
+
+    const setup = async () => {
+      const listeners = await Promise.all([
+        tauri.onSessionAppend(sessionId, (blocks) => {
+          setData(previous => previous
+            ? { ...previous, blocks: [...previous.blocks, ...blocks] }
+            : previous);
+        }),
+        tauri.onSessionActivity(sessionId, (activity) => {
+          patchActivity(sessionId, activity);
+        }),
+        tauri.onSessionTitle(sessionId, (title) => {
+          renameTab(tabId, title);
+          setData(previous => previous
+            ? { ...previous, meta: { ...previous.meta, title } }
+            : previous);
+        }),
+        provider === 'opencode'
+          ? tauri.onSessionSync(sessionId, () => {
+              if (syncTimer) clearTimeout(syncTimer);
+              syncTimer = setTimeout(() => { void readLatest(true); }, 150);
+            })
+          : Promise.resolve(() => {}),
+      ]);
+      if (cancelled) {
+        listeners.forEach(unlisten => unlisten());
+        return;
+      }
+      unlisteners.push(...listeners);
+      try {
+        await tauri.openSessionWatch(projectId, sessionId, provider);
+        watchOpened = true;
+      } catch {
+        watchOpened = false;
+      }
+      if (cancelled) {
+        if (watchOpened) await tauri.closeSessionWatch(sessionId).catch(() => {});
+        return;
+      }
+      await readLatest(false);
+    };
+
+    void setup().catch(reason => {
+      if (!cancelled) setError(formatTauriError(reason));
+    });
     return () => {
       cancelled = true;
+      requestGeneration += 1;
       if (syncTimer) clearTimeout(syncTimer);
-      if (unlistenAppend) unlistenAppend();
-      if (unlistenActivity) unlistenActivity();
-      if (unlistenTitle) unlistenTitle();
-      if (unlistenSync) unlistenSync();
-      tauri.closeSessionWatch(sessionId).catch(() => {});
+      unlisteners.forEach(unlisten => unlisten());
+      if (watchOpened) tauri.closeSessionWatch(sessionId).catch(() => {});
     };
   }, [projectId, sessionId, tabId, provider, patchActivity, renameTab]);
 

@@ -203,7 +203,15 @@ pub fn spawn_pty(
 
     let args_ref: Vec<&str> = args_owned.iter().map(|s| s.as_str()).collect();
     let shell = crate::commands::settings::resolve_shell(&c);
-    let env = crate::commands::settings::ensure_shell_env(&state, &shell);
+    let mut env = crate::commands::settings::ensure_shell_env(&state, &shell);
+    if matches!(&kind, PtyKind::Agent { provider: Provider::Opencode, .. }) {
+        if let Some(parent) = crate::commands::models::locate_binary(&state, "opencode")
+            .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+        {
+            let current = env.get("PATH").map(String::as_str).unwrap_or("");
+            env.insert("PATH".into(), format!("{}:{current}", parent.display()));
+        }
+    }
     let pty_id = state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows, &env)?;
     if let Some(session_id) = session_to_bind(&kind) {
         state.session_pty.bind(&session_id, &pty_id);

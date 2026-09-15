@@ -292,8 +292,9 @@ pub async fn clickup_generate_summary(
     }
     let prompt = build_summary_prompt(&blocks);
     let raw = crate::commands::sessions::run_agent_prompt(
-        prov, None, prompt, std::path::PathBuf::from(proj_path),
-    ).await?;
+        &state, prov, None, prompt, std::path::PathBuf::from(proj_path),
+    )
+    .await?;
     let trimmed = raw.trim().to_string();
     if trimmed.is_empty() {
         return Err(AppError::Other("Pusta odpowiedź modelu".into()));
@@ -379,8 +380,9 @@ pub async fn clickup_estimate_time(
     let session_ms = active_session_ms(&blocks, IDLE_CAP_MS);
     let prompt = build_time_prompt(&blocks);
     let raw = crate::commands::sessions::run_agent_prompt(
-        prov, None, prompt, std::path::PathBuf::from(proj_path),
-    ).await?;
+        &state, prov, None, prompt, std::path::PathBuf::from(proj_path),
+    )
+    .await?;
     let dev_minutes = parse_minutes(&raw).unwrap_or((session_ms / 60_000).max(1));
     Ok(TimeEstimate { session_ms, dev_estimate_ms: dev_minutes * 60_000 })
 }

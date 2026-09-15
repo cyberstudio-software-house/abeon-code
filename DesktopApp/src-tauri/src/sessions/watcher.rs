@@ -26,7 +26,7 @@ enum WatchSource {
     },
     OpenCode {
         database_path: PathBuf,
-        revision: i64,
+        title: String,
     },
 }
 
@@ -103,7 +103,10 @@ impl SessionWatchers {
         }
         if let Some(watcher) = w.as_mut() {
             let dir = path.parent().map(|p| p.to_path_buf()).unwrap_or(path.clone());
-            let _ = watcher.watch(&dir, RecursiveMode::Recursive);
+            if let Err(error) = watcher.watch(&dir, RecursiveMode::Recursive) {
+                self.sessions.lock().remove(session_id);
+                return Err(crate::error::AppError::Other(format!("notify: {error}")));
+            }
         }
         Ok(())
     }
@@ -123,7 +126,7 @@ impl SessionWatchers {
                 provider: Provider::Opencode,
                 source: WatchSource::OpenCode {
                     database_path: database_path.clone(),
-                    revision: revision.updated_at,
+                    title: revision.title,
                 },
             },
         );
@@ -144,7 +147,11 @@ impl SessionWatchers {
             *watcher = Some(created);
         }
         if let (Some(watcher), Some(parent)) = (watcher.as_mut(), database_path.parent()) {
-            let _ = watcher.watch(parent, RecursiveMode::NonRecursive);
+            if let Err(error) = watcher.watch(parent, RecursiveMode::NonRecursive) {
+                self.sessions.lock().remove(session_id);
+                self.last_activity.lock().remove(session_id);
+                return Err(crate::error::AppError::Other(format!("notify: {error}")));
+            }
         }
         Ok(())
     }
@@ -181,13 +188,14 @@ impl SessionWatchers {
 
         for (sid, sess) in sessions.iter_mut() {
             let WatchSource::File { path, last_offset, lines_seen, usage } = &mut sess.source else {
-                let WatchSource::OpenCode { database_path, revision } = &mut sess.source else { unreachable!() };
+                let WatchSource::OpenCode { database_path, title } = &mut sess.source else { unreachable!() };
                 if !is_opencode_database_event(database_path, changed) { continue; }
-                let Ok(Some(current)) = crate::sessions::opencode::reader::session_revision(database_path, sid) else { continue; };
-                if current.updated_at != *revision {
-                    *revision = current.updated_at;
-                    sync_updates.push(sid.clone());
-                    title_updates.push((sid.clone(), current.title));
+                sync_updates.push(sid.clone());
+                if let Ok(Some(current)) = crate::sessions::opencode::reader::session_revision(database_path, sid) {
+                    if current.title != *title {
+                        *title = current.title.clone();
+                        title_updates.push((sid.clone(), current.title));
+                    }
                     opencode_activity.push((sid.clone(), current.activity));
                 }
                 continue;

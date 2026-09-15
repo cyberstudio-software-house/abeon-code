@@ -92,17 +92,30 @@ pub(crate) fn locate_binary(state: &AppState, name: &str) -> Option<PathBuf> {
         .map(|conn| resolve_shell(&conn))
         .map(|shell| ensure_shell_env(state, &shell))
         .and_then(|env| env.get("PATH").cloned())
-        .or_else(|| std::env::var("PATH").ok())?;
-    for dir in path_var.split(':') {
-        if dir.is_empty() {
-            continue;
-        }
-        let candidate = Path::new(dir).join(name);
-        if candidate.is_file() {
-            return Some(std::fs::canonicalize(&candidate).unwrap_or(candidate));
+        .or_else(|| std::env::var("PATH").ok());
+    if let Some(path_var) = path_var {
+        for dir in path_var.split(':') {
+            if dir.is_empty() {
+                continue;
+            }
+            let candidate = Path::new(dir).join(name);
+            if candidate.is_file() {
+                return Some(std::fs::canonicalize(&candidate).unwrap_or(candidate));
+            }
         }
     }
-    None
+    default_binary_path(name)
+}
+
+fn default_binary_path_for(name: &str, home: Option<&Path>) -> Option<PathBuf> {
+    match name {
+        "opencode" => home.map(|path| path.join(".opencode/bin/opencode")),
+        _ => None,
+    }
+}
+
+pub(crate) fn default_binary_path(name: &str) -> Option<PathBuf> {
+    default_binary_path_for(name, dirs::home_dir().as_deref()).filter(|path| path.is_file())
 }
 
 fn locate_claude(state: &AppState) -> Option<PathBuf> {
@@ -188,6 +201,15 @@ mod tests {
         let toks = scan_aliases(blob);
         assert!(toks.contains(&"claude-opus-4-8".to_string()));
         assert!(toks.contains(&"claude-sonnet-4-6".to_string()));
+    }
+
+    #[test]
+    fn resolves_the_default_opencode_install_path() {
+        assert_eq!(
+            default_binary_path_for("opencode", Some(Path::new("/home/developer"))),
+            Some(PathBuf::from("/home/developer/.opencode/bin/opencode"))
+        );
+        assert_eq!(default_binary_path_for("claude", Some(Path::new("/home/developer"))), None);
     }
 
     #[test]

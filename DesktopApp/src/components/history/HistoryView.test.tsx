@@ -6,7 +6,9 @@ import type { SessionHistory } from '../../types';
 import { HistoryView } from './HistoryView';
 
 vi.mock('./HistoryStream', () => ({
-  HistoryStream: () => <div data-testid="stream" />,
+  HistoryStream: ({ blocks }: { blocks: Array<{ text?: string }> }) => (
+    <div data-testid="stream">{blocks.map(block => block.text ?? '').join('|')}</div>
+  ),
 }));
 vi.mock('./HistorySearchBar', () => ({
   HistorySearchBar: () => <div data-testid="search-bar" />,
@@ -41,6 +43,27 @@ describe('HistoryView search shortcut', () => {
     useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1', sessionsByProject: {} });
   });
 
+  it('registers listeners before opening the watcher and reading the snapshot', async () => {
+    const order: string[] = [];
+    vi.spyOn(tauri, 'onSessionAppend').mockImplementation(async () => {
+      order.push('listener');
+      return () => {};
+    });
+    vi.spyOn(tauri, 'openSessionWatch').mockImplementation(async () => {
+      order.push('watch');
+    });
+    vi.spyOn(tauri, 'readSessionHistory').mockImplementation(async () => {
+      order.push('read');
+      return history;
+    });
+
+    render(<HistoryView projectId={1} sessionId="s1" tabId="session:s1" />);
+    await act(async () => {});
+
+    expect(order.indexOf('listener')).toBeLessThan(order.indexOf('watch'));
+    expect(order.indexOf('watch')).toBeLessThan(order.indexOf('read'));
+  });
+
   it('debounces a burst of OpenCode synchronization events', async () => {
     vi.useFakeTimers();
     const opencodeHistory: SessionHistory = {
@@ -73,6 +96,58 @@ describe('HistoryView search shortcut', () => {
     await act(async () => {});
 
     expect(read).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('ignores an older OpenCode snapshot that resolves after a newer one', async () => {
+    vi.useFakeTimers();
+    const opencodeHistory: SessionHistory = {
+      ...history,
+      meta: { ...history.meta, provider: 'opencode' },
+    };
+    let resolveOlder!: (value: SessionHistory) => void;
+    let resolveNewer!: (value: SessionHistory) => void;
+    const older = new Promise<SessionHistory>(resolve => { resolveOlder = resolve; });
+    const newer = new Promise<SessionHistory>(resolve => { resolveNewer = resolve; });
+    vi.spyOn(tauri, 'readSessionHistory')
+      .mockResolvedValueOnce(opencodeHistory)
+      .mockReturnValueOnce(older)
+      .mockReturnValueOnce(newer);
+    let sync: (() => void) | undefined;
+    vi.spyOn(tauri, 'onSessionSync').mockImplementation(async (_sessionId, callback) => {
+      sync = callback;
+      return () => {};
+    });
+
+    const { getByTestId } = render(
+      <HistoryView projectId={1} sessionId="s1" tabId="session:s1" provider="opencode" />,
+    );
+    await act(async () => {});
+    act(() => {
+      sync?.();
+      vi.advanceTimersByTime(150);
+    });
+    await act(async () => {});
+    act(() => {
+      sync?.();
+      vi.advanceTimersByTime(150);
+    });
+    await act(async () => {});
+
+    await act(async () => {
+      resolveNewer({
+        ...opencodeHistory,
+        blocks: [{ kind: 'assistantText', uuid: 'b0', timestamp: 0, text: 'newer' }],
+      });
+    });
+    await act(async () => {
+      resolveOlder({
+        ...opencodeHistory,
+        blocks: [{ kind: 'assistantText', uuid: 'b0', timestamp: 0, text: 'older' }],
+      });
+    });
+
+    expect(getByTestId('stream').textContent).toBe('newer');
     vi.useRealTimers();
   });
 

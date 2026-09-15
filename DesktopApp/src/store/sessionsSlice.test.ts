@@ -184,6 +184,44 @@ describe('refreshActivity', () => {
     const tab = useStore.getState().tabs[0];
     expect(tab.kind === 'session' && tab.linkedSessionId).toBe('ses_open');
   });
+
+  it('links concurrent OpenCode placeholders from oldest to oldest', async () => {
+    useStore.setState({
+      sessionsByProject: { 1: { items: [], hasMore: false } },
+      tabs: [
+        {
+          kind: 'session',
+          id: 'session:new-first',
+          projectId: 1,
+          sessionId: 'new-first',
+          title: 'New session',
+          mode: 'terminal',
+          fresh: true,
+          provider: 'opencode',
+        },
+        {
+          kind: 'session',
+          id: 'session:new-second',
+          projectId: 1,
+          sessionId: 'new-second',
+          title: 'New session',
+          mode: 'terminal',
+          fresh: true,
+          provider: 'opencode',
+        },
+      ],
+    });
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([
+      { ...fakeMeta('ses-newer', 1), provider: 'opencode', lastModified: 200 },
+      { ...fakeMeta('ses-older', 1), provider: 'opencode', lastModified: 100 },
+    ]);
+
+    await useStore.getState().refreshActivity(1);
+
+    const [first, second] = useStore.getState().tabs;
+    expect(first.kind === 'session' && first.linkedSessionId).toBe('ses-older');
+    expect(second.kind === 'session' && second.linkedSessionId).toBe('ses-newer');
+  });
 });
 
 describe('scheduleNewSessionRefresh', () => {

@@ -13,7 +13,6 @@ const LIVE_WINDOW_MS: i64 = 5_000;
 const TOOL_STALL_MS: i64 = 30_000;
 const RUNNING_STALL_MS: i64 = 10 * 60_000;
 const WAITING_DECAY_MS: i64 = 4 * 60 * 60_000;
-const HARD_IDLE_MS: i64 = 24 * 60 * 60_000;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoredSession {
@@ -202,6 +201,13 @@ pub fn count_for_directory(path: &Path, directory: &str) -> AppResult<usize> {
     Ok(count as usize)
 }
 
+pub fn session_directory(path: &Path, session_id: &str) -> AppResult<Option<String>> {
+    let Some(connection) = open_database(path)? else {
+        return Ok(None);
+    };
+    Ok(stored_session(&connection, session_id)?.map(|session| session.directory))
+}
+
 pub fn read_history(
     path: &Path,
     session_id: &str,
@@ -214,7 +220,7 @@ pub fn read_history(
     let session = stored_session(&connection, session_id)?
         .ok_or_else(|| AppError::NotFound(session_id.to_string()))?;
     let mut statement = connection.prepare(
-        "SELECT m.id, json_extract(m.data, '$.role'), m.time_created,
+        "SELECT m.id, m.data, m.time_created,
                 p.id, p.time_created, p.data
          FROM message m
          JOIN part p ON p.message_id = m.id AND p.session_id = m.session_id
@@ -224,7 +230,7 @@ pub fn read_history(
     let rows = statement.query_map(params![session_id], |row| {
         Ok((
             row.get::<_, String>(0)?,
-            row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            row.get::<_, String>(1)?,
             row.get::<_, i64>(2)?,
             row.get::<_, String>(3)?,
             row.get::<_, i64>(4)?,
@@ -233,7 +239,11 @@ pub fn read_history(
     })?;
     let mut all_blocks = Vec::new();
     for row in rows {
-        let (message_id, role, message_created_at, part_id, part_created_at, raw_data) = row?;
+        let (message_id, raw_message, message_created_at, part_id, part_created_at, raw_data) = row?;
+        let role = serde_json::from_str::<Value>(&raw_message)
+            .ok()
+            .and_then(|data| data.get("role").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_default();
         let Ok(data) = serde_json::from_str::<Value>(&raw_data) else {
             continue;
         };
@@ -281,18 +291,27 @@ fn find_text_part(
     };
     let direction = if descending { "DESC" } else { "ASC" };
     let sql = format!(
-        "SELECT p.data FROM message m
+        "SELECT m.data, p.data FROM message m
          JOIN part p ON p.message_id = m.id AND p.session_id = m.session_id
-         WHERE m.session_id = ?1 AND json_extract(m.data, '$.role') = ?2
-           AND json_extract(p.data, '$.type') = 'text'
+         WHERE m.session_id = ?1
          ORDER BY m.time_created {direction}, m.id {direction}, p.time_created {direction}, p.id {direction}"
     );
     let mut statement = connection.prepare(&sql)?;
-    let rows = statement.query_map(params![session_id, role], |row| row.get::<_, String>(0))?;
+    let rows = statement.query_map(params![session_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
     for row in rows {
-        let Ok(data) = serde_json::from_str::<Value>(&row?) else {
+        let (raw_message, raw_part) = row?;
+        let message_role = serde_json::from_str::<Value>(&raw_message)
+            .ok()
+            .and_then(|data| data.get("role").and_then(Value::as_str).map(str::to_string));
+        if message_role.as_deref() != Some(role) {
             continue;
-        };
+        }
+        let Ok(data) = serde_json::from_str::<Value>(&raw_part) else { continue; };
+        if data.get("type").and_then(Value::as_str) != Some("text") {
+            continue;
+        }
         if let Some(text) = data
             .get("text")
             .and_then(Value::as_str)
@@ -311,8 +330,17 @@ pub fn session_revision(path: &Path, session_id: &str) -> AppResult<Option<Sessi
     let Some(session) = stored_session(&connection, session_id)? else {
         return Ok(None);
     };
+    let updated_at = connection.query_row(
+        "SELECT MAX(updated_at) FROM (
+            SELECT time_updated AS updated_at FROM session WHERE id = ?1
+            UNION ALL SELECT time_updated FROM message WHERE session_id = ?1
+            UNION ALL SELECT time_updated FROM part WHERE session_id = ?1
+        )",
+        params![session_id],
+        |row| row.get::<_, Option<i64>>(0),
+    )?.unwrap_or(session.updated_at);
     Ok(Some(SessionRevision {
-        updated_at: session.updated_at,
+        updated_at,
         title: session.title,
         activity: session.activity,
     }))
@@ -349,31 +377,33 @@ fn activity_for_session(
     updated_at: i64,
 ) -> AppResult<SessionActivity> {
     let now = crate::sessions::reader::now_ms();
-    let age = now.saturating_sub(updated_at);
-    if age > HARD_IDLE_MS {
-        return Ok(SessionActivity::Idle);
-    }
     let mut statement = connection.prepare(
-        "SELECT json_extract(m.data, '$.role'), p.data
+        "SELECT m.data, p.data, p.time_updated
          FROM message m JOIN part p ON p.message_id = m.id AND p.session_id = m.session_id
          WHERE m.session_id = ?1
          ORDER BY p.time_updated DESC, p.id DESC",
     )?;
     let rows = statement.query_map(params![session_id], |row| {
         Ok((
-            row.get::<_, Option<String>>(0)?.unwrap_or_default(),
+            row.get::<_, String>(0)?,
             row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
         ))
     })?;
     for row in rows {
-        let (role, raw_data) = row?;
+        let (raw_message, raw_data, event_updated_at) = row?;
+        let role = serde_json::from_str::<Value>(&raw_message)
+            .ok()
+            .and_then(|data| data.get("role").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_default();
         let Ok(data) = serde_json::from_str::<Value>(&raw_data) else {
             continue;
         };
         if let Some(event) = last_event(&role, &data) {
-            return Ok(activity_from_event(event, age));
+            return Ok(activity_from_event(event, now.saturating_sub(event_updated_at)));
         }
     }
+    let age = now.saturating_sub(updated_at);
     Ok(if age <= LIVE_WINDOW_MS {
         SessionActivity::Running
     } else {
@@ -654,6 +684,95 @@ mod tests {
         assert_eq!(revision.title, "Useful title");
         assert_eq!(revision.updated_at, now);
         assert_ne!(revision.activity, SessionActivity::Idle);
+    }
+
+    #[test]
+    fn revision_tracks_an_existing_part_without_touching_the_session() {
+        let file = test_database();
+        let connection = Connection::open(file.path()).unwrap();
+        insert_session(&connection, "session", None, "/project", "Session", 100);
+        insert_message(&connection, "msg", "session", 110, "assistant");
+        insert_part(
+            &connection,
+            "part",
+            "msg",
+            "session",
+            120,
+            r#"{"type":"text","text":"Partial"}"#,
+        );
+
+        let before = session_revision(file.path(), "session").unwrap().unwrap();
+        connection
+            .execute(
+                "UPDATE part SET time_updated = 130, data = ?1 WHERE id = 'part'",
+                [r#"{"type":"text","text":"Complete"}"#],
+            )
+            .unwrap();
+        let after = session_revision(file.path(), "session").unwrap().unwrap();
+        let history = read_history(file.path(), "session", None, None).unwrap();
+
+        assert!(after.updated_at > before.updated_at);
+        assert!(matches!(
+            &history.blocks[0],
+            HistoryBlock::AssistantText { text, .. } if text == "Complete"
+        ));
+    }
+
+    #[test]
+    fn malformed_message_json_does_not_break_history_or_prompt_lookup() {
+        let file = test_database();
+        let connection = Connection::open(file.path()).unwrap();
+        insert_session(&connection, "session", None, "/project", "Session", 100);
+        connection
+            .execute(
+                "INSERT INTO message VALUES ('bad-message', 'session', 105, 105, 'not-json')",
+                [],
+            )
+            .unwrap();
+        insert_message(&connection, "good-message", "session", 110, "user");
+        insert_part(
+            &connection,
+            "bad-part-owner",
+            "bad-message",
+            "session",
+            106,
+            r#"{"type":"text","text":"Ignore"}"#,
+        );
+        insert_part(
+            &connection,
+            "good-part",
+            "good-message",
+            "session",
+            111,
+            r#"{"type":"text","text":"Keep"}"#,
+        );
+
+        let history = read_history(file.path(), "session", None, None).unwrap();
+
+        assert_eq!(history.blocks.len(), 1);
+        assert_eq!(first_user_prompt(file.path(), "session").unwrap().as_deref(), Some("Keep"));
+    }
+
+    #[test]
+    fn activity_uses_the_latest_part_timestamp() {
+        let file = test_database();
+        let connection = Connection::open(file.path()).unwrap();
+        let now = crate::sessions::reader::now_ms();
+        let old = now - 24 * 60 * 60_000 - 1_000;
+        insert_session(&connection, "session", None, "/project", "Session", old);
+        insert_message(&connection, "message", "session", old, "assistant");
+        insert_part(
+            &connection,
+            "part",
+            "message",
+            "session",
+            now,
+            r#"{"type":"tool","tool":"bash","state":{"status":"running","input":{}}}"#,
+        );
+
+        let revision = session_revision(file.path(), "session").unwrap().unwrap();
+
+        assert_eq!(revision.activity, SessionActivity::Running);
     }
 
     #[test]

@@ -162,7 +162,9 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
         && t.sessionId.startsWith('new-') && !t.linkedSessionId
     );
     if (unlinkedNewTabs.length > 0 && newSessions.length > 0) {
-      const pool = [...newSessions];
+      const pool = [...newSessions].sort(
+        (left, right) => left.lastModified - right.lastModified || left.id.localeCompare(right.id),
+      );
       for (const tab of unlinkedNewTabs) {
         const idx = pool.findIndex(s => s.provider === (tab.provider ?? 'claude'));
         if (idx < 0) continue;
