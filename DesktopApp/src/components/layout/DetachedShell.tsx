@@ -19,7 +19,9 @@ const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 const RIGHT_MIN = 220;
 const RIGHT_MAX = 480;
 
-export function DetachedShell({ mode }: { mode: WindowMode }) {
+type DetachedWindowMode = Exclude<WindowMode, { view: 'notes' }>;
+
+export function DetachedShell({ mode }: { mode: DetachedWindowMode }) {
   const isGroup = mode.view === 'group';
   const projectId = mode.projectId;
   const rightWidth = useStore(s => s.rightWidth);

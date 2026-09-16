@@ -3,6 +3,7 @@ import { Toaster } from 'sonner';
 import { ThemeProvider } from './components/layout/ThemeProvider';
 import { AppShell } from './components/layout/AppShell';
 import { DetachedShell } from './components/layout/DetachedShell';
+import { NotesShell } from './components/notes/NotesShell';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
 import { SettingsDialog } from './components/dialogs/SettingsDialog';
 import { useStore } from './store';
@@ -19,7 +20,11 @@ export default function App() {
   return (
     <ThemeProvider>
       <ErrorBoundary>
-        {windowMode ? <DetachedShell mode={windowMode} /> : <AppShell />}
+        {windowMode?.view === 'notes'
+          ? <NotesShell projectId={windowMode.projectId} />
+          : windowMode
+            ? <DetachedShell mode={windowMode} />
+            : <AppShell />}
       </ErrorBoundary>
       {!windowMode && settingsOpen && <SettingsDialog />}
       <ErrorBoundary>
