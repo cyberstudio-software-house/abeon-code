@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for app windows (main + detached session/project windows)",
-  "windows": ["main", "session-*", "project-*"],
+  "windows": ["main", "session-*", "project-*", "notes-project-*"],
   "permissions": [
     "core:default",
     "core:window:allow-set-title",

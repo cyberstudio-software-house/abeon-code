@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseWindowMode, buildSessionWindowUrl, buildGroupWindowUrl, sessionWindowLabel, groupWindowLabel, type DetachedTab } from './windowMode';
+import { parseWindowMode, buildSessionWindowUrl, buildGroupWindowUrl, buildNotesWindowUrl, sessionWindowLabel, groupWindowLabel, notesWindowLabel, type DetachedTab } from './windowMode';
 import { isProvider } from './providers';
 
 describe('provider validation', () => {
@@ -102,5 +102,22 @@ describe('group window mode', () => {
 describe('groupWindowLabel', () => {
   it('prefixes with project', () => {
     expect(groupWindowLabel(12)).toBe('project-12');
+  });
+});
+
+describe('notes window mode', () => {
+  it('round-trips a valid project id', () => {
+    const url = buildNotesWindowUrl(12);
+    expect(parseWindowMode(url.slice(url.indexOf('?')))).toEqual({ view: 'notes', projectId: 12 });
+  });
+
+  it('rejects missing and invalid project ids', () => {
+    expect(parseWindowMode('?view=notes')).toBeNull();
+    expect(parseWindowMode('?view=notes&projectId=x')).toBeNull();
+    expect(parseWindowMode('?view=notes&projectId=1.5')).toBeNull();
+  });
+
+  it('builds a stable project label', () => {
+    expect(notesWindowLabel(12)).toBe('notes-project-12');
   });
 });

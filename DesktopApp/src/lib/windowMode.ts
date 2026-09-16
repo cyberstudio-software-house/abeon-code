@@ -24,7 +24,9 @@ export type GroupWindowMode = {
   activeTabId: string | null;
 };
 
-export type WindowMode = SessionWindowMode | GroupWindowMode;
+export type NotesWindowMode = { view: 'notes'; projectId: number };
+
+export type WindowMode = SessionWindowMode | GroupWindowMode | NotesWindowMode;
 
 function encodePayload(value: unknown): string {
   return btoa(unescape(encodeURIComponent(JSON.stringify(value))));
@@ -79,11 +81,17 @@ function parseGroupMode(q: URLSearchParams): GroupWindowMode | null {
   };
 }
 
+function parseNotesMode(q: URLSearchParams): NotesWindowMode | null {
+  const projectId = parseProjectId(q.get('projectId'));
+  return projectId === null ? null : { view: 'notes', projectId };
+}
+
 export function parseWindowMode(search: string): WindowMode | null {
   const q = new URLSearchParams(search);
   const view = q.get('view');
   if (view === 'session') return parseSessionMode(q);
   if (view === 'group') return parseGroupMode(q);
+  if (view === 'notes') return parseNotesMode(q);
   return null;
 }
 
@@ -119,10 +127,19 @@ export function buildGroupWindowUrl(p: {
   return `index.html?${q.toString()}`;
 }
 
+export function buildNotesWindowUrl(projectId: number): string {
+  const q = new URLSearchParams({ view: 'notes', projectId: String(projectId) });
+  return `index.html?${q.toString()}`;
+}
+
 export function sessionWindowLabel(sessionId: string): string {
   return `session-${sessionId.replace(/[^a-zA-Z0-9-]/g, '_')}`;
 }
 
 export function groupWindowLabel(projectId: number): string {
   return `project-${projectId}`;
+}
+
+export function notesWindowLabel(projectId: number): string {
+  return `notes-project-${projectId}`;
 }
