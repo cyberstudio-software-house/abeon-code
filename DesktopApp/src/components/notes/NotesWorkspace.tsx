@@ -21,7 +21,7 @@ export function NotesWorkspace({ projectId, onDirtyChange }: NotesWorkspaceProps
   const [saving, setSaving] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
-  const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
+  const [noteToDelete, setNoteToDelete] = useState<Pick<Note, 'id' | 'title'> | null>(null);
   const [deleting, setDeleting] = useState(false);
   const deletedIds = useRef(new Set<number>());
   const projectIdForScope = scope === 'project' ? projectId : null;
@@ -95,7 +95,7 @@ export function NotesWorkspace({ projectId, onDirtyChange }: NotesWorkspaceProps
     }
   };
 
-  const requestDelete = (note: Note) => {
+  const requestDelete = (note: Pick<Note, 'id' | 'title'>) => {
     if (saving || deleting || pendingAction || noteToDelete) return;
     if (draft?.id === note.id) {
       requestDiscard(() => setNoteToDelete(note));
@@ -184,8 +184,7 @@ export function NotesWorkspace({ projectId, onDirtyChange }: NotesWorkspaceProps
             }))}
             onSave={() => { void save(); }}
             onDelete={() => {
-              const selectedNote = notes.find(note => note.id === draft?.id);
-              if (selectedNote) requestDelete(selectedNote);
+              if (draft?.id != null) requestDelete({ id: draft.id, title: draft.savedTitle });
             }}
           />
         </div>

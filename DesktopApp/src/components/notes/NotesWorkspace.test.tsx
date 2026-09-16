@@ -406,4 +406,40 @@ describe('NotesWorkspace', () => {
       expect(screen.getByLabelText('Tytuł')).toHaveValue('Plan');
     }
   });
+
+  it.each([false, true])('deletes a saved draft from the editor after both list attempts fail (dirty: %s)', async (dirty) => {
+    vi.mocked(tauri.listNotes)
+      .mockRejectedValueOnce(new Error('initial load failed'))
+      .mockRejectedValueOnce(new Error('retry failed'));
+    vi.mocked(tauri.createNote).mockResolvedValue(savedNote);
+    vi.mocked(tauri.deleteNote).mockResolvedValue(undefined);
+    render(<NotesWorkspace projectId={2} onDirtyChange={onDirtyChange} />);
+    await screen.findByRole('button', { name: 'Spróbuj ponownie' });
+    fireEvent.click(screen.getByRole('button', { name: 'Nowa notatka' }));
+    fireEvent.change(screen.getByLabelText('Tytuł'), { target: { value: 'Nowa' } });
+    fireEvent.change(screen.getByLabelText('Treść'), { target: { value: 'Tekst' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Zapisz' }));
+    await screen.findByRole('button', { name: 'Usuń' });
+    expect(tauri.createNote).toHaveBeenCalledWith(2, 'Nowa', 'Tekst');
+    fireEvent.click(screen.getByRole('button', { name: 'Spróbuj ponownie' }));
+    await screen.findByRole('button', { name: 'Spróbuj ponownie' });
+    expect(tauri.listNotes).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('button', { name: 'Otwórz Nowa' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Tytuł')).toHaveValue('Nowa');
+
+    if (dirty) {
+      fireEvent.change(screen.getByLabelText('Tytuł'), { target: { value: 'Niezapisany tytuł' } });
+    }
+    fireEvent.click(screen.getByRole('button', { name: 'Usuń' }));
+    if (dirty) {
+      fireEvent.click(screen.getByRole('button', { name: 'Odrzuć' }));
+    }
+    expect(screen.getByText('Usunąć notatkę „Nowa”? Tej operacji nie można cofnąć.')).toBeInTheDocument();
+    expect(tauri.deleteNote).not.toHaveBeenCalled();
+    confirmDeletion();
+    await screen.findByText('Otwórz notatkę z listy lub utwórz nową.');
+    expect(tauri.deleteNote).toHaveBeenCalledExactlyOnceWith(8);
+    expect(screen.queryByLabelText('Tytuł')).not.toBeInTheDocument();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+  });
 });
