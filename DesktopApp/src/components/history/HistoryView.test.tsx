@@ -19,7 +19,7 @@ vi.mock('./SessionFooter', () => ({
 
 const history: SessionHistory = {
   meta: {
-    id: 's1', projectId: 1, title: 'Sesja', messageCount: 1, lastModified: 0,
+    id: 's1', projectId: 1, title: 'Sesja', messageCount: 1, lastModified: 0, createdAt: null,
     gitBranch: null, cwd: null, activity: 'idle', provider: 'claude', runningAgents: 0, totalAgents: 0,
   },
   blocks: [{ kind: 'assistantText', uuid: 'b0', timestamp: 0, text: 'hej' }],

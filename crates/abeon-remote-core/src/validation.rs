@@ -34,7 +34,7 @@ pub fn validate_session_id(id: &str) -> ValidationResult {
 }
 
 /// Validate a model identifier passed to `claude --model`. Allowlist
-/// `[A-Za-z0-9._/\[\]-]`, non-empty, bounded, no leading `-`.
+/// `[A-Za-z0-9._/:\[\]-]`, non-empty, bounded, no leading `-`.
 pub fn validate_model(model: &str) -> ValidationResult {
     if model.is_empty() || model.len() > MAX_MODEL_LEN {
         return Err(ValidationError("model length out of range".into()));
@@ -44,7 +44,7 @@ pub fn validate_model(model: &str) -> ValidationResult {
     }
     if !model
         .chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '[' | ']' | '-'))
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | ':' | '[' | ']' | '-'))
     {
         return Err(ValidationError("model contains invalid characters".into()));
     }
@@ -91,6 +91,7 @@ mod tests {
         assert!(validate_model("claude-sonnet-4-6").is_ok());
         assert!(validate_model("gpt-4o").is_ok());
         assert!(validate_model("gpt-5.5-codex").is_ok());
+        assert!(validate_model("ollama/gemma4:e2b").is_ok());
     }
 
     #[test]

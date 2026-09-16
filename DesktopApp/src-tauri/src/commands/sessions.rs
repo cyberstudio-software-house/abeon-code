@@ -634,7 +634,7 @@ mod merge_tests {
     fn meta(id: &str, provider: Provider, last_modified: i64) -> SessionMeta {
         SessionMeta {
             id: id.into(), project_id: 1, title: id.into(), message_count: 1,
-            last_modified, git_branch: None, cwd: None,
+            last_modified, created_at: None, git_branch: None, cwd: None,
             activity: SessionActivity::Idle, provider,
             running_agents: 0, total_agents: 0,
         }
@@ -724,7 +724,7 @@ mod active_tests {
     fn meta(id: &str, provider: Provider, activity: SessionActivity) -> SessionMeta {
         SessionMeta {
             id: id.into(), project_id: 7, title: format!("title-{id}"), message_count: 1,
-            last_modified: 100, git_branch: None, cwd: None, activity, provider,
+            last_modified: 100, created_at: None, git_branch: None, cwd: None, activity, provider,
             running_agents: 0, total_agents: 0,
         }
     }

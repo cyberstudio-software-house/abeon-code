@@ -16,7 +16,7 @@ function project(): Project {
 }
 function meta(id: string, over: Partial<SessionMeta> = {}): SessionMeta {
   return {
-    id, projectId: 1, title: `T-${id}`, messageCount: 1, lastModified: 1,
+    id, projectId: 1, title: `T-${id}`, messageCount: 1, lastModified: 1, createdAt: null,
     gitBranch: null, cwd: null, activity: 'running', provider: 'claude',
     runningAgents: 0, totalAgents: 0, ...over,
   };

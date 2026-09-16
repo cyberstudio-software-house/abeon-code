@@ -18,7 +18,7 @@ vi.mock('./HistoryStream', () => ({
 
 const history: SessionHistory = {
   meta: {
-    id: 'agent-a1', projectId: 1, title: 'Sesja agent-a1', messageCount: 2, lastModified: 0,
+    id: 'agent-a1', projectId: 1, title: 'Sesja agent-a1', messageCount: 2, lastModified: 0, createdAt: null,
     gitBranch: null, cwd: null, activity: 'idle', provider: 'claude', runningAgents: 0, totalAgents: 0,
   },
   blocks: [],

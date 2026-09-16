@@ -33,6 +33,7 @@ mod tests {
     fn accepts_valid_inputs() {
         assert!(validate_session_id("550e8400-e29b-41d4-a716-446655440000").is_ok());
         assert!(validate_model("claude-opus-4-8").is_ok());
+        assert!(validate_model("ollama/gemma4:e2b").is_ok());
     }
 
     #[test]

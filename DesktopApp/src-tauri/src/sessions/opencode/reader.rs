@@ -20,6 +20,7 @@ pub struct StoredSession {
     pub title: String,
     pub message_count: usize,
     pub updated_at: i64,
+    pub created_at: i64,
     pub directory: String,
     pub activity: SessionActivity,
 }
@@ -44,6 +45,7 @@ pub fn into_session_meta(record: StoredSession, project_id: i64) -> SessionMeta 
         title: record.title,
         message_count: record.message_count,
         last_modified: record.updated_at,
+        created_at: Some(record.created_at),
         git_branch: None,
         cwd: Some(record.directory),
         activity: record.activity,
@@ -157,7 +159,7 @@ pub fn list_for_directory(
         return Ok(Vec::new());
     };
     let mut statement = connection.prepare(
-        "SELECT s.id, s.title, s.time_updated, s.directory,
+        "SELECT s.id, s.title, s.time_updated, s.time_created, s.directory,
                 (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id)
          FROM session s
          WHERE s.directory = ?1 AND s.parent_id IS NULL
@@ -170,19 +172,21 @@ pub fn list_for_directory(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, i64>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, i64>(4)? as usize,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, i64>(5)? as usize,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
     raw.into_iter()
-        .map(|(id, title, updated_at, directory, message_count)| {
+        .map(|(id, title, updated_at, created_at, directory, message_count)| {
             Ok(StoredSession {
                 activity: activity_for_session(&connection, &id, updated_at)?,
                 id,
                 title,
                 message_count,
                 updated_at,
+                created_at,
                 directory,
             })
         })
@@ -348,7 +352,7 @@ pub fn session_revision(path: &Path, session_id: &str) -> AppResult<Option<Sessi
 
 fn stored_session(connection: &Connection, session_id: &str) -> AppResult<Option<StoredSession>> {
     let mut statement = connection.prepare(
-        "SELECT s.id, s.title, s.time_updated, s.directory,
+        "SELECT s.id, s.title, s.time_updated, s.time_created, s.directory,
                 (SELECT COUNT(*) FROM message m WHERE m.session_id = s.id)
          FROM session s WHERE s.id = ?1 AND s.parent_id IS NULL",
     )?;
@@ -359,14 +363,16 @@ fn stored_session(connection: &Connection, session_id: &str) -> AppResult<Option
     let id = row.get::<_, String>(0)?;
     let title = row.get::<_, String>(1)?;
     let updated_at = row.get::<_, i64>(2)?;
-    let directory = row.get::<_, String>(3)?;
-    let message_count = row.get::<_, i64>(4)? as usize;
+    let created_at = row.get::<_, i64>(3)?;
+    let directory = row.get::<_, String>(4)?;
+    let message_count = row.get::<_, i64>(5)? as usize;
     Ok(Some(StoredSession {
         activity: activity_for_session(connection, &id, updated_at)?,
         id,
         title,
         message_count,
         updated_at,
+        created_at,
         directory,
     }))
 }

@@ -139,6 +139,37 @@ describe('TerminalView focus', () => {
     expect(container).not.toHaveClass('p-4', 'pb-6');
     expect(container.parentElement).toHaveClass('h-full', 'w-full', 'p-4', 'pb-6');
   });
+
+  it('passes the selected model to a fresh OpenCode process', async () => {
+    const { tauri } = await import('../../lib/tauri');
+    useStore.setState({ opencodeModelId: 'openai/gpt-5.6-sol' });
+
+    await act(async () => {
+      render(
+        <TerminalView
+          projectId={1}
+          kind="agent"
+          provider="opencode"
+          sessionId="new-opencode"
+          fresh
+          visible
+          focused
+        />,
+      );
+    });
+
+    expect(tauri.spawnPty).toHaveBeenCalledWith(
+      1,
+      expect.objectContaining({
+        kind: 'agent',
+        provider: 'opencode',
+        model: 'openai/gpt-5.6-sol',
+        fresh: true,
+      }),
+      80,
+      24,
+    );
+  });
 });
 
 describe('TerminalView clipboard copy', () => {

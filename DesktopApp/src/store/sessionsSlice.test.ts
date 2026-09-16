@@ -10,6 +10,7 @@ function fakeMeta(id: string, projectId: number, activity: SessionMeta['activity
     title: `Session ${id}`,
     messageCount: 1,
     lastModified: 0,
+    createdAt: null,
     gitBranch: null,
     cwd: null,
     activity,
@@ -175,17 +176,160 @@ describe('refreshActivity', () => {
         ptyId: 'pty-open',
       }],
     });
-    const resolveStart = vi.spyOn(tauri, 'resolveOpencodeStart').mockResolvedValue(true);
+    const resolveStart = vi.spyOn(tauri, 'resolveOpencodeStart').mockResolvedValue('pty-open');
     vi.spyOn(tauri, 'listSessions').mockResolvedValue([
       { ...fakeMeta('ses_claude', 1, 'running'), provider: 'claude', title: 'Claude session' },
-      { ...fakeMeta('ses_open', 1, 'running'), provider: 'opencode', title: 'OpenCode session' },
+      {
+        ...fakeMeta('ses_open', 1, 'running'),
+        provider: 'opencode',
+        title: 'OpenCode session',
+        createdAt: 100,
+      },
     ]);
 
     await useStore.getState().refreshActivity(1);
 
     const tab = useStore.getState().tabs[0];
     expect(tab.kind === 'session' && tab.linkedSessionId).toBe('ses_open');
-    expect(resolveStart).toHaveBeenCalledWith('pty-open');
+    expect(resolveStart).toHaveBeenCalledWith(1, 'ses_open', 100, ['pty-open']);
+  });
+
+  it('links concurrent OpenCode placeholders to separate sessions', async () => {
+    useStore.setState({
+      sessionsByProject: { 1: { items: [], hasMore: false } },
+      tabs: [
+        {
+          kind: 'session',
+          id: 'session:new-first',
+          projectId: 1,
+          sessionId: 'new-first',
+          title: 'New session',
+          mode: 'terminal',
+          fresh: true,
+          provider: 'opencode',
+          ptyId: 'pty-first',
+        },
+        {
+          kind: 'session',
+          id: 'session:new-second',
+          projectId: 1,
+          sessionId: 'new-second',
+          title: 'New session',
+          mode: 'terminal',
+          fresh: true,
+          provider: 'opencode',
+          ptyId: 'pty-second',
+        },
+      ],
+    });
+    const resolveStart = vi.spyOn(tauri, 'resolveOpencodeStart').mockImplementation(
+      async (_projectId, sessionId) => sessionId === 'ses-first' ? 'pty-first' : 'pty-second',
+    );
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([
+      {
+        ...fakeMeta('ses-second', 1), provider: 'opencode', title: 'Second',
+        lastModified: 100, createdAt: 100,
+      },
+      {
+        ...fakeMeta('ses-first', 1), provider: 'opencode', title: 'First',
+        lastModified: 200, createdAt: 200,
+      },
+    ]);
+
+    await useStore.getState().refreshActivity(1);
+
+    const [first, second] = useStore.getState().tabs;
+    expect(first.kind === 'session' && first.linkedSessionId).toBe('ses-first');
+    expect(second.kind === 'session' && second.linkedSessionId).toBe('ses-second');
+    expect(resolveStart).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not link one OpenCode session to two placeholders during overlapping refreshes', async () => {
+    useStore.setState({
+      sessionsByProject: { 1: { items: [], hasMore: false } },
+      tabs: [
+        {
+          kind: 'session',
+          id: 'session:new-first',
+          projectId: 1,
+          sessionId: 'new-first',
+          title: 'New session',
+          mode: 'terminal',
+          fresh: true,
+          provider: 'opencode',
+          ptyId: 'pty-first',
+        },
+        {
+          kind: 'session',
+          id: 'session:new-second',
+          projectId: 1,
+          sessionId: 'new-second',
+          title: 'New session',
+          mode: 'terminal',
+          fresh: true,
+          provider: 'opencode',
+          ptyId: 'pty-second',
+        },
+      ],
+    });
+    let consumed = false;
+    const resolveStart = vi.spyOn(tauri, 'resolveOpencodeStart').mockImplementation(async () => {
+      if (consumed) return null;
+      consumed = true;
+      return 'pty-first';
+    });
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([
+      {
+        ...fakeMeta('ses-only', 1), provider: 'opencode', title: 'Only session',
+        lastModified: 100, createdAt: 100,
+      },
+    ]);
+
+    await Promise.all([
+      useStore.getState().refreshActivity(1),
+      useStore.getState().refreshActivity(1),
+    ]);
+
+    const linked = useStore.getState().tabs.filter(
+      tab => tab.kind === 'session' && tab.linkedSessionId === 'ses-only',
+    );
+    expect(linked).toHaveLength(1);
+    expect(resolveStart).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries a reserved OpenCode session until its owner window links it', async () => {
+    useStore.setState({
+      sessionsByProject: { 1: { items: [], hasMore: false } },
+      tabs: [{
+        kind: 'session',
+        id: 'session:new-owner',
+        projectId: 1,
+        sessionId: 'new-owner',
+        title: 'New session',
+        mode: 'terminal',
+        fresh: true,
+        provider: 'opencode',
+        ptyId: 'pty-owner',
+      }],
+    });
+    const session = {
+      ...fakeMeta('ses-reserved', 1),
+      provider: 'opencode' as const,
+      title: 'Reserved session',
+      lastModified: 100,
+      createdAt: 100,
+    };
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([session]);
+    vi.spyOn(tauri, 'resolveOpencodeStart')
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('pty-owner');
+
+    await useStore.getState().refreshActivity(1);
+    await useStore.getState().refreshActivity(1);
+
+    const tab = useStore.getState().tabs[0];
+    expect(tab.kind === 'session' && tab.linkedSessionId).toBe('ses-reserved');
+    expect(tauri.resolveOpencodeStart).toHaveBeenCalledTimes(2);
   });
 
   it('does not link an OpenCode placeholder whose PTY failed to start', async () => {
@@ -241,10 +385,13 @@ describe('refreshActivity', () => {
       ],
     });
     vi.spyOn(tauri, 'resolveOpencodeStart').mockImplementation(
-      async (ptyId) => (ptyId === 'pty-second') as never,
+      async () => 'pty-second',
     );
     vi.spyOn(tauri, 'listSessions').mockResolvedValue([
-      { ...fakeMeta('ses-current', 1), provider: 'opencode', lastModified: 200 },
+      {
+        ...fakeMeta('ses-current', 1), provider: 'opencode',
+        lastModified: 200, createdAt: 200,
+      },
     ]);
 
     await useStore.getState().refreshActivity(1);

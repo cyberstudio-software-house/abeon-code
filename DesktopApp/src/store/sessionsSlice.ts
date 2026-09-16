@@ -9,6 +9,7 @@ const PAGE = 5;
 let pollIntervalId: ReturnType<typeof setInterval> | null = null;
 let focusHandler: (() => void) | null = null;
 let blurHandler: (() => void) | null = null;
+const refreshQueues = new Map<number, Promise<void>>();
 
 const POLL_INTERVAL_MS = 10_000;
 
@@ -17,6 +18,15 @@ function clearPoll() {
     clearInterval(pollIntervalId);
     pollIntervalId = null;
   }
+}
+
+function enqueueProjectRefresh(projectId: number, task: () => Promise<void>): Promise<void> {
+  const previous = refreshQueues.get(projectId) ?? Promise.resolve();
+  const current = previous.catch(() => {}).then(task);
+  refreshQueues.set(projectId, current);
+  return current.finally(() => {
+    if (refreshQueues.get(projectId) === current) refreshQueues.delete(projectId);
+  });
 }
 
 export type SessionsSlice = {
@@ -124,7 +134,7 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
     }
     if (changed) set({ sessionsByProject: next });
   },
-  refreshActivity: async (projectId) => {
+  refreshActivity: (projectId) => enqueueProjectRefresh(projectId, async () => {
     const current = get().sessionsByProject[projectId];
     if (!current) return;
     const limit = current.items.length + PAGE;
@@ -162,18 +172,40 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
         && t.sessionId.startsWith('new-') && !t.linkedSessionId
         && ((t.provider ?? 'claude') !== 'opencode' || !!t.ptyId)
     );
-    if (unlinkedNewTabs.length > 0 && newSessions.length > 0) {
+    if (unlinkedNewTabs.length > 0 && fresh.length > 0) {
       const pool = [...newSessions].sort(
         (left, right) => left.lastModified - right.lastModified || left.id.localeCompare(right.id),
       );
-      for (const tab of unlinkedNewTabs) {
+      const opencodeCandidates = fresh
+        .filter(session => session.provider === 'opencode' && session.createdAt !== null)
+        .sort((left, right) =>
+          (left.createdAt as number) - (right.createdAt as number) || left.id.localeCompare(right.id),
+        );
+      const eligiblePtyIds = unlinkedNewTabs
+        .filter(item => item.provider === 'opencode' && !!item.ptyId)
+        .map(item => item.ptyId as string);
+      for (const candidate of opencodeCandidates) {
+        const ptyId = await tauri
+          .resolveOpencodeStart(projectId, candidate.id, candidate.createdAt as number, eligiblePtyIds)
+          .catch(() => null);
+        if (!ptyId) continue;
+        const tab = (get() as AppState).tabs.find(
+          item => item.kind === 'session'
+            && item.projectId === projectId
+            && item.sessionId.startsWith('new-')
+            && !item.linkedSessionId
+            && item.provider === 'opencode'
+            && item.ptyId === ptyId,
+        );
+        if (!tab) continue;
+        const idx = pool.findIndex(session => session.id === candidate.id);
+        if (idx >= 0) pool.splice(idx, 1);
+        linkNewSession(tab.id, candidate.id);
+        renameTab(tab.id, candidate.title);
+      }
+      for (const tab of unlinkedNewTabs.filter(item => (item.provider ?? 'claude') !== 'opencode')) {
         const idx = pool.findIndex(s => s.provider === (tab.provider ?? 'claude'));
         if (idx < 0) continue;
-        const candidate = pool[idx];
-        if (candidate.provider === 'opencode' && tab.ptyId) {
-          const isCurrentStart = await tauri.resolveOpencodeStart(tab.ptyId).catch(() => false);
-          if (!isCurrentStart) continue;
-        }
         const [s] = pool.splice(idx, 1);
         linkNewSession(tab.id, s.id);
         renameTab(tab.id, s.title);
@@ -188,7 +220,7 @@ export const createSessionsSlice: StateCreator<SessionsSlice & TabsSlice, [], []
         renameTab(tab.id, freshMeta.title);
       }
     }
-  },
+  }),
   refreshActiveSessions: async () => {
     if (!(get() as AppState).showActiveSessions) return;
     try {

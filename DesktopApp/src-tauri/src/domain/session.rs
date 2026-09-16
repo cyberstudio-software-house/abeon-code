@@ -24,6 +24,8 @@ pub struct SessionMeta {
     pub message_count: usize,
     #[ts(type = "number")]
     pub last_modified: i64,
+    #[ts(type = "number | null")]
+    pub created_at: Option<i64>,
     pub git_branch: Option<String>,
     pub cwd: Option<String>,
     pub activity: SessionActivity,

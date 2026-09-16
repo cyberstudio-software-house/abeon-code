@@ -8,6 +8,7 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::db::{projects_repo, actions_repo};
 use crate::remote::dispatch::session_to_bind;
+use crate::validation::validate_session_id;
 
 const OPENCODE_DISCOVERY_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(15);
 
@@ -115,6 +116,22 @@ fn build_agent_command(
     }
 }
 
+fn resolve_agent_model(
+    connection: &rusqlite::Connection,
+    provider: Provider,
+    requested_model: Option<&str>,
+    fresh: bool,
+) -> AppResult<Option<String>> {
+    if let Some(model) = requested_model {
+        return Ok((!model.trim().is_empty()).then(|| model.to_string()));
+    }
+    if provider != Provider::Opencode || !fresh {
+        return Ok(None);
+    }
+    Ok(crate::db::settings_repo::get(connection, "opencodeModelId")?
+        .filter(|model| !model.trim().is_empty()))
+}
+
 /// Spawn `claude --resume <session_id>` for a project, outside a Tauri command
 /// (used by the remote bridge actuator). Mirrors spawn_pty's Claude path:
 /// `bash -c "claude --resume <id>"` with env pre-loaded from the chosen shell.
@@ -156,13 +173,19 @@ pub fn spawn_pty(
             if let Some(id) = session_id {
                 crate::validation::validate_session_id(id)?;
             }
-            if let Some(m) = model {
+            let effective_model = resolve_agent_model(
+                &c,
+                *provider,
+                model.as_deref(),
+                *fresh,
+            )?;
+            if let Some(m) = effective_model.as_deref() {
                 crate::validation::validate_model(m)?;
             }
             let cmd = build_agent_command(
                 *provider,
                 session_id.as_deref(),
-                model.as_deref(),
+                effective_model.as_deref(),
                 *skip_permissions,
                 *fresh,
             );
@@ -264,8 +287,17 @@ pub fn spawn_pty(
 }
 
 #[tauri::command]
-pub fn resolve_opencode_start(state: State<AppState>, pty_id: String) -> AppResult<bool> {
-    Ok(state.opencode_starts.resolve_pty(&pty_id))
+pub fn resolve_opencode_start(
+    state: State<AppState>,
+    project_id: i64,
+    session_id: String,
+    created_at: i64,
+    eligible_pty_ids: Vec<String>,
+) -> AppResult<Option<String>> {
+    validate_session_id(&session_id)?;
+    Ok(state
+        .opencode_starts
+        .resolve_session(project_id, &session_id, created_at, &eligible_pty_ids))
 }
 
 #[tauri::command]
@@ -731,5 +763,92 @@ mod tests {
             ),
             "opencode --model anthropic/claude-sonnet-4-5 --auto"
         );
+    }
+
+    #[test]
+    fn opencode_uses_persisted_model_when_request_has_none() {
+        let pool = crate::db::init_pool(&std::path::PathBuf::from(":memory:"))
+            .expect("in-memory db");
+        let connection = pool.get().unwrap();
+        crate::db::settings_repo::set(
+            &connection,
+            "opencodeModelId",
+            "openai/gpt-5.6-sol",
+        )
+        .unwrap();
+
+        let model = resolve_agent_model(
+            &connection,
+            Provider::Opencode,
+            None,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(model.as_deref(), Some("openai/gpt-5.6-sol"));
+    }
+
+    #[test]
+    fn opencode_requested_model_overrides_persisted_model() {
+        let pool = crate::db::init_pool(&std::path::PathBuf::from(":memory:"))
+            .expect("in-memory db");
+        let connection = pool.get().unwrap();
+        crate::db::settings_repo::set(
+            &connection,
+            "opencodeModelId",
+            "openai/gpt-5.6-sol",
+        )
+        .unwrap();
+
+        let model = resolve_agent_model(
+            &connection,
+            Provider::Opencode,
+            Some("ollama/gemma4:e2b"),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(model.as_deref(), Some("ollama/gemma4:e2b"));
+    }
+
+    #[test]
+    fn opencode_empty_persisted_model_keeps_auto_selection() {
+        let pool = crate::db::init_pool(&std::path::PathBuf::from(":memory:"))
+            .expect("in-memory db");
+        let connection = pool.get().unwrap();
+        crate::db::settings_repo::set(&connection, "opencodeModelId", "").unwrap();
+
+        let model = resolve_agent_model(
+            &connection,
+            Provider::Opencode,
+            None,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(model, None);
+    }
+
+    #[test]
+    fn opencode_explicit_empty_model_keeps_auto_selection() {
+        let pool = crate::db::init_pool(&std::path::PathBuf::from(":memory:"))
+            .expect("in-memory db");
+        let connection = pool.get().unwrap();
+        crate::db::settings_repo::set(
+            &connection,
+            "opencodeModelId",
+            "openai/gpt-5.6-sol",
+        )
+        .unwrap();
+
+        let model = resolve_agent_model(
+            &connection,
+            Provider::Opencode,
+            Some("  "),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(model, None);
     }
 }

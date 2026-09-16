@@ -161,7 +161,7 @@ fn meta_for_file_fast(project_id: i64, path: &Path) -> AppResult<SessionMeta> {
     Ok(SessionMeta {
         id, project_id, title,
         message_count: approx_messages,
-        last_modified, git_branch, cwd,
+        last_modified, created_at: None, git_branch, cwd,
         activity: compute_activity_with_agents(path, running_agents, now),
         provider: Provider::Claude,
         running_agents,
@@ -272,7 +272,7 @@ pub fn read_history_at(
     let meta = SessionMeta {
         id, project_id, title,
         message_count: line_count,
-        last_modified, git_branch, cwd,
+        last_modified, created_at: None, git_branch, cwd,
         activity: compute_activity_with_agents(path, running_agents, now),
         provider: Provider::Claude,
         running_agents,

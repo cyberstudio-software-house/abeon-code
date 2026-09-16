@@ -98,15 +98,6 @@ export function tabsFromGroupMode(mode: GroupWindowMode): Tab[] {
 
 const moveToFront = (order: string[], id: string) => [id, ...order.filter(x => x !== id)];
 
-const unresolvedOpenCodeTab = (tabs: Tab[], projectId: number) => tabs.find(
-  (tab): tab is Extract<Tab, { kind: 'session' }> =>
-    tab.kind === 'session'
-    && tab.projectId === projectId
-    && tab.provider === 'opencode'
-    && tab.sessionId.startsWith('new-')
-    && !tab.linkedSessionId,
-);
-
 const withNav = (get: () => TabsSlice, id: string) => {
   const nav = pushNav({ history: get().navHistory, index: get().navIndex }, id);
   return { navHistory: nav.history, navIndex: nav.index };
@@ -160,13 +151,6 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
     get().startSessionTab(projectId, enabled[0] ?? 'claude');
   },
   startSessionTab: (projectId, provider) => {
-    if (provider === 'opencode') {
-      const pending = unresolvedOpenCodeTab(get().tabs, projectId);
-      if (pending) {
-        get().setActive(pending.id);
-        return;
-      }
-    }
     const sessionId = provider === 'claude' ? crypto.randomUUID() : `new-${crypto.randomUUID()}`;
     const id = sessionTabId(sessionId);
     set({
@@ -180,14 +164,6 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
   chooseProvider: (tabId, provider) => {
     const picker = get().tabs.find(t => t.id === tabId && t.kind === 'providerPicker');
     if (!picker || picker.kind !== 'providerPicker') return;
-    if (provider === 'opencode') {
-      const pending = unresolvedOpenCodeTab(get().tabs, picker.projectId);
-      if (pending) {
-        get().closeTab(tabId);
-        get().setActive(pending.id);
-        return;
-      }
-    }
     const sessionId = provider === 'claude' ? crypto.randomUUID() : `new-${crypto.randomUUID()}`;
     const id = sessionTabId(sessionId);
     set({

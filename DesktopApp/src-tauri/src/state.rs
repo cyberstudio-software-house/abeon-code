@@ -1,48 +1,62 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use parking_lot::Mutex;
 use crate::db::DbPool;
 use crate::sessions::watcher::SessionWatchers;
 use crate::pty::PtyManager;
 use crate::remote::registry::SessionPtyRegistry;
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 
 #[derive(Default)]
 pub struct OpenCodeStartRegistry {
-    pending: Mutex<HashMap<i64, OpenCodeStart>>,
+    state: Mutex<OpenCodeStartState>,
 }
 
 struct OpenCodeStart {
-    token: String,
+    project_id: i64,
     pty_id: Option<String>,
+    started_at: i64,
+    sequence: u64,
+}
+
+#[derive(Default)]
+struct OpenCodeStartState {
+    pending: HashMap<String, OpenCodeStart>,
+    resolved_sessions: HashMap<(i64, String), String>,
+    next_sequence: u64,
 }
 
 impl OpenCodeStartRegistry {
     pub fn claim(&self, project_id: i64) -> AppResult<String> {
-        let mut pending = self.pending.lock();
-        if pending.contains_key(&project_id) {
-            return Err(AppError::Other(
-                "Poczekaj na powiązanie uruchamianej sesji OpenCode".into(),
-            ));
-        }
+        self.claim_at(project_id, current_time_millis())
+    }
+
+    fn claim_at(&self, project_id: i64, started_at: i64) -> AppResult<String> {
+        let mut state = self.state.lock();
         let token = uuid::Uuid::new_v4().to_string();
-        pending.insert(project_id, OpenCodeStart { token: token.clone(), pty_id: None });
+        let sequence = state.next_sequence;
+        state.next_sequence = state.next_sequence.saturating_add(1);
+        state.pending.insert(
+            token.clone(),
+            OpenCodeStart { project_id, pty_id: None, started_at, sequence },
+        );
         Ok(token)
     }
 
     pub fn bind(&self, project_id: i64, token: &str, pty_id: &str) {
-        if let Some(start) = self.pending.lock().get_mut(&project_id) {
-            if start.token == token {
+        if let Some(start) = self.state.lock().pending.get_mut(token) {
+            if start.project_id == project_id {
                 start.pty_id = Some(pty_id.to_string());
             }
         }
     }
 
     pub fn release(&self, project_id: i64, token: &str) {
-        let mut pending = self.pending.lock();
-        if pending.get(&project_id).map(|start| start.token.as_str()) == Some(token) {
-            pending.remove(&project_id);
+        let mut state = self.state.lock();
+        if state.pending.get(token).map(|start| start.project_id) == Some(project_id) {
+            state.pending.remove(token);
         }
     }
 
@@ -58,13 +72,39 @@ impl OpenCodeStartRegistry {
         });
     }
 
-    pub fn resolve_pty(&self, pty_id: &str) -> bool {
-        let mut pending = self.pending.lock();
-        let project_id = pending.iter().find_map(|(project_id, start)| {
-            (start.pty_id.as_deref() == Some(pty_id)).then_some(*project_id)
-        });
-        project_id.and_then(|id| pending.remove(&id)).is_some()
+    pub fn resolve_session(
+        &self,
+        project_id: i64,
+        session_id: &str,
+        created_at: i64,
+        eligible_pty_ids: &[String],
+    ) -> Option<String> {
+        let mut state = self.state.lock();
+        let session_key = (project_id, session_id.to_string());
+        if let Some(pty_id) = state.resolved_sessions.get(&session_key) {
+            return eligible_pty_ids
+                .contains(pty_id)
+                .then(|| pty_id.clone());
+        }
+        let (token, pty_id) = state.pending.iter()
+            .filter(|(_, start)| {
+                start.project_id == project_id
+                    && start.pty_id.is_some()
+                    && created_at >= start.started_at
+            })
+            .min_by_key(|(_, start)| (created_at.abs_diff(start.started_at), start.sequence))
+            .map(|(token, start)| (token.clone(), start.pty_id.clone().unwrap()))?;
+        state.pending.remove(&token)?;
+        state.resolved_sessions.insert(session_key, pty_id.clone());
+        eligible_pty_ids.contains(&pty_id).then_some(pty_id)
     }
+}
+
+fn current_time_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
 
 pub struct AppState {
@@ -145,19 +185,91 @@ mod tests {
     }
 
     #[test]
-    fn opencode_start_tokens_do_not_release_a_newer_claim() {
+    fn opencode_start_tokens_are_independent_within_a_project() {
         let registry = OpenCodeStartRegistry::default();
-        let first = registry.claim(1).unwrap();
-        assert!(registry.claim(1).is_err());
+        let first = registry.claim_at(1, 100).unwrap();
+        let second = registry.claim_at(1, 200).unwrap();
         registry.bind(1, &first, "pty-first");
-        assert!(registry.resolve_pty("pty-first"));
-        assert!(!registry.resolve_pty("pty-first"));
+        registry.bind(1, &second, "pty-second");
 
-        let second = registry.claim(1).unwrap();
-        registry.release(1, &first);
-        assert!(registry.claim(1).is_err());
-        registry.release(1, &second);
-        assert!(registry.claim(1).is_ok());
+        assert_eq!(
+            registry.resolve_session(1, "ses-second", 210, &["pty-second".to_string()]),
+            Some("pty-second".to_string()),
+        );
+        assert_eq!(
+            registry.resolve_session(1, "ses-second", 210, &["pty-second".to_string()]),
+            Some("pty-second".to_string()),
+        );
+        assert_eq!(
+            registry.resolve_session(1, "ses-first", 300, &["pty-first".to_string()]),
+            Some("pty-first".to_string()),
+        );
+    }
+
+    #[test]
+    fn opencode_start_is_reserved_for_its_owner_window() {
+        let registry = OpenCodeStartRegistry::default();
+        let first = registry.claim_at(1, 100).unwrap();
+        let second = registry.claim_at(1, 200).unwrap();
+        registry.bind(1, &first, "pty-first");
+        registry.bind(1, &second, "pty-second");
+
+        assert_eq!(
+            registry.resolve_session(1, "ses-second", 210, &["pty-first".to_string()]),
+            None,
+        );
+        assert_eq!(
+            registry.resolve_session(1, "ses-second", 210, &["pty-second".to_string()]),
+            Some("pty-second".to_string()),
+        );
+        assert_eq!(
+            registry.resolve_session(1, "ses-first", 220, &["pty-first".to_string()]),
+            Some("pty-first".to_string()),
+        );
+    }
+
+    #[test]
+    fn opencode_start_does_not_match_a_session_created_before_it() {
+        let registry = OpenCodeStartRegistry::default();
+        let token = registry.claim_at(1, 100).unwrap();
+        registry.bind(1, &token, "pty-current");
+
+        assert_eq!(
+            registry.resolve_session(1, "ses-old", 99, &["pty-current".to_string()]),
+            None,
+        );
+        assert_eq!(
+            registry.resolve_session(1, "ses-current", 110, &["pty-current".to_string()]),
+            Some("pty-current".to_string()),
+        );
+    }
+
+    #[test]
+    fn opencode_starts_with_equal_timestamps_resolve_in_claim_order() {
+        let registry = OpenCodeStartRegistry::default();
+        let first = registry.claim_at(1, 100).unwrap();
+        let second = registry.claim_at(1, 100).unwrap();
+        registry.bind(1, &first, "pty-first");
+        registry.bind(1, &second, "pty-second");
+
+        assert_eq!(
+            registry.resolve_session(
+                1,
+                "ses-first",
+                110,
+                &["pty-first".to_string(), "pty-second".to_string()],
+            ),
+            Some("pty-first".to_string()),
+        );
+        assert_eq!(
+            registry.resolve_session(
+                1,
+                "ses-second",
+                120,
+                &["pty-first".to_string(), "pty-second".to_string()],
+            ),
+            Some("pty-second".to_string()),
+        );
     }
 
     #[tokio::test]
@@ -169,9 +281,10 @@ mod tests {
             .clone()
             .release_after(1, token, std::time::Duration::from_millis(20));
 
-        assert!(registry.claim(1).is_err());
         tokio::time::sleep(std::time::Duration::from_millis(30)).await;
-        assert!(registry.claim(1).is_ok());
-        assert!(!registry.resolve_pty("pty-expired"));
+        assert_eq!(
+            registry.resolve_session(1, "ses-expired", i64::MAX, &["pty-expired".to_string()]),
+            None,
+        );
     }
 }

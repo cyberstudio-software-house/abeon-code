@@ -16,6 +16,7 @@ function meta(
     title: 'Test session',
     messageCount: 1,
     lastModified: Date.now(),
+    createdAt: null,
     gitBranch: null,
     cwd: null,
     activity,

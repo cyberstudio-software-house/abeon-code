@@ -211,7 +211,7 @@ describe('DetachedShell', () => {
 
   it('tracks activity in a single-session window so its dot is not stuck on idle', async () => {
     vi.spyOn(tauri, 'listSessions').mockResolvedValue([{
-      id: 's1', projectId: 1, title: 'S1', messageCount: 3, lastModified: 0,
+      id: 's1', projectId: 1, title: 'S1', messageCount: 3, lastModified: 0, createdAt: null,
       gitBranch: null, cwd: null, activity: 'running', provider: 'claude',
       runningAgents: 0, totalAgents: 0,
     }]);
