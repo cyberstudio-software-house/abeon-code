@@ -123,6 +123,37 @@ describe('NotesWorkspace', () => {
     expect(screen.queryByRole('button', { name: 'Spróbuj ponownie' })).not.toBeInTheDocument();
   });
 
+  it.each([false, true])('preserves a saved note when an older retry response arrives (includes saved id: %s)', async (includesSavedId) => {
+    let resolveList!: (notes: Note[]) => void;
+    let resolveSave!: (note: Note) => void;
+    vi.mocked(tauri.listNotes)
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveList = resolve; }));
+    vi.mocked(tauri.createNote).mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve; }));
+    render(<NotesWorkspace projectId={2} onDirtyChange={onDirtyChange} />);
+    await screen.findByRole('button', { name: 'Spróbuj ponownie' });
+    fireEvent.click(screen.getByRole('button', { name: 'Nowa notatka' }));
+    fireEvent.change(screen.getByLabelText('Tytuł'), { target: { value: 'Nowa' } });
+    fireEvent.change(screen.getByLabelText('Treść'), { target: { value: 'Tekst' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Spróbuj ponownie' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zapisz' }));
+    await act(async () => { resolveSave(savedNote); });
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    await act(async () => {
+      resolveList(includesSavedId
+        ? [projectNote, { ...savedNote, title: 'Starszy tytuł', updatedAt: 25 }]
+        : [projectNote]);
+    });
+    const rows = screen.getAllByTestId('note-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveTextContent('Nowa');
+    expect(rows[1]).toHaveTextContent('Plan');
+    expect(screen.getByRole('button', { name: 'Otwórz Nowa' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByLabelText('Tytuł')).toHaveValue('Nowa');
+    expect(screen.getByLabelText('Treść')).toHaveValue('Tekst');
+    expect(screen.queryByText('Starszy tytuł')).not.toBeInTheDocument();
+  });
+
   it.each(['create', 'update'])('preserves both inputs and reports a rejected %s', async (operation) => {
     vi.mocked(tauri.listNotes).mockResolvedValue(operation === 'create' ? [] : [projectNote]);
     vi.mocked(tauri.createNote).mockRejectedValue(new Error('offline'));

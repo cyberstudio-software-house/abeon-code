@@ -27,7 +27,12 @@ export function NotesWorkspace({ projectId, onDirtyChange }: NotesWorkspaceProps
     setLoadError(false);
     setNotes([]);
     void tauri.listNotes(projectIdForScope).then(result => {
-      if (!isCancelled()) setNotes(result);
+      if (!isCancelled()) {
+        setNotes(current => {
+          const savedIds = new Set(current.map(note => note.id));
+          return [...current, ...result.filter(note => !savedIds.has(note.id))];
+        });
+      }
     }).catch(() => {
       if (!isCancelled()) setLoadError(true);
     }).finally(() => {
