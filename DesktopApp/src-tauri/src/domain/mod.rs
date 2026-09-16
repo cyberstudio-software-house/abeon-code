@@ -11,6 +11,7 @@ pub mod roster;
 pub mod provider;
 pub mod clickup;
 pub mod subagent;
+pub mod note;
 
 pub use project::*;
 pub use action::*;
@@ -22,3 +23,4 @@ pub use usage::*;
 pub use model::*;
 pub use provider::Provider;
 pub use subagent::*;
+pub use note::*;

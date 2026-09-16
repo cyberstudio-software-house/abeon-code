@@ -32,3 +32,4 @@ export type { RateLimitWindow } from './RateLimitWindow';
 export type { ProviderInfo } from './ProviderInfo';
 export type { SubagentInfo } from './SubagentInfo';
 export type { SubagentStatus } from './SubagentStatus';
+export type { Note } from './Note';

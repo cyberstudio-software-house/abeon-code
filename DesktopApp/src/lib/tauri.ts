@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, DetectedModel, Provider, ProviderInfo } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, DetectedModel, Provider, ProviderInfo, Note } from '../types';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
 import type { ClickUpSpace } from '../types/ClickUpSpace';
@@ -35,6 +35,13 @@ export const tauri = {
   reorderProjects: (ids: number[]) => invoke<void>('reorder_projects', { ids }),
   findOrCreateProject: (path: string) =>
     invoke<Project>('find_or_create_project', { path }),
+  listNotes: (projectId: number | null) =>
+    invoke<Note[]>('list_notes', { projectId }),
+  createNote: (projectId: number | null, title: string, content: string) =>
+    invoke<Note>('create_note', { projectId, title, content }),
+  updateNote: (id: number, title: string, content: string) =>
+    invoke<Note>('update_note', { id, title, content }),
+  deleteNote: (id: number) => invoke<void>('delete_note', { id }),
   takePendingOpenPaths: () => invoke<string[]>('take_pending_open_paths'),
   installCliCommand: () => invoke<string>('install_cli_command'),
   onCliOpenPath: (cb: (path: string) => void): Promise<UnlistenFn> =>
