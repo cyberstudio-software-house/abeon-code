@@ -156,6 +156,86 @@ mod tests {
     }
 
     #[test]
+    fn rejects_missing_project_without_creating_a_note() {
+        let pool = pool();
+        let conn = pool.get().unwrap();
+        assert!(matches!(
+            create(&conn, Some(404), "Title", "Content"),
+            Err(AppError::InvalidInput(_))
+        ));
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM notes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn rejects_blank_update_without_changing_the_note() {
+        let pool = pool();
+        let conn = pool.get().unwrap();
+        let note = create(&conn, None, "Original", "Original content").unwrap();
+
+        assert!(matches!(
+            update(&conn, note.id, " \t\n ", "Changed content"),
+            Err(AppError::InvalidInput(_))
+        ));
+
+        let unchanged = get(&conn, note.id).unwrap();
+        assert_eq!(unchanged.title, "Original");
+        assert_eq!(unchanged.content, "Original content");
+        assert_eq!(unchanged.created_at, note.created_at);
+        assert_eq!(unchanged.updated_at, note.updated_at);
+    }
+
+    #[test]
+    fn trims_title_on_create_without_trimming_content() {
+        let pool = pool();
+        let conn = pool.get().unwrap();
+        let note = create(&conn, None, " \t First title \n", "  Content \n").unwrap();
+        assert_eq!(note.title, "First title");
+        assert_eq!(note.content, "  Content \n");
+        assert_eq!(get(&conn, note.id).unwrap().title, "First title");
+    }
+
+    #[test]
+    fn trims_title_on_update_and_accepts_empty_content() {
+        let pool = pool();
+        let conn = pool.get().unwrap();
+        let note = create(&conn, None, "Original", "Original content").unwrap();
+        let updated = update(&conn, note.id, "\n Updated title \t", "").unwrap();
+        assert_eq!(updated.title, "Updated title");
+        assert_eq!(updated.content, "");
+        let stored = get(&conn, note.id).unwrap();
+        assert_eq!(stored.title, "Updated title");
+        assert_eq!(stored.content, "");
+    }
+
+    #[test]
+    fn breaks_equal_timestamp_ties_by_descending_id_in_both_scopes() {
+        let pool = pool();
+        let conn = pool.get().unwrap();
+        let project = projects_repo::insert(&conn, "Demo", "/demo", "-demo", None).unwrap();
+        conn.execute("DROP INDEX idx_notes_project_updated", []).unwrap();
+
+        for project_id in [None, Some(project.id)] {
+            let first = create(&conn, project_id, "First", "").unwrap();
+            let second = create(&conn, project_id, "Second", "").unwrap();
+            conn.execute(
+                "UPDATE notes SET updated_at=1700000000000 WHERE id IN (?1, ?2)",
+                [first.id, second.id],
+            )
+            .unwrap();
+
+            let notes = list(&conn, project_id).unwrap();
+            assert_eq!(
+                notes.iter().map(|note| note.id).collect::<Vec<_>>(),
+                vec![second.id, first.id]
+            );
+            assert!(notes.iter().all(|note| note.updated_at == 1700000000000));
+        }
+    }
+
+    #[test]
     fn cascades_project_notes_only() {
         let pool = pool();
         let conn = pool.get().unwrap();

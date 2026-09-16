@@ -21,7 +21,16 @@ export async function openNotesWindow(projectId: number, projectName: string): P
     hiddenTitle: true,
   });
 
-  await win.once('tauri://error', (event) => {
+  await win.once('tauri://error', async (event) => {
+    try {
+      const existing = await WebviewWindow.getByLabel(label);
+      if (existing) {
+        await existing.setFocus();
+        return;
+      }
+    } catch (error) {
+      console.error('[notes] window recovery failed', error);
+    }
     console.error('[notes] window create failed', event);
     toast.error('Nie udało się otworzyć okna notatek');
   });
