@@ -209,8 +209,9 @@ successful save is authoritative.
   show a Polish error toast.
 - External editor launch failure is surfaced from the new toolbar instead of
   being logged only.
-- An invalid or missing notes-window project id renders a safe error state and
-  does not issue note mutations.
+- A well-formed notes window URL whose project id no longer exists renders a
+  safe error state and does not issue note mutations. Malformed or missing
+  query parameters are rejected by the shared window-mode parser.
 
 ## Testing
 
