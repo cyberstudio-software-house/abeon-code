@@ -46,7 +46,7 @@ export function TabPanel({ tab, visible, focused = true }: { tab: Tab; visible: 
   if (tab.kind === 'providerPicker') {
     return (
       <div className={layer(visible)}>
-        <ProviderPicker tabId={tab.id} />
+        <ProviderPicker tabId={tab.id} active={visible && focused} />
       </div>
     );
   }
