@@ -130,6 +130,7 @@ export type ClaudeModelRows = {
   latest: ClaudeModelRow[];
   older: ClaudeModelRow[];
   custom: ClaudeModelRow[];
+  detectedCustom: ClaudeModelRow[];
   undetected: ClaudeModelRow | null;
 };
 
@@ -147,12 +148,17 @@ export function buildClaudeModelRows(
     const row = { modelId: model.modelId, label: claudeModelLabel(model.modelId, []) };
     (model.latest ? latest : older).push(row);
   }
-  const custom = customModels.map(m => ({ modelId: m.modelId, label: m.label }));
+  const custom: ClaudeModelRow[] = [];
+  const detectedCustom: ClaudeModelRow[] = [];
+  for (const model of customModels) {
+    (seen.has(model.modelId) ? detectedCustom : custom).push({ modelId: model.modelId, label: model.label });
+  }
   const known = selectedId === '' || seen.has(selectedId) || customModels.some(m => m.modelId === selectedId);
   return {
     latest,
     older,
     custom,
+    detectedCustom,
     undetected: known ? null : { modelId: selectedId, label: claudeModelLabel(selectedId, customModels) },
   };
 }

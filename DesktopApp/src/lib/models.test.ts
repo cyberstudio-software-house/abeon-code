@@ -134,6 +134,18 @@ describe('buildClaudeModelRows', () => {
     expect(rows.undetected).toBeNull();
   });
 
+  it('keeps a custom model that is also detected out of the custom rows', () => {
+    const rows = buildClaudeModelRows(
+      detected,
+      [{ modelId: 'claude-opus-4-8', label: 'Old custom' }, { modelId: 'claude-x-1', label: 'X' }],
+      'claude-opus-4-8',
+    );
+    expect(rows.custom).toEqual([{ modelId: 'claude-x-1', label: 'X' }]);
+    expect(rows.detectedCustom).toEqual([{ modelId: 'claude-opus-4-8', label: 'Old custom' }]);
+    expect(rows.older).toEqual([{ modelId: 'claude-opus-4-8', label: 'Opus 4.8' }]);
+    expect(rows.undetected).toBeNull();
+  });
+
   it('marks a selected model that is neither detected nor custom', () => {
     expect(buildClaudeModelRows(detected, [], 'claude-opus-4-1').undetected)
       .toEqual({ modelId: 'claude-opus-4-1', label: 'Opus 4.1' });

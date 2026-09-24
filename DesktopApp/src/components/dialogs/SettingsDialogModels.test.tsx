@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
@@ -69,11 +69,38 @@ describe('SettingsDialog Claude models', () => {
     expect(screen.getByText('niewykryty')).toBeTruthy();
   });
 
-  it('shows a hint when nothing is detected', async () => {
+  it('shows a hint and the custom models when nothing is detected', async () => {
     vi.spyOn(tauri, 'detectClaudeOptions').mockResolvedValue({ models: [], effortLevels: ['low'] });
+    useStore.setState({ customModels: [{ modelId: 'us.anthropic.x', label: 'Mine' }] });
     render(<SettingsDialog />);
     fireEvent.click(screen.getByText('Modele'));
     expect(await screen.findByText('Nie wykryto modeli — sprawdź instalację Claude Code')).toBeTruthy();
+    expect(screen.getByText('Mine')).toBeTruthy();
+    expect(screen.getByText('us.anthropic.x')).toBeTruthy();
+  });
+
+  it('lists a custom model that is also detected only once among the choices', async () => {
+    useStore.setState({ customModels: [{ modelId: 'claude-opus-5-5', label: 'Old custom' }] });
+    await openModelsTab();
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
+    fireEvent.click(screen.getByText('Zaawansowane'));
+    expect(screen.getAllByRole('radio')).toHaveLength(3);
+    expect(screen.getByText('Old custom')).toBeTruthy();
+    fireEvent.click(screen.getByLabelText('Usuń model'));
+    expect(useStore.getState().customModels).toEqual([]);
+  });
+
+  it('shows progress while refreshing the model list', async () => {
+    await openModelsTab();
+    let resolve: (value: typeof OPTIONS) => void = () => {};
+    const detect = vi.spyOn(tauri, 'detectClaudeOptions')
+      .mockReturnValue(new Promise(r => { resolve = r; }));
+    fireEvent.click(screen.getByText('Odśwież'));
+    expect(detect).toHaveBeenCalledWith(true);
+    const button = screen.getByText('Odświeżanie…') as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    await act(async () => { resolve(OPTIONS); });
+    expect((screen.getByText('Odśwież') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('adds a custom model under Zaawansowane', async () => {

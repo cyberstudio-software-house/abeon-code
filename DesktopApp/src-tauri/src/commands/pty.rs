@@ -652,6 +652,26 @@ mod tests {
     }
 
     #[test]
+    fn claude_command_accepts_effort_at_max_length() {
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), None, Some("aaaaaaaaaaaaaaaa"), false, true),
+            "claude --session-id uuid-1 --effort aaaaaaaaaaaaaaaa"
+        );
+    }
+
+    #[test]
+    fn claude_command_drops_effort_with_uppercase_or_hyphen() {
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), None, Some("High"), false, true),
+            "claude --session-id uuid-1"
+        );
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), None, Some("x-high"), false, true),
+            "claude --session-id uuid-1"
+        );
+    }
+
+    #[test]
     fn claude_command_skip_permissions_after_effort() {
         assert_eq!(
             build_claude_command(Some("uuid-1"), None, Some("low"), true, true),

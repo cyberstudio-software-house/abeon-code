@@ -51,14 +51,19 @@ const AUTO_MODEL_LABEL = 'Auto (domyślny model Claude)';
 function useClaudeOptions() {
   const [options, setOptions] = useState<ClaudeOptions>({ models: [], effortLevels: FALLBACK_EFFORT_LEVELS });
   const [loaded, setLoaded] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const refresh = useCallback((force?: boolean) => {
+    setRefreshing(true);
     tauri.detectClaudeOptions(force)
       .then(setOptions)
       .catch(() => setOptions({ models: [], effortLevels: FALLBACK_EFFORT_LEVELS }))
-      .finally(() => setLoaded(true));
+      .finally(() => {
+        setLoaded(true);
+        setRefreshing(false);
+      });
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
-  return { options, loaded, refresh };
+  return { options, loaded, refreshing, refresh };
 }
 
 export function SettingsDialog() {
@@ -297,9 +302,9 @@ function TitleGenSection() {
             {claudeTitleRows.older.filter(r => r.modelId === titleGenModelId).map(r => (
               <option key={r.modelId} value={r.modelId}>{r.label}</option>
             ))}
-            {customModels.length > 0 && <option disabled>──────────</option>}
-            {customModels.map(m => (
-              <option key={m.modelId} value={m.modelId}>{m.label}</option>
+            {claudeTitleRows.custom.length > 0 && <option disabled>──────────</option>}
+            {claudeTitleRows.custom.map(r => (
+              <option key={r.modelId} value={r.modelId}>{r.label}</option>
             ))}
             {claudeTitleRows.undetected && claudeTitleRows.undetected.modelId !== DEFAULT_TITLE_GEN_MODEL_ID && (
               <option value={claudeTitleRows.undetected.modelId}>{claudeTitleRows.undetected.label}</option>
@@ -836,7 +841,7 @@ function ClaudeModelsSection() {
   const setModelEffort = useStore(s => s.setModelEffort);
   const addCustomModel = useStore(s => s.addCustomModel);
   const removeCustomModel = useStore(s => s.removeCustomModel);
-  const { options, loaded, refresh } = useClaudeOptions();
+  const { options, loaded, refreshing, refresh } = useClaudeOptions();
 
   const [showOlder, setShowOlder] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -848,8 +853,10 @@ function ClaudeModelsSection() {
     () => buildClaudeModelRows(options.models, customModels, defaultModelId),
     [options.models, customModels, defaultModelId],
   );
+  const nothingDetected = loaded && options.models.length === 0;
+  const advancedOpen = showAdvanced || nothingDetected;
   const visibleOlder = showOlder ? rows.older : rows.older.filter(r => r.modelId === defaultModelId);
-  const pinnedCustom = showAdvanced ? [] : rows.custom.filter(r => r.modelId === defaultModelId);
+  const pinnedCustom = advancedOpen ? [] : rows.custom.filter(r => r.modelId === defaultModelId);
 
   const submitCustom = () => {
     if (!newLabel.trim() || !newModelId.trim()) return;
@@ -883,9 +890,10 @@ function ClaudeModelsSection() {
         </div>
         <button
           onClick={() => refresh(true)}
-          className="text-[11px] text-muted hover:text-fg transition-colors"
+          disabled={refreshing}
+          className="text-[11px] text-muted hover:text-fg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Odśwież
+          {refreshing ? 'Odświeżanie…' : 'Odśwież'}
         </button>
       </div>
       <p className="text-[11px] text-muted mb-3">
@@ -893,7 +901,7 @@ function ClaudeModelsSection() {
         Lista pochodzi z zainstalowanego Claude Code.
       </p>
 
-      {loaded && options.models.length === 0 && (
+      {nothingDetected && (
         <p className="text-[11px] text-danger mb-2">Nie wykryto modeli — sprawdź instalację Claude Code</p>
       )}
 
@@ -919,18 +927,32 @@ function ClaudeModelsSection() {
           onClick={() => setShowAdvanced(v => !v)}
           className="flex items-center gap-1.5 text-[10px] text-muted uppercase tracking-wider hover:text-fg transition-colors mb-2"
         >
-          <span>{showAdvanced ? '▾' : '▸'}</span>
+          <span>{advancedOpen ? '▾' : '▸'}</span>
           <span>Zaawansowane</span>
         </button>
 
-        {showAdvanced && (
+        {advancedOpen && (
           <div>
             <p className="text-[11px] text-muted mb-2">
               Modele własne — gdy wykrywanie nie znajduje potrzebnego ID (np. Bedrock/Vertex).
             </p>
-            {rows.custom.length > 0 && (
+            {(rows.custom.length > 0 || rows.detectedCustom.length > 0) && (
               <div className="space-y-0.5 mb-3">
                 {rows.custom.map(row => renderRow(row, { onRemove: () => removeCustomModel(row.modelId) }))}
+                {rows.detectedCustom.map(row => (
+                  <div key={row.modelId} className="flex items-center gap-3 py-1.5 px-2">
+                    <span className="text-[13px]">{row.label}</span>
+                    <span className="text-[11px] text-muted font-mono truncate flex-1 min-w-0">{row.modelId}</span>
+                    <span className="text-[10px] text-muted border border-border px-1.5 py-0.5 rounded">wykryty</span>
+                    <button
+                      onClick={() => removeCustomModel(row.modelId)}
+                      className="text-muted hover:text-danger transition-colors p-1"
+                      aria-label="Usuń model"
+                    >
+                      <Icon name="trash" className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
 
