@@ -23,6 +23,8 @@ pub enum PtyKind {
         #[serde(default)]
         model: Option<String>,
         #[serde(default)]
+        effort: Option<String>,
+        #[serde(default)]
         skip_permissions: bool,
         #[serde(default)]
         fresh: bool,
@@ -34,11 +36,27 @@ pub enum PtyKind {
     Shell,
 }
 
+const MAX_EFFORT_LEN: usize = 16;
+
+fn is_valid_effort(effort: &str) -> bool {
+    !effort.is_empty() && effort.len() <= MAX_EFFORT_LEN && effort.chars().all(|c| c.is_ascii_lowercase())
+}
+
+fn push_claude_model_flags(cmd: &mut String, model: Option<&str>, effort: Option<&str>) {
+    if let Some(m) = model {
+        cmd.push_str(&format!(" --model {m}"));
+    }
+    if let Some(e) = effort.filter(|e| is_valid_effort(e)) {
+        cmd.push_str(&format!(" --effort {e}"));
+    }
+}
+
 // A fresh session forces its id up-front via `--session-id` so the tab's id equals the
 // real session id from the start (no placeholder linking). Resuming uses `--resume`.
 fn build_claude_command(
     session_id: Option<&str>,
     model: Option<&str>,
+    effort: Option<&str>,
     skip_permissions: bool,
     fresh: bool,
 ) -> String {
@@ -46,16 +64,10 @@ fn build_claude_command(
     match session_id {
         Some(id) if fresh => {
             cmd.push_str(&format!(" --session-id {id}"));
-            if let Some(m) = model {
-                cmd.push_str(&format!(" --model {m}"));
-            }
+            push_claude_model_flags(&mut cmd, model, effort);
         }
         Some(id) => cmd.push_str(&format!(" --resume {id}")),
-        None => {
-            if let Some(m) = model {
-                cmd.push_str(&format!(" --model {m}"));
-            }
-        }
+        None => push_claude_model_flags(&mut cmd, model, effort),
     }
     if skip_permissions {
         cmd.push_str(" --dangerously-skip-permissions");
@@ -106,11 +118,12 @@ fn build_agent_command(
     provider: Provider,
     session_id: Option<&str>,
     model: Option<&str>,
+    effort: Option<&str>,
     skip_permissions: bool,
     fresh: bool,
 ) -> String {
     match provider {
-        Provider::Claude => build_claude_command(session_id, model, skip_permissions, fresh),
+        Provider::Claude => build_claude_command(session_id, model, effort, skip_permissions, fresh),
         Provider::Codex => build_codex_command(session_id, model, skip_permissions, fresh),
         Provider::Opencode => build_opencode_command(session_id, model, skip_permissions, fresh),
     }
@@ -146,7 +159,7 @@ pub(crate) fn spawn_claude_resume(
     let c = state.db.get()?;
     let proj = crate::db::projects_repo::get(&c, project_id)?;
     let cwd = std::path::PathBuf::from(&proj.path);
-    let cmd = build_claude_command(Some(session_id), None, false, false);
+    let cmd = build_claude_command(Some(session_id), None, None, false, false);
     let shell = crate::commands::settings::resolve_shell(&c);
     let env = crate::commands::settings::ensure_shell_env(&state, &shell);
     state.pty.spawn(app.clone(), "bash", &["-c", &cmd], &cwd, 80, 24, &env)
@@ -166,7 +179,7 @@ pub fn spawn_pty(
     let mut cwd = std::path::PathBuf::from(&proj.path);
 
     let (program, args_owned) = match &kind {
-        PtyKind::Agent { provider, session_id, model, skip_permissions, fresh } => {
+        PtyKind::Agent { provider, session_id, model, effort, skip_permissions, fresh } => {
             // Untrusted in the remote-bridge path (session_id can originate from a
             // mobile `resumeSession`). Validate before it reaches `bash -c` so the
             // shell can never reinterpret it; the allowlist also blocks flag smuggling.
@@ -186,6 +199,7 @@ pub fn spawn_pty(
                 *provider,
                 session_id.as_deref(),
                 effective_model.as_deref(),
+                effort.as_deref(),
                 *skip_permissions,
                 *fresh,
             );
@@ -520,7 +534,7 @@ mod tests {
     #[test]
     fn codex_command_fresh_plain() {
         assert_eq!(
-            build_agent_command(Provider::Codex, None, None, false, true),
+            build_agent_command(Provider::Codex, None, None, None, false, true),
             "codex"
         );
     }
@@ -528,7 +542,7 @@ mod tests {
     #[test]
     fn codex_command_resume() {
         assert_eq!(
-            build_agent_command(Provider::Codex, Some("uuid-1"), None, false, false),
+            build_agent_command(Provider::Codex, Some("uuid-1"), None, None, false, false),
             "codex resume uuid-1"
         );
     }
@@ -536,7 +550,7 @@ mod tests {
     #[test]
     fn codex_command_skip_permissions() {
         assert_eq!(
-            build_agent_command(Provider::Codex, None, None, true, true),
+            build_agent_command(Provider::Codex, None, None, None, true, true),
             "codex --dangerously-bypass-approvals-and-sandbox"
         );
     }
@@ -544,7 +558,7 @@ mod tests {
     #[test]
     fn codex_command_resume_ignores_model() {
         assert_eq!(
-            build_agent_command(Provider::Codex, Some("uuid-1"), Some("gpt-x"), false, false),
+            build_agent_command(Provider::Codex, Some("uuid-1"), Some("gpt-x"), None, false, false),
             "codex resume uuid-1"
         );
     }
@@ -552,7 +566,7 @@ mod tests {
     #[test]
     fn claude_command_via_agent_dispatch() {
         assert_eq!(
-            build_agent_command(Provider::Claude, Some("uuid-1"), None, false, true),
+            build_agent_command(Provider::Claude, Some("uuid-1"), None, None, false, true),
             "claude --session-id uuid-1"
         );
     }
@@ -560,7 +574,7 @@ mod tests {
     #[test]
     fn claude_command_fresh_uses_session_id() {
         assert_eq!(
-            build_claude_command(Some("uuid-1"), None, false, true),
+            build_claude_command(Some("uuid-1"), None, None, false, true),
             "claude --session-id uuid-1"
         );
     }
@@ -568,7 +582,7 @@ mod tests {
     #[test]
     fn claude_command_fresh_with_model() {
         assert_eq!(
-            build_claude_command(Some("uuid-1"), Some("opus"), false, true),
+            build_claude_command(Some("uuid-1"), Some("opus"), None, false, true),
             "claude --session-id uuid-1 --model opus"
         );
     }
@@ -576,7 +590,7 @@ mod tests {
     #[test]
     fn claude_command_resume_ignores_model() {
         assert_eq!(
-            build_claude_command(Some("uuid-1"), Some("opus"), false, false),
+            build_claude_command(Some("uuid-1"), Some("opus"), None, false, false),
             "claude --resume uuid-1"
         );
     }
@@ -584,7 +598,7 @@ mod tests {
     #[test]
     fn claude_command_no_id_with_model() {
         assert_eq!(
-            build_claude_command(None, Some("opus"), false, false),
+            build_claude_command(None, Some("opus"), None, false, false),
             "claude --model opus"
         );
     }
@@ -592,9 +606,72 @@ mod tests {
     #[test]
     fn claude_command_skip_permissions_appended_last() {
         assert_eq!(
-            build_claude_command(Some("uuid-1"), None, true, true),
+            build_claude_command(Some("uuid-1"), None, None, true, true),
             "claude --session-id uuid-1 --dangerously-skip-permissions"
         );
+    }
+
+    #[test]
+    fn claude_command_fresh_with_model_and_effort() {
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), Some("opus"), Some("high"), false, true),
+            "claude --session-id uuid-1 --model opus --effort high"
+        );
+    }
+
+    #[test]
+    fn claude_command_effort_without_model() {
+        assert_eq!(
+            build_claude_command(None, None, Some("max"), false, false),
+            "claude --effort max"
+        );
+    }
+
+    #[test]
+    fn claude_command_resume_ignores_effort() {
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), Some("opus"), Some("high"), false, false),
+            "claude --resume uuid-1"
+        );
+    }
+
+    #[test]
+    fn claude_command_drops_invalid_effort() {
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), None, Some("high; rm -rf ~"), false, true),
+            "claude --session-id uuid-1"
+        );
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), None, Some(""), false, true),
+            "claude --session-id uuid-1"
+        );
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), None, Some("aaaaaaaaaaaaaaaaa"), false, true),
+            "claude --session-id uuid-1"
+        );
+    }
+
+    #[test]
+    fn claude_command_skip_permissions_after_effort() {
+        assert_eq!(
+            build_claude_command(Some("uuid-1"), None, Some("low"), true, true),
+            "claude --session-id uuid-1 --effort low --dangerously-skip-permissions"
+        );
+    }
+
+    #[test]
+    fn agent_command_ignores_effort_for_codex() {
+        assert_eq!(
+            build_agent_command(Provider::Codex, None, Some("gpt-x"), Some("high"), false, true),
+            "codex -m gpt-x"
+        );
+    }
+
+    #[test]
+    fn pty_kind_deserializes_effort() {
+        let kind: PtyKind =
+            serde_json::from_str(r#"{"kind":"agent","provider":"claude","effort":"high"}"#).unwrap();
+        assert!(matches!(kind, PtyKind::Agent { effort: Some(ref e), .. } if e == "high"));
     }
 
     #[test]
@@ -730,7 +807,7 @@ mod tests {
     #[test]
     fn codex_command_resume_with_skip_permissions() {
         assert_eq!(
-            build_agent_command(Provider::Codex, Some("uuid-1"), None, true, false),
+            build_agent_command(Provider::Codex, Some("uuid-1"), None, None, true, false),
             "codex resume uuid-1 --dangerously-bypass-approvals-and-sandbox"
         );
     }
@@ -738,7 +815,7 @@ mod tests {
     #[test]
     fn codex_command_fresh_with_session_id_ignores_id() {
         assert_eq!(
-            build_agent_command(Provider::Codex, Some("uuid-1"), Some("gpt-x"), false, true),
+            build_agent_command(Provider::Codex, Some("uuid-1"), Some("gpt-x"), None, false, true),
             "codex -m gpt-x"
         );
     }
@@ -746,11 +823,11 @@ mod tests {
     #[test]
     fn opencode_commands_cover_fresh_resume_model_and_permissions() {
         assert_eq!(
-            build_agent_command(Provider::Opencode, None, None, false, true),
+            build_agent_command(Provider::Opencode, None, None, None, false, true),
             "opencode"
         );
         assert_eq!(
-            build_agent_command(Provider::Opencode, Some("ses_123"), None, false, false),
+            build_agent_command(Provider::Opencode, Some("ses_123"), None, None, false, false),
             "opencode --session ses_123"
         );
         assert_eq!(
@@ -758,6 +835,7 @@ mod tests {
                 Provider::Opencode,
                 None,
                 Some("anthropic/claude-sonnet-4-5"),
+                None,
                 true,
                 true,
             ),
