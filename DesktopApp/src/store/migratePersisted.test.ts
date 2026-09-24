@@ -39,6 +39,12 @@ describe('migratePersisted', () => {
     expect(migratePersisted({ theme: 'dark' }, [{ modelId: 'claude-x-1', label: 'X' }])).toEqual({ theme: 'dark' });
   });
 
+  it('keeps Auto for both model ids', async () => {
+    const { migratePersisted } = await import('./index');
+    expect(migratePersisted({ defaultModelId: '', titleGenModelId: '' }, []))
+      .toEqual({ defaultModelId: '', titleGenModelId: '' });
+  });
+
   it('resolves ids against the fallback custom models', async () => {
     const { migratePersisted } = await import('./index');
     expect(migratePersisted({ defaultModelId: 'custom-model' }, [{ modelId: 'custom-model', label: 'M' }]))
@@ -79,5 +85,25 @@ describe('store boot with legacy Claude model settings', () => {
     const local = JSON.parse(localStorage.getItem('abeoncode.settings') ?? '{}');
     expect(local.defaultModelId).toBe('claude-x-1');
     expect(local.customModels).toEqual([{ modelId: 'claude-x-1', label: 'X' }]);
+  });
+
+  it('restores Auto as the title generation model from localStorage', async () => {
+    localStorage.setItem('abeoncode.settings', JSON.stringify({ titleGenModelId: '' }));
+    const { useStore } = await import('./index');
+    expect(useStore.getState().titleGenModelId).toBe('');
+  });
+
+  it('restores Auto for both model ids from SQLite over non-empty local values', async () => {
+    localStorage.setItem('abeoncode.settings', JSON.stringify({
+      defaultModelId: 'claude-opus-5-5',
+      titleGenModelId: 'claude-sonnet-5',
+    }));
+    getAllSettings.mockResolvedValue({ migrated_v2: '1', defaultModelId: '', titleGenModelId: '' });
+    const { useStore } = await import('./index');
+    await vi.waitFor(() => expect(useStore.getState().defaultModelId).toBe(''));
+    expect(useStore.getState().titleGenModelId).toBe('');
+    const local = JSON.parse(localStorage.getItem('abeoncode.settings') ?? '{}');
+    expect(local.defaultModelId).toBe('');
+    expect(local.titleGenModelId).toBe('');
   });
 });

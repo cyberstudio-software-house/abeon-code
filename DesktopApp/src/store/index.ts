@@ -157,6 +157,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
 }
 
 function deserializeValue(key: PersistedKey, raw: string): unknown {
+  if (key === 'defaultModelId' || key === 'titleGenModelId') return raw;
   if (raw === '') return undefined;
   switch (key) {
     case 'leftWidth':
@@ -198,8 +199,8 @@ function applyPersistedToState(p: Persisted) {
   if (typeof p.leftWidth === 'number') patch.leftWidth = clamp(p.leftWidth, 200, 420);
   if (typeof p.rightWidth === 'number') patch.rightWidth = clamp(p.rightWidth, 220, 480);
   if (p.displayName) patch.displayName = p.displayName;
-  if (typeof p.defaultModelId === 'string' && p.defaultModelId) patch.defaultModelId = p.defaultModelId;
-  if (typeof p.titleGenModelId === 'string' && p.titleGenModelId) patch.titleGenModelId = p.titleGenModelId;
+  if (typeof p.defaultModelId === 'string') patch.defaultModelId = p.defaultModelId;
+  if (typeof p.titleGenModelId === 'string') patch.titleGenModelId = p.titleGenModelId;
   if (p.modelEfforts && typeof p.modelEfforts === 'object') patch.modelEfforts = p.modelEfforts;
   if (Array.isArray(p.customModels)) patch.customModels = p.customModels as AppState['customModels'];
   if (p.projectsBasePath) patch.projectsBasePath = p.projectsBasePath;
