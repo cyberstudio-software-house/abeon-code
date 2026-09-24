@@ -1,12 +1,12 @@
 use std::collections::HashMap;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tauri::State;
 
 use crate::commands::settings::{ensure_shell_env, resolve_shell};
 use crate::domain::{ClaudeOptions, DetectedModel};
+use crate::error::AppResult;
 use crate::state::AppState;
 
 const MAX_FALLBACK_FILES: usize = 50;
@@ -225,59 +225,58 @@ fn shell_env(state: &AppState) -> HashMap<String, String> {
         .unwrap_or_default()
 }
 
-fn read_claude_help(binary: &Path, env: &HashMap<String, String>) -> Option<String> {
-    let mut child = std::process::Command::new(binary)
+async fn read_claude_help(binary: &Path, env: HashMap<String, String>) -> Option<String> {
+    let mut command = tokio::process::Command::new(binary);
+    command
         .arg("--help")
         .envs(env)
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(HELP_TIMEOUT, command.output())
+        .await
+        .ok()?
         .ok()?;
-    let deadline = Instant::now() + HELP_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-        }
-    }
-    let mut out = String::new();
-    child.stdout.take()?.read_to_string(&mut out).ok()?;
-    Some(out)
+    Some(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn scan_models(binary: Option<&Path>) -> Vec<DetectedModel> {
+    binary
+        .and_then(|path| std::fs::read(path).ok())
+        .map(|bytes| build_models(scan_aliases(&bytes), "binary"))
+        .filter(|models| !models.is_empty())
+        .unwrap_or_else(detect_from_sessions)
 }
 
 /// Best-effort discovery of Claude models and effort levels. Never errors.
 /// Result is cached in `AppState`; pass `force: true` to re-scan.
 #[tauri::command]
-pub fn detect_claude_options(state: State<AppState>, force: Option<bool>) -> ClaudeOptions {
+pub async fn detect_claude_options(
+    state: State<'_, AppState>,
+    force: Option<bool>,
+) -> AppResult<ClaudeOptions> {
     if force != Some(true) {
         if let Some(cached) = state.claude_options.lock().clone() {
-            return cached;
+            return Ok(cached);
         }
     }
-    let result = scan_options(&state);
+    let result = scan_options(&state).await;
     *state.claude_options.lock() = Some(result.clone());
-    result
+    Ok(result)
 }
 
-fn scan_options(state: &AppState) -> ClaudeOptions {
+async fn scan_options(state: &AppState) -> ClaudeOptions {
     let binary = locate_claude(state);
-    let models = binary
-        .as_deref()
-        .and_then(|path| std::fs::read(path).ok())
-        .map(|bytes| build_models(scan_aliases(&bytes), "binary"))
-        .filter(|models| !models.is_empty())
-        .unwrap_or_else(detect_from_sessions);
-    let effort_levels = binary
-        .as_deref()
-        .and_then(|path| read_claude_help(path, &shell_env(state)))
+    let env = shell_env(state);
+    let scan_binary = binary.clone();
+    let models_task = tokio::task::spawn_blocking(move || scan_models(scan_binary.as_deref()));
+    let help = match binary.as_deref() {
+        Some(path) => read_claude_help(path, env).await,
+        None => None,
+    };
+    let effort_levels = help
         .and_then(|help| parse_effort_levels(&help))
         .unwrap_or_else(|| FALLBACK_EFFORT_LEVELS.iter().map(|s| s.to_string()).collect());
+    let models = models_task.await.unwrap_or_default();
     ClaudeOptions { models, effort_levels }
 }
 
