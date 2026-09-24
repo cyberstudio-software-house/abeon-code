@@ -1,12 +1,20 @@
+use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
 use tauri::State;
 
 use crate::commands::settings::{ensure_shell_env, resolve_shell};
-use crate::domain::DetectedModel;
+use crate::domain::{ClaudeOptions, DetectedModel};
 use crate::state::AppState;
 
 const MAX_FALLBACK_FILES: usize = 50;
-const NON_MODEL_FAMILIES: [&str; 2] = ["code", "cli"];
+const NON_MODEL_FAMILIES: [&str; 5] = ["code", "cli", "desktop", "eval", "instant"];
+const FALLBACK_EFFORT_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+const HELP_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_MINOR_VERSION: u32 = 100;
+const EFFORT_LIST_MAX_DISTANCE: usize = 400;
 
 /// Pull every `claude-...` ASCII token out of a byte blob (CLI binary or JSONL).
 /// A token runs while bytes stay in `[a-z0-9-]`, so `claude-opus-4-8[1m]` yields
@@ -49,7 +57,10 @@ fn normalize_alias(token: &str) -> Option<(String, String)> {
         return None;
     }
     let major: u32 = parts.next()?.parse().ok()?;
-    let minor: Option<u32> = parts.next().and_then(|s| s.parse::<u32>().ok());
+    let minor: Option<u32> = parts
+        .next()
+        .and_then(|s| s.parse::<u32>().ok())
+        .filter(|m| *m < MAX_MINOR_VERSION);
     if minor == Some(0) {
         return None;
     }
@@ -58,6 +69,12 @@ fn normalize_alias(token: &str) -> Option<(String, String)> {
         None => format!("claude-{family}-{major}"),
     };
     Some((clean, family.to_string()))
+}
+
+fn version_key(model_id: &str) -> (u32, u32) {
+    let base = model_id.trim_end_matches("[1m]");
+    let mut numbers = base.split('-').skip(2).filter_map(|s| s.parse::<u32>().ok());
+    (numbers.next().unwrap_or(0), numbers.next().unwrap_or(0))
 }
 
 /// Normalize + dedupe raw tokens into `DetectedModel`s. Opus aliases also get a
@@ -77,10 +94,28 @@ fn build_models(tokens: Vec<String>, source: &str) -> Vec<DetectedModel> {
                     model_id: v,
                     family: family.clone(),
                     source: source.to_string(),
+                    latest: false,
                 });
             }
         }
     }
+    let mut newest: HashMap<String, (u32, u32)> = HashMap::new();
+    for model in &out {
+        let version = version_key(&model.model_id);
+        let entry = newest.entry(model.family.clone()).or_insert(version);
+        if version > *entry {
+            *entry = version;
+        }
+    }
+    for model in &mut out {
+        model.latest = newest.get(&model.family) == Some(&version_key(&model.model_id));
+    }
+    out.sort_by(|a, b| {
+        a.family
+            .cmp(&b.family)
+            .then_with(|| version_key(&b.model_id).cmp(&version_key(&a.model_id)))
+            .then_with(|| a.model_id.cmp(&b.model_id))
+    });
     out
 }
 
@@ -163,32 +198,87 @@ fn detect_from_sessions() -> Vec<DetectedModel> {
     build_models(tokens, "session")
 }
 
-/// Best-effort model discovery. Never errors: returns `[]` when nothing is found.
-/// Result is cached in `AppState` (the CLI binary is large); pass `force: true`
-/// to bypass the cache and re-scan.
-#[tauri::command]
-pub fn detect_models(state: State<AppState>, force: Option<bool>) -> Vec<DetectedModel> {
-    if force != Some(true) {
-        if let Some(cached) = state.detected_models.lock().clone() {
-            return cached;
-        }
+fn parse_effort_levels(help: &str) -> Option<Vec<String>> {
+    let start = help.find("--effort")?;
+    let rest = &help[start..];
+    let open = rest.find('(')?;
+    if open > EFFORT_LIST_MAX_DISTANCE {
+        return None;
     }
-    let result = scan_models(&state);
-    *state.detected_models.lock() = Some(result.clone());
-    result
+    let close = open + rest[open..].find(')')?;
+    let levels: Vec<String> = rest[open + 1..close]
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_lowercase()))
+        .map(String::from)
+        .collect();
+    (!levels.is_empty()).then_some(levels)
 }
 
-/// Run the actual scan: CLI binary first, session JSONL fallback.
-fn scan_models(state: &AppState) -> Vec<DetectedModel> {
-    if let Some(path) = locate_claude(state) {
-        if let Ok(bytes) = std::fs::read(&path) {
-            let models = build_models(scan_aliases(&bytes), "binary");
-            if !models.is_empty() {
-                return models;
+fn shell_env(state: &AppState) -> HashMap<String, String> {
+    state
+        .db
+        .get()
+        .ok()
+        .map(|conn| resolve_shell(&conn))
+        .map(|shell| ensure_shell_env(state, &shell))
+        .unwrap_or_default()
+}
+
+fn read_claude_help(binary: &Path, env: &HashMap<String, String>) -> Option<String> {
+    let mut child = std::process::Command::new(binary)
+        .arg("--help")
+        .envs(env)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = Instant::now() + HELP_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(50)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
             }
         }
     }
-    detect_from_sessions()
+    let mut out = String::new();
+    child.stdout.take()?.read_to_string(&mut out).ok()?;
+    Some(out)
+}
+
+/// Best-effort discovery of Claude models and effort levels. Never errors.
+/// Result is cached in `AppState`; pass `force: true` to re-scan.
+#[tauri::command]
+pub fn detect_claude_options(state: State<AppState>, force: Option<bool>) -> ClaudeOptions {
+    if force != Some(true) {
+        if let Some(cached) = state.claude_options.lock().clone() {
+            return cached;
+        }
+    }
+    let result = scan_options(&state);
+    *state.claude_options.lock() = Some(result.clone());
+    result
+}
+
+fn scan_options(state: &AppState) -> ClaudeOptions {
+    let binary = locate_claude(state);
+    let models = binary
+        .as_deref()
+        .and_then(|path| std::fs::read(path).ok())
+        .map(|bytes| build_models(scan_aliases(&bytes), "binary"))
+        .filter(|models| !models.is_empty())
+        .unwrap_or_else(detect_from_sessions);
+    let effort_levels = binary
+        .as_deref()
+        .and_then(|path| read_claude_help(path, &shell_env(state)))
+        .and_then(|help| parse_effort_levels(&help))
+        .unwrap_or_else(|| FALLBACK_EFFORT_LEVELS.iter().map(|s| s.to_string()).collect());
+    ClaudeOptions { models, effort_levels }
 }
 
 #[cfg(test)]
@@ -283,5 +373,77 @@ mod tests {
         assert!(!ids.contains(&"claude-fable-5[1m]"));
         assert_eq!(ids.iter().filter(|i| **i == "claude-opus-4-9").count(), 1);
         assert!(models.iter().all(|m| m.source == "binary"));
+    }
+    #[test]
+    fn rejects_new_denylisted_families() {
+        assert_eq!(normalize_alias("claude-desktop-3"), None);
+        assert_eq!(normalize_alias("claude-eval-9"), None);
+        assert_eq!(normalize_alias("claude-instant-1"), None);
+    }
+
+    #[test]
+    fn treats_date_segment_as_no_minor() {
+        assert_eq!(
+            normalize_alias("claude-opus-4-20250514"),
+            Some(("claude-opus-4".to_string(), "opus".to_string()))
+        );
+    }
+
+    #[test]
+    fn flags_latest_per_family_and_inherits_it_for_1m() {
+        let toks = vec![
+            "claude-opus-4-8".to_string(),
+            "claude-opus-5-5".to_string(),
+            "claude-opus-5".to_string(),
+            "claude-sonnet-5".to_string(),
+            "claude-sonnet-4-6".to_string(),
+        ];
+        let models = build_models(toks, "binary");
+        let latest: Vec<&str> = models.iter().filter(|m| m.latest).map(|m| m.model_id.as_str()).collect();
+        assert_eq!(latest, vec!["claude-opus-5-5", "claude-opus-5-5[1m]", "claude-sonnet-5"]);
+    }
+
+    #[test]
+    fn sorts_by_family_then_newest_version_first() {
+        let toks = vec![
+            "claude-sonnet-4-6".to_string(),
+            "claude-opus-4-8".to_string(),
+            "claude-sonnet-5".to_string(),
+            "claude-opus-5-5".to_string(),
+        ];
+        let ids: Vec<String> = build_models(toks, "binary").into_iter().map(|m| m.model_id).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "claude-opus-5-5",
+                "claude-opus-5-5[1m]",
+                "claude-opus-4-8",
+                "claude-opus-4-8[1m]",
+                "claude-sonnet-5",
+                "claude-sonnet-4-6",
+            ]
+        );
+    }
+
+    #[test]
+    fn parses_effort_levels_from_help() {
+        let help = "  --debug        Enable debug\n  --effort <level>                      Effort level for the current session\n                                        (low, medium, high, xhigh, max)\n  --environment <id>   Cloud env (not this one)\n";
+        assert_eq!(
+            parse_effort_levels(help),
+            Some(vec!["low", "medium", "high", "xhigh", "max"].into_iter().map(String::from).collect())
+        );
+    }
+
+    #[test]
+    fn effort_parser_returns_none_without_flag_or_list() {
+        assert_eq!(parse_effort_levels(""), None);
+        assert_eq!(parse_effort_levels("  --model <model>  (opus, sonnet)"), None);
+        assert_eq!(parse_effort_levels("  --effort <level>  Effort level\n"), None);
+    }
+
+    #[test]
+    fn effort_parser_drops_non_word_entries() {
+        let help = "--effort <level>  (low, High, x y, max)";
+        assert_eq!(parse_effort_levels(help), Some(vec!["low".to_string(), "max".to_string()]));
     }
 }

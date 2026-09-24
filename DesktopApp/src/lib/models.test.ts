@@ -57,7 +57,7 @@ describe('getModelDisplayLabel', () => {
   });
 });
 
-const d = (modelId: string, family: string): DetectedModel => ({ modelId, family, source: 'binary' });
+const d = (modelId: string, family: string): DetectedModel => ({ modelId, family, source: 'binary', latest: false });
 
 describe('detectedClaudeModels', () => {
   it('drops models already in the static list', () => {

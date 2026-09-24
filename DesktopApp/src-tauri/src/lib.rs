@@ -119,7 +119,7 @@ pub fn run() {
             commands::usage::session_usage,
             commands::usage::project_usage,
             commands::usage::provider_limits,
-            commands::models::detect_models,
+            commands::models::detect_claude_options,
             commands::providers::detect_providers,
             commands::providers::detect_codex_models,
             commands::providers::detect_opencode_models,

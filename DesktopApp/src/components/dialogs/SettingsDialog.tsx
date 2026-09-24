@@ -812,7 +812,7 @@ function ClaudeModelsSection() {
 
   const [detected, setDetected] = useState<DetectedModel[]>([]);
   const refreshDetected = useCallback((force?: boolean) => {
-    tauri.detectModels(force).then(setDetected).catch(() => setDetected([]));
+    tauri.detectClaudeOptions(force).then(options => setDetected(options.models)).catch(() => setDetected([]));
   }, []);
   useEffect(() => { refreshDetected(); }, [refreshDetected]);
   const detectedRows = useMemo<DetectedSuggestion[]>(() => {
