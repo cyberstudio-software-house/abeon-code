@@ -541,6 +541,10 @@ useStore.subscribe((state) => {
 
 const MIGRATION_FLAG_KEY = 'migrated_v2';
 
+const CLAUDE_MODEL_KEYS = [
+  'defaultModelId', 'titleGenModelId', 'modelEfforts', 'customModels',
+] as const satisfies readonly PersistedKey[];
+
 function persistedFromRawMap(raw: Record<string, string>): Persisted {
   const out: Persisted = {};
   for (const key of PERSISTED_KEYS) {
@@ -564,6 +568,17 @@ async function hydrateFromSqlite(): Promise<void> {
 
   const sqliteHasMigrationFlag = raw[MIGRATION_FLAG_KEY] === '1';
   const sqliteSnapshot = migratePersisted(persistedFromRawMap(raw), useStore.getState().customModels);
+  for (const key of CLAUDE_MODEL_KEYS) {
+    const value = sqliteSnapshot[key];
+    if (value === undefined) continue;
+    const serialized = serializeValue(key, value);
+    if (serialized === raw[key]) continue;
+    try {
+      await tauri.setSetting(key, serialized);
+    } catch (err) {
+      console.error('[settings] model migration setSetting failed', key, err);
+    }
+  }
   const localSnapshot = loadFromLocalStorage();
 
   // Case 1: first boot post-migration — SQLite empty, localStorage has data.
