@@ -21,6 +21,7 @@ const windowMode = parseWindowMode(window.location.search);
 const isDetachedWindow = new URLSearchParams(window.location.search).has('view');
 import type { Provider } from '../types';
 import { isProvider } from '../lib/providers';
+import { migrateClaudeModelSettings } from '../lib/models';
 
 export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice;
 
@@ -38,9 +39,6 @@ export const useStore = create<AppState>()((...a) => ({
 const PERSIST_KEY = 'abeoncode.settings';
 const TABS_PERSIST_KEY = 'abeoncode.tabs';
 
-type EffortLevelStr = 'low' | 'medium' | 'high';
-type CustomModelLite = { id: string; modelId: string; label: string };
-
 type Persisted = {
   theme?: 'dark' | 'light' | 'system';
   leftWidth?: number;
@@ -48,8 +46,8 @@ type Persisted = {
   displayName?: string;
   defaultModelId?: string;
   titleGenModelId?: string;
-  modelEfforts?: Record<string, EffortLevelStr>;
-  customModels?: CustomModelLite[];
+  modelEfforts?: Record<string, string>;
+  customModels?: unknown[];
   projectsBasePath?: string;
   skipPermissions?: boolean;
   remoteBridgeEnabled?: boolean;
@@ -108,7 +106,7 @@ function pickPersistedFields(state: AppState): Persisted {
     displayName: state.displayName,
     defaultModelId: state.defaultModelId,
     titleGenModelId: state.titleGenModelId,
-    modelEfforts: state.modelEfforts as Record<string, EffortLevelStr>,
+    modelEfforts: state.modelEfforts,
     customModels: state.customModels,
     projectsBasePath: state.projectsBasePath,
     skipPermissions: state.skipPermissions,
@@ -200,10 +198,10 @@ function applyPersistedToState(p: Persisted) {
   if (typeof p.leftWidth === 'number') patch.leftWidth = clamp(p.leftWidth, 200, 420);
   if (typeof p.rightWidth === 'number') patch.rightWidth = clamp(p.rightWidth, 220, 480);
   if (p.displayName) patch.displayName = p.displayName;
-  if (p.defaultModelId) patch.defaultModelId = p.defaultModelId;
-  if (p.titleGenModelId) patch.titleGenModelId = p.titleGenModelId;
-  if (p.modelEfforts) patch.modelEfforts = p.modelEfforts as AppState['modelEfforts'];
-  if (p.customModels) patch.customModels = p.customModels as AppState['customModels'];
+  if (typeof p.defaultModelId === 'string' && p.defaultModelId) patch.defaultModelId = p.defaultModelId;
+  if (typeof p.titleGenModelId === 'string' && p.titleGenModelId) patch.titleGenModelId = p.titleGenModelId;
+  if (p.modelEfforts && typeof p.modelEfforts === 'object') patch.modelEfforts = p.modelEfforts;
+  if (Array.isArray(p.customModels)) patch.customModels = p.customModels as AppState['customModels'];
   if (p.projectsBasePath) patch.projectsBasePath = p.projectsBasePath;
   if (p.skipPermissions !== undefined) patch.skipPermissions = p.skipPermissions;
   if (p.remoteBridgeEnabled !== undefined) patch.remoteBridgeEnabled = p.remoteBridgeEnabled;
@@ -243,6 +241,22 @@ function applyPersistedToState(p: Persisted) {
     patch.opencodeCustomModels = p.opencodeCustomModels.filter((x): x is string => typeof x === 'string');
   }
   if (Object.keys(patch).length > 0) useStore.setState(patch);
+}
+
+export function migratePersisted(p: Persisted, fallbackCustomModels: unknown[]): Persisted {
+  const { defaultModelId, titleGenModelId, modelEfforts, customModels, ...rest } = p;
+  const migrated = migrateClaudeModelSettings({
+    defaultModelId,
+    titleGenModelId,
+    modelEfforts,
+    customModels: customModels ?? fallbackCustomModels,
+  });
+  const out: Persisted = { ...rest };
+  if (migrated.defaultModelId !== undefined) out.defaultModelId = migrated.defaultModelId;
+  if (migrated.titleGenModelId !== undefined) out.titleGenModelId = migrated.titleGenModelId;
+  if (migrated.modelEfforts !== undefined) out.modelEfforts = migrated.modelEfforts;
+  if (customModels !== undefined && migrated.customModels !== undefined) out.customModels = migrated.customModels;
+  return out;
 }
 
 function loadFromLocalStorage(): Persisted {
@@ -403,7 +417,7 @@ function writeTabsToLocalStorage(state: AppState) {
 }
 
 // --- Boot: sync hydrate from localStorage ---
-applyPersistedToState(loadFromLocalStorage());
+applyPersistedToState(migratePersisted(loadFromLocalStorage(), []));
 
 // Apply the theme synchronously before React mounts. ThemeProvider also does
 // this in an effect, but effects run child-first — a terminal that mounts on
@@ -548,7 +562,7 @@ async function hydrateFromSqlite(): Promise<void> {
   }
 
   const sqliteHasMigrationFlag = raw[MIGRATION_FLAG_KEY] === '1';
-  const sqliteSnapshot = persistedFromRawMap(raw);
+  const sqliteSnapshot = migratePersisted(persistedFromRawMap(raw), useStore.getState().customModels);
   const localSnapshot = loadFromLocalStorage();
 
   // Case 1: first boot post-migration — SQLite empty, localStorage has data.

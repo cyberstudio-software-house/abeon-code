@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Icon } from '../shared/Icon';
 import { tauri } from '../../lib/tauri';
 import { useStore } from '../../store';
-import { getModelDisplayLabel } from '../../lib/models';
+import { useShallow } from 'zustand/react/shallow';
+import { claudeModelLabel } from '../../lib/models';
 import type { GitUser } from '../../types';
 
 export function SidebarFooter() {
@@ -11,14 +12,14 @@ export function SidebarFooter() {
 
   const displayName = useStore(s => s.displayName);
   const defaultModelId = useStore(s => s.defaultModelId);
-  const customModels = useStore(s => s.customModels);
+  const customModels = useStore(useShallow(s => s.customModels));
   const openSettings = useStore(s => s.openSettings);
 
   const initials = displayName
     ? displayName.slice(0, 1).toUpperCase()
     : (user?.initials ?? 'D');
   const name = displayName || (user?.name ?? 'Developer');
-  const modelLabel = getModelDisplayLabel(defaultModelId, customModels);
+  const modelLabel = claudeModelLabel(defaultModelId, customModels);
 
   return (
     <div className="border-t border-border px-1 py-2.5 flex items-center gap-2.5">

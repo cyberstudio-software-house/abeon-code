@@ -99,7 +99,7 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
 
 export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, tabId, visible = true, focused = true }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
-  const customModels = useStore(s => s.customModels);
+  const modelEfforts = useStore(s => s.modelEfforts);
   const codexModelId = useStore(s => s.codexModelId);
   const opencodeModelId = useStore(s => s.opencodeModelId);
   const skipPermissions = useStore(s => s.skipPermissions);
@@ -171,9 +171,9 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     const rows = term.rows;
     const agentProvider = provider ?? 'claude';
     const isResume = kind === 'agent' && !!sessionId && !fresh;
-    const cliModel = !isResume && kind === 'agent' && agentProvider === 'claude'
-      ? getCliModelString(defaultModelId, customModels)
-      : undefined;
+    const isNewClaudeAgent = !isResume && kind === 'agent' && agentProvider === 'claude';
+    const cliModel = isNewClaudeAgent ? getCliModelString(defaultModelId) : undefined;
+    const cliEffort = isNewClaudeAgent ? modelEfforts[defaultModelId] : undefined;
     const ptyKind: PtyKindClient =
       kind === 'agent'
         ? {
@@ -181,6 +181,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
             provider: agentProvider,
             ...(sessionId ? { session_id: sessionId } : {}),
             ...(agentProvider === 'claude' && cliModel ? { model: cliModel } : {}),
+            ...(agentProvider === 'claude' && cliEffort ? { effort: cliEffort } : {}),
             ...(agentProvider === 'codex' && !isResume && codexModelId ? { model: codexModelId } : {}),
             ...(agentProvider === 'opencode' && !isResume && opencodeModelId ? { model: opencodeModelId } : {}),
             ...(fresh ? { fresh: true } : {}),

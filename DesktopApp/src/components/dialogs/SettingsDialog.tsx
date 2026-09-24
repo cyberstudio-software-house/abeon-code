@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, useCallback, type ReactElement } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, type ReactElement, type ReactNode } from 'react';
 import { PairingDialog } from './PairingDialog';
 import { ConfirmDialog } from './ConfirmDialog';
 import { open } from '@tauri-apps/plugin-dialog';
@@ -6,11 +6,14 @@ import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
 import { Icon } from '../shared/Icon';
 import { TabButton } from '../shared/TabButton';
-import { BUILTIN_MODELS, detectedClaudeModels, getModelDisplayLabel, type EffortLevel, type DetectedSuggestion } from '../../lib/models';
+import {
+  buildClaudeModelRows, effortOptions, FALLBACK_EFFORT_LEVELS, DEFAULT_TITLE_GEN_MODEL_ID,
+  type ClaudeModelRow,
+} from '../../lib/models';
 import type { ThemeMode } from '../../styles/theme';
 import type { TabLayoutMode } from '../../store/settingsSlice';
 import { tauri } from '../../lib/tauri';
-import type { ShellInfo, EditorInfo, DetectedModel, ProviderInfo } from '../../types';
+import type { ShellInfo, EditorInfo, ClaudeOptions, ProviderInfo } from '../../types';
 import type { ClickUpConnectionStatus } from '../../types/ClickUpConnectionStatus';
 import { ALL_PROVIDERS, PROVIDER_LABEL, PROVIDER_ICON } from '../../lib/providers';
 import {
@@ -35,11 +38,28 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
 
 type SettingsTab = 'general' | 'cli' | 'models' | 'shortcuts' | 'cloud' | 'clickup';
 
-const EFFORT_OPTIONS: { value: EffortLevel; label: string }[] = [
-  { value: 'low', label: 'Niski' },
-  { value: 'medium', label: 'Średni' },
-  { value: 'high', label: 'Wysoki' },
-];
+const EFFORT_LABELS: Record<string, string> = {
+  low: 'Niski',
+  medium: 'Średni',
+  high: 'Wysoki',
+  xhigh: 'Bardzo wysoki',
+  max: 'Maksymalny',
+};
+
+const AUTO_MODEL_LABEL = 'Auto (domyślny model Claude)';
+
+function useClaudeOptions() {
+  const [options, setOptions] = useState<ClaudeOptions>({ models: [], effortLevels: FALLBACK_EFFORT_LEVELS });
+  const [loaded, setLoaded] = useState(false);
+  const refresh = useCallback((force?: boolean) => {
+    tauri.detectClaudeOptions(force)
+      .then(setOptions)
+      .catch(() => setOptions({ models: [], effortLevels: FALLBACK_EFFORT_LEVELS }))
+      .finally(() => setLoaded(true));
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+  return { options, loaded, refresh };
+}
 
 export function SettingsDialog() {
   const [tab, setTab] = useState<SettingsTab>('general');
@@ -229,6 +249,11 @@ function TitleGenSection() {
   const setOpencodeTitleGenModel = useStore(s => s.setOpencodeTitleGenModel);
   const opencodeCustomModels = useStore(useShallow(s => s.opencodeCustomModels));
   const [detectedOpencode, setDetectedOpencode] = useState<string[]>([]);
+  const { options: claudeOptions } = useClaudeOptions();
+  const claudeTitleRows = useMemo(
+    () => buildClaudeModelRows(claudeOptions.models, customModels, titleGenModelId),
+    [claudeOptions.models, customModels, titleGenModelId],
+  );
 
   useEffect(() => {
     tauri.detectCodexModels().then(setDetectedCodex).catch(() => setDetectedCodex([]));
@@ -264,15 +289,21 @@ function TitleGenSection() {
             onChange={e => setTitleGenModel(e.target.value)}
             className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
           >
-            {BUILTIN_MODELS.map(m => (
-              <option key={m.id} value={m.id}>
-                {m.label}{m.context ? ` (${m.context})` : ''}
-              </option>
+            <option value="">{AUTO_MODEL_LABEL}</option>
+            <option value={DEFAULT_TITLE_GEN_MODEL_ID}>Haiku (najnowszy)</option>
+            {claudeTitleRows.latest.map(r => (
+              <option key={r.modelId} value={r.modelId}>{r.label}</option>
+            ))}
+            {claudeTitleRows.older.filter(r => r.modelId === titleGenModelId).map(r => (
+              <option key={r.modelId} value={r.modelId}>{r.label}</option>
             ))}
             {customModels.length > 0 && <option disabled>──────────</option>}
             {customModels.map(m => (
-              <option key={m.id} value={m.id}>{m.label}</option>
+              <option key={m.modelId} value={m.modelId}>{m.label}</option>
             ))}
+            {claudeTitleRows.undetected && claudeTitleRows.undetected.modelId !== DEFAULT_TITLE_GEN_MODEL_ID && (
+              <option value={claudeTitleRows.undetected.modelId}>{claudeTitleRows.undetected.label}</option>
+            )}
           </select>
         </div>
       )}
@@ -805,182 +836,150 @@ function ClaudeModelsSection() {
   const setModelEffort = useStore(s => s.setModelEffort);
   const addCustomModel = useStore(s => s.addCustomModel);
   const removeCustomModel = useStore(s => s.removeCustomModel);
+  const { options, loaded, refresh } = useClaudeOptions();
 
+  const [showOlder, setShowOlder] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [adding, setAdding] = useState(false);
   const [newLabel, setNewLabel] = useState('');
   const [newModelId, setNewModelId] = useState('');
 
-  const [detected, setDetected] = useState<DetectedModel[]>([]);
-  const refreshDetected = useCallback((force?: boolean) => {
-    tauri.detectClaudeOptions(force).then(options => setDetected(options.models)).catch(() => setDetected([]));
-  }, []);
-  useEffect(() => { refreshDetected(); }, [refreshDetected]);
-  const detectedRows = useMemo<DetectedSuggestion[]>(() => {
-    const rows = detectedClaudeModels(detected, customModels);
-    const isRawSelected =
-      defaultModelId.startsWith('claude-') &&
-      !customModels.some(m => m.id === defaultModelId || m.modelId === defaultModelId) &&
-      !rows.some(r => r.modelId === defaultModelId);
-    return isRawSelected
-      ? [...rows, { modelId: defaultModelId, label: getModelDisplayLabel(defaultModelId, customModels) }]
-      : rows;
-  }, [detected, customModels, defaultModelId]);
+  const rows = useMemo(
+    () => buildClaudeModelRows(options.models, customModels, defaultModelId),
+    [options.models, customModels, defaultModelId],
+  );
+  const visibleOlder = showOlder ? rows.older : rows.older.filter(r => r.modelId === defaultModelId);
+  const pinnedCustom = showAdvanced ? [] : rows.custom.filter(r => r.modelId === defaultModelId);
 
   const submitCustom = () => {
-    const label = newLabel.trim();
-    const modelId = newModelId.trim();
-    if (!label || !modelId) return;
-    const id = `custom-${crypto.randomUUID().slice(0, 8)}`;
-    addCustomModel({ id, modelId, label });
+    if (!newLabel.trim() || !newModelId.trim()) return;
+    addCustomModel({ modelId: newModelId, label: newLabel });
     setNewLabel('');
     setNewModelId('');
     setAdding(false);
   };
 
+  const renderRow = (row: ClaudeModelRow, extra?: { badge?: string; onRemove?: () => void }) => (
+    <ModelRow
+      key={row.modelId || 'auto'}
+      label={row.label}
+      modelId={row.modelId}
+      selected={defaultModelId === row.modelId}
+      effort={modelEfforts[row.modelId]}
+      effortLevels={options.effortLevels}
+      badge={extra?.badge}
+      onSelect={() => setDefaultModel(row.modelId)}
+      onEffortChange={effort => setModelEffort(row.modelId, effort)}
+      onRemove={extra?.onRemove}
+    />
+  );
+
   return (
     <div>
-      <div className="flex items-center gap-2 mb-2">
-        <Icon name="claudeLogo" className="w-3.5 h-3.5" />
-        <label className="block text-[10px] text-muted uppercase tracking-wider">Claude Code</label>
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <Icon name="claudeLogo" className="w-3.5 h-3.5" />
+          <label className="block text-[10px] text-muted uppercase tracking-wider">Claude Code</label>
+        </div>
+        <button
+          onClick={() => refresh(true)}
+          className="text-[11px] text-muted hover:text-fg transition-colors"
+        >
+          Odśwież
+        </button>
       </div>
       <p className="text-[11px] text-muted mb-3">
         Model używany przy tworzeniu nowych sesji. Istniejące sesje zachowują swój model.
+        Lista pochodzi z zainstalowanego Claude Code.
       </p>
 
-      <div className="space-y-0.5 mb-4">
-        <ModelRow
-          label="Auto (domyślny model Claude)"
-          selected={defaultModelId === ''}
-          onSelect={() => setDefaultModel('')}
-        />
-        {BUILTIN_MODELS.map(m => (
-          <ModelRow
-            key={m.id}
-            label={m.label}
-            context={m.context}
-            selected={defaultModelId === m.id}
-            effort={m.supportsEffort ? (modelEfforts[m.id] ?? 'medium') : undefined}
-            onSelect={() => setDefaultModel(m.id)}
-            onEffortChange={m.supportsEffort ? (e) => setModelEffort(m.id, e) : undefined}
-          />
-        ))}
+      {loaded && options.models.length === 0 && (
+        <p className="text-[11px] text-danger mb-2">Nie wykryto modeli — sprawdź instalację Claude Code</p>
+      )}
+
+      <div className="space-y-0.5 mb-2">
+        {renderRow({ modelId: '', label: AUTO_MODEL_LABEL })}
+        {rows.latest.map(row => renderRow(row))}
+        {visibleOlder.map(row => renderRow(row))}
+        {pinnedCustom.map(row => renderRow(row))}
+        {rows.undetected && renderRow(rows.undetected, { badge: 'niewykryty' })}
       </div>
 
-      {customModels.length > 0 && (
-        <>
-          <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
-            Modele własne
-          </label>
-          <div className="space-y-0.5 mb-4">
-            {customModels.map(m => (
-              <div key={m.id} className="flex items-center gap-2">
-                <label className="flex-1 flex items-center gap-3 py-1.5 px-2 hover:bg-bg-elev-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    name="default-model"
-                    checked={defaultModelId === m.id}
-                    onChange={() => setDefaultModel(m.id)}
-                    className="accent-accent"
-                  />
-                  <div>
-                    <span className="text-[13px]">{m.label}</span>
-                    <span className="text-[11px] text-muted ml-2 font-mono">{m.modelId}</span>
-                  </div>
-                </label>
-                <button
-                  onClick={() => removeCustomModel(m.id)}
-                  className="text-muted hover:text-danger transition-colors p-1"
-                  aria-label="Usuń model"
-                >
-                  <Icon name="trash" className="w-3 h-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {detectedRows.length > 0 && (
-        <>
-          <div className="flex items-center justify-between mb-2">
-            <label className="block text-[10px] text-muted uppercase tracking-wider">
-              Wykryte modele
-            </label>
-            <button
-              onClick={() => refreshDetected(true)}
-              className="text-[11px] text-muted hover:text-fg transition-colors"
-            >
-              Odśwież
-            </button>
-          </div>
-          <p className="text-[11px] text-muted mb-2">
-            Modele wykryte w Claude Code, których nie ma na liście wbudowanej.
-          </p>
-          <div className="space-y-0.5 mb-4">
-            {detectedRows.map(s => (
-              <label
-                key={s.modelId}
-                className={`flex items-center gap-3 py-1.5 px-2 cursor-pointer ${defaultModelId === s.modelId ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}
-              >
-                <input
-                  type="radio"
-                  name="default-model"
-                  checked={defaultModelId === s.modelId}
-                  onChange={() => setDefaultModel(s.modelId)}
-                  className="accent-accent"
-                />
-                <span className="text-[13px]">{s.label}</span>
-                <span className="text-[11px] text-muted font-mono">{s.modelId}</span>
-                <span className="text-[10px] text-muted border border-border px-1.5 py-0.5 rounded">wykryty</span>
-              </label>
-            ))}
-          </div>
-        </>
-      )}
-
-      {adding ? (
-        <div className="border border-border p-3 space-y-2">
-          <label className="block text-[10px] text-muted uppercase tracking-wider">Nazwa</label>
-          <input
-            value={newLabel}
-            onChange={e => setNewLabel(e.target.value)}
-            placeholder="np. My Fine-tuned Model"
-            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px]"
-            autoFocus
-          />
-          <label className="block text-[10px] text-muted uppercase tracking-wider">ID modelu (CLI)</label>
-          <input
-            value={newModelId}
-            onChange={e => setNewModelId(e.target.value)}
-            placeholder="np. claude-sonnet-4-6"
-            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] font-mono"
-            onKeyDown={e => { if (e.key === 'Enter') submitCustom(); }}
-          />
-          <div className="flex justify-end gap-2 pt-1">
-            <button
-              onClick={() => { setAdding(false); setNewLabel(''); setNewModelId(''); }}
-              className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg"
-            >
-              Anuluj
-            </button>
-            <button
-              onClick={submitCustom}
-              disabled={!newLabel.trim() || !newModelId.trim()}
-              className="px-3 py-1.5 bg-fg text-bg text-[12px] font-medium disabled:opacity-40"
-            >
-              Dodaj
-            </button>
-          </div>
-        </div>
-      ) : (
+      {rows.older.length > 0 && (
         <button
-          onClick={() => setAdding(true)}
-          className="flex items-center gap-1.5 text-[12px] text-muted hover:text-fg transition-colors"
+          onClick={() => setShowOlder(v => !v)}
+          className="text-[11px] text-muted hover:text-fg transition-colors mb-4"
         >
-          <Icon name="plus" className="w-3 h-3" />
-          Dodaj własny model
+          {showOlder ? 'Ukryj starsze wersje' : `Pokaż starsze wersje (${rows.older.length})`}
         </button>
       )}
+
+      <div className="border-t border-border pt-3">
+        <button
+          onClick={() => setShowAdvanced(v => !v)}
+          className="flex items-center gap-1.5 text-[10px] text-muted uppercase tracking-wider hover:text-fg transition-colors mb-2"
+        >
+          <span>{showAdvanced ? '▾' : '▸'}</span>
+          <span>Zaawansowane</span>
+        </button>
+
+        {showAdvanced && (
+          <div>
+            <p className="text-[11px] text-muted mb-2">
+              Modele własne — gdy wykrywanie nie znajduje potrzebnego ID (np. Bedrock/Vertex).
+            </p>
+            {rows.custom.length > 0 && (
+              <div className="space-y-0.5 mb-3">
+                {rows.custom.map(row => renderRow(row, { onRemove: () => removeCustomModel(row.modelId) }))}
+              </div>
+            )}
+
+            {adding ? (
+              <div className="border border-border p-3 space-y-2">
+                <label className="block text-[10px] text-muted uppercase tracking-wider">Nazwa</label>
+                <input
+                  value={newLabel}
+                  onChange={e => setNewLabel(e.target.value)}
+                  placeholder="np. My Fine-tuned Model"
+                  className="w-full bg-bg border border-border px-3 py-1.5 text-[13px]"
+                  autoFocus
+                />
+                <label className="block text-[10px] text-muted uppercase tracking-wider">ID modelu (CLI)</label>
+                <input
+                  value={newModelId}
+                  onChange={e => setNewModelId(e.target.value)}
+                  placeholder="np. claude-sonnet-4-6"
+                  className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] font-mono"
+                  onKeyDown={e => { if (e.key === 'Enter') submitCustom(); }}
+                />
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    onClick={() => { setAdding(false); setNewLabel(''); setNewModelId(''); }}
+                    className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg"
+                  >
+                    Anuluj
+                  </button>
+                  <button
+                    onClick={submitCustom}
+                    disabled={!newLabel.trim() || !newModelId.trim()}
+                    className="px-3 py-1.5 bg-fg text-bg text-[12px] font-medium disabled:opacity-40"
+                  >
+                    Dodaj
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAdding(true)}
+                className="flex items-center gap-1.5 text-[12px] text-muted hover:text-fg transition-colors"
+              >
+                <Icon name="plus" className="w-3 h-3" />
+                Dodaj własny model
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1300,17 +1299,20 @@ function ShortcutsTab() {
   );
 }
 
-function ModelRow({ label, context, selected, effort, onSelect, onEffortChange }: {
+function ModelRow({ label, modelId, selected, effort, effortLevels, badge, onSelect, onEffortChange, onRemove }: {
   label: string;
-  context?: string;
+  modelId: string;
   selected: boolean;
-  effort?: EffortLevel;
+  effort: string | undefined;
+  effortLevels: string[];
+  badge?: ReactNode;
   onSelect: () => void;
-  onEffortChange?: (effort: EffortLevel) => void;
+  onEffortChange: (effort: string | null) => void;
+  onRemove?: () => void;
 }) {
   return (
     <div className={`flex items-center gap-3 py-1.5 px-2 ${selected ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}>
-      <label className="flex items-center gap-3 flex-1 cursor-pointer">
+      <label className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
         <input
           type="radio"
           name="default-model"
@@ -1319,26 +1321,33 @@ function ModelRow({ label, context, selected, effort, onSelect, onEffortChange }
           className="accent-accent"
         />
         <span className="text-[13px]">{label}</span>
-        {context && (
-          <span className="text-[10px] text-muted font-mono border border-border px-1.5 py-0.5 rounded">
-            {context}
-          </span>
+        {modelId && <span className="text-[11px] text-muted font-mono truncate">{modelId}</span>}
+        {badge && (
+          <span className="text-[10px] text-muted border border-border px-1.5 py-0.5 rounded">{badge}</span>
         )}
       </label>
-
-      {effort !== undefined && onEffortChange && (
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-muted">Effort</span>
-          <select
-            value={effort}
-            onChange={e => onEffortChange(e.target.value as EffortLevel)}
-            className={`${SELECT_BASE} text-[11px] px-1.5 py-0.5`}
-          >
-            {EFFORT_OPTIONS.map(o => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-        </div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] text-muted">Effort</span>
+        <select
+          aria-label={`Effort: ${label}`}
+          value={effort ?? ''}
+          onChange={e => onEffortChange(e.target.value || null)}
+          className={`${SELECT_BASE} text-[11px] px-1.5 py-0.5`}
+        >
+          <option value="">Domyślny</option>
+          {effortOptions(effortLevels, effort).map(level => (
+            <option key={level} value={level}>{EFFORT_LABELS[level] ?? level}</option>
+          ))}
+        </select>
+      </div>
+      {onRemove && (
+        <button
+          onClick={onRemove}
+          className="text-muted hover:text-danger transition-colors p-1"
+          aria-label="Usuń model"
+        >
+          <Icon name="trash" className="w-3 h-3" />
+        </button>
       )}
     </div>
   );

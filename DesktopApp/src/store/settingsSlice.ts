@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { ThemeMode } from '../styles/theme';
-import type { EffortLevel, CustomModel } from '../lib/models';
-import { DEFAULT_MODEL_ID } from '../lib/models';
+import type { ClaudeCustomModel } from '../lib/models';
+import { DEFAULT_MODEL_ID, DEFAULT_TITLE_GEN_MODEL_ID } from '../lib/models';
 import type { NotificationTrigger } from '../lib/attention';
 import type { Provider } from '../types';
 
@@ -16,8 +16,8 @@ export type SettingsSlice = {
   displayName: string;
   defaultModelId: string;
   titleGenModelId: string;
-  modelEfforts: Record<string, EffortLevel>;
-  customModels: CustomModel[];
+  modelEfforts: Record<string, string>;
+  customModels: ClaudeCustomModel[];
   projectsBasePath: string;
   skipPermissions: boolean;
   remoteBridgeEnabled: boolean;
@@ -48,9 +48,9 @@ export type SettingsSlice = {
   setDisplayName: (name: string) => void;
   setDefaultModel: (id: string) => void;
   setTitleGenModel: (id: string) => void;
-  setModelEffort: (modelId: string, effort: EffortLevel) => void;
-  addCustomModel: (model: CustomModel) => void;
-  removeCustomModel: (id: string) => void;
+  setModelEffort: (modelId: string, effort: string | null) => void;
+  addCustomModel: (model: ClaudeCustomModel) => void;
+  removeCustomModel: (modelId: string) => void;
   setProjectsBasePath: (path: string) => void;
   setSkipPermissions: (v: boolean) => void;
   setRemoteBridgeEnabled: (v: boolean) => void;
@@ -84,7 +84,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   rightWidth: 300,
   displayName: '',
   defaultModelId: DEFAULT_MODEL_ID,
-  titleGenModelId: 'haiku-4.5',
+  titleGenModelId: DEFAULT_TITLE_GEN_MODEL_ID,
   modelEfforts: {},
   customModels: [],
   projectsBasePath: '',
@@ -122,10 +122,16 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   setDisplayName: (displayName) => set({ displayName }),
   setDefaultModel: (defaultModelId) => set({ defaultModelId }),
   setTitleGenModel: (titleGenModelId) => set({ titleGenModelId }),
-  setModelEffort: (modelId, effort) =>
-    set({ modelEfforts: { ...get().modelEfforts, [modelId]: effort } }),
-  addCustomModel: (model) =>
-    set({ customModels: [...get().customModels, model] }),
+  setModelEffort: (modelId, effort) => {
+    const { [modelId]: _removed, ...rest } = get().modelEfforts;
+    set({ modelEfforts: effort ? { ...rest, [modelId]: effort } : rest });
+  },
+  addCustomModel: (model) => {
+    const modelId = model.modelId.trim();
+    const label = model.label.trim();
+    if (!modelId || !label || get().customModels.some(m => m.modelId === modelId)) return;
+    set({ customModels: [...get().customModels, { modelId, label }] });
+  },
   setProjectsBasePath: (projectsBasePath) => set({ projectsBasePath }),
   setSkipPermissions: (skipPermissions) => set({ skipPermissions }),
   setRemoteBridgeEnabled: (remoteBridgeEnabled) => set({ remoteBridgeEnabled }),
@@ -142,11 +148,14 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   setNotificationsEnabled: (notificationsEnabled) => set({ notificationsEnabled }),
   setNotificationTrigger: (notificationTrigger) => set({ notificationTrigger }),
   setShowActiveSessions: (showActiveSessions) => set({ showActiveSessions }),
-  removeCustomModel: (id) => {
-    const customModels = get().customModels.filter(m => m.id !== id);
-    const defaultModelId = get().defaultModelId === id ? DEFAULT_MODEL_ID : get().defaultModelId;
-    const titleGenModelId = get().titleGenModelId === id ? 'haiku-4.5' : get().titleGenModelId;
-    set({ customModels, defaultModelId, titleGenModelId });
+  removeCustomModel: (modelId) => {
+    const { [modelId]: _removed, ...modelEfforts } = get().modelEfforts;
+    set({
+      customModels: get().customModels.filter(m => m.modelId !== modelId),
+      modelEfforts,
+      ...(get().defaultModelId === modelId ? { defaultModelId: DEFAULT_MODEL_ID } : {}),
+      ...(get().titleGenModelId === modelId ? { titleGenModelId: DEFAULT_TITLE_GEN_MODEL_ID } : {}),
+    });
   },
   openSettings: () => set({ settingsOpen: true }),
   closeSettings: () => set({ settingsOpen: false }),

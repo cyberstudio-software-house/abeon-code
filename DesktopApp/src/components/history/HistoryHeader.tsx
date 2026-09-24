@@ -25,7 +25,6 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'cl
   const rename = useStore(s => s.renameSession);
   const openTerminal = useStore(s => s.openNewTerminalTab);
   const titleGenModelId = useStore(s => s.titleGenModelId);
-  const customModels = useStore(s => s.customModels);
   const codexTitleGenModelId = useStore(s => s.codexTitleGenModelId);
   const opencodeTitleGenModelId = useStore(s => s.opencodeTitleGenModelId);
 
@@ -46,7 +45,7 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'cl
         ? (codexTitleGenModelId || undefined)
         : provider === 'opencode'
           ? (opencodeTitleGenModelId || undefined)
-          : (getCliModelString(titleGenModelId, customModels) ?? undefined);
+          : (getCliModelString(titleGenModelId) ?? undefined);
       const title = (await tauri.generateSessionTitle(meta.projectId, meta.id, modelCli, provider)).trim();
       if (title && title !== meta.title) {
         await rename(meta.projectId, meta.id, title);

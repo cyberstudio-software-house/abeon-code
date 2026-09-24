@@ -107,3 +107,36 @@ describe('settingsSlice tabLayoutMode', () => {
     expect(useStore.getState().tabLayoutMode).toBe('classic');
   });
 });
+
+describe('settingsSlice claude models', () => {
+  beforeEach(() => {
+    useStore.setState({ defaultModelId: '', titleGenModelId: 'haiku', modelEfforts: {}, customModels: [] });
+  });
+
+  it('setModelEffort stores and clears a level, including for Auto', () => {
+    useStore.getState().setModelEffort('', 'max');
+    useStore.getState().setModelEffort('claude-opus-5-5', 'high');
+    expect(useStore.getState().modelEfforts).toEqual({ '': 'max', 'claude-opus-5-5': 'high' });
+    useStore.getState().setModelEffort('claude-opus-5-5', null);
+    expect(useStore.getState().modelEfforts).toEqual({ '': 'max' });
+  });
+
+  it('addCustomModel trims and dedupes by modelId', () => {
+    useStore.getState().addCustomModel({ modelId: '  claude-x-1 ', label: ' X ' });
+    useStore.getState().addCustomModel({ modelId: 'claude-x-1', label: 'Other' });
+    expect(useStore.getState().customModels).toEqual([{ modelId: 'claude-x-1', label: 'X' }]);
+  });
+
+  it('removeCustomModel resets selections and drops its effort', () => {
+    useStore.getState().addCustomModel({ modelId: 'claude-x-1', label: 'X' });
+    useStore.getState().setDefaultModel('claude-x-1');
+    useStore.getState().setTitleGenModel('claude-x-1');
+    useStore.getState().setModelEffort('claude-x-1', 'low');
+    useStore.getState().removeCustomModel('claude-x-1');
+    const s = useStore.getState();
+    expect(s.customModels).toEqual([]);
+    expect(s.defaultModelId).toBe('');
+    expect(s.titleGenModelId).toBe('haiku');
+    expect(s.modelEfforts).toEqual({});
+  });
+});
