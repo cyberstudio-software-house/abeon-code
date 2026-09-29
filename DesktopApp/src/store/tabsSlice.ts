@@ -5,9 +5,10 @@ import type { SettingsSlice } from './settingsSlice';
 import type { AppState } from './index';
 import { pushNav, stepBack, stepForward, pruneNav } from '../lib/navHistory';
 import { findLeaf } from '../lib/paneTree';
+import { promptTabTitle } from '../lib/promptTitle';
 
 export type Tab =
-  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; ptyId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider; viewingSubagentId?: string }
+  | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; ptyId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider; viewingSubagentId?: string; initialPrompt?: string }
   | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number }
   | { kind: 'terminal'; id: string; projectId: number; title: string }
   | { kind: 'providerPicker'; id: string; projectId: number; title: string };
@@ -24,6 +25,8 @@ export type TabsSlice = {
   openNewSessionTab: (projectId: number) => void;
   openNewTerminalTab: (projectId: number) => void;
   startSessionTab: (projectId: number, provider: Provider) => void;
+  startBackgroundSessionTab: (projectId: number, initialPrompt: string) => string;
+  consumeInitialPrompt: (tabId: string) => void;
   chooseProvider: (tabId: string, provider: Provider) => void;
   setSessionMode: (tabId: string, mode: 'history' | 'terminal') => void;
   viewSubagent: (tabId: string, agentId: string | null) => void;
@@ -160,6 +163,29 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       ...withNav(get, id),
     });
     (get() as AppState).scheduleNewSessionRefresh(projectId);
+  },
+  startBackgroundSessionTab: (projectId, initialPrompt) => {
+    const sessionId = crypto.randomUUID();
+    const id = sessionTabId(sessionId);
+    set({
+      tabs: [...get().tabs, {
+        kind: 'session', id, projectId, sessionId, title: promptTabTitle(initialPrompt),
+        mode: 'terminal', fresh: true, provider: 'claude', initialPrompt,
+      }],
+      mruOrder: [...get().mruOrder, id],
+    });
+    (get() as AppState).scheduleNewSessionRefresh(projectId);
+    return id;
+  },
+  consumeInitialPrompt: (tabId) => {
+    set({
+      tabs: get().tabs.map(t => {
+        if (t.id !== tabId || t.kind !== 'session' || t.initialPrompt === undefined) return t;
+        const { initialPrompt, ...rest } = t;
+        void initialPrompt;
+        return rest;
+      }),
+    });
   },
   chooseProvider: (tabId, provider) => {
     const picker = get().tabs.find(t => t.id === tabId && t.kind === 'providerPicker');

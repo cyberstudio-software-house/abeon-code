@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from './index';
+import { findLeaf } from '../lib/paneTree';
 import { sessionTabFromMode, tabsFromGroupMode } from './tabsSlice';
 import type { GroupWindowMode } from '../lib/windowMode';
 
@@ -456,5 +457,55 @@ describe('tabsSlice detachTabs', () => {
     const s = useStore.getState();
     expect(s.tabs).toEqual([]);
     expect(s.activeTabId).toBeNull();
+  });
+});
+
+describe('startBackgroundSessionTab', () => {
+  beforeEach(() => {
+    useStore.setState({
+      tabs: [{ kind: 'terminal', id: 't1', projectId: 1, title: 'a' }],
+      activeTabId: 't1',
+      mruOrder: ['t1'],
+      navHistory: ['t1'],
+      navIndex: 0,
+      enabledProviders: ['codex', 'claude'],
+    });
+  });
+
+  it('adds a claude tab carrying the prompt without activating it', () => {
+    const before = useStore.getState();
+    const id = useStore.getState().startBackgroundSessionTab(7, 'Add endpoint\ndetails');
+    const s = useStore.getState();
+    const tab = s.tabs.find(t => t.id === id);
+    expect(tab).toMatchObject({
+      kind: 'session', projectId: 7, provider: 'claude', fresh: true, mode: 'terminal',
+      initialPrompt: 'Add endpoint\ndetails', title: 'Add endpoint',
+    });
+    expect(s.activeTabId).toBe('t1');
+    expect(s.focusedPaneId).toBe(before.focusedPaneId);
+    expect(s.navHistory).toEqual(['t1']);
+    expect(s.mruOrder).toEqual(['t1', id]);
+  });
+
+  it('places the tab in the focused pane', () => {
+    const id = useStore.getState().startBackgroundSessionTab(7, 'x');
+    const s = useStore.getState();
+    expect(findLeaf(s.layout, s.focusedPaneId)?.tabIds).toContain(id);
+  });
+
+  it('consumeInitialPrompt removes only the prompt', () => {
+    const id = useStore.getState().startBackgroundSessionTab(7, 'x');
+    useStore.getState().consumeInitialPrompt(id);
+    const tab = useStore.getState().tabs.find(t => t.id === id);
+    expect(tab && 'initialPrompt' in tab).toBe(false);
+    expect(tab).toMatchObject({ kind: 'session', fresh: true, provider: 'claude' });
+  });
+
+  it('never persists the prompt to localStorage', () => {
+    const id = useStore.getState().startBackgroundSessionTab(7, 'Visible title\nSECRET-PROMPT');
+    const dump = Object.keys(localStorage).map(k => localStorage.getItem(k) ?? '').join('\n');
+    expect(dump).toContain(id);
+    expect(dump).toContain('Visible title');
+    expect(dump).not.toContain('SECRET-PROMPT');
   });
 });
