@@ -271,7 +271,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     }).catch(error => {
       if (!cancelled) {
         term.write(`\r\n\x1b[31m${formatTauriError(error)}\x1b[0m\r\n`);
-        if (initialPrompt) toast.error(`Nie udało się uruchomić sesji z promptem: ${formatTauriError(error)}`);
+        if (initialPrompt) toast.error(`Nie udało się uruchomić sesji z promptem w ${projectPathRef.current}: ${formatTauriError(error)}`);
       }
     });
     }

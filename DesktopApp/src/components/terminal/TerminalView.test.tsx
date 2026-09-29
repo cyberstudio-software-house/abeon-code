@@ -33,6 +33,7 @@ vi.mock('@xterm/xterm', () => ({
 }));
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class {} }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
 vi.mock('../../lib/tauri', () => ({
   tauri: {
@@ -67,6 +68,7 @@ vi.stubGlobal('ResizeObserver', class {
 import { useStore } from '../../store';
 import { TerminalView } from './TerminalView';
 import { tauri } from '../../lib/tauri';
+import { toast } from 'sonner';
 
 function Panes({ focused }: { focused: 'left' | 'right' }) {
   return (
@@ -278,5 +280,25 @@ describe('TerminalView initial prompt', () => {
     });
     await act(async () => { render(view()); });
     expect(vi.mocked(tauri.spawnPty).mock.calls[0][1]).not.toHaveProperty('initial_prompt');
+  });
+
+  it('names the project path in the toast when a prompted spawn fails', async () => {
+    vi.mocked(toast.error).mockClear();
+    useStore.setState({ projects: [{ id: 1, name: 'P', path: '/home/x/proj' }] as never });
+    vi.mocked(tauri.spawnPty).mockRejectedValueOnce(new Error('boom'));
+    await act(async () => { render(view()); });
+    expect(toast.error).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toContain('/home/x/proj');
+  });
+
+  it('does not toast when an unprompted spawn fails', async () => {
+    vi.mocked(toast.error).mockClear();
+    useStore.setState({
+      projects: [{ id: 1, name: 'P', path: '/home/x/proj' }] as never,
+      tabs: [{ kind: 'session', id: 'session:s1', projectId: 1, sessionId: 's1', title: 'T', mode: 'terminal', fresh: true, provider: 'claude' }],
+    });
+    vi.mocked(tauri.spawnPty).mockRejectedValueOnce(new Error('boom'));
+    await act(async () => { render(view()); });
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

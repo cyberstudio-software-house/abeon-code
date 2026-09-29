@@ -42,6 +42,17 @@ const MAX_EFFORT_LEN: usize = 16;
 
 pub const MAX_INITIAL_PROMPT_BYTES: usize = 100_000;
 
+const MAX_SHELL_COMMAND_BYTES: usize = 131_072;
+
+fn check_shell_command_len(cmd: &str) -> AppResult<()> {
+    if cmd.len() >= MAX_SHELL_COMMAND_BYTES {
+        return Err(AppError::InvalidInput(format!(
+            "agent command exceeds {MAX_SHELL_COMMAND_BYTES} bytes after shell quoting"
+        )));
+    }
+    Ok(())
+}
+
 fn shell_single_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
@@ -242,6 +253,7 @@ pub fn spawn_pty(
                 ),
                 initial_prompt.as_deref(),
             );
+            check_shell_command_len(&cmd)?;
             (
                 "bash".to_string(),
                 vec!["-c".to_string(), cmd],
@@ -1060,6 +1072,16 @@ mod tests {
         assert!(validate_initial_prompt(Provider::Claude, true, &big).is_err());
         let max = "a".repeat(MAX_INITIAL_PROMPT_BYTES);
         assert!(validate_initial_prompt(Provider::Claude, true, &max).is_ok());
+    }
+
+    #[test]
+    fn shell_command_len_rejects_prompt_that_expands_past_arg_limit() {
+        let prompt = "'".repeat(40_000);
+        validate_initial_prompt(Provider::Claude, true, &prompt).unwrap();
+        let cmd = append_initial_prompt("claude".to_string(), Some(&prompt));
+        assert!(check_shell_command_len(&cmd).is_err());
+        let ok = append_initial_prompt("claude".to_string(), Some("hello"));
+        assert!(check_shell_command_len(&ok).is_ok());
     }
 
     #[test]
