@@ -1,5 +1,6 @@
 pub mod open_input;
 pub mod installer;
+pub mod skill;
 pub mod request;
 
 use tauri::{AppHandle, Emitter, Manager};

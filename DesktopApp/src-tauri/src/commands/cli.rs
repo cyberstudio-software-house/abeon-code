@@ -2,6 +2,7 @@ use tauri::State;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::cli::installer;
+use crate::cli::skill;
 
 #[tauri::command]
 pub fn take_pending_open_paths(state: State<AppState>) -> Vec<crate::cli::request::OpenRequest> {
@@ -15,5 +16,12 @@ pub fn install_cli_command() -> AppResult<String> {
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home dir".into()))?;
     let target = home.join(".local").join("bin");
     let dest = installer::install(&exe.to_string_lossy(), &target)?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn install_claude_skill() -> AppResult<String> {
+    let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home dir".into()))?;
+    let dest = skill::install(&home.join(".claude").join("skills"))?;
     Ok(dest.to_string_lossy().to_string())
 }

@@ -391,12 +391,44 @@ function CliCommandSection() {
   );
 }
 
+function ClaudeSkillSection() {
+  const [installedPath, setInstalledPath] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const doInstall = () => {
+    setError(null);
+    tauri.installClaudeSkill()
+      .then(setInstalledPath)
+      .catch(err => setError(String(err?.message ?? err)));
+  };
+
+  return (
+    <div className="space-y-2">
+      <h3 className="text-[12px] font-semibold text-fg">Skill dla Claude Code</h3>
+      <p className="text-[11px] text-muted">
+        Instaluje skill <code className="mx-1">abeon-open-session</code> w
+        <code className="mx-1">~/.claude/skills</code>. Pozwala agentowi uruchomić w tle nową
+        sesję w innym projekcie z gotowym promptem, np. „odpal sesję w ~/projects/x i dodaj
+        endpoint…”. Wymaga zainstalowanej komendy <code>abeon-code</code>.
+      </p>
+      <button onClick={doInstall} className="text-accent underline text-[12px]">
+        Zainstaluj skill
+      </button>
+      {installedPath && (
+        <p className="text-[11px] text-success">Zainstalowano: {installedPath}</p>
+      )}
+      {error && <p className="text-[11px] text-danger">{error}</p>}
+    </div>
+  );
+}
+
 function CliTab() {
   return (
     <div className="space-y-6">
       <ProvidersSection />
       <TitleGenSection />
       <CliCommandSection />
+      <ClaudeSkillSection />
     </div>
   );
 }

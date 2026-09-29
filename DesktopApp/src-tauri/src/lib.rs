@@ -77,6 +77,7 @@ pub fn run() {
             commands::notes::delete_note,
             commands::cli::take_pending_open_paths,
             commands::cli::install_cli_command,
+            commands::cli::install_claude_skill,
             commands::sessions::list_sessions,
             commands::sessions::list_active_sessions,
             commands::sessions::read_session_history,

@@ -44,6 +44,7 @@ export const tauri = {
   deleteNote: (id: number) => invoke<void>('delete_note', { id }),
   takePendingOpenPaths: () => invoke<string[]>('take_pending_open_paths'),
   installCliCommand: () => invoke<string>('install_cli_command'),
+  installClaudeSkill: () => invoke<string>('install_claude_skill'),
   onCliOpenPath: (cb: (path: string) => void): Promise<UnlistenFn> =>
     listen<string>('cli://open-path', e => cb(e.payload)),
   listSessions: (projectId: number, limit = 20, offset = 0) =>
