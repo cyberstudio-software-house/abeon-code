@@ -77,8 +77,12 @@ The wrapper script (`cli/installer.rs::wrapper_script`) gains a second mode:
     - the prompt is empty after trimming whitespace
     - `<path>` is missing or not a directory
     - the prompt exceeds `MAX_INITIAL_PROMPT_BYTES` (100 000 bytes)
-  - otherwise resolves `<path>` to an absolute directory and runs
-    `exec "<exe>" "<abs>" --prompt "<prompt>" --background`.
+  - otherwise resolves `<path>` to an absolute directory, launches
+    `"<exe>" "<abs>" --prompt "<prompt>" --background` **detached** (`setsid`, falling back to
+    `nohup`, with stdio redirected to `/dev/null`), and exits 0 immediately.
+  - Why detached: the calling agent's Bash tool waits for the process to exit. On a cold
+    start the exe *becomes* the main app instance, so a plain `exec` would block the agent
+    until timeout, and the timeout could kill the app.
 
 All validation that can happen before dispatch lives in the wrapper. Single-instance
 forwarding is fire-and-forget: the second process exits before the main instance handles
@@ -121,15 +125,15 @@ would delete the user's key.
   - Rejected unless `provider == claude && fresh`.
   - Rejected if it contains a NUL byte.
   - Rejected if it exceeds `MAX_INITIAL_PROMPT_BYTES`.
-- `build_claude_command` takes `initial_prompt: Option<&str>`. When present, it appends
+- A new pure function `append_initial_prompt(cmd: String, prompt: Option<&str>) -> String`
+  is applied to the agent command in `spawn_pty`. When a prompt is present, it appends
   ` -- <shell_single_quote(prompt)>` as the last element, after
-  `--dangerously-skip-permissions`.
+  `--dangerously-skip-permissions`. `build_claude_command`'s signature stays unchanged.
 - `shell_single_quote(s)` returns `'` + `s.replace('\'', "'\\''")` + `'`. This is required
   because the command runs as `bash -c "<cmd>"` (`pty.rs:206`).
-- The `--` end-of-options separator protects prompts starting with `-`. Implementation must
-  verify that the installed `claude` CLI honours `--` before a positional prompt in
-  interactive mode. If it does not, drop `--` and instead guarantee the quoted prompt never
-  starts with `-` (e.g. by prefixing a space). Record the outcome in the plan.
+- The `--` end-of-options separator protects prompts starting with `-`. Verified on
+  2026-09-29 with `claude` 2.1.284: `claude -p -- "-x: reply PONG"` treats the argument as
+  the prompt. Interactive mode uses the same argument parser.
 - Model, effort and `skip_permissions` come from the global settings, like any new session.
 
 ## Frontend
