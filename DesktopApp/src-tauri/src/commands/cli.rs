@@ -4,7 +4,7 @@ use crate::state::AppState;
 use crate::cli::installer;
 
 #[tauri::command]
-pub fn take_pending_open_paths(state: State<AppState>) -> Vec<String> {
+pub fn take_pending_open_paths(state: State<AppState>) -> Vec<crate::cli::request::OpenRequest> {
     *state.cli_frontend_ready.lock() = true;
     std::mem::take(&mut *state.pending_open_paths.lock())
 }

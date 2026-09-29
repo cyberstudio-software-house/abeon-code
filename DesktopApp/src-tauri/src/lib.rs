@@ -53,7 +53,7 @@ pub fn run() {
                 app.deep_link().on_open_url(move |event| {
                     for url in event.urls() {
                         if let Some(path) = crate::cli::open_input::parse_open_input(url.as_str(), None) {
-                            crate::cli::dispatch_open(&handle, path);
+                            crate::cli::dispatch_open(&handle, crate::cli::request::OpenRequest::path_only(path));
                         }
                     }
                 });

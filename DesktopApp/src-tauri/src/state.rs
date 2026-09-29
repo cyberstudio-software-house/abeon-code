@@ -119,7 +119,7 @@ pub struct AppState {
     pub project_usage_cache: Mutex<HashMap<i64, (i64, crate::domain::UsageSummary)>>,
     /// Cached result of `detect_claude_options`; populated on first call, bypassed by `force`.
     pub claude_options: Mutex<Option<crate::domain::ClaudeOptions>>,
-    pub pending_open_paths: Mutex<Vec<String>>,
+    pub pending_open_paths: Mutex<Vec<crate::cli::request::OpenRequest>>,
     pub cli_frontend_ready: Mutex<bool>,
 }
 
