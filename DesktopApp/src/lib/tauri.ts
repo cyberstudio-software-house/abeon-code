@@ -21,7 +21,7 @@ export type AttentionReason = 'hook' | 'heuristic';
 export type AttentionEvent = { sessionId: string; reason: AttentionReason; message: string | null };
 
 export type PtyKindClient =
-  | { kind: 'agent'; provider: Provider; session_id?: string; model?: string; effort?: string; skip_permissions?: boolean; fresh?: boolean }
+  | { kind: 'agent'; provider: Provider; session_id?: string; model?: string; effort?: string; skip_permissions?: boolean; fresh?: boolean; initial_prompt?: string }
   | { kind: 'action'; action_id: number }
   | { kind: 'shell' };
 

@@ -66,6 +66,7 @@ vi.stubGlobal('ResizeObserver', class {
 
 import { useStore } from '../../store';
 import { TerminalView } from './TerminalView';
+import { tauri } from '../../lib/tauri';
 
 function Panes({ focused }: { focused: 'left' | 'right' }) {
   return (
@@ -235,5 +236,47 @@ describe('TerminalView clipboard copy', () => {
     });
 
     expect(tauri.writeClipboardText).not.toHaveBeenCalled();
+  });
+});
+
+describe('TerminalView initial prompt', () => {
+  beforeEach(() => {
+    vi.mocked(tauri.spawnPty).mockClear();
+    useStore.setState({
+      tabs: [{
+        kind: 'session', id: 'session:s1', projectId: 1, sessionId: 's1', title: 'T',
+        mode: 'terminal', fresh: true, provider: 'claude', initialPrompt: 'Do X',
+      }],
+    });
+  });
+
+  const view = () => (
+    <TerminalView projectId={1} kind="agent" provider="claude" sessionId="s1" fresh tabId="session:s1" visible focused />
+  );
+
+  it('passes initial_prompt on the first spawn and consumes it', async () => {
+    await act(async () => { render(view()); });
+    const kind = vi.mocked(tauri.spawnPty).mock.calls[0][1];
+    expect(kind).toMatchObject({ kind: 'agent', provider: 'claude', fresh: true, initial_prompt: 'Do X' });
+    const tab = useStore.getState().tabs[0];
+    expect(tab.kind === 'session' && tab.initialPrompt).toBeFalsy();
+  });
+
+  it('does not resend after remount', async () => {
+    let r!: ReturnType<typeof render>;
+    await act(async () => { r = render(view()); });
+    await act(async () => { r.unmount(); });
+    await act(async () => { render(view()); });
+    const calls = vi.mocked(tauri.spawnPty).mock.calls;
+    expect(calls.length).toBe(2);
+    expect(calls[1][1]).not.toHaveProperty('initial_prompt');
+  });
+
+  it('omits initial_prompt when the tab has none', async () => {
+    useStore.setState({
+      tabs: [{ kind: 'session', id: 'session:s1', projectId: 1, sessionId: 's1', title: 'T', mode: 'terminal', fresh: true, provider: 'claude' }],
+    });
+    await act(async () => { render(view()); });
+    expect(vi.mocked(tauri.spawnPty).mock.calls[0][1]).not.toHaveProperty('initial_prompt');
   });
 });

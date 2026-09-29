@@ -10,6 +10,7 @@ import { processManager } from '../../lib/processManager';
 import { getCliModelString } from '../../lib/models';
 import type { Provider } from '../../types';
 import { formatTauriError } from '../../lib/errors';
+import { toast } from 'sonner';
 
 type Props = {
   projectId: number;
@@ -105,6 +106,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
   const skipPermissions = useStore(s => s.skipPermissions);
   const setActiveAgentPtyId = useStore(s => s.setActiveAgentPtyId);
   const markSessionPtyStarted = useStore(s => s.markSessionPtyStarted);
+  const consumeInitialPrompt = useStore(s => s.consumeInitialPrompt);
   const [agentPtyId, setAgentPtyId] = useState<string | null>(null);
   const projectPath = useStore(s => s.projects.find(p => p.id === projectId)?.path ?? '');
   const projectPathRef = useRef(projectPath);
@@ -174,6 +176,8 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     const isNewClaudeAgent = !isResume && kind === 'agent' && agentProvider === 'claude';
     const cliModel = isNewClaudeAgent ? getCliModelString(defaultModelId) : undefined;
     const cliEffort = isNewClaudeAgent ? modelEfforts[defaultModelId] : undefined;
+    const seededTab = isNewClaudeAgent && tabId ? useStore.getState().tabs.find(t => t.id === tabId) : undefined;
+    const initialPrompt = seededTab?.kind === 'session' ? seededTab.initialPrompt : undefined;
     const ptyKind: PtyKindClient =
       kind === 'agent'
         ? {
@@ -185,6 +189,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
             ...(agentProvider === 'codex' && !isResume && codexModelId ? { model: codexModelId } : {}),
             ...(agentProvider === 'opencode' && !isResume && opencodeModelId ? { model: opencodeModelId } : {}),
             ...(fresh ? { fresh: true } : {}),
+            ...(initialPrompt ? { initial_prompt: initialPrompt } : {}),
             ...(skipPermissions ? { skip_permissions: true } : {}),
           }
         : kind === 'action'
@@ -199,6 +204,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
         return;
       }
       ptyRef.current = id;
+      if (initialPrompt && tabId) consumeInitialPrompt(tabId);
       if (kind === 'agent') setAgentPtyId(id);
       if (kind === 'agent' && agentProvider === 'opencode' && fresh && tabId) {
         markSessionPtyStarted(tabId, id);
@@ -265,6 +271,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     }).catch(error => {
       if (!cancelled) {
         term.write(`\r\n\x1b[31m${formatTauriError(error)}\x1b[0m\r\n`);
+        if (initialPrompt) toast.error(`Nie udało się uruchomić sesji z promptem: ${formatTauriError(error)}`);
       }
     });
     }
@@ -281,7 +288,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
       // React removes the DOM container; PTY is killed; listeners detached.
       // xterm internal state will be GC'd with the Terminal object.
     };
-  }, [projectId, kind, provider, sessionId, fresh, actionId, tabId, markSessionPtyStarted]);
+  }, [projectId, kind, provider, sessionId, fresh, actionId, tabId, markSessionPtyStarted, consumeInitialPrompt]);
 
   useEffect(() => {
     const root = document.documentElement;
