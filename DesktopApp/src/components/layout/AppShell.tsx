@@ -143,7 +143,7 @@ export function AppShell() {
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    tauri.onCliOpenPath((path) => { void openProjectPath(path); })
+    tauri.onCliOpenPath((req) => { void openProjectPath(req); })
       .then(fn => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
   }, []);

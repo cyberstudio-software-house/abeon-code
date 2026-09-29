@@ -637,9 +637,9 @@ async function bootstrapShellPath(): Promise<void> {
 
 async function drainPendingOpenPaths(): Promise<void> {
   try {
-    const paths = await tauri.takePendingOpenPaths();
+    const requests = await tauri.takePendingOpenPaths();
     const { openProjectPath } = await import('../lib/openProject');
-    for (const p of paths) await openProjectPath(p);
+    for (const r of requests) await openProjectPath(r);
   } catch (err) {
     console.error('[cli] drainPendingOpenPaths failed', err);
   }
