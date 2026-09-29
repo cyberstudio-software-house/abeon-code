@@ -1,6 +1,6 @@
 use std::path::Path;
 
-const SCHEME: &str = "abeon-code://";
+pub(crate) const SCHEME: &str = "abeon-code://";
 
 fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();

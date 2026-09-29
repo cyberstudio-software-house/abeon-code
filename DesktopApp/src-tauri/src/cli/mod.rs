@@ -9,10 +9,12 @@ use request::OpenRequest;
 
 pub fn dispatch_open(app: &AppHandle, req: OpenRequest) {
     let state = app.state::<AppState>();
-    let ready = *state.cli_frontend_ready.lock();
-    if !ready {
-        state.pending_open_paths.lock().push(req);
-        return;
+    {
+        let ready = state.cli_frontend_ready.lock();
+        if !*ready {
+            state.pending_open_paths.lock().push(req);
+            return;
+        }
     }
     let background = req.background;
     let _ = app.emit("cli://open-path", req);

@@ -4,7 +4,6 @@ use super::open_input::parse_open_input;
 
 const PROMPT_FLAG: &str = "--prompt";
 const BACKGROUND_FLAG: &str = "--background";
-const DEEP_LINK_SCHEME: &str = "abeon-code://";
 
 #[derive(Serialize, Clone, Debug, PartialEq, TS)]
 #[ts(export, export_to = "../../src/types/")]
@@ -38,7 +37,7 @@ pub fn parse_cli_args(args: &[String], cwd: Option<&str>) -> Vec<OpenRequest> {
             continue;
         }
         if let Some(path) = parse_open_input(raw, cwd) {
-            paths.push((path, raw.starts_with(DEEP_LINK_SCHEME)));
+            paths.push((path, raw.starts_with(super::open_input::SCHEME)));
         }
     }
     paths
