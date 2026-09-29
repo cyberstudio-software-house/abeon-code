@@ -366,6 +366,7 @@ function CliCommandSection() {
 
   const doInstall = () => {
     setError(null);
+    setInstalledPath(null);
     tauri.installCliCommand()
       .then(setInstalledPath)
       .catch(err => setError(String(err?.message ?? err)));
@@ -397,6 +398,7 @@ function ClaudeSkillSection() {
 
   const doInstall = () => {
     setError(null);
+    setInstalledPath(null);
     tauri.installClaudeSkill()
       .then(setInstalledPath)
       .catch(err => setError(String(err?.message ?? err)));
@@ -409,7 +411,8 @@ function ClaudeSkillSection() {
         Instaluje skill <code className="mx-1">abeon-open-session</code> w
         <code className="mx-1">~/.claude/skills</code>. Pozwala agentowi uruchomić w tle nową
         sesję w innym projekcie z gotowym promptem, np. „odpal sesję w ~/projects/x i dodaj
-        endpoint…”. Wymaga zainstalowanej komendy <code>abeon-code</code> dostępnej w <code>PATH</code>.
+        endpoint…”. Instaluje też (aktualizuje) komendę <code>abeon-code</code> w
+        <code className="mx-1">~/.local/bin</code>, która musi być dostępna w <code>PATH</code>.
       </p>
       <button onClick={doInstall} className="text-accent underline text-[12px]">
         Zainstaluj skill

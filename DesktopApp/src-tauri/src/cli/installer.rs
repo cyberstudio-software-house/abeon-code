@@ -2,12 +2,33 @@ use std::path::{Path, PathBuf};
 use crate::error::{AppError, AppResult};
 use crate::commands::pty::MAX_INITIAL_PROMPT_BYTES;
 
+const CALLER_SESSION_ENV_VARS: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_BRIDGE_SESSION_ID",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+    "AI_AGENT",
+];
+
 pub fn wrapper_script(exe_path: &str) -> String {
+    let unset_args = CALLER_SESSION_ENV_VARS
+        .iter()
+        .map(|v| format!("-u {v}"))
+        .collect::<Vec<_>>()
+        .join(" ");
     format!(
         r#"#!/usr/bin/env bash
 set -euo pipefail
 exe="{exe_path}"
 max_prompt_bytes={MAX_INITIAL_PROMPT_BYTES}
+unset_args=({unset_args})
 
 fail() {{
   echo "abeon-code: $1" >&2
@@ -24,10 +45,11 @@ if [ "${{1:-}}" = "session" ]; then
   bytes="$(printf '%s' "$prompt" | wc -c | tr -d ' ')"
   [ "$bytes" -le "$max_prompt_bytes" ] || fail "prompt too long ($bytes bytes, max $max_prompt_bytes)"
   abs="$(cd "$target" && pwd -P)"
+  [ -x "$exe" ] || fail "AbeonCode executable not found: $exe (reinstall the command in AbeonCode settings)"
   if command -v setsid >/dev/null 2>&1; then
-    setsid "$exe" "$abs" --prompt "$prompt" --background </dev/null >/dev/null 2>&1 &
+    setsid env "${{unset_args[@]}}" "$exe" "$abs" --prompt "$prompt" --background </dev/null >/dev/null 2>&1 &
   else
-    nohup "$exe" "$abs" --prompt "$prompt" --background </dev/null >/dev/null 2>&1 &
+    nohup env "${{unset_args[@]}}" "$exe" "$abs" --prompt "$prompt" --background </dev/null >/dev/null 2>&1 &
   fi
   echo "abeon-code: session requested in $abs"
   exit 0
@@ -39,7 +61,8 @@ if [ -d "$target" ]; then
 else
   abs="$(cd "$(dirname -- "$target")" 2>/dev/null && pwd -P)/$(basename -- "$target")"
 fi
-exec "$exe" "$abs"
+[ -x "$exe" ] || fail "AbeonCode executable not found: $exe (reinstall the command in AbeonCode settings)"
+exec env "${{unset_args[@]}}" "$exe" "$abs"
 "#
     )
 }
@@ -92,7 +115,7 @@ mod tests {
         std::fs::write(
             &exe,
             format!(
-                "#!/usr/bin/env bash\nsleep {delay_secs}\nprintf '%s\\0' \"$@\" > \"$ABEON_TEST_OUT.tmp\"\nmv \"$ABEON_TEST_OUT.tmp\" \"$ABEON_TEST_OUT\"\n"
+                "#!/usr/bin/env bash\nsleep {delay_secs}\nenv > \"$ABEON_TEST_OUT.env\"\nprintf '%s\\0' \"$@\" > \"$ABEON_TEST_OUT.tmp\"\nmv \"$ABEON_TEST_OUT.tmp\" \"$ABEON_TEST_OUT\"\n"
             ),
         )
         .unwrap();
@@ -106,12 +129,16 @@ mod tests {
             .arg(wrapper)
             .args(args)
             .env("ABEON_TEST_OUT", out)
+            .env("CLAUDECODE", "1")
+            .env("CLAUDE_CODE_SESSION_ID", "leak-session")
+            .env("AI_AGENT", "leak-agent")
+            .env("CLAUDE_CODE_USE_BEDROCK", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap();
+        let _ = child.stdin.take().unwrap().write_all(stdin.as_bytes());
         child.wait_with_output().unwrap()
     }
 
@@ -214,5 +241,62 @@ mod tests {
         assert!(res.status.success());
         let canonical = std::fs::canonicalize(&project).unwrap();
         assert_eq!(wait_for_argv(&out), vec![canonical.to_string_lossy().to_string()]);
+    }
+
+    fn read_env(out: &Path) -> String {
+        std::fs::read_to_string(format!("{}.env", out.display())).unwrap()
+    }
+
+    #[test]
+    fn session_mode_strips_caller_session_env_but_keeps_user_settings() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("proj");
+        std::fs::create_dir(&project).unwrap();
+        let exe = fake_exe(dir.path(), 0);
+        let wrapper = install(&exe.to_string_lossy(), dir.path()).unwrap();
+        let out = dir.path().join("argv");
+        let res = run_wrapper(&wrapper, &["session", project.to_str().unwrap()], "hi", &out);
+        assert!(res.status.success());
+        wait_for_argv(&out);
+        let env = read_env(&out);
+        assert!(!env.contains("CLAUDECODE="));
+        assert!(!env.contains("CLAUDE_CODE_SESSION_ID="));
+        assert!(!env.contains("AI_AGENT="));
+        assert!(env.contains("CLAUDE_CODE_USE_BEDROCK=1"));
+    }
+
+    #[test]
+    fn legacy_mode_strips_caller_session_env_but_keeps_user_settings() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("proj");
+        std::fs::create_dir(&project).unwrap();
+        let exe = fake_exe(dir.path(), 0);
+        let wrapper = install(&exe.to_string_lossy(), dir.path()).unwrap();
+        let out = dir.path().join("argv");
+        let res = run_wrapper(&wrapper, &[project.to_str().unwrap()], "", &out);
+        assert!(res.status.success());
+        wait_for_argv(&out);
+        let env = read_env(&out);
+        assert!(!env.contains("CLAUDECODE="));
+        assert!(env.contains("CLAUDE_CODE_USE_BEDROCK=1"));
+    }
+
+    #[test]
+    fn session_mode_fails_when_executable_is_missing() {
+        let dir = tempdir().unwrap();
+        let wrapper = install("/definitely/not/here/abeoncode", dir.path()).unwrap();
+        let res = run_wrapper(&wrapper, &["session", dir.path().to_str().unwrap()], "hi", &dir.path().join("argv"));
+        assert_eq!(res.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&res.stderr).contains("abeon-code: AbeonCode executable not found"));
+        assert!(!String::from_utf8_lossy(&res.stdout).contains("session requested"));
+    }
+
+    #[test]
+    fn legacy_mode_fails_when_executable_is_missing() {
+        let dir = tempdir().unwrap();
+        let wrapper = install("/definitely/not/here/abeoncode", dir.path()).unwrap();
+        let res = run_wrapper(&wrapper, &[dir.path().to_str().unwrap()], "", &dir.path().join("argv"));
+        assert_eq!(res.status.code(), Some(2));
+        assert!(String::from_utf8_lossy(&res.stderr).contains("abeon-code: AbeonCode executable not found"));
     }
 }

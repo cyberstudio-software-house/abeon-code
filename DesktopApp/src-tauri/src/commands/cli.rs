@@ -6,7 +6,8 @@ use crate::cli::skill;
 
 #[tauri::command]
 pub fn take_pending_open_paths(state: State<AppState>) -> Vec<crate::cli::request::OpenRequest> {
-    *state.cli_frontend_ready.lock() = true;
+    let mut ready = state.cli_frontend_ready.lock();
+    *ready = true;
     std::mem::take(&mut *state.pending_open_paths.lock())
 }
 
@@ -21,6 +22,7 @@ pub fn install_cli_command() -> AppResult<String> {
 
 #[tauri::command]
 pub fn install_claude_skill() -> AppResult<String> {
+    install_cli_command()?;
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home dir".into()))?;
     let dest = skill::install(&home.join(".claude").join("skills"))?;
     Ok(dest.to_string_lossy().to_string())

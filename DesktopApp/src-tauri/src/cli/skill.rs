@@ -24,18 +24,23 @@ submits your prompt as its first message. The user continues that session themse
    - relevant file paths, interfaces, names, error messages and findings from this session
    - constraints and decisions already made
    - what "done" looks like
-3. **Run exactly this command** with the Bash tool. Keep the quoted delimiter, which
-   prevents shell expansion inside the prompt:
+3. **Run exactly this command** with the Bash tool. Pick a fresh random delimiter for
+   every call, `ABEON_PROMPT_` followed by 8 random hex characters, and keep it quoted,
+   which prevents shell expansion inside the prompt. Never let any line of the prompt be
+   equal to the delimiter:
 
    ```bash
-   abeon-code session /absolute/path/to/project <<'ABEON_PROMPT'
+   abeon-code session /absolute/path/to/project <<'ABEON_PROMPT_3f9a1c2e'
    <prompt>
-   ABEON_PROMPT
+   ABEON_PROMPT_3f9a1c2e
    ```
 
-4. **Report the result.**
-   - Exit code 0: tell the user the session was started in the background in that project.
-     Mention the tab title, which is the first line of the prompt.
+4. **Report the result.** Judge success by the exit code AND the stdout line.
+   - Exit code 0 and stdout has a line starting with `abeon-code: session requested in`:
+     tell the user the session was started in the background in that project. Mention the
+     tab title, which is the first line of the prompt.
+   - Exit code 0 but no such line: the user's `abeon-code` command is outdated. Tell them
+     to reinstall it in AbeonCode → Ustawienia (Skill dla Claude Code / Komenda terminala).
    - Non-zero: show the `abeon-code: …` message from stderr.
    - `command not found`: the user must install the command in AbeonCode → Ustawienia →
      Komenda terminala.
@@ -67,6 +72,10 @@ mod tests {
         let content = std::fs::read_to_string(&first).unwrap();
         assert!(content.starts_with("---\nname: abeon-open-session\n"));
         assert!(content.contains("abeon-code session"));
-        assert!(content.contains("<<'ABEON_PROMPT'"));
+        assert!(content.contains("<<'ABEON_PROMPT_3f9a1c2e'"));
+        assert!(content.contains("8 random hex characters"));
+        assert!(content.contains("Never let any line of the prompt be"));
+        assert!(content.contains("session requested in"));
+        assert!(content.contains("is outdated"));
     }
 }
