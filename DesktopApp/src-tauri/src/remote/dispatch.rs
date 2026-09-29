@@ -180,14 +180,14 @@ mod tests {
         assert_eq!(
             session_to_bind(&PtyKind::Agent {
                 provider: Provider::Claude,
-                session_id: Some("s1".into()), model: None, effort: None, skip_permissions: false, fresh: true,
+                session_id: Some("s1".into()), model: None, effort: None, skip_permissions: false, fresh: true, initial_prompt: None,
             }),
             Some("s1".to_string())
         );
         assert_eq!(
             session_to_bind(&PtyKind::Agent {
                 provider: Provider::Claude,
-                session_id: None, model: None, effort: None, skip_permissions: false, fresh: false,
+                session_id: None, model: None, effort: None, skip_permissions: false, fresh: false, initial_prompt: None,
             }),
             None
         );
@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(
             session_to_bind(&PtyKind::Agent {
                 provider: Provider::Codex,
-                session_id: Some("s1".into()), model: None, effort: None, skip_permissions: false, fresh: true,
+                session_id: Some("s1".into()), model: None, effort: None, skip_permissions: false, fresh: true, initial_prompt: None,
             }),
             None
         );

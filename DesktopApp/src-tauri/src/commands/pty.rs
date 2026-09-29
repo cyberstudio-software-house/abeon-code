@@ -28,6 +28,8 @@ pub enum PtyKind {
         skip_permissions: bool,
         #[serde(default)]
         fresh: bool,
+        #[serde(default)]
+        initial_prompt: Option<String>,
     },
     Action {
         #[ts(type = "number")]
@@ -37,6 +39,37 @@ pub enum PtyKind {
 }
 
 const MAX_EFFORT_LEN: usize = 16;
+
+pub const MAX_INITIAL_PROMPT_BYTES: usize = 100_000;
+
+fn shell_single_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+fn append_initial_prompt(cmd: String, prompt: Option<&str>) -> String {
+    match prompt {
+        Some(p) => format!("{cmd} -- {}", shell_single_quote(p)),
+        None => cmd,
+    }
+}
+
+fn validate_initial_prompt(provider: Provider, fresh: bool, prompt: &str) -> AppResult<()> {
+    if provider != Provider::Claude || !fresh {
+        return Err(AppError::InvalidInput("initial prompt is only supported for new Claude sessions".into()));
+    }
+    if prompt.trim().is_empty() {
+        return Err(AppError::InvalidInput("initial prompt is empty".into()));
+    }
+    if prompt.contains('\0') {
+        return Err(AppError::InvalidInput("initial prompt contains a NUL byte".into()));
+    }
+    if prompt.len() > MAX_INITIAL_PROMPT_BYTES {
+        return Err(AppError::InvalidInput(format!(
+            "initial prompt exceeds {MAX_INITIAL_PROMPT_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
 
 fn is_valid_effort(effort: &str) -> bool {
     !effort.is_empty() && effort.len() <= MAX_EFFORT_LEN && effort.chars().all(|c| c.is_ascii_lowercase())
@@ -179,12 +212,15 @@ pub fn spawn_pty(
     let mut cwd = std::path::PathBuf::from(&proj.path);
 
     let (program, args_owned) = match &kind {
-        PtyKind::Agent { provider, session_id, model, effort, skip_permissions, fresh } => {
+        PtyKind::Agent { provider, session_id, model, effort, skip_permissions, fresh, initial_prompt } => {
             // Untrusted in the remote-bridge path (session_id can originate from a
             // mobile `resumeSession`). Validate before it reaches `bash -c` so the
             // shell can never reinterpret it; the allowlist also blocks flag smuggling.
             if let Some(id) = session_id {
                 crate::validation::validate_session_id(id)?;
+            }
+            if let Some(p) = initial_prompt.as_deref() {
+                validate_initial_prompt(*provider, *fresh, p)?;
             }
             let effective_model = resolve_agent_model(
                 &c,
@@ -195,13 +231,16 @@ pub fn spawn_pty(
             if let Some(m) = effective_model.as_deref() {
                 crate::validation::validate_model(m)?;
             }
-            let cmd = build_agent_command(
-                *provider,
-                session_id.as_deref(),
-                effective_model.as_deref(),
-                effort.as_deref(),
-                *skip_permissions,
-                *fresh,
+            let cmd = append_initial_prompt(
+                build_agent_command(
+                    *provider,
+                    session_id.as_deref(),
+                    effective_model.as_deref(),
+                    effort.as_deref(),
+                    *skip_permissions,
+                    *fresh,
+                ),
+                initial_prompt.as_deref(),
             );
             (
                 "bash".to_string(),
@@ -948,5 +987,97 @@ mod tests {
         .unwrap();
 
         assert_eq!(model, None);
+    }
+
+    fn bash_echo(quoted: &str) -> String {
+        let out = std::process::Command::new("bash")
+            .arg("-c")
+            .arg(format!("printf %s {quoted}"))
+            .output()
+            .expect("bash");
+        String::from_utf8(out.stdout).expect("utf8")
+    }
+
+    #[test]
+    fn shell_single_quote_round_trips_hostile_input() {
+        let inputs = [
+            "plain",
+            "it's",
+            "'''",
+            "$(id) `whoami` $HOME",
+            "back\\slash \\' mix",
+            "line one\nline two\n\nline four",
+            "-starts-with-dash",
+            "--help",
+            "zażółć gęślą jaźń 🚀",
+            "\"double\" and 'single'",
+            "",
+        ];
+        for input in inputs {
+            assert_eq!(bash_echo(&shell_single_quote(input)), input, "input: {input:?}");
+        }
+    }
+
+    #[test]
+    fn append_initial_prompt_none_is_noop() {
+        assert_eq!(
+            append_initial_prompt("claude --session-id u1".into(), None),
+            "claude --session-id u1"
+        );
+    }
+
+    #[test]
+    fn append_initial_prompt_goes_last_after_separator() {
+        assert_eq!(
+            append_initial_prompt("claude --session-id u1 --dangerously-skip-permissions".into(), Some("fix it's bug")),
+            "claude --session-id u1 --dangerously-skip-permissions -- 'fix it'\\''s bug'"
+        );
+    }
+
+    #[test]
+    fn validate_initial_prompt_accepts_fresh_claude() {
+        assert!(validate_initial_prompt(Provider::Claude, true, "do things").is_ok());
+    }
+
+    #[test]
+    fn validate_initial_prompt_rejects_resume() {
+        assert!(matches!(
+            validate_initial_prompt(Provider::Claude, false, "x"),
+            Err(AppError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn validate_initial_prompt_rejects_other_providers() {
+        assert!(validate_initial_prompt(Provider::Codex, true, "x").is_err());
+        assert!(validate_initial_prompt(Provider::Opencode, true, "x").is_err());
+    }
+
+    #[test]
+    fn validate_initial_prompt_rejects_nul_and_oversize() {
+        assert!(validate_initial_prompt(Provider::Claude, true, "a\0b").is_err());
+        let big = "a".repeat(MAX_INITIAL_PROMPT_BYTES + 1);
+        assert!(validate_initial_prompt(Provider::Claude, true, &big).is_err());
+        let max = "a".repeat(MAX_INITIAL_PROMPT_BYTES);
+        assert!(validate_initial_prompt(Provider::Claude, true, &max).is_ok());
+    }
+
+    #[test]
+    fn validate_initial_prompt_rejects_blank() {
+        assert!(validate_initial_prompt(Provider::Claude, true, "  \n\t").is_err());
+    }
+
+    #[test]
+    fn pty_kind_deserializes_initial_prompt() {
+        let kind: PtyKind = serde_json::from_str(
+            r#"{"kind":"agent","provider":"claude","fresh":true,"initial_prompt":"hello"}"#,
+        ).unwrap();
+        assert!(matches!(kind, PtyKind::Agent { initial_prompt: Some(ref p), .. } if p == "hello"));
+    }
+
+    #[test]
+    fn pty_kind_initial_prompt_defaults_to_none() {
+        let kind: PtyKind = serde_json::from_str(r#"{"kind":"agent","provider":"claude"}"#).unwrap();
+        assert!(matches!(kind, PtyKind::Agent { initial_prompt: None, .. }));
     }
 }
