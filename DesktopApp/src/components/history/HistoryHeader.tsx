@@ -23,7 +23,7 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'cl
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const rename = useStore(s => s.renameSession);
-  const openTerminal = useStore(s => s.openNewTerminalTab);
+  const openTerminal = useStore(s => s.openTerminal);
   const titleGenModelId = useStore(s => s.titleGenModelId);
   const codexTitleGenModelId = useStore(s => s.codexTitleGenModelId);
   const opencodeTitleGenModelId = useStore(s => s.opencodeTitleGenModelId);
@@ -146,7 +146,7 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'cl
             <IconBtn
               icon="terminal"
               label="Otwórz terminal"
-              onClick={() => openTerminal(meta.projectId)}
+              onClick={() => openTerminal(meta.projectId, { toggle: false })}
             />
           </div>
         </div>

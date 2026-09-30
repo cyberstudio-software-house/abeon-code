@@ -843,4 +843,55 @@ describe('PaneLayout terminal drawer', () => {
     expect(ev.defaultPrevented).toBe(true);
     expect(useStore.getState().drawers.s1.hasFocus).toBe(true);
   });
+
+  it('splits the focused drawer terminal with the shortcut', () => {
+    render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    fireEvent.keyDown(document, { key: 'O', ctrlKey: true, shiftKey: true });
+    expect(drawerIds()).toHaveLength(2);
+  });
+
+  it('lets split shortcuts through to the session while it holds the keyboard', () => {
+    render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().focusDrawerSession('s1');
+    });
+    const ev = createEvent.keyDown(document, { key: 'O', ctrlKey: true, shiftKey: true });
+    fireEvent(document, ev);
+    expect(ev.defaultPrevented).toBe(false);
+    expect(drawerIds()).toHaveLength(1);
+  });
+
+  it('moves between drawer splits with mod+alt+arrows', () => {
+    render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().splitDrawerTerminal('s1', 'row');
+    });
+    const [first] = drawerIds();
+    fireEvent.keyDown(document, { key: 'ArrowLeft', ctrlKey: true, altKey: true });
+    expect(useStore.getState().drawers.s1.focusedTerminalId).toBe(first);
+  });
+
+  it('closes the focused drawer terminal on mod+w instead of the session', () => {
+    render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    const [id] = drawerIds();
+    fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
+    expect(useStore.getState().drawerClosePrompt).toBe(id);
+    expect(screen.getByText('Zamknąć terminal?')).toBeInTheDocument();
+    expect(useStore.getState().tabs.some(t => t.id === 's1')).toBe(true);
+  });
+
+  it('closes the session on mod+w while the session holds the keyboard', () => {
+    render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().focusDrawerSession('s1');
+    });
+    fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
+    expect(useStore.getState().drawerClosePrompt).toBeNull();
+    expect(screen.getByText('Zamknąć aktywny tab?')).toBeInTheDocument();
+  });
 });

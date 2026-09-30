@@ -10,7 +10,7 @@ import { Icon } from '../shared/Icon';
 export function ProjectLauncher() {
   const projects = useStore(useShallow(selectSortedProjects));
   const openNewSession = useStore(s => s.openNewSessionTab);
-  const openNewTerminal = useStore(s => s.openNewTerminalTab);
+  const openTerminal = useStore(s => s.openTerminal);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
@@ -46,7 +46,7 @@ export function ProjectLauncher() {
   const close = () => setOpen(false);
 
   const launch = (projectId: number, terminal: boolean) => {
-    if (terminal) openNewTerminal(projectId);
+    if (terminal) openTerminal(projectId, { toggle: false });
     else openNewSession(projectId);
     close();
   };

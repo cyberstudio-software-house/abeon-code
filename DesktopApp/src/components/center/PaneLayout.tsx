@@ -12,6 +12,7 @@ import { StackedTabBar } from './StackedTabBar';
 import { TabPanel } from './TabContent';
 import { DrawerCloseDialog, TerminalDrawerChrome } from './TerminalDrawerChrome';
 import { usePaneDrag } from './usePaneDrag';
+import { useTerminalDrawerShortcuts } from './useTerminalDrawerShortcuts';
 
 export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number } = {}) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -29,6 +30,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   const barHeight = tabBarHeight(tabLayoutMode);
   const Bar = tabLayoutMode === 'stacked' ? StackedTabBar : TabBar;
   const { drag, beginDrag } = usePaneDrag(containerRef);
+  useTerminalDrawerShortcuts();
   const rects = useMemo(() => computePaneRects(layout), [layout]);
   const panes = useMemo(() => leaves(layout), [layout]);
   const { layers, visibleDrawers } = useMemo(

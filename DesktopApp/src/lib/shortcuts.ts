@@ -1,3 +1,5 @@
+import type { Direction } from './drawerGeometry';
+
 const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.includes('Mac');
 
 export type ShortcutId = 'newSession' | 'newTerminal' | 'closeTab' | 'focusSearch' | 'openProjectLauncher' | 'splitTerminalRight' | 'splitTerminalDown';
@@ -11,7 +13,7 @@ export type ShortcutDef = {
 
 export const SHORTCUTS: ShortcutDef[] = [
   { id: 'newSession', label: 'Nowa sesja', description: 'Otwiera nową sesję w aktywnym projekcie', defaultBinding: 'mod+n' },
-  { id: 'newTerminal', label: 'Nowy terminal', description: 'Otwiera nowy terminal w aktywnym projekcie', defaultBinding: 'mod+t' },
+  { id: 'newTerminal', label: 'Terminal', description: 'W sesji wysuwa lub chowa panel terminala, poza sesją otwiera nową zakładkę terminala', defaultBinding: 'mod+t' },
   { id: 'closeTab', label: 'Zamknij tab', description: 'Zamyka aktywny tab (z potwierdzeniem jeśli proces)', defaultBinding: 'mod+w' },
   { id: 'focusSearch', label: 'Szukaj', description: 'Przenosi fokus do wyszukiwarki projektów', defaultBinding: 'mod+k' },
   { id: 'openProjectLauncher', label: 'Szukaj projektu', description: 'Otwiera szybką wyszukiwarkę projektów (nowa sesja / terminal)', defaultBinding: 'mod+shift+n' },
@@ -23,6 +25,7 @@ export const FIXED_SHORTCUTS = [
   { label: 'Akcja 1–9', description: 'Uruchamia akcję o podanym numerze', binding: 'mod+1…9' },
   { label: 'Przełącz zakładki', description: 'Cyklicznie po ostatnio używanych (Shift = wstecz)', binding: 'ctrl+tab' },
   { label: 'Nawigacja zakładek', description: 'Przyciski myszy wstecz/następny — po historii oglądania', binding: 'mousenav' },
+  { label: 'Podziały terminala', description: 'Przenosi fokus na sąsiedni podział w panelu terminala', binding: 'mod+alt+arrows' },
 ];
 
 export function getBinding(id: ShortcutId, overrides: Record<string, string>): string {
@@ -52,6 +55,17 @@ export function matchesBinding(e: KeyboardEvent, binding: string): boolean {
   return e.key.toLowerCase() === key;
 }
 
+export const DRAWER_FOCUS_BINDINGS: ReadonlyArray<readonly [Direction, string]> = [
+  ['left', 'mod+alt+arrowleft'],
+  ['right', 'mod+alt+arrowright'],
+  ['up', 'mod+alt+arrowup'],
+  ['down', 'mod+alt+arrowdown'],
+];
+
+export function drawerFocusDirection(e: KeyboardEvent): Direction | null {
+  return DRAWER_FOCUS_BINDINGS.find(([, binding]) => matchesBinding(e, binding))?.[0] ?? null;
+}
+
 export function eventToBinding(e: KeyboardEvent): string | null {
   if (['Control', 'Meta', 'Shift', 'Alt'].includes(e.key)) return null;
 
@@ -76,6 +90,7 @@ export function formatBinding(binding: string): string {
       if (p === 'alt') return IS_MAC ? '⌥' : 'Alt';
       if (p === '1…9') return '1–9';
       if (p === 'mousenav') return 'Mysz ←/→';
+      if (p === 'arrows') return '←↑→↓';
       return p.toUpperCase();
     })
     .join(IS_MAC ? '' : '+');

@@ -29,7 +29,7 @@ export function ProjectToolbar() {
   const projectId = activeTab?.projectId ?? null;
   const projects = useStore(state => state.projects);
   const project = projectId != null ? projects.find(item => item.id === projectId) ?? null : null;
-  const openNewTerminalTab = useStore(state => state.openNewTerminalTab);
+  const openTerminal = useStore(state => state.openTerminal);
 
   if (!project) return null;
 
@@ -51,7 +51,7 @@ export function ProjectToolbar() {
         icon="terminal"
         label="Terminal"
         ariaLabel="Otwórz terminal"
-        onClick={() => openNewTerminalTab(project.id)}
+        onClick={() => openTerminal(project.id, { toggle: false })}
       />
       <ToolbarButton
         icon="code"

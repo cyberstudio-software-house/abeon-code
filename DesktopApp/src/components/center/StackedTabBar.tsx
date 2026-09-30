@@ -29,7 +29,7 @@ export function StackedTabBar({ detachedProjectId, paneId, onTabPointerDown }: {
   const mruOrder = useStore(useShallow(s => s.mruOrder));
   const setPaneActiveTab = useStore(s => s.setPaneActiveTab);
   const openNewSessionTab = useStore(s => s.openNewSessionTab);
-  const openNewTerminalTab = useStore(s => s.openNewTerminalTab);
+  const openTerminal = useStore(s => s.openTerminal);
   const projects = useStore(useShallow(s => s.projects));
   const sessionRowRef = useRef<HTMLDivElement>(null);
 
@@ -130,7 +130,7 @@ export function StackedTabBar({ detachedProjectId, paneId, onTabPointerDown }: {
                 className="px-2 py-1 text-[11px] text-muted hover:text-fg"
               >+</button>
               <button
-                onClick={() => openNewTerminalTab(selectedProjectId)}
+                onClick={() => openTerminal(selectedProjectId, { toggle: true })}
                 title="Nowy terminal"
                 className="px-2 py-1 text-[11px] text-muted hover:text-fg"
               >$</button>

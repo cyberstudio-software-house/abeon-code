@@ -108,6 +108,11 @@ export function useTabBarActions(tabs: Tab[], detachedProjectId?: number) {
       if (!tabs.some(t => t.id === active)) return;
       e.preventDefault();
       e.stopPropagation();
+      const drawer = useStore.getState().drawers[active];
+      if (drawer?.open && drawer.hasFocus) {
+        useStore.getState().requestCloseDrawerTerminal(drawer.focusedTerminalId);
+        return;
+      }
       closeWithGuard(active);
     };
     document.addEventListener('keydown', onKeyDown, { capture: true });

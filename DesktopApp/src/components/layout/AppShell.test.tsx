@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 
 vi.mock('../sidebar/Sidebar', () => ({ Sidebar: () => <div /> }));
 vi.mock('../center/CenterPanel', () => ({ CenterPanel: () => <div /> }));
@@ -110,6 +110,13 @@ describe('AppShell attention across panes', () => {
     expect(attention.has('s3')).toBe(false);
     expect(attention.has('s2')).toBe(false);
     expect(attention.has('s1')).toBe(true);
+  });
+
+  it('toggles the drawer of the active session on mod+t', () => {
+    act(() => { useStore.setState({ drawers: {}, drawerTerminals: {}, shortcutOverrides: {} }); });
+    fireEvent.keyDown(document, { key: 't', ctrlKey: true });
+    expect(useStore.getState().drawers['session:s1']?.open).toBe(true);
+    expect(useStore.getState().tabs.some(t => t.kind === 'terminal')).toBe(false);
   });
 });
 

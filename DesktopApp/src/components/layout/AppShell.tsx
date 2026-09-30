@@ -71,7 +71,7 @@ export function AppShell() {
       if (matchesShortcut(e, 'newTerminal', state.shortcutOverrides) && projectId != null) {
         e.preventDefault();
         e.stopPropagation();
-        state.openNewTerminalTab(projectId);
+        state.openTerminal(projectId, { toggle: true });
         return;
       }
 

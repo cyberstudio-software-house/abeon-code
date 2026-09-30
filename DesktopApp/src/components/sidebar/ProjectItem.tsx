@@ -17,7 +17,7 @@ export function ProjectItem({ project }: Props) {
   const expanded = useStore(s => s.expandedProjectIds.has(project.id));
   const toggle = useStore(s => s.toggleProjectExpanded);
   const openNew = useStore(s => s.openNewSessionTab);
-  const openTerminal = useStore(s => s.openNewTerminalTab);
+  const openTerminal = useStore(s => s.openTerminal);
   const [count, setCount] = useState<number | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -108,7 +108,7 @@ export function ProjectItem({ project }: Props) {
               <span>New session</span>
             </button>
             <button
-              onClick={(e) => { e.stopPropagation(); openTerminal(project.id); }}
+              onClick={(e) => { e.stopPropagation(); openTerminal(project.id, { toggle: false }); }}
               className="flex items-center gap-1 px-1.5 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors rounded"
               title="New terminal"
             >

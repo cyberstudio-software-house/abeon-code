@@ -111,10 +111,22 @@ describe('StackedTabBar session row actions', () => {
     expect(openNewSessionTab).toHaveBeenCalledWith(2);
   });
 
-  it('opens a new terminal for the project of the active tab', () => {
+  it('toggles the terminal drawer of the active session', () => {
+    seed('session:a1', ['session:a1']);
+    useStore.setState({ drawers: {}, drawerTerminals: {} });
+    render(<StackedTabBar />);
+    fireEvent.click(screen.getByTitle('Nowy terminal'));
+    expect(useStore.getState().drawers['session:a1']?.open).toBe(true);
+  });
+
+  it('opens a terminal tab when the active tab is not a session', () => {
     seed('session:a1', ['session:a1']);
     const openNewTerminalTab = vi.fn();
-    useStore.setState({ openNewTerminalTab });
+    useStore.setState({
+      tabs: [...useStore.getState().tabs, { kind: 'terminal', id: 'terminal:x', projectId: 1, title: 'T' }],
+      activeTabId: 'terminal:x',
+      openNewTerminalTab,
+    });
     render(<StackedTabBar />);
     fireEvent.click(screen.getByTitle('Nowy terminal'));
     expect(openNewTerminalTab).toHaveBeenCalledWith(1);

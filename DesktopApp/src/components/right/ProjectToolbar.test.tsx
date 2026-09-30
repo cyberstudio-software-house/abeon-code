@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 type MockState = Record<string, unknown>;
 let mockState: MockState;
 
-const { openNewTerminalTab, openProjectInEditor, openNotesWindow, toastError } = vi.hoisted(() => ({
-  openNewTerminalTab: vi.fn(),
+const { openTerminal, openProjectInEditor, openNotesWindow, toastError } = vi.hoisted(() => ({
+  openTerminal: vi.fn(),
   openProjectInEditor: vi.fn(),
   openNotesWindow: vi.fn(),
   toastError: vi.fn(),
@@ -30,7 +30,7 @@ function baseState(overrides: Partial<MockState> = {}): MockState {
     projects: [{ id: 4, name: 'Demo', path: '/demo' }],
     tabs: [{ id: 'tab-4', projectId: 4 }],
     activeTabId: 'tab-4',
-    openNewTerminalTab,
+    openTerminal,
     ...overrides,
   };
 }
@@ -48,7 +48,7 @@ describe('ProjectToolbar', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Otwórz terminal' }));
     fireEvent.click(screen.getByRole('button', { name: 'Otwórz w edytorze' }));
     fireEvent.click(screen.getByRole('button', { name: 'Otwórz notatki' }));
-    expect(openNewTerminalTab).toHaveBeenCalledWith(4);
+    expect(openTerminal).toHaveBeenCalledWith(4, { toggle: false });
     expect(openProjectInEditor).toHaveBeenCalledWith('/demo');
     expect(openNotesWindow).toHaveBeenCalledWith(4, 'Demo');
   });
