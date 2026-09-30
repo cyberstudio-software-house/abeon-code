@@ -2,12 +2,15 @@ import type { StateCreator } from 'zustand';
 import {
   collapseEmpty,
   createLeaf,
+  findLeafOfTab,
   insertBeside,
   leaves,
+  mapLeaves,
   removeTabFromLeaves,
   replaceSplitSizes,
   type PaneNode,
 } from '../lib/paneTree';
+import { pushNav } from '../lib/navHistory';
 import { neighborInDirection, type Direction } from '../lib/drawerGeometry';
 import type { Tab } from './tabsSlice';
 import type { AppState } from './index';
@@ -38,6 +41,10 @@ export type TerminalDrawersSlice = {
   cancelCloseDrawerTerminal: () => void;
   resizeDrawerSplit: (tabId: string, splitId: string, sizes: number[]) => void;
   setDrawerDragSize: (size: number | null) => void;
+  openTerminal: (projectId: number, opts: { toggle: boolean }) => void;
+  detachDrawerTerminal: (terminalId: string) => void;
+  detachAllDrawerTerminals: (tabId: string) => void;
+  pruneDrawers: (liveTabIds: ReadonlySet<string>) => void;
 };
 
 const DRAWER_TERMINAL_TITLE = 'Terminal';
@@ -54,6 +61,13 @@ export const toTerminalTab = (terminal: DrawerTerminal): Extract<Tab, { kind: 't
 
 export function countDrawerTerminals(state: Pick<TerminalDrawersSlice, 'drawerTerminals'>, ownerTabId: string): number {
   return Object.values(state.drawerTerminals).filter(t => t.ownerTabId === ownerTabId).length;
+}
+
+export function selectDrawerTerminalTabs(
+  state: Pick<TerminalDrawersSlice, 'drawerTerminals'>,
+  projectId: number,
+): Extract<Tab, { kind: 'terminal' }>[] {
+  return Object.values(state.drawerTerminals).filter(t => t.projectId === projectId).map(toTerminalTab);
 }
 
 type DrawerMaps = Pick<TerminalDrawersSlice, 'drawers' | 'drawerTerminals'>;
@@ -168,5 +182,50 @@ export const createTerminalDrawersSlice: StateCreator<AppState, [], [], Terminal
       if (drawer) patchDrawer(tabId, { layout: replaceSplitSizes(drawer.layout, splitId, sizes) });
     },
     setDrawerDragSize: (drawerDragSize) => set({ drawerDragSize }),
+    openTerminal: (projectId, { toggle }) => {
+      const active = get().tabs.find(t => t.id === get().activeTabId);
+      if (active?.kind === 'session' && active.projectId === projectId) {
+        reveal(active.id, toggle);
+        return;
+      }
+      get().openNewTerminalTab(projectId);
+    },
+    detachDrawerTerminal: (terminalId) => {
+      const terminal = get().drawerTerminals[terminalId];
+      if (!terminal) return;
+      const pane = findLeafOfTab(get().layout, terminal.ownerTabId);
+      const remaining = withoutDrawerTerminal(get(), terminalId);
+      if (!pane || !remaining) return;
+      const at = pane.tabIds.indexOf(terminal.ownerTabId) + 1;
+      const tabIds = [...pane.tabIds.slice(0, at), terminalId, ...pane.tabIds.slice(at)];
+      const nav = pushNav({ history: get().navHistory, index: get().navIndex }, terminalId);
+      const prompt = get().drawerClosePrompt;
+      set({
+        ...remaining,
+        drawerClosePrompt: prompt === terminalId ? null : prompt,
+        tabs: [...get().tabs, toTerminalTab(terminal)],
+        layout: mapLeaves(get().layout, leaf => (leaf.id === pane.id ? { ...leaf, tabIds, activeTabId: terminalId } : leaf)),
+        focusedPaneId: pane.id,
+        activeTabId: terminalId,
+        mruOrder: [terminalId, ...get().mruOrder.filter(x => x !== terminalId)],
+        navHistory: nav.history,
+        navIndex: nav.index,
+      });
+    },
+    detachAllDrawerTerminals: (tabId) => {
+      const drawer = get().drawers[tabId];
+      if (!drawer) return;
+      for (const leaf of leaves(drawer.layout)) get().detachDrawerTerminal(leaf.id);
+    },
+    pruneDrawers: (liveTabIds) => {
+      const drawers = Object.fromEntries(
+        Object.entries(get().drawers).filter(([tabId]) => liveTabIds.has(tabId)),
+      );
+      const drawerTerminals = Object.fromEntries(
+        Object.entries(get().drawerTerminals).filter(([, t]) => liveTabIds.has(t.ownerTabId)),
+      );
+      const prompt = get().drawerClosePrompt;
+      set({ drawers, drawerTerminals, drawerClosePrompt: prompt && drawerTerminals[prompt] ? prompt : null });
+    },
   };
 };

@@ -518,6 +518,17 @@ useStore.subscribe(reconcileLayout);
 // into the layout once — nothing else guarantees a state change before React mounts.
 reconcileLayout(useStore.getState());
 
+function pruneOrphanDrawers(state: AppState) {
+  const terminals = Object.values(state.drawerTerminals);
+  const owners = Object.keys(state.drawers);
+  if (owners.length === 0 && terminals.length === 0) return;
+  const live = new Set(state.tabs.map(t => t.id));
+  if (owners.every(id => live.has(id)) && terminals.every(t => live.has(t.ownerTabId))) return;
+  state.pruneDrawers(live);
+}
+
+useStore.subscribe(pruneOrphanDrawers);
+
 // --- Subscribe: on any state change, diff + write localStorage + SQLite ---
 const tabsChangeKey = (state: AppState) =>
   JSON.stringify(state.tabs) + '|' + (state.activeTabId ?? '') + '|' + JSON.stringify(state.layout);

@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from './index';
 import { ROOT_PANE_ID } from './panesSlice';
-import { createLeaf, leaves, type PaneSplit } from '../lib/paneTree';
+import { createLeaf, findLeaf, leaves, type PaneSplit } from '../lib/paneTree';
+import { selectDrawerTerminalTabs } from './terminalDrawersSlice';
 import type { Tab } from './tabsSlice';
 
 const session = (id: string, projectId = 1, extra: Partial<Extract<Tab, { kind: 'session' }>> = {}): Tab => ({
@@ -175,5 +176,106 @@ describe('drawer size setting', () => {
     useStore.getState().setTerminalDrawerSize(0.5);
     const persisted = JSON.parse(localStorage.getItem('abeoncode.settings') ?? '{}');
     expect(persisted.terminalDrawerSize).toBe(0.5);
+  });
+});
+
+describe('openTerminal routing', () => {
+  it('opens the drawer of the active session of the same project', () => {
+    useStore.getState().openTerminal(1, { toggle: true });
+    expect(drawer()?.open).toBe(true);
+    expect(useStore.getState().tabs).toHaveLength(1);
+  });
+
+  it('opens a terminal tab when the active tab belongs to another project', () => {
+    useStore.getState().openTerminal(2, { toggle: true });
+    expect(useStore.getState().drawers).toEqual({});
+    expect(useStore.getState().tabs.some(t => t.kind === 'terminal' && t.projectId === 2)).toBe(true);
+  });
+
+  it('opens a terminal tab when no tab is active', () => {
+    useStore.setState({ tabs: [], activeTabId: null, layout: createLeaf(ROOT_PANE_ID) });
+    useStore.getState().openTerminal(1, { toggle: false });
+    expect(useStore.getState().tabs.map(t => t.kind)).toEqual(['terminal']);
+  });
+
+  it('keeps a focused drawer open when not toggling', () => {
+    useStore.getState().openTerminal(1, { toggle: false });
+    useStore.getState().openTerminal(1, { toggle: false });
+    expect(drawer()).toMatchObject({ open: true, hasFocus: true });
+  });
+
+  it('only touches the drawer of the focused pane session', () => {
+    useStore.setState({
+      tabs: [session('s1'), session('s2')],
+      activeTabId: 's2',
+      layout: {
+        kind: 'split', id: 'outer', dir: 'row', sizes: [0.5, 0.5],
+        children: [createLeaf('left', ['s1'], 's1'), createLeaf('right', ['s2'], 's2')],
+      },
+      focusedPaneId: 'right',
+    });
+    useStore.getState().openTerminal(1, { toggle: true });
+    expect(useStore.getState().drawers.s2?.open).toBe(true);
+    expect(useStore.getState().drawers.s1).toBeUndefined();
+  });
+});
+
+describe('detaching drawer terminals', () => {
+  it('turns the terminal into a tab right after its session, keeping the id', () => {
+    useStore.setState({
+      tabs: [session('s1'), { kind: 'terminal', id: 'x', projectId: 1, title: 'X' }],
+      layout: createLeaf(ROOT_PANE_ID, ['s1', 'x'], 's1'),
+    });
+    useStore.getState().toggleTerminalDrawer('s1');
+    const [id] = terminalIds();
+
+    useStore.getState().detachDrawerTerminal(id);
+
+    const state = useStore.getState();
+    expect(state.drawers).toEqual({});
+    expect(state.drawerTerminals).toEqual({});
+    expect(state.tabs.find(t => t.id === id)).toEqual({ kind: 'terminal', id, projectId: 1, title: 'Terminal' });
+    expect(findLeaf(state.layout, ROOT_PANE_ID)?.tabIds).toEqual(['s1', id, 'x']);
+    expect(state.activeTabId).toBe(id);
+    expect(state.focusedPaneId).toBe(ROOT_PANE_ID);
+    expect(state.mruOrder[0]).toBe(id);
+  });
+
+  it('keeps the other terminals in the drawer', () => {
+    useStore.getState().toggleTerminalDrawer('s1');
+    useStore.getState().splitDrawerTerminal('s1', 'row');
+    const [first, second] = terminalIds();
+    useStore.getState().detachDrawerTerminal(second);
+    expect(terminalIds()).toEqual([first]);
+    expect(drawer().focusedTerminalId).toBe(first);
+  });
+
+  it('detaches every drawer terminal of a session', () => {
+    useStore.getState().toggleTerminalDrawer('s1');
+    useStore.getState().splitDrawerTerminal('s1', 'col');
+    const ids = terminalIds();
+    useStore.getState().detachAllDrawerTerminals('s1');
+    expect(useStore.getState().drawers).toEqual({});
+    expect(ids.every(id => useStore.getState().tabs.some(t => t.id === id))).toBe(true);
+  });
+});
+
+describe('drawer cleanup', () => {
+  it('drops a drawer when its session tab closes', () => {
+    useStore.getState().toggleTerminalDrawer('s1');
+    useStore.getState().requestCloseDrawerTerminal(drawer().focusedTerminalId);
+    useStore.getState().closeTab('s1');
+    expect(useStore.getState().drawers).toEqual({});
+    expect(useStore.getState().drawerTerminals).toEqual({});
+    expect(useStore.getState().drawerClosePrompt).toBeNull();
+  });
+
+  it('lists drawer terminals of a project as terminal tabs', () => {
+    useStore.setState({ tabs: [session('s1'), session('s2', 2)] });
+    useStore.getState().toggleTerminalDrawer('s1');
+    useStore.getState().toggleTerminalDrawer('s2');
+    const own = selectDrawerTerminalTabs(useStore.getState(), 1);
+    expect(own).toHaveLength(1);
+    expect(own[0]).toMatchObject({ kind: 'terminal', projectId: 1 });
   });
 });
