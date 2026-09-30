@@ -11,6 +11,11 @@ vi.mock('../../lib/detachGroup', async (importOriginal) => {
   };
 });
 
+vi.mock('../../lib/detachSession', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/detachSession')>();
+  return { ...actual, detachSessionTab: vi.fn() };
+});
+
 vi.stubGlobal('ResizeObserver', class {
   observe() {}
   unobserve() {}
@@ -21,6 +26,7 @@ Element.prototype.scrollIntoView = vi.fn();
 
 import { processManager } from '../../lib/processManager';
 import { detachProjectGroup, focusExistingGroupWindow } from '../../lib/detachGroup';
+import { detachSessionTab } from '../../lib/detachSession';
 import { useStore } from '../../store';
 import { TabBar } from './TabBar';
 import { createLeaf, insertBeside } from '../../lib/paneTree';
@@ -336,5 +342,41 @@ describe('TabBar per pane', () => {
     expect(useStore.getState().tabs.map(t => t.id)).toEqual(['session:a', 'session:n', 'session:c']);
     expect([...container.querySelectorAll('[data-tab-id]')].map(el => el.getAttribute('data-tab-id')))
       .toEqual(['session:a', 'session:c', 'session:n']);
+  });
+});
+
+describe('TabBar session detach to a window', () => {
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('hands the drawer shells over as tabs before the session tab closes', () => {
+    useStore.setState({
+      tabs: [{ kind: 'session', id: 'session:s1', projectId: 1, sessionId: 's1', title: 'S1', mode: 'history' }],
+      activeTabId: 'session:s1',
+      mruOrder: ['session:s1'],
+      navHistory: ['session:s1'],
+      navIndex: 0,
+      runningActions: {},
+      projects: [{ id: 1, name: 'Alfa', path: '/a' }] as never,
+      layout: createLeaf(ROOT_PANE_ID, ['session:s1'], 'session:s1'),
+      focusedPaneId: ROOT_PANE_ID,
+      drawers: {},
+      drawerTerminals: {},
+    });
+    act(() => { useStore.getState().toggleTerminalDrawer('session:s1'); });
+    const drawerTerminalId = Object.keys(useStore.getState().drawerTerminals)[0];
+
+    render(<TabBar />);
+    fireEvent.contextMenu(screen.getByText('S1'));
+    fireEvent.click(screen.getByText('Otwórz w nowym oknie'));
+
+    expect(detachSessionTab).toHaveBeenCalledOnce();
+    const closeTab = vi.mocked(detachSessionTab).mock.calls[0][1];
+    act(() => { closeTab('session:s1'); });
+
+    const state = useStore.getState();
+    expect(state.tabs.map(t => t.id)).toEqual([drawerTerminalId]);
+    expect(state.tabs[0].kind).toBe('terminal');
+    expect(state.drawers).toEqual({});
+    expect(state.drawerTerminals).toEqual({});
   });
 });
