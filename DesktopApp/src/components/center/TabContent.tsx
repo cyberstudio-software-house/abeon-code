@@ -43,11 +43,12 @@ function SessionBody({ tab, visible, focused = true, takeFocus }: { tab: Session
   );
 }
 
-export function TabPanel({ tab, visible, focused = true, takeFocus, onExit }: {
+export function TabPanel({ tab, visible, focused = true, takeFocus, focusToken, onExit }: {
   tab: Tab;
   visible: boolean;
   focused?: boolean;
   takeFocus?: boolean;
+  focusToken?: number;
   onExit?: (code: number) => void;
 }) {
   if (tab.kind === 'providerPicker') {
@@ -81,7 +82,7 @@ export function TabPanel({ tab, visible, focused = true, takeFocus, onExit }: {
   if (tab.kind === 'terminal') {
     return (
       <div className={layer(visible)}>
-        <TerminalView projectId={tab.projectId} kind="shell" visible={visible} focused={focused} takeFocus={takeFocus} onExit={onExit} />
+        <TerminalView projectId={tab.projectId} kind="shell" visible={visible} focused={focused} takeFocus={takeFocus} focusToken={focusToken} onExit={onExit} />
       </div>
     );
   }

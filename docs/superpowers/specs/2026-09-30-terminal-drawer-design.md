@@ -151,7 +151,7 @@ ma dzisiejszy prostokąt.
 (prostokąt w px, z którego liczone jest `totalPx`) i callback `onResize`. Używany przez panele
 i przez podziały w szufladzie. Separator sesja/szuflada to osobny, prosty uchwyt zmieniający
 `terminalDrawerSize`. Minima: sesja i ciało szuflady po 120 px, podział w szufladzie
-160 × 60 px.
+160 × 90 px.
 
 ## Interakcje, fokus i skróty
 

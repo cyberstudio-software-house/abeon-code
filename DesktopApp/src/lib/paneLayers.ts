@@ -12,6 +12,7 @@ export type PaneLayer = {
   focused: boolean;
   takeFocus: boolean;
   drawerOwnerId: string | null;
+  focusToken: number | undefined;
 };
 
 export type VisibleDrawer = {
@@ -46,7 +47,7 @@ export function computePaneLayers(input: {
     const content = paneContentRect(paneRect, input.barHeight);
     const drawer = tab.kind === 'session' ? input.drawers[tab.id] : undefined;
     if (!drawer) {
-      layers.push({ tab, paneId: owner.paneId, rect: content, visible: owner.active, focused: paneFocused, takeFocus: paneFocused, drawerOwnerId: null });
+      layers.push({ tab, paneId: owner.paneId, rect: content, visible: owner.active, focused: paneFocused, takeFocus: paneFocused, drawerOwnerId: null, focusToken: undefined });
       continue;
     }
     const drawerRects = computeDrawerLayout(paneRect, input.barHeight, input.drawerSize, drawer.layout);
@@ -59,12 +60,13 @@ export function computePaneLayers(input: {
       focused: paneFocused,
       takeFocus: paneFocused && !(drawer.open && drawer.hasFocus),
       drawerOwnerId: null,
+      focusToken: undefined,
     });
     for (const [terminalId, rect] of drawerRects.terminals) {
       const terminal = input.drawerTerminals[terminalId];
       if (!terminal) continue;
       const focused = drawerShown && paneFocused && drawer.hasFocus && drawer.focusedTerminalId === terminalId;
-      layers.push({ tab: toTerminalTab(terminal), paneId: owner.paneId, rect, visible: drawerShown, focused, takeFocus: focused, drawerOwnerId: tab.id });
+      layers.push({ tab: toTerminalTab(terminal), paneId: owner.paneId, rect, visible: drawerShown, focused, takeFocus: focused, drawerOwnerId: tab.id, focusToken: focused ? drawer.focusRequest : undefined });
     }
     if (drawerShown) visibleDrawers.push({ ownerTabId: tab.id, paneId: owner.paneId, rects: drawerRects, drawer });
   }

@@ -12,7 +12,7 @@ const drawerTerminal = (id: string): DrawerTerminal => ({ id, ownerTabId: 'sessi
 
 function run(opts: { drawer?: Partial<TerminalDrawer>; layout?: PaneNode; focusedPaneId?: string; tabs?: Tab[] } = {}) {
   const drawer: TerminalDrawer | undefined = opts.drawer
-    ? { open: true, hasFocus: true, layout: createLeaf('terminal:d1', ['terminal:d1'], 'terminal:d1'), focusedTerminalId: 'terminal:d1', ...opts.drawer }
+    ? { open: true, hasFocus: true, focusRequest: 3, layout: createLeaf('terminal:d1', ['terminal:d1'], 'terminal:d1'), focusedTerminalId: 'terminal:d1', ...opts.drawer }
     : undefined;
   return computePaneLayers({
     tabs: opts.tabs ?? [s1],
@@ -43,6 +43,14 @@ describe('computePaneLayers', () => {
     expect(terminal.tab).toEqual({ kind: 'terminal', id: 'terminal:d1', projectId: 1, title: 'Terminal' });
     expect(lenRectStyle(session.rect).height).toBe('calc(65% - 20.8px)');
     expect(visibleDrawers).toHaveLength(1);
+  });
+
+  it('hands the focus request only to the focused drawer terminal', () => {
+    const { layers } = run({ drawer: {} });
+    expect(layers.find(l => l.tab.id === 'terminal:d1')!.focusToken).toBe(3);
+    expect(layers.find(l => l.tab.id === 'session:s1')!.focusToken).toBeUndefined();
+    const unfocused = run({ drawer: { hasFocus: false } }).layers;
+    expect(unfocused.every(l => l.focusToken === undefined)).toBe(true);
   });
 
   it('keeps the session keyboard while the drawer is open but unfocused', () => {

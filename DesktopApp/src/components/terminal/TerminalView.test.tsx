@@ -198,6 +198,19 @@ describe('TerminalView focus', () => {
     expect(probe.focusCalls).toBeGreaterThan(0);
   });
 
+  it('refocuses a keyboard-claiming terminal when the focus token changes', async () => {
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<TerminalView projectId={1} kind="shell" visible focused takeFocus focusToken={0} />);
+    });
+    const before = probe.focusCalls;
+    await act(async () => {
+      view.rerender(<TerminalView projectId={1} kind="shell" visible focused takeFocus focusToken={1} />);
+    });
+    expect(probe.focusCalls).toBeGreaterThan(before);
+    expect(probe.spawned).toBe(1);
+  });
+
   it('reports the PTY exit to the latest onExit without respawning', async () => {
     const first = vi.fn();
     const second = vi.fn();

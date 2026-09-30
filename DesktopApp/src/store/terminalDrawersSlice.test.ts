@@ -79,6 +79,38 @@ describe('terminal drawer toggle', () => {
   });
 });
 
+describe('terminal drawer focus requests', () => {
+  it('starts at zero when the drawer is created', () => {
+    useStore.getState().toggleTerminalDrawer('s1');
+    expect(drawer().focusRequest).toBe(0);
+  });
+
+  it('counts a show on an already open and focused drawer', () => {
+    useStore.getState().showTerminalDrawer('s1');
+    useStore.getState().showTerminalDrawer('s1');
+    expect(drawer()).toMatchObject({ open: true, hasFocus: true, focusRequest: 1 });
+    useStore.getState().showTerminalDrawer('s1');
+    expect(drawer().focusRequest).toBe(2);
+  });
+
+  it('counts a toggle that reveals but not one that hides', () => {
+    useStore.getState().toggleTerminalDrawer('s1');
+    useStore.getState().toggleTerminalDrawer('s1');
+    expect(drawer()).toMatchObject({ open: false, focusRequest: 0 });
+    useStore.getState().toggleTerminalDrawer('s1');
+    expect(drawer()).toMatchObject({ open: true, focusRequest: 1 });
+  });
+
+  it('keeps the counter through splits and closes', () => {
+    useStore.getState().showTerminalDrawer('s1');
+    useStore.getState().showTerminalDrawer('s1');
+    useStore.getState().splitDrawerTerminal('s1', 'row');
+    expect(drawer().focusRequest).toBe(1);
+    useStore.getState().closeDrawerTerminal(drawer().focusedTerminalId);
+    expect(drawer().focusRequest).toBe(1);
+  });
+});
+
 describe('terminal drawer splits', () => {
   it('splits beside the focused terminal and focuses the new one', () => {
     useStore.getState().toggleTerminalDrawer('s1');
@@ -257,6 +289,8 @@ describe('detaching drawer terminals', () => {
     useStore.getState().detachAllDrawerTerminals('s1');
     expect(useStore.getState().drawers).toEqual({});
     expect(ids.every(id => useStore.getState().tabs.some(t => t.id === id))).toBe(true);
+    expect(findLeaf(useStore.getState().layout, ROOT_PANE_ID)?.tabIds).toEqual(['s1', ...ids]);
+    expect(useStore.getState().activeTabId).toBe(ids[0]);
   });
 });
 

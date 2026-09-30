@@ -71,7 +71,9 @@ export function AppShell() {
       if (matchesShortcut(e, 'newTerminal', state.shortcutOverrides) && projectId != null) {
         e.preventDefault();
         e.stopPropagation();
-        state.openTerminal(projectId, { toggle: true });
+        const active = document.activeElement;
+        const inDrawer = active instanceof Element && !!active.closest(`[data-drawer-owner="${state.activeTabId}"]`);
+        state.openTerminal(projectId, { toggle: inDrawer });
         return;
       }
 

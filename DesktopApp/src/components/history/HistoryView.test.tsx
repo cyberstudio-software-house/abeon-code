@@ -3,6 +3,7 @@ import { render, fireEvent, act } from '@testing-library/react';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import type { SessionHistory } from '../../types';
+import { createLeaf } from '../../lib/paneTree';
 import { HistoryView } from './HistoryView';
 
 vi.mock('./HistoryStream', () => ({
@@ -40,7 +41,7 @@ describe('HistoryView search shortcut', () => {
     vi.spyOn(tauri, 'onSessionAppend').mockResolvedValue(() => {});
     vi.spyOn(tauri, 'onSessionActivity').mockResolvedValue(() => {});
     vi.spyOn(tauri, 'onSessionTitle').mockResolvedValue(() => {});
-    useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1', sessionsByProject: {} });
+    useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1', sessionsByProject: {}, drawers: {}, drawerTerminals: {} });
   });
 
   it('registers listeners before opening the watcher and reading the snapshot', async () => {
@@ -181,5 +182,33 @@ describe('HistoryView search shortcut', () => {
     fireEvent.keyDown(document, { key: 'f', ctrlKey: true });
 
     expect(queryByTestId('search-bar')).toBeNull();
+  });
+
+  it('leaves Ctrl+F to the shell while the session drawer holds the keyboard', async () => {
+    useStore.setState({
+      drawers: { 'session:s1': { open: true, hasFocus: true, layout: createLeaf('terminal:d1', ['terminal:d1'], 'terminal:d1'), focusedTerminalId: 'terminal:d1', focusRequest: 0 } },
+    });
+    const { queryByTestId } = render(<HistoryView projectId={1} sessionId="s1" tabId="session:s1" />);
+    await act(async () => {});
+
+    const event = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true });
+    act(() => { document.dispatchEvent(event); });
+
+    expect(queryByTestId('search-bar')).toBeNull();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it('still opens the search when the drawer is open but the session holds the keyboard', async () => {
+    useStore.setState({
+      drawers: { 'session:s1': { open: true, hasFocus: false, layout: createLeaf('terminal:d1', ['terminal:d1'], 'terminal:d1'), focusedTerminalId: 'terminal:d1', focusRequest: 0 } },
+    });
+    const { queryByTestId } = render(<HistoryView projectId={1} sessionId="s1" tabId="session:s1" />);
+    await act(async () => {});
+
+    const event = new KeyboardEvent('keydown', { key: 'f', ctrlKey: true, bubbles: true, cancelable: true });
+    act(() => { document.dispatchEvent(event); });
+
+    expect(queryByTestId('search-bar')).toBeTruthy();
+    expect(event.defaultPrevented).toBe(true);
   });
 });

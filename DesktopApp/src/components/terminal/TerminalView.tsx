@@ -23,6 +23,7 @@ type Props = {
   visible?: boolean;
   focused?: boolean;
   takeFocus?: boolean;
+  focusToken?: number;
   onExit?: (code: number) => void;
 };
 
@@ -100,7 +101,7 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
   };
 }
 
-export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, tabId, visible = true, focused = true, takeFocus, onExit }: Props) {
+export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, tabId, visible = true, focused = true, takeFocus, focusToken, onExit }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const modelEfforts = useStore(s => s.modelEfforts);
   const codexModelId = useStore(s => s.codexModelId);
@@ -347,7 +348,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     pendingWrites.current = [];
     fit.fit();
     if (claimsKeyboard) term.focus();
-  }, [visible, claimsKeyboard]);
+  }, [visible, claimsKeyboard, focusToken]);
 
   useEffect(() => {
     if (kind !== 'agent' || !agentPtyId || !visible || !focused) return;

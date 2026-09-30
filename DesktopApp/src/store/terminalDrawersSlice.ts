@@ -22,6 +22,7 @@ export type TerminalDrawer = {
   hasFocus: boolean;
   layout: PaneNode;
   focusedTerminalId: string;
+  focusRequest: number;
 };
 
 export type TerminalDrawersSlice = {
@@ -110,8 +111,11 @@ export const createTerminalDrawersSlice: StateCreator<AppState, [], [], Terminal
   const reveal = (tabId: string, hideWhenFocused: boolean) => {
     const drawer = get().drawers[tabId];
     if (drawer) {
-      if (!drawer.open || !drawer.hasFocus) patchDrawer(tabId, { open: true, hasFocus: true });
-      else if (hideWhenFocused) patchDrawer(tabId, { open: false, hasFocus: false });
+      if (drawer.open && drawer.hasFocus && hideWhenFocused) {
+        patchDrawer(tabId, { open: false, hasFocus: false });
+        return;
+      }
+      patchDrawer(tabId, { open: true, hasFocus: true, focusRequest: drawer.focusRequest + 1 });
       return;
     }
     const owner = get().tabs.find(t => t.id === tabId);
@@ -120,7 +124,7 @@ export const createTerminalDrawersSlice: StateCreator<AppState, [], [], Terminal
     set({
       drawers: {
         ...get().drawers,
-        [tabId]: { open: true, hasFocus: true, layout: terminalLeaf(id), focusedTerminalId: id },
+        [tabId]: { open: true, hasFocus: true, layout: terminalLeaf(id), focusedTerminalId: id, focusRequest: 0 },
       },
       drawerTerminals: {
         ...get().drawerTerminals,
@@ -147,6 +151,7 @@ export const createTerminalDrawersSlice: StateCreator<AppState, [], [], Terminal
         drawers: {
           ...get().drawers,
           [tabId]: {
+            ...drawer,
             open: true,
             hasFocus: true,
             focusedTerminalId: id,
@@ -222,7 +227,7 @@ export const createTerminalDrawersSlice: StateCreator<AppState, [], [], Terminal
     detachAllDrawerTerminals: (tabId) => {
       const drawer = get().drawers[tabId];
       if (!drawer) return;
-      for (const leaf of leaves(drawer.layout)) get().detachDrawerTerminal(leaf.id);
+      for (const leaf of [...leaves(drawer.layout)].reverse()) get().detachDrawerTerminal(leaf.id);
     },
     pruneDrawers: (liveTabIds) => {
       const drawers = Object.fromEntries(

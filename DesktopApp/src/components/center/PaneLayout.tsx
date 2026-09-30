@@ -81,6 +81,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
             visible={layer.visible}
             focused={layer.focused}
             takeFocus={layer.takeFocus}
+            focusToken={layer.focusToken}
             onExit={layer.drawerOwnerId ? () => closeDrawerTerminal(layer.tab.id) : undefined}
           />
         </div>

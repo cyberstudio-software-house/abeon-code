@@ -118,6 +118,34 @@ describe('AppShell attention across panes', () => {
     expect(useStore.getState().drawers['session:s1']?.open).toBe(true);
     expect(useStore.getState().tabs.some(t => t.kind === 'terminal')).toBe(false);
   });
+
+  it('keeps the drawer open and requests focus on mod+t when DOM focus is outside it', () => {
+    act(() => { useStore.setState({ drawers: {}, drawerTerminals: {}, shortcutOverrides: {} }); });
+    act(() => { useStore.getState().toggleTerminalDrawer('session:s1'); });
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.activeElement).toBe(document.body);
+
+    fireEvent.keyDown(document, { key: 't', ctrlKey: true });
+
+    expect(useStore.getState().drawers['session:s1']).toMatchObject({ open: true, hasFocus: true, focusRequest: 1 });
+  });
+
+  it('hides the drawer on mod+t when DOM focus is inside it', () => {
+    act(() => { useStore.setState({ drawers: {}, drawerTerminals: {}, shortcutOverrides: {} }); });
+    act(() => { useStore.getState().toggleTerminalDrawer('session:s1'); });
+    const host = document.createElement('div');
+    host.setAttribute('data-drawer-owner', 'session:s1');
+    const input = document.createElement('textarea');
+    host.appendChild(input);
+    document.body.appendChild(host);
+    input.focus();
+    expect(document.activeElement).toBe(input);
+
+    fireEvent.keyDown(document, { key: 't', ctrlKey: true });
+
+    expect(useStore.getState().drawers['session:s1']?.open).toBe(false);
+    host.remove();
+  });
 });
 
 describe('AppShell tab layout mode', () => {

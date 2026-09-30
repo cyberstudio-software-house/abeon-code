@@ -8,7 +8,7 @@ export const DRAWER_MAX_SIZE = 0.8;
 export const DRAWER_MIN_SESSION_HEIGHT = 120;
 export const DRAWER_MIN_BODY_HEIGHT = 120;
 export const DRAWER_MIN_SPLIT_WIDTH = 160;
-export const DRAWER_MIN_SPLIT_HEIGHT = 60;
+export const DRAWER_MIN_SPLIT_HEIGHT = 90;
 
 export type Len = { pct: number; px: number };
 export type LenRect = { left: Len; top: Len; width: Len; height: Len };
