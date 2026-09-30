@@ -7,6 +7,7 @@ import {
   insertBeside,
   moveTab,
   removeTabFromLeaves,
+  replaceSplitSizes,
   type PaneNode,
 } from '../lib/paneTree';
 import type { TabsSlice } from './tabsSlice';
@@ -25,13 +26,6 @@ export type PanesSlice = {
 
 export function selectPaneOfTab(state: { layout: PaneNode }, tabId: string): string | null {
   return findLeafOfTab(state.layout, tabId)?.id ?? null;
-}
-
-function replaceSizes(node: PaneNode, splitId: string, sizes: number[]): PaneNode {
-  if (node.kind === 'leaf') return node;
-  if (node.id === splitId) return { ...node, sizes };
-  const children = node.children.map(c => replaceSizes(c, splitId, sizes));
-  return children.every((c, i) => c === node.children[i]) ? node : { ...node, children };
 }
 
 export const createPanesSlice: StateCreator<PanesSlice & TabsSlice, [], [], PanesSlice> = (set, get) => ({
@@ -68,6 +62,6 @@ export const createPanesSlice: StateCreator<PanesSlice & TabsSlice, [], [], Pane
     set({ layout: collapsed.root, focusedPaneId: collapsed.focusedPaneId, activeTabId: tabId });
   },
   resizeSplit: (splitId, sizes) => {
-    set({ layout: replaceSizes(get().layout, splitId, sizes) });
+    set({ layout: replaceSplitSizes(get().layout, splitId, sizes) });
   },
 });

@@ -4,6 +4,7 @@ import type { ClaudeCustomModel } from '../lib/models';
 import { DEFAULT_MODEL_ID, DEFAULT_TITLE_GEN_MODEL_ID } from '../lib/models';
 import type { NotificationTrigger } from '../lib/attention';
 import type { Provider } from '../types';
+import { DRAWER_DEFAULT_SIZE } from '../lib/drawerGeometry';
 
 export type SortMode = 'manual' | 'alpha' | 'activity';
 export type HistoryViewMode = 'communication' | 'full';
@@ -29,6 +30,7 @@ export type SettingsSlice = {
   shortcutOverrides: Record<string, string>;
   historyViewMode: HistoryViewMode;
   tabLayoutMode: TabLayoutMode;
+  terminalDrawerSize: number;
   notificationsEnabled: boolean;
   notificationTrigger: NotificationTrigger;
   showActiveSessions: boolean;
@@ -63,6 +65,7 @@ export type SettingsSlice = {
   resetShortcutOverrides: () => void;
   setHistoryViewMode: (mode: HistoryViewMode) => void;
   setTabLayoutMode: (mode: TabLayoutMode) => void;
+  setTerminalDrawerSize: (size: number) => void;
   setNotificationsEnabled: (v: boolean) => void;
   setNotificationTrigger: (t: NotificationTrigger) => void;
   setShowActiveSessions: (v: boolean) => void;
@@ -98,6 +101,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   shortcutOverrides: {},
   historyViewMode: 'full',
   tabLayoutMode: 'classic',
+  terminalDrawerSize: DRAWER_DEFAULT_SIZE,
   notificationsEnabled: true,
   notificationTrigger: 'both',
   showActiveSessions: true,
@@ -145,6 +149,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   resetShortcutOverrides: () => set({ shortcutOverrides: {} }),
   setHistoryViewMode: (historyViewMode) => set({ historyViewMode }),
   setTabLayoutMode: (tabLayoutMode) => set({ tabLayoutMode }),
+  setTerminalDrawerSize: (terminalDrawerSize) => set({ terminalDrawerSize }),
   setNotificationsEnabled: (notificationsEnabled) => set({ notificationsEnabled }),
   setNotificationTrigger: (notificationTrigger) => set({ notificationTrigger }),
   setShowActiveSessions: (showActiveSessions) => set({ showActiveSessions }),

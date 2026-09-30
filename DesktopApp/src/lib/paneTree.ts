@@ -25,6 +25,13 @@ export function mapLeaves(node: PaneNode, fn: (leaf: PaneLeaf) => PaneLeaf): Pan
   return children.every((child, i) => child === node.children[i]) ? node : { ...node, children };
 }
 
+export function replaceSplitSizes(node: PaneNode, splitId: string, sizes: number[]): PaneNode {
+  if (node.kind === 'leaf') return node;
+  if (node.id === splitId) return { ...node, sizes };
+  const children = node.children.map(c => replaceSplitSizes(c, splitId, sizes));
+  return children.every((c, i) => c === node.children[i]) ? node : { ...node, children };
+}
+
 function pickActive(tabIds: string[], current: string | null): string | null {
   if (current && tabIds.includes(current)) return current;
   return tabIds[tabIds.length - 1] ?? null;

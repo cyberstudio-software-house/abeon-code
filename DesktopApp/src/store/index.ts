@@ -7,6 +7,8 @@ import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 import { createGitSlice, type GitSlice } from './gitSlice';
 import { createClickUpSlice, type ClickUpSlice } from './clickupSlice';
 import { createPanesSlice, ROOT_PANE_ID, type PanesSlice } from './panesSlice';
+import { createTerminalDrawersSlice, type TerminalDrawersSlice } from './terminalDrawersSlice';
+import { DRAWER_MAX_SIZE, DRAWER_MIN_SIZE } from '../lib/drawerGeometry';
 import { collapseEmpty, createLeaf, leaves, mapLeaves, reconcilePanes, type PaneNode } from '../lib/paneTree';
 import { tauri } from '../lib/tauri';
 import { parseWindowMode } from '../lib/windowMode';
@@ -23,7 +25,7 @@ import type { Provider } from '../types';
 import { isProvider } from '../lib/providers';
 import { migrateClaudeModelSettings } from '../lib/models';
 
-export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice;
+export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice & TerminalDrawersSlice;
 
 export const useStore = create<AppState>()((...a) => ({
   ...createSettingsSlice(...a),
@@ -34,6 +36,7 @@ export const useStore = create<AppState>()((...a) => ({
   ...createGitSlice(...a),
   ...createClickUpSlice(...a),
   ...createPanesSlice(...a),
+  ...createTerminalDrawersSlice(...a),
 }));
 
 const PERSIST_KEY = 'abeoncode.settings';
@@ -59,6 +62,7 @@ type Persisted = {
   shortcutOverrides?: Record<string, string>;
   historyViewMode?: 'communication' | 'full';
   tabLayoutMode?: 'classic' | 'stacked';
+  terminalDrawerSize?: number;
   notificationsEnabled?: boolean;
   notificationTrigger?: 'turnEnd' | 'questionsOnly' | 'both';
   showActiveSessions?: boolean;
@@ -82,6 +86,7 @@ const PERSISTED_KEYS = [
   'shortcutOverrides',
   'historyViewMode',
   'tabLayoutMode',
+  'terminalDrawerSize',
   'notificationsEnabled',
   'notificationTrigger',
   'showActiveSessions',
@@ -119,6 +124,7 @@ function pickPersistedFields(state: AppState): Persisted {
     shortcutOverrides: state.shortcutOverrides,
     historyViewMode: state.historyViewMode,
     tabLayoutMode: state.tabLayoutMode,
+    terminalDrawerSize: state.terminalDrawerSize,
     notificationsEnabled: state.notificationsEnabled,
     notificationTrigger: state.notificationTrigger,
     showActiveSessions: state.showActiveSessions,
@@ -137,6 +143,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
   switch (key) {
     case 'leftWidth':
     case 'rightWidth':
+    case 'terminalDrawerSize':
       return String(value as number);
     case 'skipPermissions':
     case 'remoteBridgeEnabled':
@@ -164,6 +171,8 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
       return clamp(Number(raw), 200, 420);
     case 'rightWidth':
       return clamp(Number(raw), 220, 480);
+    case 'terminalDrawerSize':
+      return clamp(Number(raw), DRAWER_MIN_SIZE, DRAWER_MAX_SIZE);
     case 'skipPermissions':
     case 'remoteBridgeEnabled':
     case 'allowRemoteSpawn':
@@ -221,6 +230,9 @@ function applyPersistedToState(p: Persisted) {
   }
   if (p.tabLayoutMode === 'classic' || p.tabLayoutMode === 'stacked') {
     patch.tabLayoutMode = p.tabLayoutMode;
+  }
+  if (typeof p.terminalDrawerSize === 'number' && Number.isFinite(p.terminalDrawerSize)) {
+    patch.terminalDrawerSize = clamp(p.terminalDrawerSize, DRAWER_MIN_SIZE, DRAWER_MAX_SIZE);
   }
   if (p.notificationsEnabled !== undefined) patch.notificationsEnabled = p.notificationsEnabled;
   if (p.showActiveSessions !== undefined) patch.showActiveSessions = p.showActiveSessions;
