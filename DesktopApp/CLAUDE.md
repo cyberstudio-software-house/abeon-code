@@ -14,14 +14,14 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 ## Folder map
 
 ### Frontend (`src/`)
-- `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `panesSlice`, `actionsSlice`, `gitSlice`. Composed in `store/index.ts`.
+- `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `panesSlice`, `actionsSlice`, `gitSlice`, `terminalDrawersSlice`. Composed in `store/index.ts`.
 - `lib/tauri.ts` — **single typed wrapper** over `invoke()`/`listen()`. Every IPC call lives here; do not call `invoke` directly from components.
 - `types/` — TS types, several are ts-rs-generated from Rust (`PtyKind.ts`, `GitStatus.ts`, etc.) — do not edit by hand.
 - `components/`
   - `layout/AppShell.tsx` — three-column shell with draggable resizers; persists widths via store.
   - `layout/TitleBar.tsx` — custom titlebar.
   - `sidebar/` — left column: project list, sessions, sort menu, search.
-  - `center/` — middle column: `CenterPanel` → `PaneLayout` (renders the pane tree: one tab bar per pane, one `TabPanel` content layer per tab, `PaneResizers`, `PaneDragOverlay` + `usePaneDrag` for the tab-drag gesture). **Tabs and panes are managed here.**
+  - `center/` — middle column: `CenterPanel` → `PaneLayout` (renders the pane tree: one tab bar per pane, one `TabPanel` content layer per tab, `PaneResizers`, `PaneDragOverlay` + `usePaneDrag` for the tab-drag gesture). **Tabs and panes are managed here.** `TerminalDrawerChrome` + `useTerminalDrawerShortcuts` render the per-session terminal drawer (layers computed by `lib/paneLayers.ts`, geometry in `lib/drawerGeometry.ts`).
   - `right/` — right column: Git panel (`GitSection` with tabs: working-tree changes / commit history via `GitHistory` + `CommitDiffDialog`), Actions list, runnable scripts.
   - `terminal/TerminalView.tsx` — xterm wrapper for any PTY (claude, action, shell).
   - `history/` — session history viewer (markdown blocks).
@@ -91,6 +91,24 @@ and `TabItem.tsx`. The bar's height is **not** a constant: `tabBarHeight(mode)` 
 `canSplit`) and `PaneResizers` (minimum pane height). A new renderer must be added there too, or
 content layers will overlap the bar.
 
+### Terminal drawer
+
+A session tab can own a bottom drawer of shells (`store/terminalDrawersSlice.ts`, keyed by the
+session tab id). Drawer terminals are **not** tabs: `tabs[]`, `reconcilePanes`, MRU and nav history
+never see them. Splits reuse `PaneNode`, with every leaf id equal to the terminal id it holds.
+
+- Entry point is `openTerminal(projectId, { toggle })`: the active session of the same project gets
+  its drawer (`mod+t` / `$` toggle; toolbar, history header, sidebar and launcher only show), any
+  other case opens a terminal tab.
+- `PaneLayout` renders tab layers and drawer layers from one array (`computePaneLayers`) sorted by
+  id. Detaching (`detachDrawerTerminal`) turns the terminal into a `terminal` tab with the **same id**
+  in one `set()`, so React keeps the node and the PTY survives with its scrollback.
+- `TerminalView.takeFocus` decides who gets the keyboard; `focused` still drives
+  `activeAgentPtyId`, so "insert into active session" keeps targeting Claude while the drawer types.
+- A store subscriber prunes drawers whose session tab vanished; that is the only cleanup path.
+- Detaching a session to a window first turns its drawer terminals into tabs of the source window;
+  detaching a project group hands them over as fresh terminal tabs.
+
 ## Detached windows
 
 Two window modes beyond the main shell, both routed by `lib/windowMode.ts` (`?view=…` in the
@@ -132,6 +150,7 @@ The app drives three AI CLIs, selected per session via `domain::Provider` (`clau
 
 - `Ctrl/Cmd+K` — focus sidebar search (`Sidebar.tsx`, document listener **with `capture: true`** so it wins over xterm's textarea while a session/terminal is focused).
 - `Ctrl/Cmd+W` — close active tab (`TabBar.tsx`, document listener **with `capture: true`** so it wins over xterm's textarea).
+- `Ctrl/Cmd+T` — toggle the session terminal drawer, or open a terminal tab outside a session (`AppShell.tsx`). While the drawer has focus, `Ctrl/Cmd+Shift+O` / `Ctrl/Cmd+Shift+E` split right / down and `Ctrl/Cmd+Alt+arrows` move between splits (`useTerminalDrawerShortcuts.ts`, capture-phase).
 
 Pattern when adding a new global shortcut that may conflict with xterm: register on `document` in `useEffect` with `{ capture: true }`, then `preventDefault()` + `stopPropagation()`.
 
@@ -139,6 +158,9 @@ Pattern when adding a new global shortcut that may conflict with xterm: register
 
 - **Never call `term.dispose()`** in `TerminalView.tsx` — triggers a webkit2gtk crash. The cleanup path kills the PTY, detaches listeners, and lets the `Terminal` object be GC'd with its container. See note around line 127.
 - **Content layers must never change DOM parent** — `PaneLayout` keeps every tab layer a direct sibling in one container and only moves it via inline `left/top/width/height`. Wrapping layers per pane (or re-keying them) remounts `TerminalView`, whose cleanup kills the live PTY.
+- **Content layers must also keep their relative order** — `computePaneLayers` sorts them by id.
+  React moves reordered keyed siblings with `insertBefore`, which detaches the node for a moment and
+  resets xterm's scroll position and focus.
 - **Middle-click on tabs needs `e.preventDefault()` in `onMouseDown`** — otherwise webview activates autoscroll cursor.
 - **xterm input is base64-encoded** over IPC (`pty_write` / `pty:*:output`). The encoding/decoding is centralized in `lib/tauri.ts` — components never deal with base64 directly.
 - **PTY output during hidden tabs is buffered** in `TerminalView.pendingWrites` and flushed on `visible` change. Don't bypass this — writing to an un-fitted xterm corrupts layout.
