@@ -158,8 +158,9 @@ i przez podziały w szufladzie. Separator sesja/szuflada to osobny, prosty uchwy
 **Strefa fokusu:**
 
 - `mousedown` (capture) na warstwie terminala szuflady lub jej nagłówku → `focusPane(paneId)` +
-  `focusDrawerTerminal`. `mousedown` na warstwie sesji lub pasku zakładek panelu →
-  `focusDrawerSession`.
+  `focusDrawerTerminal`. `mousedown` na warstwie sesji → `focusDrawerSession`. Pasek zakładek
+  **nie** zmienia strefy fokusu: gdyby zmieniał, `mousedown` na `$` zdejmowałby fokus z szuflady
+  przed `click`, więc toggle nigdy by jej nie schował.
 - `TerminalView` dostaje opcjonalny prop `takeFocus` (domyślnie = `focused`), który steruje
   **wyłącznie** wywołaniem `term.focus()`. Sesja: `focused` bez zmian (pane z fokusem → nadal
   rejestruje `activeAgentPtyId`, więc „Wstaw do aktywnej sesji" celuje w Claude'a), a
