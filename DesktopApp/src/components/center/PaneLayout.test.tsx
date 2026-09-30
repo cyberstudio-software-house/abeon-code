@@ -5,15 +5,18 @@ import { act, fireEvent, render } from '@testing-library/react';
 const counters = vi.hoisted(() => ({ terminalMounts: 0 }));
 
 vi.mock('../terminal/TerminalView', () => ({
-  TerminalView: ({ visible, focused }: { visible?: boolean; focused?: boolean }) => {
+  TerminalView: ({ visible, focused, takeFocus, onExit }: { visible?: boolean; focused?: boolean; takeFocus?: boolean; onExit?: (code: number) => void }) => {
     useEffect(() => { counters.terminalMounts += 1; }, []);
     return (
       <div
         data-testid="terminal"
         data-visible={String(visible)}
         data-focused={String(!!focused)}
+        data-take-focus={String(takeFocus ?? !!focused)}
         onMouseDown={e => e.stopPropagation()}
-      />
+      >
+        {onExit ? <button data-testid="exit" onClick={() => onExit(0)} /> : null}
+      </div>
     );
   },
 }));
@@ -635,5 +638,106 @@ describe('PaneLayout tab layout mode', () => {
     expect(container.querySelector('[data-project-tab-id="1"]')).not.toBeNull();
     const layer = container.querySelector('[data-tab-layer="t1"]') as HTMLElement;
     expect(layer.style.top).toBe(`calc(0% + ${STACKED_TAB_BAR_HEIGHT}px)`);
+  });
+});
+
+const liveSession = (id: string): Tab => ({ kind: 'session', id, projectId: 1, sessionId: id, title: id, mode: 'terminal' });
+
+describe('PaneLayout terminal drawer', () => {
+  beforeEach(() => {
+    counters.terminalMounts = 0;
+    useStore.setState({
+      tabs: [liveSession('s1')],
+      activeTabId: 's1',
+      mruOrder: [],
+      navHistory: [],
+      navIndex: 0,
+      projects: [{ id: 1, name: 'P', path: '/p' }] as never,
+      layout: createLeaf(ROOT_PANE_ID, ['s1'], 's1'),
+      focusedPaneId: ROOT_PANE_ID,
+      tabLayoutMode: 'classic',
+      drawers: {},
+      drawerTerminals: {},
+      drawerDragSize: null,
+      drawerClosePrompt: null,
+      terminalDrawerSize: 0.35,
+    });
+  });
+
+  const drawerIds = () => leaves(useStore.getState().drawers.s1.layout).map(l => l.id);
+
+  it('shrinks the session layer and places the drawer terminal below it', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    const [id] = drawerIds();
+    const session = container.querySelector('[data-tab-layer="s1"]') as HTMLElement;
+    const terminal = container.querySelector(`[data-tab-layer="${id}"]`) as HTMLElement;
+    expect(session.style.height).toBe('calc(65% - 20.8px)');
+    expect(terminal.style.top).toBe('calc(65% + 39.2px)');
+    expect(terminal.dataset.drawerOwner).toBe('s1');
+  });
+
+  it('never remounts a drawer terminal when it is detached to a tab', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    expect(counters.terminalMounts).toBe(2);
+    const [id] = drawerIds();
+    const node = container.querySelector(`[data-tab-layer="${id}"]`) as HTMLElement;
+    const observer = new MutationObserver(() => {});
+    observer.observe(node.parentElement!, { childList: true });
+
+    act(() => { useStore.getState().detachDrawerTerminal(id); });
+
+    const removed = observer.takeRecords().flatMap(r => Array.from(r.removedNodes));
+    observer.disconnect();
+    expect(counters.terminalMounts).toBe(2);
+    expect(container.querySelector(`[data-tab-layer="${id}"]`)).toBe(node);
+    expect(removed).not.toContain(node);
+    expect(node.dataset.drawerOwner).toBeUndefined();
+  });
+
+  it('never remounts drawer terminals when their session moves to another pane', () => {
+    useStore.setState({ tabs: [liveSession('s1'), terminalTab('t2', 'Inny')], layout: createLeaf(ROOT_PANE_ID, ['s1', 't2'], 's1') });
+    render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    const mounts = counters.terminalMounts;
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 's1'); });
+    expect(counters.terminalMounts).toBe(mounts);
+  });
+
+  it('keeps the terminals of a hidden drawer mounted but invisible', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    const [id] = drawerIds();
+    act(() => { useStore.getState().hideTerminalDrawer('s1'); });
+    const layer = container.querySelector(`[data-tab-layer="${id}"]`) as HTMLElement;
+    expect(layer.className).toContain('invisible');
+    expect(counters.terminalMounts).toBe(2);
+    expect((container.querySelector('[data-tab-layer="s1"]') as HTMLElement).style.height).toBe('calc(100% - 32px)');
+  });
+
+  it('hands the keyboard back to the session when the last drawer shell exits', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    const session = () => container.querySelector('[data-tab-layer="s1"] [data-testid="terminal"]') as HTMLElement;
+    expect(session().dataset.takeFocus).toBe('false');
+
+    fireEvent.click(container.querySelector('[data-testid="exit"]')!);
+
+    expect(useStore.getState().drawers.s1).toBeUndefined();
+    expect(session().dataset.takeFocus).toBe('true');
+  });
+
+  it('moves the keyboard between the session and a clicked drawer terminal', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().splitDrawerTerminal('s1', 'row');
+    });
+    const [first] = drawerIds();
+    fireEvent.mouseDown(container.querySelector(`[data-tab-layer="${first}"] [data-testid="terminal"]`)!);
+    expect(useStore.getState().drawers.s1).toMatchObject({ hasFocus: true, focusedTerminalId: first });
+    fireEvent.mouseDown(container.querySelector('[data-tab-layer="s1"] [data-testid="terminal"]')!);
+    expect(useStore.getState().drawers.s1.hasFocus).toBe(false);
   });
 });

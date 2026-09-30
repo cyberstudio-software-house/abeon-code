@@ -2,6 +2,8 @@ import { useMemo, useRef } from 'react';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { computePaneRects, tabBarHeight } from '../../lib/paneGeometry';
+import { lenRectStyle } from '../../lib/drawerGeometry';
+import { computePaneLayers } from '../../lib/paneLayers';
 import { leaves } from '../../lib/paneTree';
 import { PaneDragOverlay } from './PaneDragOverlay';
 import { PaneResizers } from './PaneResizers';
@@ -17,18 +19,21 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   const focusedPaneId = useStore(s => s.focusedPaneId);
   const focusPane = useStore(s => s.focusPane);
   const tabLayoutMode = useStore(s => s.tabLayoutMode);
+  const drawers = useStore(s => s.drawers);
+  const drawerTerminals = useStore(s => s.drawerTerminals);
+  const drawerSize = useStore(s => s.drawerDragSize ?? s.terminalDrawerSize);
+  const focusDrawerTerminal = useStore(s => s.focusDrawerTerminal);
+  const focusDrawerSession = useStore(s => s.focusDrawerSession);
+  const closeDrawerTerminal = useStore(s => s.closeDrawerTerminal);
   const barHeight = tabBarHeight(tabLayoutMode);
   const Bar = tabLayoutMode === 'stacked' ? StackedTabBar : TabBar;
   const { drag, beginDrag } = usePaneDrag(containerRef);
   const rects = useMemo(() => computePaneRects(layout), [layout]);
   const panes = useMemo(() => leaves(layout), [layout]);
-  const ownerOf = useMemo(() => {
-    const map = new Map<string, { paneId: string; active: boolean }>();
-    for (const pane of panes) {
-      for (const tabId of pane.tabIds) map.set(tabId, { paneId: pane.id, active: pane.activeTabId === tabId });
-    }
-    return map;
-  }, [panes]);
+  const { layers } = useMemo(
+    () => computePaneLayers({ tabs, layout, focusedPaneId, barHeight, drawers, drawerTerminals, drawerSize }),
+    [tabs, layout, focusedPaneId, barHeight, drawers, drawerTerminals, drawerSize],
+  );
 
   return (
     <div ref={containerRef} className="flex-1 relative overflow-hidden">
@@ -53,29 +58,30 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
         );
       })}
       {/* Layers stay siblings of one container: a new DOM parent would remount TerminalView, whose cleanup kills the live PTY. */}
-      {tabs.map(tab => {
-        const owner = ownerOf.get(tab.id);
-        const rect = owner ? rects.get(owner.paneId) : undefined;
-        if (!owner || !rect) return null;
-        return (
-          <div
-            key={tab.id}
-            data-tab-layer={tab.id}
-            data-pane-content={owner.paneId}
-            // Capture phase: xterm's textarea swallows mousedown before it bubbles out.
-            onMouseDownCapture={() => focusPane(owner.paneId)}
-            className={`absolute ${owner.active ? '' : 'invisible pointer-events-none'}`}
-            style={{
-              left: `${rect.left}%`,
-              top: `calc(${rect.top}% + ${barHeight}px)`,
-              width: `${rect.width}%`,
-              height: `calc(${rect.height}% - ${barHeight}px)`,
-            }}
-          >
-            <TabPanel tab={tab} visible={owner.active} focused={owner.paneId === focusedPaneId} />
-          </div>
-        );
-      })}
+      {layers.map(layer => (
+        <div
+          key={layer.tab.id}
+          data-tab-layer={layer.tab.id}
+          data-pane-content={layer.paneId}
+          data-drawer-owner={layer.drawerOwnerId ?? undefined}
+          // Capture phase: xterm's textarea swallows mousedown before it bubbles out.
+          onMouseDownCapture={() => {
+            focusPane(layer.paneId);
+            if (layer.drawerOwnerId) focusDrawerTerminal(layer.drawerOwnerId, layer.tab.id);
+            else focusDrawerSession(layer.tab.id);
+          }}
+          className={`absolute ${layer.visible ? '' : 'invisible pointer-events-none'}`}
+          style={lenRectStyle(layer.rect)}
+        >
+          <TabPanel
+            tab={layer.tab}
+            visible={layer.visible}
+            focused={layer.focused}
+            takeFocus={layer.takeFocus}
+            onExit={layer.drawerOwnerId ? () => closeDrawerTerminal(layer.tab.id) : undefined}
+          />
+        </div>
+      ))}
       <PaneResizers layout={layout} containerRef={containerRef} />
       {tabs.length === 0 && (
         <div className="absolute inset-0 grid place-items-center text-muted text-[13px]">
