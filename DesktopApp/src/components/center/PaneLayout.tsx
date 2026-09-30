@@ -10,6 +10,7 @@ import { PaneResizers } from './PaneResizers';
 import { TabBar } from './TabBar';
 import { StackedTabBar } from './StackedTabBar';
 import { TabPanel } from './TabContent';
+import { DrawerCloseDialog, TerminalDrawerChrome } from './TerminalDrawerChrome';
 import { usePaneDrag } from './usePaneDrag';
 
 export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number } = {}) {
@@ -30,7 +31,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   const { drag, beginDrag } = usePaneDrag(containerRef);
   const rects = useMemo(() => computePaneRects(layout), [layout]);
   const panes = useMemo(() => leaves(layout), [layout]);
-  const { layers } = useMemo(
+  const { layers, visibleDrawers } = useMemo(
     () => computePaneLayers({ tabs, layout, focusedPaneId, barHeight, drawers, drawerTerminals, drawerSize }),
     [tabs, layout, focusedPaneId, barHeight, drawers, drawerTerminals, drawerSize],
   );
@@ -83,6 +84,10 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
         </div>
       ))}
       <PaneResizers layout={layout} containerRef={containerRef} />
+      {visibleDrawers.map(entry => (
+        <TerminalDrawerChrome key={entry.ownerTabId} entry={entry} containerRef={containerRef} />
+      ))}
+      <DrawerCloseDialog />
       {tabs.length === 0 && (
         <div className="absolute inset-0 grid place-items-center text-muted text-[13px]">
           {detachedProjectId != null ? 'Otwórz nową sesję przyciskiem + na pasku zakładek' : 'Wybierz sesję z lewej'}

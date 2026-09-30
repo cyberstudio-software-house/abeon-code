@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, fireEvent, render } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 const counters = vi.hoisted(() => ({ terminalMounts: 0 }));
 
@@ -739,5 +739,71 @@ describe('PaneLayout terminal drawer', () => {
     expect(useStore.getState().drawers.s1).toMatchObject({ hasFocus: true, focusedTerminalId: first });
     fireEvent.mouseDown(container.querySelector('[data-tab-layer="s1"] [data-testid="terminal"]')!);
     expect(useStore.getState().drawers.s1.hasFocus).toBe(false);
+  });
+
+  it('splits from the header and outlines the focused terminal', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    expect(container.querySelector('[data-drawer-focus-ring]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Podziel w prawo/ }));
+    expect(container.querySelectorAll('[data-drawer-owner="s1"]')).toHaveLength(2);
+    expect(container.querySelector('[data-drawer-focus-ring]')).not.toBeNull();
+  });
+
+  it('detaches the focused terminal from the header', () => {
+    render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    const [id] = drawerIds();
+    fireEvent.click(screen.getByRole('button', { name: 'Wydziel do zakładki' }));
+    expect(useStore.getState().tabs.some(t => t.id === id && t.kind === 'terminal')).toBe(true);
+    expect(useStore.getState().drawers).toEqual({});
+  });
+
+  it('hides the drawer from the header', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    fireEvent.click(screen.getByRole('button', { name: 'Schowaj panel' }));
+    expect(useStore.getState().drawers.s1.open).toBe(false);
+    expect(container.querySelector('[data-drawer-header]')).toBeNull();
+  });
+
+  it('asks before closing a terminal from the header', () => {
+    render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    fireEvent.click(screen.getByRole('button', { name: 'Zamknij terminal' }));
+    expect(screen.getByText('Zamknąć terminal?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Zamknij' }));
+    expect(useStore.getState().drawers).toEqual({});
+    expect(screen.queryByText('Zamknąć terminal?')).toBeNull();
+  });
+
+  it('resizes the drawer from the divider and persists only on release', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    stubBox(container.firstElementChild as HTMLElement, 1000, 800);
+    const divider = container.querySelector('[data-drawer-divider]') as HTMLElement;
+
+    fireEvent.mouseDown(divider, { clientX: 500, clientY: 500 });
+    fireEvent.mouseMove(window, { clientX: 500, clientY: 400 });
+    expect(useStore.getState().drawerDragSize).toBeCloseTo(0.35 + 100 / 768);
+    expect(useStore.getState().terminalDrawerSize).toBe(0.35);
+
+    fireEvent.mouseUp(window);
+    expect(useStore.getState().terminalDrawerSize).toBeCloseTo(0.35 + 100 / 768);
+    expect(useStore.getState().drawerDragSize).toBeNull();
+  });
+
+  it('resizes a split inside the drawer', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().splitDrawerTerminal('s1', 'row');
+    });
+    stubBox(container.firstElementChild as HTMLElement, 1000, 800);
+    const handle = container.querySelector('[role="separator"]:not([data-drawer-divider])') as HTMLElement;
+    fireEvent.mouseDown(handle, { clientX: 500, clientY: 700 });
+    fireEvent.mouseMove(window, { clientX: 600, clientY: 700 });
+    const split = useStore.getState().drawers.s1.layout as PaneSplit;
+    expect(split.sizes[0]).toBeCloseTo(0.6);
   });
 });
