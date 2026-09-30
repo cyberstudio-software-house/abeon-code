@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
 
 const probe = vi.hoisted(() => ({
+  exits: [] as Array<(code: number) => void>,
   focusCalls: 0,
   writes: [] as Uint8Array[],
   sinks: [] as Array<(bytes: Uint8Array) => void>,
@@ -42,7 +43,10 @@ vi.mock('../../lib/tauri', () => ({
       probe.sinks.push(cb);
       return () => {};
     }),
-    onPtyExit: vi.fn(async () => () => {}),
+    onPtyExit: vi.fn(async (_id: string, cb: (code: number) => void) => {
+      probe.exits.push(cb);
+      return () => {};
+    }),
     ptyKill: vi.fn(async () => {}),
     ptyWrite: vi.fn(async () => {}),
     ptyResize: vi.fn(async () => {}),
@@ -81,6 +85,7 @@ function Panes({ focused }: { focused: 'left' | 'right' }) {
 
 describe('TerminalView focus', () => {
   beforeEach(() => {
+    probe.exits = [];
     probe.focusCalls = 0;
     probe.writes = [];
     probe.sinks = [];
@@ -172,6 +177,37 @@ describe('TerminalView focus', () => {
       80,
       24,
     );
+  });
+
+  it('keeps the active agent PTY while another element holds the keyboard', async () => {
+    await act(async () => {
+      render(<TerminalView projectId={1} kind="agent" sessionId="s1" visible focused takeFocus={false} />);
+    });
+    expect(useStore.getState().activeAgentPtyId).toBe('pty-1');
+    expect(probe.focusCalls).toBe(0);
+  });
+
+  it('takes the keyboard back when takeFocus turns on', async () => {
+    let view!: ReturnType<typeof render>;
+    await act(async () => {
+      view = render(<TerminalView projectId={1} kind="agent" sessionId="s1" visible focused takeFocus={false} />);
+    });
+    await act(async () => {
+      view.rerender(<TerminalView projectId={1} kind="agent" sessionId="s1" visible focused takeFocus />);
+    });
+    expect(probe.focusCalls).toBeGreaterThan(0);
+  });
+
+  it('reports the PTY exit to the latest onExit without respawning', async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<TerminalView projectId={1} kind="shell" visible onExit={first} />); });
+    await act(async () => { view.rerender(<TerminalView projectId={1} kind="shell" visible onExit={second} />); });
+    act(() => { probe.exits[0](0); });
+    expect(probe.spawned).toBe(1);
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledWith(0);
   });
 });
 

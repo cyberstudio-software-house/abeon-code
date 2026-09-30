@@ -22,6 +22,8 @@ type Props = {
   tabId?: string;
   visible?: boolean;
   focused?: boolean;
+  takeFocus?: boolean;
+  onExit?: (code: number) => void;
 };
 
 const FILE_PATH_RE = /((?:\.\.?\/|~\/|\/|[\w@.-]+\/)[\w@.\/-]*\.\w{1,10})(?::(\d+)(?::(\d+))?|\((\d+)[,:](\d+)\))?/g;
@@ -98,7 +100,7 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
   };
 }
 
-export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, tabId, visible = true, focused = true }: Props) {
+export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, tabId, visible = true, focused = true, takeFocus, onExit }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const modelEfforts = useStore(s => s.modelEfforts);
   const codexModelId = useStore(s => s.codexModelId);
@@ -119,8 +121,11 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
   const pendingWrites = useRef<Uint8Array[]>([]);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
-  const focusedRef = useRef(focused);
-  focusedRef.current = focused;
+  const claimsKeyboard = takeFocus ?? focused;
+  const claimsKeyboardRef = useRef(claimsKeyboard);
+  claimsKeyboardRef.current = claimsKeyboard;
+  const onExitRef = useRef(onExit);
+  onExitRef.current = onExit;
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -165,7 +170,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     });
     term.registerLinkProvider(createFilePathProvider(term, projectPathRef));
     fit.fit();
-    if (visibleRef.current && focusedRef.current) term.focus();
+    if (visibleRef.current && claimsKeyboardRef.current) term.focus();
     termRef.current = term;
     fitRef.current = fit;
 
@@ -220,6 +225,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
       const offExit = await tauri.onPtyExit(id, (code) => {
         if (cancelled) return;
         term.write(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m\r\n`);
+        onExitRef.current?.(code);
       });
       unlistenRefs.current.push(offOut, offExit);
 
@@ -340,8 +346,8 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
     }
     pendingWrites.current = [];
     fit.fit();
-    if (focused) term.focus();
-  }, [visible, focused]);
+    if (claimsKeyboard) term.focus();
+  }, [visible, claimsKeyboard]);
 
   useEffect(() => {
     if (kind !== 'agent' || !agentPtyId || !visible || !focused) return;

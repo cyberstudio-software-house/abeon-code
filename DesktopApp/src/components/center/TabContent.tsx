@@ -8,7 +8,7 @@ type SessionTab = Extract<Tab, { kind: 'session' }>;
 
 const layer = (visible: boolean) => `absolute inset-0 ${visible ? '' : 'invisible pointer-events-none'}`;
 
-function SessionBody({ tab, visible, focused = true }: { tab: SessionTab; visible: boolean; focused?: boolean }) {
+function SessionBody({ tab, visible, focused = true, takeFocus }: { tab: SessionTab; visible: boolean; focused?: boolean; takeFocus?: boolean }) {
   if (tab.mode === 'history') {
     const historySessionId = tab.linkedSessionId ?? tab.sessionId;
     return (
@@ -30,6 +30,7 @@ function SessionBody({ tab, visible, focused = true }: { tab: SessionTab; visibl
           fresh
           visible={visible}
           focused={focused}
+          takeFocus={takeFocus}
         />
       </div>
     );
@@ -37,12 +38,18 @@ function SessionBody({ tab, visible, focused = true }: { tab: SessionTab; visibl
   const resumeId = tab.linkedSessionId ?? (tab.sessionId.startsWith('new-') ? undefined : tab.sessionId);
   return (
     <div className={layer(visible)}>
-      <TerminalView projectId={tab.projectId} kind="agent" provider={provider} tabId={tab.id} sessionId={resumeId} visible={visible} focused={focused} />
+      <TerminalView projectId={tab.projectId} kind="agent" provider={provider} tabId={tab.id} sessionId={resumeId} visible={visible} focused={focused} takeFocus={takeFocus} />
     </div>
   );
 }
 
-export function TabPanel({ tab, visible, focused = true }: { tab: Tab; visible: boolean; focused?: boolean }) {
+export function TabPanel({ tab, visible, focused = true, takeFocus, onExit }: {
+  tab: Tab;
+  visible: boolean;
+  focused?: boolean;
+  takeFocus?: boolean;
+  onExit?: (code: number) => void;
+}) {
   if (tab.kind === 'providerPicker') {
     return (
       <div className={layer(visible)}>
@@ -55,7 +62,7 @@ export function TabPanel({ tab, visible, focused = true }: { tab: Tab; visible: 
     const subagentSessionId = tab.linkedSessionId ?? tab.sessionId;
     return (
       <>
-        <SessionBody tab={tab} visible={visible && !agentId} focused={focused} />
+        <SessionBody tab={tab} visible={visible && !agentId} focused={focused} takeFocus={takeFocus} />
         {agentId ? (
           <div className={layer(visible)}>
             <SubagentView projectId={tab.projectId} sessionId={subagentSessionId} agentId={agentId} tabId={tab.id} />
@@ -74,7 +81,7 @@ export function TabPanel({ tab, visible, focused = true }: { tab: Tab; visible: 
   if (tab.kind === 'terminal') {
     return (
       <div className={layer(visible)}>
-        <TerminalView projectId={tab.projectId} kind="shell" visible={visible} focused={focused} />
+        <TerminalView projectId={tab.projectId} kind="shell" visible={visible} focused={focused} takeFocus={takeFocus} onExit={onExit} />
       </div>
     );
   }

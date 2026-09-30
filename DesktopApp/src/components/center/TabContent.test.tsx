@@ -3,12 +3,13 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
 import type { Tab } from '../../store/tabsSlice';
 
-const counters = vi.hoisted(() => ({ terminalMounts: 0 }));
+const counters = vi.hoisted(() => ({ terminalMounts: 0, lastProps: null as Record<string, unknown> | null }));
 
 vi.mock('../terminal/TerminalView', () => ({
-  TerminalView: ({ visible }: { visible?: boolean }) => {
+  TerminalView: (props: { visible?: boolean }) => {
+    counters.lastProps = props;
     useEffect(() => { counters.terminalMounts += 1; }, []);
-    return <div data-testid="terminal" data-visible={String(visible)} />;
+    return <div data-testid="terminal" data-visible={String(props.visible)} />;
   },
 }));
 vi.mock('../history/HistoryView', () => ({
@@ -108,5 +109,18 @@ describe('TabPanel and the subagent view', () => {
     expect(overlay?.className).toContain('invisible');
     expect(overlay?.className).toContain('pointer-events-none');
     expect(getAllByTestId('terminal')[0].dataset.visible).toBe('false');
+  });
+});
+
+describe('TabPanel keyboard and exit wiring', () => {
+  it('passes takeFocus and onExit to a terminal tab', () => {
+    const onExit = vi.fn();
+    render(<TabPanel tab={{ kind: 'terminal', id: 't1', projectId: 1, title: 'T' }} visible focused takeFocus={false} onExit={onExit} />);
+    expect(counters.lastProps).toMatchObject({ kind: 'shell', focused: true, takeFocus: false, onExit });
+  });
+
+  it('passes takeFocus to a live session', () => {
+    render(<TabPanel tab={{ kind: 'session', id: 's', projectId: 1, sessionId: 's', title: 'S', mode: 'terminal' }} visible focused takeFocus={false} />);
+    expect(counters.lastProps).toMatchObject({ kind: 'agent', focused: true, takeFocus: false });
   });
 });
