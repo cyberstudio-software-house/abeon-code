@@ -98,13 +98,20 @@ session tab id). Drawer terminals are **not** tabs: `tabs[]`, `reconcilePanes`, 
 never see them. Splits reuse `PaneNode`, with every leaf id equal to the terminal id it holds.
 
 - Entry point is `openTerminal(projectId, { toggle })`: the active session of the same project gets
-  its drawer (`mod+t` / `$` toggle; toolbar, history header, sidebar and launcher only show), any
-  other case opens a terminal tab.
+  its drawer (`$` toggles; toolbar, history header, sidebar and launcher only show), any other case
+  opens a terminal tab. `mod+t` (`AppShell.tsx`) toggles only when DOM focus is really inside that
+  drawer (`[data-drawer-owner="<tabId>"]`), otherwise it shows — the store's `hasFocus` can drift
+  from DOM focus (e.g. caret in the commit textarea).
 - `PaneLayout` renders tab layers and drawer layers from one array (`computePaneLayers`) sorted by
   id. Detaching (`detachDrawerTerminal`) turns the terminal into a `terminal` tab with the **same id**
   in one `set()`, so React keeps the node and the PTY survives with its scrollback.
 - `TerminalView.takeFocus` decides who gets the keyboard; `focused` still drives
   `activeAgentPtyId`, so "insert into active session" keeps targeting Claude while the drawer types.
+- `TerminalView` only calls `term.focus()` when `visible`/`takeFocus` change. Every non-hiding reveal
+  bumps `drawer.focusRequest`, which reaches the focused drawer terminal as `focusToken` (a dep of
+  the focus effect, never of the spawn effect) — this pulls the keyboard back after a button click
+  stole DOM focus. The drawer header `preventDefault`s mousedown for the same reason.
+- `HistoryView` leaves `Ctrl/Cmd+F` to the shell while its session's drawer holds the keyboard.
 - A store subscriber prunes drawers whose session tab vanished; that is the only cleanup path.
 - Detaching a session to a window first turns its drawer terminals into tabs of the source window;
   detaching a project group hands them over as fresh terminal tabs.

@@ -62,7 +62,8 @@ type TerminalDrawer = {
   open: boolean;                  // schowana ≠ usunięta; procesy żyją
   hasFocus: boolean;              // strefa fokusu: szuflada vs sesja, pamiętana per sesja
   layout: PaneNode;               // typ z paneTree; każdy liść trzyma dokładnie jeden terminal
-  focusedTerminalId: string | null;
+  focusedTerminalId: string;
+  focusRequest: number;           // rośnie przy każdym „pokaż” bez chowania; wymusza term.focus()
 };
 
 drawers: Record<string, TerminalDrawer>;          // klucz: id zakładki sesji
@@ -79,9 +80,12 @@ Akcje:
 - `openTerminal(projectId, { toggle }: { toggle: boolean })` — jedyny punkt wejścia zamiast
   `openNewTerminalTab` we wszystkich wywołaniach. Jeśli aktywna zakładka to sesja **tego samego
   projektu** → szuflada (`toggle` ? `toggleTerminalDrawer` : `showTerminalDrawer`); w przeciwnym
-  razie `openNewTerminalTab(projectId)` jak dziś. `toggle: true` dla `mod+t` i `$` w paskach
-  zakładek; `toggle: false` dla przycisku „Terminal" w prawej kolumnie, nagłówka historii,
-  sidebaru i launchera.
+  razie `openNewTerminalTab(projectId)` jak dziś. `toggle: true` dla `$` w paskach zakładek;
+  `toggle: false` dla przycisku „Terminal" w prawej kolumnie, nagłówka historii, sidebaru i
+  launchera. `mod+t` przekazuje `toggle` = „fokus DOM jest wewnątrz warstwy tej szuflady”
+  (`document.activeElement.closest('[data-drawer-owner="<tabId>"]')`), bo flaga `hasFocus` w
+  store może się rozjechać z rzeczywistym fokusem (np. kursor w polu commita) — wtedy `mod+t`
+  wciąga klawiaturę do szuflady zamiast ją chować.
 - `splitDrawerTerminal(tabId, dir: 'row' | 'col')` — nowy shell obok terminala z fokusem
   (`insertBeside`), fokus na nowy.
 - `focusDrawerTerminal(tabId, terminalId)` / `focusDrawerSession(tabId)` — ustawiają `hasFocus`.
@@ -167,6 +171,18 @@ i przez podziały w szufladzie. Separator sesja/szuflada to osobny, prosty uchwy
   `takeFocus = paneFocused && !drawer.hasFocus`. Terminal szuflady:
   `focused = takeFocus = visible && paneFocused && drawer.hasFocus && focusedTerminalId === id`.
 - Schowanie szuflady z fokusem oddaje fokus sesji.
+- `TerminalView` woła `term.focus()` tylko przy zmianie `visible`/`takeFocus`. Gdy szuflada już
+  ma fokus w store, a kliknięcie przycisku (toolbar, sidebar, launcher) zabrało fokus DOM, nic
+  by się nie zmieniło. Dlatego każde „pokaż” bez chowania (`reveal`) zwiększa
+  `drawer.focusRequest`; `computePaneLayers` przekazuje go jako `focusToken` wyłącznie warstwie
+  terminala z fokusem, a `TabPanel` → `TerminalView` dokłada go do zależności efektu fokusu (nie
+  efektu spawnującego PTY).
+- `mousedown` na nagłówku szuflady robi `preventDefault()`, żeby przyciski nie zabierały fokusu
+  DOM xtermowi (np. po „Wydziel do zakładki” terminal zachowuje `takeFocus`, więc nic by go nie
+  przywróciło).
+- `HistoryView` przechwytuje `Ctrl/Cmd+F` (wyszukiwarka historii) tylko gdy szuflada jego sesji
+  nie trzyma klawiatury — inaczej `Ctrl+F` trafia do shella (readline forward-char, akceptacja
+  podpowiedzi zsh).
 
 **Nagłówek szuflady** (IconBtn, polskie `aria-label`, skrót w tooltipie), akcje dotyczą
 terminala z fokusem: *Podziel w prawo*, *Podziel w dół*, *Wydziel do zakładki*,
@@ -176,7 +192,7 @@ terminala z fokusem: *Podziel w prawo*, *Podziel w dół*, *Wydziel do zakładki
 
 | Skrót | Działanie | Konfigurowalny |
 |---|---|---|
-| `mod+t` (`newTerminal`) | w sesji: toggle szuflady; poza sesją: nowa zakładka terminala. Opis w `SHORTCUTS` zaktualizowany. | tak |
+| `mod+t` (`newTerminal`) | w sesji: toggle szuflady (chowa tylko, gdy fokus DOM jest w tej szufladzie); poza sesją: nowa zakładka terminala. Opis w `SHORTCUTS` zaktualizowany. | tak |
 | `mod+shift+o` (nowy `splitTerminalRight`) | podział w prawo | tak |
 | `mod+shift+e` (nowy `splitTerminalDown`) | podział w dół | tak |
 | `mod+alt+←↑→↓` | fokus na sąsiedni podział w danym kierunku | nie — dopisany do `FIXED_SHORTCUTS` |
