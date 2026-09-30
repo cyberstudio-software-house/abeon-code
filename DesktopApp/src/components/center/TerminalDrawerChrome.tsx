@@ -71,6 +71,7 @@ export function TerminalDrawerChrome({ entry, containerRef }: {
   containerRef: RefObject<HTMLDivElement | null>;
 }) {
   const { ownerTabId, paneId, rects, drawer } = entry;
+  const focusedPaneId = useStore(s => s.focusedPaneId);
   const overrides = useStore(s => s.shortcutOverrides);
   const focusPane = useStore(s => s.focusPane);
   const focusDrawerTerminal = useStore(s => s.focusDrawerTerminal);
@@ -91,7 +92,8 @@ export function TerminalDrawerChrome({ entry, containerRef }: {
       <DrawerDivider content={rects.content} header={rects.header} containerRef={containerRef} />
       <div
         data-drawer-header={ownerTabId}
-        onMouseDownCapture={() => {
+        onMouseDownCapture={e => {
+          e.preventDefault();
           focusPane(paneId);
           focusDrawerTerminal(ownerTabId, drawer.focusedTerminalId);
         }}
@@ -108,7 +110,7 @@ export function TerminalDrawerChrome({ entry, containerRef }: {
         </div>
       </div>
       <SplitResizers layout={drawer.layout} containerRef={containerRef} frame={rects.body} minPx={drawerMinPx} onResize={onResize} />
-      {rects.terminals.size > 1 && drawer.hasFocus && focusedRect && (
+      {rects.terminals.size > 1 && drawer.hasFocus && focusedPaneId === paneId && focusedRect && (
         <div
           data-drawer-focus-ring
           className="absolute z-20 pointer-events-none border border-accent"

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, createEvent, fireEvent, render, screen } from '@testing-library/react';
 
 const counters = vi.hoisted(() => ({ terminalMounts: 0 }));
 
@@ -805,5 +805,42 @@ describe('PaneLayout terminal drawer', () => {
     fireEvent.mouseMove(window, { clientX: 600, clientY: 700 });
     const split = useStore.getState().drawers.s1.layout as PaneSplit;
     expect(split.sizes[0]).toBeCloseTo(0.6);
+  });
+
+  it('drops the focus ring when another pane takes focus', () => {
+    useStore.setState({ tabs: [liveSession('s1'), terminalTab('t2', 'Inny')], layout: createLeaf(ROOT_PANE_ID, ['s1', 't2'], 's1') });
+    const { container } = render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().splitDrawerTerminal('s1', 'row');
+      useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2');
+      useStore.getState().focusPane(ROOT_PANE_ID);
+    });
+    expect(container.querySelector('[data-drawer-focus-ring]')).not.toBeNull();
+    const otherPane = leaves(useStore.getState().layout).find(l => l.tabIds.includes('t2'))!;
+    act(() => { useStore.getState().focusPane(otherPane.id); });
+    expect(container.querySelector('[data-drawer-focus-ring]')).toBeNull();
+  });
+
+  it('drops the focus ring when the keyboard returns to the session', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().splitDrawerTerminal('s1', 'row');
+    });
+    expect(container.querySelector('[data-drawer-focus-ring]')).not.toBeNull();
+    act(() => { useStore.getState().focusDrawerSession('s1'); });
+    expect(container.querySelector('[data-drawer-focus-ring]')).toBeNull();
+  });
+
+  it('keeps DOM focus in the terminal when a header button is pressed', () => {
+    render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    act(() => { useStore.getState().focusDrawerSession('s1'); });
+    const button = screen.getByRole('button', { name: 'Wydziel do zakładki' });
+    const ev = createEvent.mouseDown(button);
+    fireEvent(button, ev);
+    expect(ev.defaultPrevented).toBe(true);
+    expect(useStore.getState().drawers.s1.hasFocus).toBe(true);
   });
 });
