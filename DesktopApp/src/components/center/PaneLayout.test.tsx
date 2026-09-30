@@ -894,4 +894,16 @@ describe('PaneLayout terminal drawer', () => {
     expect(useStore.getState().drawerClosePrompt).toBeNull();
     expect(screen.getByText('Zamknąć aktywny tab?')).toBeInTheDocument();
   });
+
+  it('asks before closing a history session with a hidden drawer', () => {
+    useStore.setState({ tabs: [{ kind: 'session', id: 's1', projectId: 1, sessionId: 's1', title: 's1', mode: 'history' }] });
+    render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().hideTerminalDrawer('s1');
+    });
+    fireEvent.click(screen.getByText('×'));
+    expect(screen.getByText('Zamknąć aktywny tab?')).toBeInTheDocument();
+    expect(screen.getByText(/terminale z panelu \(1\)/)).toBeInTheDocument();
+  });
 });

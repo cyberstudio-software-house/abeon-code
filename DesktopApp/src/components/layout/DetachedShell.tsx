@@ -83,7 +83,7 @@ export function DetachedShell({ mode }: { mode: DetachedWindowMode }) {
     let unlisten: (() => void) | null = null;
     win.onCloseRequested((event) => {
       const state = useStore.getState();
-      if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions))) {
+      if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
         event.preventDefault();
         setConfirming(true);
       }

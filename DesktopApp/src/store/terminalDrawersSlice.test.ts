@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from './index';
 import { ROOT_PANE_ID } from './panesSlice';
 import { createLeaf, findLeaf, leaves, type PaneSplit } from '../lib/paneTree';
-import { selectDrawerTerminalTabs } from './terminalDrawersSlice';
+import { selectDrawerTerminalTabs, selectProjectTabsWithDrawers } from './terminalDrawersSlice';
 import type { Tab } from './tabsSlice';
 
 const session = (id: string, projectId = 1, extra: Partial<Extract<Tab, { kind: 'session' }>> = {}): Tab => ({
@@ -277,5 +277,14 @@ describe('drawer cleanup', () => {
     const own = selectDrawerTerminalTabs(useStore.getState(), 1);
     expect(own).toHaveLength(1);
     expect(own[0]).toMatchObject({ kind: 'terminal', projectId: 1 });
+  });
+});
+
+describe('group detach payload', () => {
+  it('adds drawer terminals of the project to its tabs', () => {
+    useStore.setState({ tabs: [session('s1'), session('s2', 2)] });
+    useStore.getState().toggleTerminalDrawer('s1');
+    const tabs = selectProjectTabsWithDrawers(useStore.getState(), 1);
+    expect(tabs.map(t => t.kind)).toEqual(['session', 'terminal']);
   });
 });

@@ -5,13 +5,14 @@ const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 
 export function TitleBar() {
   const tabs = useStore(s => s.tabs);
+  const drawerShells = useStore(s => Object.keys(s.drawerTerminals).length);
   const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
   const activeProjectName = useStore(s => {
     const tab = s.tabs.find(t => t.id === s.activeTabId);
     return tab ? (s.projects.find(p => p.id === tab.projectId)?.name ?? null) : null;
   });
   const headerTitle = formatHeaderTitle(activeTabTitle, activeProjectName);
-  const activeSessions = tabs.filter(t => (t.kind === 'session' && t.mode === 'terminal') || t.kind === 'terminal').length;
+  const activeSessions = tabs.filter(t => (t.kind === 'session' && t.mode === 'terminal') || t.kind === 'terminal').length + drawerShells;
 
   return (
     <header

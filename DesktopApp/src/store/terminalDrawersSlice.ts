@@ -70,6 +70,13 @@ export function selectDrawerTerminalTabs(
   return Object.values(state.drawerTerminals).filter(t => t.projectId === projectId).map(toTerminalTab);
 }
 
+export function selectProjectTabsWithDrawers(
+  state: Pick<AppState, 'tabs' | 'drawerTerminals'>,
+  projectId: number,
+): Tab[] {
+  return [...state.tabs.filter(t => t.projectId === projectId), ...selectDrawerTerminalTabs(state, projectId)];
+}
+
 type DrawerMaps = Pick<TerminalDrawersSlice, 'drawers' | 'drawerTerminals'>;
 
 export function withoutDrawerTerminal(maps: DrawerMaps, terminalId: string): DrawerMaps | null {

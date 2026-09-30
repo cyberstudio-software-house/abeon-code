@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isTabLiveProcess } from './tabProcess';
+import { closeConfirmMessage, isTabLiveProcess } from './tabProcess';
 import type { Tab } from '../store/tabsSlice';
 
 const sessionHistory: Tab = { kind: 'session', id: 's1', projectId: 1, sessionId: 'a', title: 't', mode: 'history' };
@@ -21,5 +21,17 @@ describe('isTabLiveProcess', () => {
     expect(isTabLiveProcess(action, { 5: { status: 'running' } as never })).toBe(true);
     expect(isTabLiveProcess(action, { 5: { status: 'exited' } as never })).toBe(false);
     expect(isTabLiveProcess(action, {})).toBe(false);
+  });
+});
+
+describe('drawer-aware close guard', () => {
+  it('treats a history session with a drawer as live', () => {
+    expect(isTabLiveProcess(sessionHistory, {}, { [sessionHistory.id]: {} })).toBe(true);
+    expect(isTabLiveProcess(sessionHistory, {}, {})).toBe(false);
+  });
+
+  it('mentions how many drawer terminals will close', () => {
+    expect(closeConfirmMessage(0)).toBe('W tym tabie działa aktywny proces. Zamknięcie zakończy go.');
+    expect(closeConfirmMessage(2)).toBe('W tym tabie działa aktywny proces. Zamknięcie zakończy go. Zamknięte zostaną też terminale z panelu (2).');
   });
 });
