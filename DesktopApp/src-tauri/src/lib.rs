@@ -9,6 +9,7 @@ pub mod commands;
 pub mod cli;
 pub mod clickup;
 pub mod detectors;
+pub mod diagnostics;
 pub mod git;
 pub mod remote;
 pub mod validation;
@@ -24,6 +25,7 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    diagnostics::init();
     let db_path = db::db_path().expect("db path");
     let pool = db::init_pool(&db_path).expect("init pool");
     let app_state = AppState::new(pool);
@@ -41,6 +43,8 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .manage(app_state)
         .setup(|app| {
+            #[cfg(unix)]
+            crate::diagnostics::watch_termination_signals();
             crate::remote::startup::init_remote_bridge(app.handle().clone());
             if let Ok(dir) = crate::commands::notifications::markers_dir(app.handle()) {
                 let watcher = crate::notifications::marker::AttentionWatcher::new(dir);
@@ -151,6 +155,7 @@ pub fn run() {
             commands::notifications::attention_hook_status,
             commands::notifications::show_attention_notification,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| diagnostics::log_run_event(&event));
 }
