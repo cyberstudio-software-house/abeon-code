@@ -25,10 +25,11 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
   - `right/` — right column: Git panel (`GitSection` with tabs: working-tree changes / commit history via `GitHistory` + `CommitDiffDialog`), Actions list, runnable scripts.
   - `terminal/TerminalView.tsx` — xterm wrapper for any PTY (claude, action, shell).
   - `history/` — session history viewer (markdown blocks).
-  - `dialogs/` — modal dialogs (`ConfirmDialog`, `SettingsDialog`, `AddProjectDialog`, `AddActionDialog`).
+  - `dialogs/` — modal dialogs (`ConfirmDialog`, `SettingsDialog`, `AddProjectDialog`, `AddActionDialog`, `RestoreSessionsDialog`).
   - `shared/` — `Icon`, `IconBtn`, `Kbd`.
 
 ### Backend (`src-tauri/src/`)
+- `diagnostics.rs` — log file redirect and lifecycle lines, see "Diagnostics log".
 - `commands/` — Tauri command handlers grouped by domain: `projects.rs`, `sessions.rs`, `pty.rs`, `actions.rs`, `git.rs`, `settings.rs`, `activity.rs`. Registered in `lib.rs`.
 - `db/` — SQLite migrations + queries.
 - `pty/` — PTY spawning and lifecycle (claude / action / shell variants).
@@ -116,6 +117,29 @@ never see them. Splits reuse `PaneNode`, with every leaf id equal to the termina
 - Detaching a session to a window first turns its drawer terminals into tabs of the source window;
   detaching a project group hands them over as fresh terminal tabs.
 
+## Session restore after a restart
+
+Session tabs persist in localStorage (`abeoncode.tabs`) and always come back in `history` mode.
+A tab that was running in a terminal is saved with `live: true`. At boot `store/index.ts` turns those
+marks into `pendingResumeTabIds`, and `AppShell` shows `RestoreSessionsDialog` for them;
+`resumePendingSessions` flips the tabs to `mode: 'terminal'`, which is the same `--resume` path as the
+"Kontynuuj w terminalu" button in the session footer.
+
+- Setting `sessionRestoreMode` (`ask` | `always` | `never`, persisted) is read synchronously at boot
+  from the localStorage settings cache: `always` restores the tabs straight into terminal mode,
+  `never` drops the marks, `ask` (default) queues them for the dialog.
+- Queued tabs keep their `live` mark until the prompt is answered (`writeTabsToLocalStorage` treats
+  `pendingResumeTabIds` as live), so quitting with the dialog still open does not lose them.
+- `setSessionMode`, `closeTab` and `detachTabs` prune the queue.
+- Only the main window takes part: detached windows never persist tabs.
+
+### Closing the main window
+
+`AppShell` mirrors the detached-window close guard: `onCloseRequested` prompts while any tab holds a
+live process. The confirm path calls `freezeTabPersistence()` **before** it drops the tabs. Dropping
+them is what kills the PTYs, and an unfrozen persistence subscriber would save the emptied list and
+erase the `live` marks the next start needs.
+
 ## Detached windows
 
 Two window modes beyond the main shell, both routed by `lib/windowMode.ts` (`?view=…` in the
@@ -152,6 +176,25 @@ The app drives three AI CLIs, selected per session via `domain::Provider` (`clau
 - **History**: Codex rollout `response_item`s map to the shared `HistoryBlock`; Codex block UUIDs are synthetic `cx-<physical_line>-<block_idx>`. OpenCode maps `message` and `part` rows to stable `oc-<part_id>` blocks. OpenCode history is mutable, so DB/WAL changes emit `session:<id>:sync` and the frontend replaces the overlapping tail instead of using append offsets.
 - **Settings**: `enabledProviders` is persisted; more than one enabled provider opens a `providerPicker` tab for a new session. Provider detection checks binaries on the shell PATH. Codex and OpenCode model IDs are persisted as opaque strings; OpenCode keeps the native `provider/model` form and discovers values through `opencode models`.
 - **v1 limits (by design)**: OpenCode remote bridge control, usage/cost, limits, and subagent presentation are unsupported. Codex `.zst` watcher updates activity only, without appended block parsing. Title generation dispatches per provider (`claude -p`, `codex exec --ephemeral`, or `opencode run --format json`) from a temporary directory; temporary OpenCode title sessions are deleted best-effort.
+
+## Diagnostics log
+
+Desktop launchers start the app with stdout/stderr on `/dev/null`, so `eprintln!`, Rust panics and
+GTK/WebKit messages (written by C code straight to fd 2) used to vanish. `diagnostics::init()` — the
+first call in `run()` — detects a discarded stderr and `dup2`s
+`<data_local_dir>/pl.cyberstudio.abeoncode/logs/abeoncode.log` onto fd 2 (and fd 1 when it is
+discarded too). On Linux that is `~/.local/share/pl.cyberstudio.abeoncode/logs/abeoncode.log`.
+A terminal or a pipe is left alone, so `npm run tauri dev` still prints to the console. The file is
+copy-truncated to `abeoncode.log.1` above 2 MiB, at start and once a minute.
+
+Timestamped lifecycle lines come from `diagnostics::log_event`: `start`, `window close requested`,
+`window destroyed`, `exit requested`, `exit`, `panic: …` and `terminated by SIGTERM|SIGHUP|SIGINT`
+(the signal is logged, then re-raised with its default action, so the exit status is unchanged).
+
+Reading an unexpected shutdown: a run whose `start` line has no matching `exit`, signal or panic line
+died by SIGKILL or a hard fault (check the kernel journal and `/var/log/apport.log`); a lost Wayland
+connection leaves a `Gdk-Message` line; a plain window close shows `window close requested` followed
+by `exit`.
 
 ## Keyboard shortcuts (global)
 
