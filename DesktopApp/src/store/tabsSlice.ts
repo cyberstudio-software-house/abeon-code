@@ -20,7 +20,10 @@ export type TabsSlice = {
   navHistory: string[];
   navIndex: number;
   activeAgentPtyId: string | null;
+  pendingResumeTabIds: string[];
   setActiveAgentPtyId: (id: string | null) => void;
+  resumePendingSessions: () => void;
+  dismissPendingResume: () => void;
   openSessionTab: (projectId: number, sessionId: string, title: string, provider?: Provider) => void;
   openNewSessionTab: (projectId: number) => void;
   openNewTerminalTab: (projectId: number) => void;
@@ -101,6 +104,14 @@ export function tabsFromGroupMode(mode: GroupWindowMode): Tab[] {
 
 const moveToFront = (order: string[], id: string) => [id, ...order.filter(x => x !== id)];
 
+const withoutIds = (ids: string[], removed: ReadonlySet<string>) =>
+  ids.some(id => removed.has(id)) ? ids.filter(id => !removed.has(id)) : ids;
+
+const withSessionMode = (tab: Extract<Tab, { kind: 'session' }>, mode: 'history' | 'terminal'): Tab => {
+  const { viewingSubagentId: _drop, ...rest } = tab;
+  return { ...rest, mode, fresh: false, preview: false };
+};
+
 const withNav = (get: () => TabsSlice, id: string) => {
   const nav = pushNav({ history: get().navHistory, index: get().navIndex }, id);
   return { navHistory: nav.history, navIndex: nav.index };
@@ -113,7 +124,16 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
   navHistory: [],
   navIndex: 0,
   activeAgentPtyId: null,
+  pendingResumeTabIds: [],
   setActiveAgentPtyId: (id) => set({ activeAgentPtyId: id }),
+  resumePendingSessions: () => {
+    const pending = new Set(get().pendingResumeTabIds);
+    set({
+      tabs: get().tabs.map(t => t.kind === 'session' && pending.has(t.id) ? withSessionMode(t, 'terminal') : t),
+      pendingResumeTabIds: [],
+    });
+  },
+  dismissPendingResume: () => set({ pendingResumeTabIds: [] }),
   openSessionTab: (projectId, sessionId, title, provider) => {
     const id = sessionTabId(sessionId);
     const existing = get().tabs.find(t => t.id === id || (t.kind === 'session' && t.linkedSessionId === sessionId));
@@ -212,11 +232,8 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
     });
   },
   setSessionMode: (tabId, mode) => set({
-    tabs: get().tabs.map(t => {
-      if (t.id !== tabId || t.kind !== 'session') return t;
-      const { viewingSubagentId: _drop, ...rest } = t;
-      return { ...rest, mode, fresh: false, preview: false };
-    }),
+    tabs: get().tabs.map(t => t.id === tabId && t.kind === 'session' ? withSessionMode(t, mode) : t),
+    pendingResumeTabIds: withoutIds(get().pendingResumeTabIds, new Set([tabId])),
   }),
   viewSubagent: (tabId, agentId) => {
     set({
@@ -240,7 +257,10 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       const idx = nav.history.lastIndexOf(activeTabId);
       if (idx !== -1) nav = { history: nav.history, index: idx };
     }
-    set({ tabs, activeTabId, mruOrder, navHistory: nav.history, navIndex: nav.index });
+    set({
+      tabs, activeTabId, mruOrder, navHistory: nav.history, navIndex: nav.index,
+      pendingResumeTabIds: withoutIds(get().pendingResumeTabIds, new Set([id])),
+    });
   },
   detachTabs: (ids) => {
     const removed = new Set(ids);
@@ -255,7 +275,10 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       const idx = nav.history.lastIndexOf(activeTabId);
       if (idx !== -1) nav = { history: nav.history, index: idx };
     }
-    set({ tabs, activeTabId, mruOrder, navHistory: nav.history, navIndex: nav.index });
+    set({
+      tabs, activeTabId, mruOrder, navHistory: nav.history, navIndex: nav.index,
+      pendingResumeTabIds: withoutIds(get().pendingResumeTabIds, removed),
+    });
   },
   setActive: (id) => set({ activeTabId: id, mruOrder: moveToFront(get().mruOrder, id), ...withNav(get, id) }),
   goBack: () => {

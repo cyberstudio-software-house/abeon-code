@@ -25,3 +25,27 @@ describe('SettingsDialog tab layout mode', () => {
     expect(useStore.getState().tabLayoutMode).toBe('classic');
   });
 });
+
+describe('SettingsDialog session restore mode', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(tauri, 'listAvailableShells').mockResolvedValue([]);
+    vi.spyOn(tauri, 'detectDefaultShell').mockResolvedValue(null);
+    vi.spyOn(tauri, 'listAvailableEditors').mockResolvedValue([]);
+    vi.spyOn(tauri, 'attentionHookStatus').mockResolvedValue(false);
+    useStore.setState({ sessionRestoreMode: 'ask' });
+  });
+
+  it('switches between asking, resuming automatically and never resuming', () => {
+    render(<SettingsDialog />);
+
+    fireEvent.click(screen.getByText('Nie wznawiaj'));
+    expect(useStore.getState().sessionRestoreMode).toBe('never');
+
+    fireEvent.click(screen.getByText('Wznawiaj automatycznie'));
+    expect(useStore.getState().sessionRestoreMode).toBe('always');
+
+    fireEvent.click(screen.getByText('Pytaj'));
+    expect(useStore.getState().sessionRestoreMode).toBe('ask');
+  });
+});

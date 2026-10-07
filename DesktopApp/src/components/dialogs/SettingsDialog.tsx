@@ -11,7 +11,7 @@ import {
   type ClaudeModelRow,
 } from '../../lib/models';
 import type { ThemeMode } from '../../styles/theme';
-import type { TabLayoutMode } from '../../store/settingsSlice';
+import type { SessionRestoreMode, TabLayoutMode } from '../../store/settingsSlice';
 import { tauri } from '../../lib/tauri';
 import type { ShellInfo, EditorInfo, ClaudeOptions, ProviderInfo } from '../../types';
 import type { ClickUpConnectionStatus } from '../../types/ClickUpConnectionStatus';
@@ -28,6 +28,12 @@ const SELECT_BASE =
 const TAB_LAYOUT_OPTIONS: { value: TabLayoutMode; label: string }[] = [
   { value: 'classic', label: 'Klasyczny' },
   { value: 'stacked', label: 'Dwuwierszowy' },
+];
+
+const SESSION_RESTORE_OPTIONS: { value: SessionRestoreMode; label: string }[] = [
+  { value: 'ask', label: 'Pytaj' },
+  { value: 'always', label: 'Wznawiaj automatycznie' },
+  { value: 'never', label: 'Nie wznawiaj' },
 ];
 
 const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
@@ -455,6 +461,8 @@ function GeneralTab() {
   const setShowActiveSessions = useStore(s => s.setShowActiveSessions);
   const tabLayoutMode = useStore(s => s.tabLayoutMode);
   const setTabLayoutMode = useStore(s => s.setTabLayoutMode);
+  const sessionRestoreMode = useStore(s => s.sessionRestoreMode);
+  const setSessionRestoreMode = useStore(s => s.setSessionRestoreMode);
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [editors, setEditors] = useState<EditorInfo[]>([]);
   const [detectedName, setDetectedName] = useState<string | null>(null);
@@ -598,6 +606,31 @@ function GeneralTab() {
         <p className="text-[11px] text-muted mt-2">
           Tryb „Dwuwierszowy" ukrywa górny pasek z nazwą projektu i dzieli zakładki na wiersz
           projektów oraz wiersz sesji wybranego projektu.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">
+          Sesje po uruchomieniu
+        </label>
+        <div className="flex gap-1">
+          {SESSION_RESTORE_OPTIONS.map(o => (
+            <button
+              key={o.value}
+              onClick={() => setSessionRestoreMode(o.value)}
+              className={`px-3 py-1.5 text-[12px] font-medium border transition-colors ${
+                sessionRestoreMode === o.value
+                  ? 'bg-fg text-bg border-fg'
+                  : 'bg-bg border-border text-muted hover:text-fg'
+              }`}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted mt-2">
+          Dotyczy sesji, które działały w terminalu w chwili zamknięcia programu. Opcja „Pytaj"
+          pokazuje ich listę przy starcie.
         </p>
       </div>
 

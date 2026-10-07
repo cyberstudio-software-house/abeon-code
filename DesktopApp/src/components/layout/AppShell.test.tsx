@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, fireEvent, render, waitFor } from '@testing-library/react';
 
+vi.mock('@tauri-apps/api/webviewWindow', () => ({
+  getCurrentWebviewWindow: () => ({ onCloseRequested: async () => () => {}, destroy: async () => {}, label: 'main' }),
+}));
 vi.mock('../sidebar/Sidebar', () => ({ Sidebar: () => <div /> }));
 vi.mock('../center/CenterPanel', () => ({ CenterPanel: () => <div /> }));
 vi.mock('../right/RightPanel', () => ({ RightPanel: () => <div /> }));

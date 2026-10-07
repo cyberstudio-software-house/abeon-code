@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { flushSync } from 'react-dom';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { Sidebar } from '../sidebar/Sidebar';
 import { CenterPanel } from '../center/CenterPanel';
 import { RightPanel } from '../right/RightPanel';
 import { TitleBar } from './TitleBar';
 import { TabSwitcher } from '../center/TabSwitcher';
 import { ProjectLauncher } from '../center/ProjectLauncher';
-import { useStore } from '../../store';
+import { freezeTabPersistence, useStore } from '../../store';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { tauri } from '../../lib/tauri';
 import type { AttentionEvent } from '../../lib/tauri';
@@ -18,6 +20,9 @@ import { openProjectPath } from '../../lib/openProject';
 import { DragHandle, clamp } from './DragHandle';
 import { checkForUpdate, type AvailableUpdate } from '../../lib/updater';
 import { UpdateDialog } from '../dialogs/UpdateDialog';
+import { ConfirmDialog } from '../dialogs/ConfirmDialog';
+import { RestoreSessionsDialog } from '../dialogs/RestoreSessionsDialog';
+import { isTabLiveProcess } from '../../lib/tabProcess';
 
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 
@@ -41,6 +46,17 @@ export function AppShell() {
     const tab = s.tabs.find(t => t.id === s.activeTabId);
     return tab ? (s.projects.find(p => p.id === tab.projectId)?.name ?? null) : null;
   });
+  const projects = useStore(s => s.projects);
+  const pendingResumeTabIds = useStore(s => s.pendingResumeTabIds);
+  const resumePendingSessions = useStore(s => s.resumePendingSessions);
+  const dismissPendingResume = useStore(s => s.dismissPendingResume);
+  const restorableSessions = useMemo(
+    () => tabs
+      .filter(t => pendingResumeTabIds.includes(t.id))
+      .map(t => ({ id: t.id, title: t.title, projectName: projects.find(p => p.id === t.projectId)?.name ?? null })),
+    [tabs, pendingResumeTabIds, projects],
+  );
+  const [confirmingClose, setConfirmingClose] = useState(false);
   const startActivityPolling = useStore(s => s.startActivityPolling);
   const stopActivityPolling = useStore(s => s.stopActivityPolling);
 
@@ -156,6 +172,28 @@ export function AppShell() {
     for (const sessionId of visibleSessionIds(state.layout, state.tabs)) state.clearAttention(sessionId);
   }, [activeTabId, layout]);
 
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    getCurrentWebviewWindow().onCloseRequested((event) => {
+      const state = useStore.getState();
+      if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
+        event.preventDefault();
+        setConfirmingClose(true);
+      }
+    }).then(fn => { unlisten = fn; });
+    return () => { if (unlisten) unlisten(); };
+  }, []);
+
+  const confirmClose = () => {
+    const state = useStore.getState();
+    freezeTabPersistence();
+    for (const tab of state.tabs) {
+      if (tab.kind === 'action') processManager.dismiss(tab.actionId);
+    }
+    flushSync(() => state.detachTabs(state.tabs.map(t => t.id)));
+    void getCurrentWebviewWindow().destroy();
+  };
+
   useMouseNavigation();
 
   const onLeftDrag = useCallback(
@@ -218,6 +256,21 @@ export function AppShell() {
       </div>
       <TabSwitcher />
       <ProjectLauncher />
+      {restorableSessions.length > 0 && (
+        <RestoreSessionsDialog
+          sessions={restorableSessions}
+          onResume={resumePendingSessions}
+          onDismiss={dismissPendingResume}
+        />
+      )}
+      {confirmingClose && (
+        <ConfirmDialog
+          title="Zamknąć AbeonCode?"
+          message="Zamknięcie okna zakończy działające w nim procesy."
+          onCancel={() => setConfirmingClose(false)}
+          onConfirm={confirmClose}
+        />
+      )}
       {update && (
         <UpdateDialog
           version={update.version}

@@ -9,6 +9,10 @@ import { DRAWER_DEFAULT_SIZE } from '../lib/drawerGeometry';
 export type SortMode = 'manual' | 'alpha' | 'activity';
 export type HistoryViewMode = 'communication' | 'full';
 export type TabLayoutMode = 'classic' | 'stacked';
+export type SessionRestoreMode = 'ask' | 'always' | 'never';
+
+export const isSessionRestoreMode = (value: unknown): value is SessionRestoreMode =>
+  value === 'ask' || value === 'always' || value === 'never';
 
 export type SettingsSlice = {
   theme: ThemeMode;
@@ -30,6 +34,7 @@ export type SettingsSlice = {
   shortcutOverrides: Record<string, string>;
   historyViewMode: HistoryViewMode;
   tabLayoutMode: TabLayoutMode;
+  sessionRestoreMode: SessionRestoreMode;
   terminalDrawerSize: number;
   notificationsEnabled: boolean;
   notificationTrigger: NotificationTrigger;
@@ -65,6 +70,7 @@ export type SettingsSlice = {
   resetShortcutOverrides: () => void;
   setHistoryViewMode: (mode: HistoryViewMode) => void;
   setTabLayoutMode: (mode: TabLayoutMode) => void;
+  setSessionRestoreMode: (mode: SessionRestoreMode) => void;
   setTerminalDrawerSize: (size: number) => void;
   setNotificationsEnabled: (v: boolean) => void;
   setNotificationTrigger: (t: NotificationTrigger) => void;
@@ -101,6 +107,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   shortcutOverrides: {},
   historyViewMode: 'full',
   tabLayoutMode: 'classic',
+  sessionRestoreMode: 'ask',
   terminalDrawerSize: DRAWER_DEFAULT_SIZE,
   notificationsEnabled: true,
   notificationTrigger: 'both',
@@ -149,6 +156,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   resetShortcutOverrides: () => set({ shortcutOverrides: {} }),
   setHistoryViewMode: (historyViewMode) => set({ historyViewMode }),
   setTabLayoutMode: (tabLayoutMode) => set({ tabLayoutMode }),
+  setSessionRestoreMode: (sessionRestoreMode) => set({ sessionRestoreMode }),
   setTerminalDrawerSize: (terminalDrawerSize) => set({ terminalDrawerSize }),
   setNotificationsEnabled: (notificationsEnabled) => set({ notificationsEnabled }),
   setNotificationTrigger: (notificationTrigger) => set({ notificationTrigger }),

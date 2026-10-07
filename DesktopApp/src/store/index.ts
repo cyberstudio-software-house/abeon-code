@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { createSettingsSlice, type SettingsSlice } from './settingsSlice';
+import { createSettingsSlice, isSessionRestoreMode, type SessionRestoreMode, type SettingsSlice } from './settingsSlice';
 import { createProjectsSlice, type ProjectsSlice } from './projectsSlice';
 import { createSessionsSlice, type SessionsSlice } from './sessionsSlice';
 import { createTabsSlice, type TabsSlice } from './tabsSlice';
@@ -62,6 +62,7 @@ type Persisted = {
   shortcutOverrides?: Record<string, string>;
   historyViewMode?: 'communication' | 'full';
   tabLayoutMode?: 'classic' | 'stacked';
+  sessionRestoreMode?: SessionRestoreMode;
   terminalDrawerSize?: number;
   notificationsEnabled?: boolean;
   notificationTrigger?: 'turnEnd' | 'questionsOnly' | 'both';
@@ -86,6 +87,7 @@ const PERSISTED_KEYS = [
   'shortcutOverrides',
   'historyViewMode',
   'tabLayoutMode',
+  'sessionRestoreMode',
   'terminalDrawerSize',
   'notificationsEnabled',
   'notificationTrigger',
@@ -124,6 +126,7 @@ function pickPersistedFields(state: AppState): Persisted {
     shortcutOverrides: state.shortcutOverrides,
     historyViewMode: state.historyViewMode,
     tabLayoutMode: state.tabLayoutMode,
+    sessionRestoreMode: state.sessionRestoreMode,
     terminalDrawerSize: state.terminalDrawerSize,
     notificationsEnabled: state.notificationsEnabled,
     notificationTrigger: state.notificationTrigger,
@@ -231,6 +234,7 @@ function applyPersistedToState(p: Persisted) {
   if (p.tabLayoutMode === 'classic' || p.tabLayoutMode === 'stacked') {
     patch.tabLayoutMode = p.tabLayoutMode;
   }
+  if (isSessionRestoreMode(p.sessionRestoreMode)) patch.sessionRestoreMode = p.sessionRestoreMode;
   if (typeof p.terminalDrawerSize === 'number' && Number.isFinite(p.terminalDrawerSize)) {
     patch.terminalDrawerSize = clamp(p.terminalDrawerSize, DRAWER_MIN_SIZE, DRAWER_MAX_SIZE);
   }
@@ -299,6 +303,7 @@ type PersistedTab = {
   linkedSessionId?: string;
   title: string;
   provider?: Provider;
+  live?: boolean;
 };
 
 type PersistedTabs = {
@@ -399,6 +404,7 @@ function loadTabsFromLocalStorage(): PersistedTabs | null {
 }
 
 function writeTabsToLocalStorage(state: AppState) {
+  const pendingResume = new Set(state.pendingResumeTabIds);
   const sessionTabs: PersistedTab[] = state.tabs
     .filter((t): t is Extract<typeof t, { kind: 'session' }> => t.kind === 'session')
     .map(t => ({
@@ -409,6 +415,7 @@ function writeTabsToLocalStorage(state: AppState) {
       ...(t.linkedSessionId ? { linkedSessionId: t.linkedSessionId } : {}),
       title: t.title,
       ...(t.provider ? { provider: t.provider } : {}),
+      ...(t.mode === 'terminal' || pendingResume.has(t.id) ? { live: true } : {}),
     }));
   const activeTabId = sessionTabs.some(t => t.id === state.activeTabId)
     ? state.activeTabId
@@ -475,7 +482,14 @@ if (windowMode?.view === 'session') {
 } else {
   const savedTabs = loadTabsFromLocalStorage();
   if (savedTabs && savedTabs.tabs.length > 0) {
-    const tabs = savedTabs.tabs.map(t => ({ ...t, mode: 'history' as const }));
+    const restoreMode = useStore.getState().sessionRestoreMode;
+    const tabs = savedTabs.tabs.map(({ live, ...t }) => ({
+      ...t,
+      mode: live === true && restoreMode === 'always' ? 'terminal' as const : 'history' as const,
+    }));
+    const pendingResumeTabIds = restoreMode === 'ask'
+      ? savedTabs.tabs.filter(t => t.live === true).map(t => t.id)
+      : [];
     const panes = sanitizeRestoredLayout(savedTabs.layout, tabs.map(t => t.id), savedTabs.focusedPaneId);
     useStore.setState({
       tabs,
@@ -484,6 +498,7 @@ if (windowMode?.view === 'session') {
       navIndex: 0,
       layout: panes.layout,
       focusedPaneId: panes.focusedPaneId,
+      pendingResumeTabIds,
     });
   }
 }
@@ -531,9 +546,16 @@ useStore.subscribe(pruneOrphanDrawers);
 
 // --- Subscribe: on any state change, diff + write localStorage + SQLite ---
 const tabsChangeKey = (state: AppState) =>
-  JSON.stringify(state.tabs) + '|' + (state.activeTabId ?? '') + '|' + JSON.stringify(state.layout);
+  JSON.stringify(state.tabs) + '|' + (state.activeTabId ?? '') + '|' + JSON.stringify(state.layout)
+  + '|' + state.pendingResumeTabIds.join(',');
 
 let prevTabsJson = tabsChangeKey(useStore.getState());
+
+let tabPersistenceFrozen = false;
+
+export function freezeTabPersistence() {
+  tabPersistenceFrozen = true;
+}
 
 useStore.subscribe((state) => {
   // Detached windows are ephemeral consumers: never persist tabs or settings
@@ -556,7 +578,7 @@ useStore.subscribe((state) => {
 
   // Tabs persistence (tabs array, activeTabId or layout change)
   const tabsJson = tabsChangeKey(state);
-  if (tabsJson !== prevTabsJson) {
+  if (tabsJson !== prevTabsJson && !tabPersistenceFrozen) {
     prevTabsJson = tabsJson;
     writeTabsToLocalStorage(state);
   }
