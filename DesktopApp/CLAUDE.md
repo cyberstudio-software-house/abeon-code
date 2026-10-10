@@ -112,6 +112,11 @@ never see them. Splits reuse `PaneNode`, with every leaf id equal to the termina
   bumps `drawer.focusRequest`, which reaches the focused drawer terminal as `focusToken` (a dep of
   the focus effect, never of the spawn effect) — this pulls the keyboard back after a button click
   stole DOM focus. The drawer header `preventDefault`s mousedown for the same reason.
+- A hidden drawer (`open: false`) leaves a `CollapsedDrawerBar` under its session, listed by
+  `computePaneLayers` as `collapsedDrawers` (active tab of a pane only). The session layer gives up
+  `DRAWER_HEADER_HEIGHT` (`computeCollapsedDrawerLayout`); the hidden terminals keep their open-size
+  rects so their PTYs are not resized. The bar sits outside the content layers, so its click calls
+  `focusPane` itself before `showTerminalDrawer`.
 - `HistoryView` leaves `Ctrl/Cmd+F` to the shell while its session's drawer holds the keyboard.
 - A store subscriber prunes drawers whose session tab vanished; that is the only cleanup path.
 - Detaching a session to a window first turns its drawer terminals into tabs of the source window;
