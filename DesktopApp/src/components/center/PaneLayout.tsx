@@ -10,7 +10,7 @@ import { PaneResizers } from './PaneResizers';
 import { TabBar } from './TabBar';
 import { StackedTabBar } from './StackedTabBar';
 import { TabPanel } from './TabContent';
-import { DrawerCloseDialog, TerminalDrawerChrome } from './TerminalDrawerChrome';
+import { CollapsedDrawerBar, DrawerCloseDialog, TerminalDrawerChrome } from './TerminalDrawerChrome';
 import { usePaneDrag } from './usePaneDrag';
 import { useTerminalDrawerShortcuts } from './useTerminalDrawerShortcuts';
 
@@ -33,7 +33,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   useTerminalDrawerShortcuts();
   const rects = useMemo(() => computePaneRects(layout), [layout]);
   const panes = useMemo(() => leaves(layout), [layout]);
-  const { layers, visibleDrawers } = useMemo(
+  const { layers, visibleDrawers, collapsedDrawers } = useMemo(
     () => computePaneLayers({ tabs, layout, focusedPaneId, barHeight, drawers, drawerTerminals, drawerSize }),
     [tabs, layout, focusedPaneId, barHeight, drawers, drawerTerminals, drawerSize],
   );
@@ -89,6 +89,9 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
       <PaneResizers layout={layout} containerRef={containerRef} />
       {visibleDrawers.map(entry => (
         <TerminalDrawerChrome key={entry.ownerTabId} entry={entry} containerRef={containerRef} />
+      ))}
+      {collapsedDrawers.map(entry => (
+        <CollapsedDrawerBar key={entry.ownerTabId} entry={entry} />
       ))}
       <DrawerCloseDialog />
       {tabs.length === 0 && (

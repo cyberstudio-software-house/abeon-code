@@ -713,7 +713,64 @@ describe('PaneLayout terminal drawer', () => {
     const layer = container.querySelector(`[data-tab-layer="${id}"]`) as HTMLElement;
     expect(layer.className).toContain('invisible');
     expect(counters.terminalMounts).toBe(2);
-    expect((container.querySelector('[data-tab-layer="s1"]') as HTMLElement).style.height).toBe('calc(100% - 32px)');
+    expect((container.querySelector('[data-tab-layer="s1"]') as HTMLElement).style.height).toBe('calc(100% - 60px)');
+  });
+
+  it('leaves a restore bar under the session only while the drawer is hidden', () => {
+    const { container } = render(<PaneLayout />);
+    expect(container.querySelector('[data-drawer-collapsed]')).toBeNull();
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    expect(container.querySelector('[data-drawer-collapsed]')).toBeNull();
+
+    act(() => { useStore.getState().hideTerminalDrawer('s1'); });
+
+    const bar = container.querySelector('[data-drawer-collapsed="s1"]') as HTMLElement;
+    expect(bar.style.top).toBe('calc(100% - 28px)');
+    expect(bar.style.height).toBe('calc(0% + 28px)');
+    expect(bar.textContent).toBe('Terminal');
+  });
+
+  it('shows the shell count on the restore bar of a split drawer', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().splitDrawerTerminal('s1', 'row');
+      useStore.getState().hideTerminalDrawer('s1');
+    });
+    expect((container.querySelector('[data-drawer-collapsed="s1"]') as HTMLElement).textContent).toBe('Terminal · 2');
+  });
+
+  it('restores the drawer and hands it the keyboard from the restore bar', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    const [id] = drawerIds();
+    act(() => { useStore.getState().hideTerminalDrawer('s1'); });
+
+    fireEvent.click(screen.getByRole('button', { name: /Pokaż terminal/ }));
+
+    expect(useStore.getState().drawers.s1).toMatchObject({ open: true, hasFocus: true });
+    expect(container.querySelector('[data-drawer-collapsed]')).toBeNull();
+    expect(container.querySelector('[data-drawer-header="s1"]')).not.toBeNull();
+    const terminal = container.querySelector(`[data-tab-layer="${id}"] [data-testid="terminal"]`) as HTMLElement;
+    expect(terminal.dataset.takeFocus).toBe('true');
+    expect(counters.terminalMounts).toBe(2);
+  });
+
+  it('focuses the pane whose restore bar is clicked', () => {
+    useStore.setState({ tabs: [liveSession('s1'), terminalTab('t2', 'Inny')], layout: createLeaf(ROOT_PANE_ID, ['s1', 't2'], 's1') });
+    render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().hideTerminalDrawer('s1');
+      useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2');
+    });
+    const paneOf = (tabId: string) => leaves(useStore.getState().layout).find(l => l.tabIds.includes(tabId))!.id;
+    act(() => { useStore.getState().focusPane(paneOf('t2')); });
+    expect(useStore.getState().focusedPaneId).toBe(paneOf('t2'));
+
+    fireEvent.click(screen.getByRole('button', { name: /Pokaż terminal/ }));
+
+    expect(useStore.getState().focusedPaneId).toBe(paneOf('s1'));
   });
 
   it('hands the keyboard back to the session when the last drawer shell exits', () => {

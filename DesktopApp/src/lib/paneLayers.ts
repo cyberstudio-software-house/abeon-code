@@ -1,5 +1,11 @@
 import { computePaneRects } from './paneGeometry';
-import { computeDrawerLayout, paneContentRect, type DrawerLayoutRects, type LenRect } from './drawerGeometry';
+import {
+  computeCollapsedDrawerLayout,
+  computeDrawerLayout,
+  paneContentRect,
+  type DrawerLayoutRects,
+  type LenRect,
+} from './drawerGeometry';
 import { leaves, type PaneNode } from './paneTree';
 import type { Tab } from '../store/tabsSlice';
 import { toTerminalTab, type DrawerTerminal, type TerminalDrawer } from '../store/terminalDrawersSlice';
@@ -22,6 +28,13 @@ export type VisibleDrawer = {
   drawer: TerminalDrawer;
 };
 
+export type CollapsedDrawer = {
+  ownerTabId: string;
+  paneId: string;
+  rect: LenRect;
+  terminalCount: number;
+};
+
 export function computePaneLayers(input: {
   tabs: Tab[];
   layout: PaneNode;
@@ -30,7 +43,7 @@ export function computePaneLayers(input: {
   drawers: Record<string, TerminalDrawer>;
   drawerTerminals: Record<string, DrawerTerminal>;
   drawerSize: number;
-}): { layers: PaneLayer[]; visibleDrawers: VisibleDrawer[] } {
+}): { layers: PaneLayer[]; visibleDrawers: VisibleDrawer[]; collapsedDrawers: CollapsedDrawer[] } {
   const rects = computePaneRects(input.layout);
   const owners = new Map<string, { paneId: string; active: boolean }>();
   for (const pane of leaves(input.layout)) {
@@ -39,6 +52,7 @@ export function computePaneLayers(input: {
 
   const layers: PaneLayer[] = [];
   const visibleDrawers: VisibleDrawer[] = [];
+  const collapsedDrawers: CollapsedDrawer[] = [];
   for (const tab of input.tabs) {
     const owner = owners.get(tab.id);
     const paneRect = owner ? rects.get(owner.paneId) : undefined;
@@ -51,11 +65,12 @@ export function computePaneLayers(input: {
       continue;
     }
     const drawerRects = computeDrawerLayout(paneRect, input.barHeight, input.drawerSize, drawer.layout);
+    const collapsedRects = computeCollapsedDrawerLayout(content);
     const drawerShown = owner.active && drawer.open;
     layers.push({
       tab,
       paneId: owner.paneId,
-      rect: drawer.open ? drawerRects.session : content,
+      rect: drawer.open ? drawerRects.session : collapsedRects.session,
       visible: owner.active,
       focused: paneFocused,
       takeFocus: paneFocused && !(drawer.open && drawer.hasFocus),
@@ -69,7 +84,10 @@ export function computePaneLayers(input: {
       layers.push({ tab: toTerminalTab(terminal), paneId: owner.paneId, rect, visible: drawerShown, focused, takeFocus: focused, drawerOwnerId: tab.id, focusToken: focused ? drawer.focusRequest : undefined });
     }
     if (drawerShown) visibleDrawers.push({ ownerTabId: tab.id, paneId: owner.paneId, rects: drawerRects, drawer });
+    else if (owner.active) {
+      collapsedDrawers.push({ ownerTabId: tab.id, paneId: owner.paneId, rect: collapsedRects.bar, terminalCount: drawerRects.terminals.size });
+    }
   }
   layers.sort((a, b) => (a.tab.id < b.tab.id ? -1 : a.tab.id > b.tab.id ? 1 : 0));
-  return { layers, visibleDrawers };
+  return { layers, visibleDrawers, collapsedDrawers };
 }

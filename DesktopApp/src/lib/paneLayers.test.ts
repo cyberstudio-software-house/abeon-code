@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { computePaneLayers } from './paneLayers';
 import { lenRectStyle, paneContentRect } from './drawerGeometry';
-import { createLeaf, type PaneNode } from './paneTree';
+import { createLeaf, leaves, type PaneNode } from './paneTree';
 import type { Tab } from '../store/tabsSlice';
 import type { DrawerTerminal, TerminalDrawer } from '../store/terminalDrawersSlice';
 
@@ -20,7 +20,7 @@ function run(opts: { drawer?: Partial<TerminalDrawer>; layout?: PaneNode; focuse
     focusedPaneId: opts.focusedPaneId ?? 'root',
     barHeight: 32,
     drawers: drawer ? { 'session:s1': drawer } : {},
-    drawerTerminals: drawer ? { 'terminal:d1': drawerTerminal('terminal:d1') } : {},
+    drawerTerminals: drawer ? Object.fromEntries(leaves(drawer.layout).map(l => [l.id, drawerTerminal(l.id)])) : {},
     drawerSize: 0.35,
   });
 }
@@ -59,12 +59,40 @@ describe('computePaneLayers', () => {
     expect(layers.find(l => l.tab.id === 'terminal:d1')!).toMatchObject({ visible: true, focused: false });
   });
 
-  it('hides the terminals of a hidden drawer and restores the full session', () => {
-    const { layers, visibleDrawers } = run({ drawer: { open: false, hasFocus: false } });
+  it('hides the terminals of a hidden drawer and leaves a restore bar under the session', () => {
+    const { layers, visibleDrawers, collapsedDrawers } = run({ drawer: { open: false, hasFocus: false } });
     const session = layers.find(l => l.tab.id === 'session:s1')!;
-    expect(lenRectStyle(session.rect)).toEqual(lenRectStyle(paneContentRect(FULL, 32)));
-    expect(layers.find(l => l.tab.id === 'terminal:d1')!.visible).toBe(false);
+    const terminal = layers.find(l => l.tab.id === 'terminal:d1')!;
+    expect(lenRectStyle(session.rect)).toEqual({
+      left: '0%', top: 'calc(0% + 32px)', width: '100%', height: 'calc(100% - 60px)',
+    });
+    expect(session.takeFocus).toBe(true);
+    expect(terminal.visible).toBe(false);
     expect(visibleDrawers).toEqual([]);
+    expect(collapsedDrawers).toHaveLength(1);
+    expect(collapsedDrawers[0]).toMatchObject({ ownerTabId: 'session:s1', paneId: 'root', terminalCount: 1 });
+    expect(lenRectStyle(collapsedDrawers[0].rect)).toEqual({
+      left: '0%', top: 'calc(100% - 28px)', width: '100%', height: 'calc(0% + 28px)',
+    });
+  });
+
+  it('keeps the hidden terminals at their open size', () => {
+    const { layers } = run({ drawer: { open: false, hasFocus: false } });
+    expect(lenRectStyle(layers.find(l => l.tab.id === 'terminal:d1')!.rect).height).toBe('calc(35% - 39.2px)');
+  });
+
+  it('counts every shell of a hidden split drawer', () => {
+    const layout: PaneNode = {
+      kind: 'split', id: 'r', dir: 'row', sizes: [0.5, 0.5],
+      children: [createLeaf('terminal:d1', ['terminal:d1'], 'terminal:d1'), createLeaf('terminal:d2', ['terminal:d2'], 'terminal:d2')],
+    };
+    const { collapsedDrawers } = run({ drawer: { open: false, hasFocus: false, layout } });
+    expect(collapsedDrawers[0].terminalCount).toBe(2);
+  });
+
+  it('offers no restore bar without a drawer or while the drawer is open', () => {
+    expect(run().collapsedDrawers).toEqual([]);
+    expect(run({ drawer: {} }).collapsedDrawers).toEqual([]);
   });
 
   it('hides the drawer of a session that is not the active tab of its pane', () => {
@@ -75,6 +103,15 @@ describe('computePaneLayers', () => {
     });
     expect(layers.find(l => l.tab.id === 'terminal:d1')!.visible).toBe(false);
     expect(visibleDrawers).toEqual([]);
+  });
+
+  it('offers no restore bar for a session that is not the active tab of its pane', () => {
+    const { collapsedDrawers } = run({
+      drawer: { open: false, hasFocus: false },
+      tabs: [s1, t0],
+      layout: createLeaf('root', ['session:s1', 'terminal:0'], 'terminal:0'),
+    });
+    expect(collapsedDrawers).toEqual([]);
   });
 
   it('never focuses a drawer terminal in an unfocused pane', () => {

@@ -9,8 +9,9 @@ import {
   resolveLen,
   type LenRect,
 } from '../../lib/drawerGeometry';
-import type { VisibleDrawer } from '../../lib/paneLayers';
+import type { CollapsedDrawer, VisibleDrawer } from '../../lib/paneLayers';
 import { formatBinding, getBinding, type ShortcutId } from '../../lib/shortcuts';
+import { Icon } from '../shared/Icon';
 import { IconBtn } from '../shared/IconBtn';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { SplitResizers } from './PaneResizers';
@@ -118,6 +119,32 @@ export function TerminalDrawerChrome({ entry, containerRef }: {
         />
       )}
     </>
+  );
+}
+
+export function CollapsedDrawerBar({ entry }: { entry: CollapsedDrawer }) {
+  const { ownerTabId, paneId, rect, terminalCount } = entry;
+  const overrides = useStore(s => s.shortcutOverrides);
+  const focusPane = useStore(s => s.focusPane);
+  const showTerminalDrawer = useStore(s => s.showTerminalDrawer);
+  const label = `Pokaż terminal (${formatBinding(getBinding('newTerminal', overrides))})`;
+
+  return (
+    <button
+      type="button"
+      data-drawer-collapsed={ownerTabId}
+      aria-label={label}
+      title={label}
+      onClick={() => {
+        focusPane(paneId);
+        showTerminalDrawer(ownerTabId);
+      }}
+      className="absolute z-20 flex items-center justify-between gap-2 border-t border-border bg-bg px-2 text-muted cursor-pointer hover:text-fg hover:bg-bg-elev-2 transition-colors"
+      style={lenRectStyle(rect)}
+    >
+      <span className="text-[11px] select-none">{terminalCount > 1 ? `Terminal · ${terminalCount}` : 'Terminal'}</span>
+      <Icon name="chevU" />
+    </button>
   );
 }
 

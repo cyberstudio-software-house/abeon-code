@@ -6,6 +6,7 @@ import {
   DRAWER_MIN_SIZE,
   addLen,
   clampDrawerSize,
+  computeCollapsedDrawerLayout,
   computeDrawerLayout,
   cssLen,
   len,
@@ -85,6 +86,26 @@ describe('computeDrawerLayout', () => {
     const r = computeDrawerLayout(FULL, 32, 0.5, mixed);
     expect(cssLen(r.terminals.get('c')!.top)).toBe('calc(75% + 22px)');
     expect(cssLen(r.terminals.get('c')!.height)).toBe('calc(25% - 22px)');
+  });
+});
+
+describe('computeCollapsedDrawerLayout', () => {
+  it('reserves a bar at the bottom of the content and gives the session the rest', () => {
+    const r = computeCollapsedDrawerLayout(paneContentRect(FULL, 32));
+    expect(lenRectStyle(r.session)).toEqual({
+      left: '0%', top: 'calc(0% + 32px)', width: '100%', height: 'calc(100% - 60px)',
+    });
+    expect(lenRectStyle(r.bar)).toEqual({
+      left: '0%', top: 'calc(100% - 28px)', width: '100%', height: 'calc(0% + 28px)',
+    });
+  });
+
+  it('keeps the bar inside an offset pane', () => {
+    const r = computeCollapsedDrawerLayout(paneContentRect({ left: 50, top: 50, width: 50, height: 50 }, 32));
+    expect(lenRectStyle(r.bar)).toEqual({
+      left: '50%', top: 'calc(100% - 28px)', width: '50%', height: 'calc(0% + 28px)',
+    });
+    expect(cssLen(r.session.height)).toBe('calc(50% - 60px)');
   });
 });
 

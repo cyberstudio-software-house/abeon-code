@@ -79,6 +79,21 @@ export function computeDrawerLayout(pane: PaneRect, barHeight: number, size: num
   return { content, session: { ...content, height: sessionHeight }, header, body, terminals };
 }
 
+export type CollapsedDrawerRects = { session: LenRect; bar: LenRect };
+
+export function computeCollapsedDrawerLayout(content: LenRect): CollapsedDrawerRects {
+  const sessionHeight = addLen(content.height, len(0, -DRAWER_HEADER_HEIGHT));
+  return {
+    session: { ...content, height: sessionHeight },
+    bar: {
+      left: content.left,
+      top: addLen(content.top, sessionHeight),
+      width: content.width,
+      height: len(0, DRAWER_HEADER_HEIGHT),
+    },
+  };
+}
+
 export function clampDrawerSize(next: number, contentPx: number): number {
   if (!Number.isFinite(next)) return DRAWER_DEFAULT_SIZE;
   const globalClamp = Math.min(DRAWER_MAX_SIZE, Math.max(DRAWER_MIN_SIZE, next));
