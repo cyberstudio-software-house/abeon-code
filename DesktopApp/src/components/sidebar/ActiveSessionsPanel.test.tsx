@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, getDefaultNormalizer } from '@testing-library/react';
 import { ActiveSessionsPanel } from './ActiveSessionsPanel';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
@@ -62,6 +62,35 @@ describe('ActiveSessionsPanel visibility', () => {
     const { getByText } = render(<ActiveSessionsPanel />);
     expect(getByText('Aktywne')).toBeTruthy();
     expect(getByText('1')).toBeTruthy();
+  });
+});
+
+describe('ActiveSessionsPanel tile', () => {
+  beforeEach(() => {
+    useStore.setState({
+      showActiveSessions: true, attentionSessions: new Set(), sessionsByProject: {},
+      projects: [project()], tabs: [sessionTab('a')], activeTabId: null, mruOrder: [],
+    });
+  });
+
+  it('shows the project name and puts the full title with the status in the tooltip', () => {
+    useStore.setState({ activeSessions: [active('a', { title: 'Gra w rzuty karne: klawiatura i sterowanie bramkarzem' })] });
+    const { getByText, getByTitle } = render(<ActiveSessionsPanel />);
+    expect(getByText('Proj')).toBeTruthy();
+    expect(getByTitle(
+      'Gra w rzuty karne: klawiatura i sterowanie bramkarzem\nProj — Aktywna — agent pracuje',
+      { normalizer: getDefaultNormalizer({ collapseWhitespace: false }) },
+    )).toBeTruthy();
+  });
+
+  it('opens the session tab and clears the attention mark on click', () => {
+    useStore.setState({ activeSessions: [active('a', { activity: 'waitingUser' })], attentionSessions: new Set(['a']) });
+    const { getByText } = render(<ActiveSessionsPanel />);
+    fireEvent.click(getByText('T-a'));
+    const { tabs, activeTabId, attentionSessions } = useStore.getState();
+    const focused = tabs.find(t => t.id === activeTabId);
+    expect(focused?.kind === 'session' && focused.sessionId).toBe('a');
+    expect(attentionSessions.has('a')).toBe(false);
   });
 });
 
