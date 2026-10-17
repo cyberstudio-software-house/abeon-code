@@ -3,6 +3,7 @@ use crate::domain::SessionActivity;
 use crate::domain::Provider;
 
 const TAIL_BYTES: u64 = 8 * 1024;
+const TAIL_WINDOWS: [u64; 4] = [TAIL_BYTES, 64 * 1024, 512 * 1024, 4 * 1024 * 1024];
 const LIVE_WINDOW_MS: i64 = 5_000;
 const TOOL_STALL_MS: i64 = 30_000;
 const RUNNING_STALL_MS: i64 = 10 * 60 * 1000;
@@ -10,12 +11,12 @@ const WAITING_DECAY_MS: i64 = 4 * 60 * 60 * 1000;
 const IDLE_HARD_CAP_MS: i64 = 24 * 60 * 60 * 1000;
 
 pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
-    compute_activity_with(find_last_significant, read_tail_lines, path, now_ms)
+    compute_activity_with(find_last_significant, read_tail_bytes, path, now_ms)
 }
 
 pub(crate) fn compute_activity_with(
     extractor: fn(&[String]) -> Option<LastEvent>,
-    read_tail: fn(&Path) -> Option<Vec<String>>,
+    read_tail: fn(&Path, u64) -> Option<Vec<String>>,
     path: &Path,
     now_ms: i64,
 ) -> SessionActivity {
@@ -28,8 +29,7 @@ pub(crate) fn compute_activity_with(
         return SessionActivity::Running;
     }
 
-    let Some(lines) = read_tail(path) else { return SessionActivity::Idle };
-    let Some(last) = extractor(&lines) else { return SessionActivity::Idle };
+    let Some(last) = find_in_growing_tail(extractor, read_tail, path) else { return SessionActivity::Idle };
 
     let waiting = match last {
         LastEvent::UserText | LastEvent::UserToolResult { is_error: false } => {
@@ -57,6 +57,23 @@ pub(crate) fn compute_activity_with(
     }
 }
 
+fn find_in_growing_tail(
+    extractor: fn(&[String]) -> Option<LastEvent>,
+    read_tail: fn(&Path, u64) -> Option<Vec<String>>,
+    path: &Path,
+) -> Option<LastEvent> {
+    let len = path.metadata().ok()?.len();
+    for window in TAIL_WINDOWS {
+        if let Some(last) = extractor(&read_tail(path, window)?) {
+            return Some(last);
+        }
+        if window >= len {
+            break;
+        }
+    }
+    None
+}
+
 fn file_age_ms(path: &Path, now_ms: i64) -> Option<i64> {
     let mtime_ms = path
         .metadata()
@@ -78,7 +95,7 @@ pub fn compute_activity_with_agents(path: &Path, running_agents: u32, now_ms: i6
 
 pub fn compute_activity_for(provider: Provider, path: &Path, now_ms: i64) -> SessionActivity {
     match provider {
-        Provider::Claude => compute_activity_with(find_last_significant, read_tail_lines, path, now_ms),
+        Provider::Claude => compute_activity_with(find_last_significant, read_tail_bytes, path, now_ms),
         Provider::Codex => compute_activity_with(
             crate::sessions::codex::activity::find_last_significant_codex,
             crate::sessions::codex::activity::read_tail_lines_codex,
@@ -90,10 +107,14 @@ pub fn compute_activity_for(provider: Provider, path: &Path, now_ms: i64) -> Ses
 }
 
 pub(crate) fn read_tail_lines(path: &Path) -> Option<Vec<String>> {
+    read_tail_bytes(path, TAIL_BYTES)
+}
+
+pub(crate) fn read_tail_bytes(path: &Path, max_bytes: u64) -> Option<Vec<String>> {
     use std::io::{Read, Seek, SeekFrom};
     let mut f = std::fs::File::open(path).ok()?;
     let len = f.metadata().ok()?.len();
-    let start = len.saturating_sub(TAIL_BYTES);
+    let start = len.saturating_sub(max_bytes);
     f.seek(SeekFrom::Start(start)).ok()?;
     let mut buf = Vec::with_capacity((len - start) as usize);
     f.read_to_end(&mut buf).ok()?;
@@ -571,10 +592,56 @@ mod tests {
 {{"type":"assistant","uuid":"a1","message":{{"content":[{{"type":"text","text":"{huge}"}}]}}}}"#
         );
         let (p, mtime) = write_with_mtime(&td, "s.jsonl", &body);
-        let result = compute_activity(&p, mtime + 60_000);
-        assert!(
-            matches!(result, SessionActivity::WaitingUser | SessionActivity::Idle),
-            "got {result:?}"
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::WaitingUser);
+    }
+
+    fn bulky_trailer() -> String {
+        let pad = "p".repeat(4_000);
+        [
+            format!(r#"{{"type":"attachment","attachment":{{"type":"skill_listing","content":"{pad}"}}}}"#),
+            format!(r#"{{"type":"api-request-blob","message":{{"content":[{{"type":"thinking","thinking":"{pad}"}}]}}}}"#),
+            format!(r#"{{"type":"api-request","request":"{pad}"}}"#),
+            r#"{"type":"last-prompt","lastPrompt":"OK"}"#.to_string(),
+            r#"{"type":"ai-title","aiTitle":"Title"}"#.to_string(),
+            r#"{"type":"mode","mode":"normal"}"#.to_string(),
+            r#"{"type":"permission-mode","permissionMode":"bypassPermissions"}"#.to_string(),
+            r#"{"type":"atis-latch","value":false}"#.to_string(),
+            r#"{"type":"bridge-session","sessionId":"b1"}"#.to_string(),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn user_text_followed_by_bulky_metadata_returns_running() {
+        let td = TempDir::new().unwrap();
+        let body = format!(
+            "{}\n{}",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"OK, dzialaj"}]}}"#,
+            bulky_trailer(),
         );
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl", &body);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn assistant_text_followed_by_bulky_metadata_returns_waiting_user() {
+        let td = TempDir::new().unwrap();
+        let body = format!(
+            "{}\n{}\n{}",
+            r#"{"type":"user","uuid":"u1","message":{"content":[{"type":"text","text":"hi"}]}}"#,
+            r#"{"type":"assistant","uuid":"a1","message":{"content":[{"type":"text","text":"done"}]}}"#,
+            bulky_trailer(),
+        );
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl", &body);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::WaitingUser);
+    }
+
+    #[test]
+    fn metadata_only_file_larger_than_every_window_returns_idle() {
+        let td = TempDir::new().unwrap();
+        let line = format!(r#"{{"type":"attachment","content":"{}"}}"#, "p".repeat(64 * 1024));
+        let body = vec![line; 80].join("\n");
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl", &body);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Idle);
     }
 }

@@ -7,9 +7,9 @@ use super::reader::is_meta_codex_text;
 
 const TAIL_LINES: usize = 60;
 
-pub(crate) fn read_tail_lines_codex(path: &Path) -> Option<Vec<String>> {
+pub(crate) fn read_tail_lines_codex(path: &Path, max_bytes: u64) -> Option<Vec<String>> {
     if !path.extension().map(|e| e == "zst").unwrap_or(false) {
-        return crate::sessions::activity::read_tail_lines(path);
+        return crate::sessions::activity::read_tail_bytes(path, max_bytes);
     }
     let reader = super::reader::open_lines(path).ok()?;
     let mut tail: VecDeque<String> = VecDeque::with_capacity(TAIL_LINES);
@@ -183,7 +183,7 @@ mod tests {
         let compressed = zstd::stream::encode_all(raw.as_bytes(), 0).unwrap();
         let p = td.path().join("rollout-x.jsonl.zst");
         std::fs::File::create(&p).unwrap().write_all(&compressed).unwrap();
-        let lines = read_tail_lines_codex(&p).unwrap();
+        let lines = read_tail_lines_codex(&p, 1024).unwrap();
         assert_eq!(lines.len(), 60);
         assert!(lines.last().unwrap().contains("msg 99"));
     }
@@ -193,7 +193,7 @@ mod tests {
         let td = tempfile::TempDir::new().unwrap();
         let p = td.path().join("rollout-y.jsonl");
         std::fs::write(&p, "line1\nline2\n").unwrap();
-        let lines = read_tail_lines_codex(&p).unwrap();
+        let lines = read_tail_lines_codex(&p, 1024).unwrap();
         assert_eq!(lines, vec!["line1", "line2"]);
     }
 }
