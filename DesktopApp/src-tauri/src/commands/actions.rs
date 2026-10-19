@@ -12,7 +12,7 @@ pub fn list_actions(state: State<AppState>, project_id: i64) -> AppResult<Vec<Ac
     repo::list(&c, project_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn detect_scripts(project_path: String) -> AppResult<Vec<DetectedScript>> {
     Ok(detect_all(&PathBuf::from(project_path)))
 }

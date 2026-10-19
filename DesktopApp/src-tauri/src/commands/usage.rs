@@ -42,7 +42,7 @@ fn scan_file(path: &Path) -> UsageSummary {
     acc.finalize()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn session_usage(
     state: State<AppState>,
     project_id: i64,
@@ -55,7 +55,7 @@ pub fn session_usage(
     Ok(scan_file(&path))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn project_usage(
     state: State<AppState>,
     project_id: i64,
@@ -95,7 +95,7 @@ pub fn project_usage(
     Ok(summary)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn provider_limits(provider: Provider) -> AppResult<ProviderLimits> {
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home".into()))?;
     Ok(crate::sessions::limits::read_provider_limits(&home, provider))

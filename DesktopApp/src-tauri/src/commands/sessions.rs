@@ -93,7 +93,7 @@ fn list_project_sessions(
     Ok(sessions)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_sessions(
     state: State<AppState>,
     project_id: i64,
@@ -107,7 +107,7 @@ pub fn list_sessions(
     Ok(sessions.into_iter().skip(offset).take(limit).collect())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_session_history(
     state: State<AppState>,
     project_id: i64,
@@ -151,7 +151,7 @@ pub fn read_session_history(
     Ok(history)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_subagents(
     state: State<AppState>,
     project_id: i64,
@@ -166,7 +166,7 @@ pub fn list_subagents(
     catch(move || crate::sessions::subagents::scan_session(&path, now))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_subagent_history(
     state: State<AppState>,
     project_id: i64,
@@ -191,7 +191,7 @@ pub fn read_subagent_history(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_session_watch(
     app: AppHandle,
     state: State<AppState>,
@@ -233,7 +233,7 @@ pub fn close_session_watch(state: State<AppState>, session_id: String) -> AppRes
     Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn count_sessions(
     state: State<AppState>,
     project_id: i64,
@@ -259,7 +259,7 @@ pub fn count_sessions(
     Ok(claude_count + codex_count + opencode_count)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn export_session(
     state: State<AppState>,
     project_id: i64,
@@ -598,7 +598,7 @@ pub fn active_sessions_snapshot(
     Ok(out)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_active_sessions(state: State<AppState>) -> AppResult<Vec<ActiveSession>> {
     let c = state.db.get()?;
     active_sessions_snapshot(&c)

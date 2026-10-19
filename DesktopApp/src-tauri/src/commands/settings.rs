@@ -16,7 +16,7 @@ pub struct GitUser {
     pub email: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_git_user() -> AppResult<GitUser> {
     let name = read_git_config("user.name").unwrap_or_else(|| "Developer".into());
     let email = read_git_config("user.email").unwrap_or_default();
@@ -50,7 +50,7 @@ pub fn detect_default_shell_impl() -> Option<String> {
     Some(raw)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn detect_default_shell() -> Option<String> {
     detect_default_shell_impl()
 }
@@ -67,7 +67,7 @@ fn which(name: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_available_shells() -> Vec<ShellInfo> {
     KNOWN_SHELLS.iter()
         .filter_map(|name| which(name).map(|path| ShellInfo {
@@ -149,7 +149,7 @@ const KNOWN_EDITORS: &[&str] = &[
     "code", "cursor", "zed", "subl", "idea", "webstorm", "nvim", "vim",
 ];
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_available_editors() -> Vec<crate::domain::EditorInfo> {
     KNOWN_EDITORS.iter()
         .filter_map(|name| which(name).map(|path| crate::domain::EditorInfo {

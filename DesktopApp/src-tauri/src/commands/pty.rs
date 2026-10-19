@@ -209,7 +209,7 @@ pub(crate) fn spawn_claude_resume(
     state.pty.spawn(app.clone(), "bash", &["-c", &cmd], &cwd, 80, 24, &env)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn spawn_pty(
     app: AppHandle,
     state: State<AppState>,
@@ -351,7 +351,7 @@ pub fn spawn_pty(
     Ok(pty_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn resolve_opencode_start(
     state: State<AppState>,
     project_id: i64,
@@ -420,7 +420,7 @@ fn save_clipboard_image_inner(
     Ok(path_str)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_clipboard_image(
     state: State<AppState>,
     pty_id: String,
@@ -513,7 +513,7 @@ fn read_clipboard_image_inner(state: &AppState, pty_id: String) -> AppResult<Opt
     Ok(Some(path_str))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_clipboard_image(
     state: State<AppState>,
     pty_id: String,
@@ -567,7 +567,7 @@ pub fn write_clipboard_text(text: String) -> AppResult<()> {
     write_clipboard_text_inner(&text)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_clipboard_text() -> AppResult<Option<String>> {
     let mut clipboard = arboard::Clipboard::new()
         .map_err(|e| AppError::Other(format!("clipboard: {e}")))?;

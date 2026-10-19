@@ -5,14 +5,14 @@ use crate::error::AppResult;
 use crate::state::AppState;
 use crate::db::projects_repo;
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_status(state: State<AppState>, project_id: i64) -> AppResult<GitStatus> {
     let c = state.db.get()?;
     let proj = projects_repo::get(&c, project_id)?;
     crate::git::status(&PathBuf::from(&proj.path))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_diff_file(
     state: State<AppState>,
     project_id: i64,
@@ -23,7 +23,7 @@ pub fn git_diff_file(
     crate::git::diff_file(&repo_path, &file_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_branches(
     state: State<AppState>,
     project_id: i64,
@@ -33,7 +33,7 @@ pub fn git_branches(
     crate::git::history::list_branches(&repo_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_log(
     state: State<AppState>,
     project_id: i64,
@@ -46,7 +46,7 @@ pub fn git_log(
     crate::git::history::log(&repo_path, &branch, skip, limit)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_commit_detail(
     state: State<AppState>,
     project_id: i64,
@@ -57,7 +57,7 @@ pub fn git_commit_detail(
     crate::git::history::commit_detail(&repo_path, &hash)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_diff_commit_file(
     state: State<AppState>,
     project_id: i64,

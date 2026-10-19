@@ -32,7 +32,7 @@ fn max_jsonl_mtime(dir: &Path) -> Option<i64> {
     max_ms
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_projects_activity(state: State<AppState>) -> AppResult<HashMap<i64, i64>> {
     let claude_root = dirs::home_dir()
         .ok_or_else(|| crate::error::AppError::Other("no home dir".into()))?

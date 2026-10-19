@@ -199,7 +199,9 @@ Timestamped lifecycle lines come from `diagnostics::log_event`: `start`, `window
 Reading an unexpected shutdown: a run whose `start` line has no matching `exit`, signal or panic line
 died by SIGKILL or a hard fault (check the kernel journal and `/var/log/apport.log`); a lost Wayland
 connection leaves a `Gdk-Message` line; a plain window close shows `window close requested` followed
-by `exit`.
+by `exit`. A `Gdk-Message: Error reading events from display` / `Lost connection to Wayland
+compositor` is normal when the journal shows a power-off in the same second; otherwise the compositor
+dropped the app because its main thread stopped reading events (see the main-thread gotcha below).
 
 ## Keyboard shortcuts (global)
 
@@ -211,6 +213,13 @@ Pattern when adding a new global shortcut that may conflict with xterm: register
 
 ## Gotchas
 
+- **Heavy Tauri commands must be `#[tauri::command(async)]`** — a plain `#[tauri::command] fn` runs
+  inline on the GTK main thread, which also reads the Wayland socket. COSMIC (smithay) silently
+  disconnects a client whose socket fills up, and the kernel buffer holds only ~280 pointer-motion
+  frames, so a ~0.3 s stall while the mouse moves kills the app (GTK `_exit(1)`, no `exit` line).
+  Anything that scans session files, runs git, spawns processes or waits on the clipboard goes on the
+  thread pool; cheap SQLite CRUD and order-sensitive PTY calls (`pty_write`, `pty_resize`,
+  `pty_kill`) stay sync.
 - **Never call `term.dispose()`** in `TerminalView.tsx` — triggers a webkit2gtk crash. The cleanup path kills the PTY, detaches listeners, and lets the `Terminal` object be GC'd with its container. See note around line 127.
 - **Content layers must never change DOM parent** — `PaneLayout` keeps every tab layer a direct sibling in one container and only moves it via inline `left/top/width/height`. Wrapping layers per pane (or re-keying them) remounts `TerminalView`, whose cleanup kills the live PTY.
 - **Content layers must also keep their relative order** — `computePaneLayers` sorts them by id.

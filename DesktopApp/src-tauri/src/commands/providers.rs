@@ -15,7 +15,7 @@ pub struct ProviderInfo {
     pub available: bool,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn detect_codex_models() -> Vec<String> {
     match crate::sessions::codex::reader::codex_root() {
         Ok(root) => crate::sessions::codex::reader::detect_models(&root),
@@ -58,7 +58,7 @@ pub async fn detect_opencode_models(state: State<'_, AppState>) -> AppResult<Vec
         .unwrap_or_default())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn detect_providers(state: State<AppState>) -> Vec<ProviderInfo> {
     [Provider::Claude, Provider::Codex, Provider::Opencode]
         .into_iter()
