@@ -200,9 +200,15 @@ impl ProductionRules {
     }
 
     fn classify_command(&self, command: &str, current_branch: Option<&str>) -> Option<String> {
-        split_segments(command)
-            .into_iter()
-            .find_map(|segment| self.classify_segment(segment, current_branch))
+        split_segments(command).into_iter().find_map(|segment| {
+            self.classify_segment(segment, current_branch).or_else(|| {
+                segment
+                    .split('`')
+                    .map(str::trim)
+                    .filter(|piece| !piece.is_empty() && *piece != segment)
+                    .find_map(|piece| self.classify_segment(piece, current_branch))
+            })
+        })
     }
 
     fn classify_segment(&self, segment: &str, current_branch: Option<&str>) -> Option<String> {
@@ -222,7 +228,7 @@ impl ProductionRules {
             }
         }
         let tokens = &tokens[start..];
-        let first = tokens.first()?.trim_start_matches('`');
+        let first = *tokens.first()?;
         let stripped = tokens.join(" ");
         if start > 0 && self.extra_bash.iter().any(|regex| regex.is_match(&stripped)) {
             return Some(stripped);
@@ -303,6 +309,11 @@ mod tests {
             ("Bash", Some("git push origin `git branch --show-current`"), Some("feature/x"), some("git push → ?")),
             ("Bash", Some("OUT=$(git push origin main)"), None, some("git push → main")),
             ("Bash", Some("`git push origin main`"), None, some("git push → main")),
+            ("Bash", Some("echo `git push origin main`"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("OUT=`git push origin main`"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("echo `task release:patch`"), Some("feature/x"), some("task release")),
+            ("Bash", Some("` git push origin main`"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("git push origin `git branch --show-current`"), Some("main"), some("git push → ?")),
             ("Bash", Some("git push"), None, some("git push → ?")),
             ("Bash", Some("git push origin HEAD"), Some("main"), some("git push → main")),
             ("Bash", Some("git push origin HEAD"), Some("feature/x"), None),
