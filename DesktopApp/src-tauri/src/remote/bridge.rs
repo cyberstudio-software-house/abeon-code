@@ -12,7 +12,7 @@ use crate::remote::client::CentrifugoClient;
 use crate::remote::cloud_client::CloudClient;
 use crate::remote::dispatch::{command_to_action, PtyAction};
 use crate::remote::protocol::{RemoteEnvelope, RemoteEvent};
-use crate::remote::registry::SessionPtyRegistry;
+use crate::pty::session_registry::SessionPtyRegistry;
 use crate::state::AppState;
 
 /// How often the bridge re-publishes the full roster snapshot to the device channel, so

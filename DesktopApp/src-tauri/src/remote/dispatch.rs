@@ -1,7 +1,5 @@
-use crate::commands::pty::PtyKind;
-use crate::domain::Provider;
 use crate::remote::protocol::RemoteCommand;
-use crate::remote::registry::SessionPtyRegistry;
+use crate::pty::session_registry::SessionPtyRegistry;
 
 /// Concrete effect a remote command resolves to. Kept separate from execution
 /// so the decision logic is pure and unit-testable without a real PTY.
@@ -78,15 +76,6 @@ pub fn command_to_action(
         RemoteCommand::RequestHistory { .. } => {
             PtyAction::Reject { reason: "requestHistory has no pty effect".into() }
         }
-    }
-}
-
-/// The session id (if any) that a freshly spawned PTY should be bound to in the
-/// `SessionPtyRegistry`. Only Claude PTYs with a known session id qualify.
-pub fn session_to_bind(kind: &PtyKind) -> Option<String> {
-    match kind {
-        PtyKind::Agent { provider: Provider::Claude, session_id: Some(id), .. } => Some(id.clone()),
-        _ => None,
     }
 }
 
@@ -173,36 +162,5 @@ mod tests {
         let reg = reg_with("s1", "pty-a");
         let cmd = RemoteCommand::RequestHistory { session_id: "s1".into() };
         assert!(matches!(command_to_action(&cmd, &reg, false), PtyAction::Reject { .. }));
-    }
-
-    #[test]
-    fn session_to_bind_only_for_claude_with_id() {
-        assert_eq!(
-            session_to_bind(&PtyKind::Agent {
-                provider: Provider::Claude,
-                session_id: Some("s1".into()), model: None, effort: None, skip_permissions: false, fresh: true, initial_prompt: None,
-            }),
-            Some("s1".to_string())
-        );
-        assert_eq!(
-            session_to_bind(&PtyKind::Agent {
-                provider: Provider::Claude,
-                session_id: None, model: None, effort: None, skip_permissions: false, fresh: false, initial_prompt: None,
-            }),
-            None
-        );
-        assert_eq!(session_to_bind(&PtyKind::Shell), None);
-        assert_eq!(session_to_bind(&PtyKind::Action { action_id: 1 }), None);
-    }
-
-    #[test]
-    fn session_to_bind_none_for_codex() {
-        assert_eq!(
-            session_to_bind(&PtyKind::Agent {
-                provider: Provider::Codex,
-                session_id: Some("s1".into()), model: None, effort: None, skip_permissions: false, fresh: true, initial_prompt: None,
-            }),
-            None
-        );
     }
 }

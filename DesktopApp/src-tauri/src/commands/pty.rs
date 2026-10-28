@@ -7,7 +7,7 @@ use crate::domain::Provider;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::db::{projects_repo, actions_repo};
-use crate::remote::dispatch::session_to_bind;
+use crate::pty::session_registry::session_to_bind;
 use crate::validation::validate_session_id;
 
 const OPENCODE_DISCOVERY_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(15);
@@ -370,6 +370,7 @@ pub fn pty_write(state: State<AppState>, pty_id: String, data: String) -> AppRes
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data.as_bytes())
         .map_err(|e| AppError::Other(format!("base64: {e}")))?;
+    state.input_activity.record(&pty_id);
     state.pty.write(&pty_id, &bytes)
 }
 

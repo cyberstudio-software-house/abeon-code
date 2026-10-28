@@ -6,7 +6,8 @@ use parking_lot::Mutex;
 use crate::db::DbPool;
 use crate::sessions::watcher::SessionWatchers;
 use crate::pty::PtyManager;
-use crate::remote::registry::SessionPtyRegistry;
+use crate::pty::input_activity::InputActivity;
+use crate::pty::session_registry::SessionPtyRegistry;
 use crate::error::AppResult;
 
 #[derive(Default)]
@@ -112,6 +113,7 @@ pub struct AppState {
     pub session_watchers: Arc<SessionWatchers>,
     pub pty: Arc<PtyManager>,
     pub session_pty: Arc<SessionPtyRegistry>,
+    pub input_activity: Arc<InputActivity>,
     pub opencode_starts: Arc<OpenCodeStartRegistry>,
     pub shell_env: Mutex<Option<HashMap<String, String>>>,
     pub clipboard_images: Mutex<HashMap<String, Vec<PathBuf>>>,
@@ -130,6 +132,7 @@ impl AppState {
             session_watchers: SessionWatchers::new(),
             pty: PtyManager::new(),
             session_pty: Arc::new(SessionPtyRegistry::new()),
+            input_activity: Arc::new(InputActivity::new()),
             opencode_starts: Arc::new(OpenCodeStartRegistry::default()),
             shell_env: Mutex::new(None),
             clipboard_images: Mutex::new(HashMap::new()),

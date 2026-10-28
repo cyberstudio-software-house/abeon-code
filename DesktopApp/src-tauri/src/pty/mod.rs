@@ -1,4 +1,6 @@
 pub mod handle;
+pub mod session_registry;
+pub mod input_activity;
 
 use std::collections::HashMap;
 use std::sync::Arc;
