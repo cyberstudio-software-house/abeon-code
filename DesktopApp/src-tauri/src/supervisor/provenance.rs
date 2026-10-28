@@ -14,7 +14,7 @@ pub enum PromptOrigin {
 pub struct PromptEvidence {
     pub pty_known: bool,
     pub quiet_since_typed: bool,
-    pub recent_keystroke: bool,
+    pub recent_submit: bool,
 }
 
 #[derive(Default)]
@@ -96,19 +96,13 @@ impl ProvenanceTracker {
             .into_iter()
             .filter(|(_, recorded)| is_fresh(*recorded, now))
             .collect();
-        let injected = !typed.is_empty()
-            && (evidence.quiet_since_typed || typed.iter().any(|(text, _)| text == prompt));
-        let origin = if !evidence.pty_known {
-            if take_match(&mut session.cli_prompts, prompt, now) {
-                PromptOrigin::Agent
-            } else {
-                PromptOrigin::Human
-            }
-        } else if injected {
+        let exact = typed.iter().any(|(text, _)| text == prompt);
+        let typed_quietly = evidence.pty_known && !typed.is_empty() && evidence.quiet_since_typed;
+        let origin = if exact || typed_quietly {
             PromptOrigin::Supervisor
         } else if take_match(&mut session.cli_prompts, prompt, now) {
             PromptOrigin::Agent
-        } else if evidence.recent_keystroke {
+        } else if !evidence.pty_known || evidence.recent_submit {
             PromptOrigin::Human
         } else {
             PromptOrigin::Agent
@@ -141,22 +135,22 @@ mod tests {
     const TYPED_QUIETLY: PromptEvidence = PromptEvidence {
         pty_known: true,
         quiet_since_typed: true,
-        recent_keystroke: false,
+        recent_submit: false,
     };
-    const KEYSTROKE: PromptEvidence = PromptEvidence {
+    const SUBMIT: PromptEvidence = PromptEvidence {
         pty_known: true,
         quiet_since_typed: false,
-        recent_keystroke: true,
+        recent_submit: true,
     };
     const SILENT: PromptEvidence = PromptEvidence {
         pty_known: true,
         quiet_since_typed: false,
-        recent_keystroke: false,
+        recent_submit: false,
     };
     const NO_PTY: PromptEvidence = PromptEvidence {
         pty_known: false,
         quiet_since_typed: false,
-        recent_keystroke: false,
+        recent_submit: false,
     };
 
     #[test]
@@ -184,7 +178,7 @@ mod tests {
         let mut tracker = ProvenanceTracker::default();
         tracker.record_injection("s1", "[agent sterujący] tak", now);
         assert_eq!(
-            tracker.on_user_prompt("s1", "  [agent sterujący] tak\n", KEYSTROKE, now),
+            tracker.on_user_prompt("s1", "  [agent sterujący] tak\n", SUBMIT, now),
             PromptOrigin::Supervisor
         );
     }
@@ -195,7 +189,7 @@ mod tests {
         let mut tracker = ProvenanceTracker::default();
         tracker.record_injection("s1", "[agent sterujący] tak", now);
         assert_eq!(
-            tracker.on_user_prompt("s1", "nie, poczekaj", KEYSTROKE, now),
+            tracker.on_user_prompt("s1", "nie, poczekaj", SUBMIT, now),
             PromptOrigin::Human
         );
         assert_eq!(tracker.last_typed_at("s1", now), None);
@@ -206,27 +200,43 @@ mod tests {
     }
 
     #[test]
-    fn cli_prompt_marks_agent() {
+    fn exact_typed_text_marks_supervisor_without_a_known_pty() {
         let now = Instant::now();
         let mut tracker = ProvenanceTracker::default();
-        tracker.expect_cli_prompt("s1", "do the thing", now);
+        tracker.record_injection("s1", "[agent sterujący] tak", now);
         assert_eq!(
-            tracker.on_user_prompt("s1", "do the thing", KEYSTROKE, now + MINUTE),
-            PromptOrigin::Agent
+            tracker.on_user_prompt("s1", "[agent sterujący] tak", NO_PTY, now),
+            PromptOrigin::Supervisor
         );
-        assert_eq!(tracker.origin("s1"), PromptOrigin::Agent);
+        tracker.record_injection("s1", "[agent sterujący] tak", now);
         assert_eq!(
-            tracker.on_user_prompt("s1", "do the thing", KEYSTROKE, now + MINUTE),
+            tracker.on_user_prompt("s1", "coś innego", NO_PTY, now),
             PromptOrigin::Human
         );
     }
 
     #[test]
-    fn recent_keystroke_marks_human_and_silence_marks_agent() {
+    fn cli_prompt_marks_agent() {
+        let now = Instant::now();
+        let mut tracker = ProvenanceTracker::default();
+        tracker.expect_cli_prompt("s1", "do the thing", now);
+        assert_eq!(
+            tracker.on_user_prompt("s1", "do the thing", SUBMIT, now + MINUTE),
+            PromptOrigin::Agent
+        );
+        assert_eq!(tracker.origin("s1"), PromptOrigin::Agent);
+        assert_eq!(
+            tracker.on_user_prompt("s1", "do the thing", SUBMIT, now + MINUTE),
+            PromptOrigin::Human
+        );
+    }
+
+    #[test]
+    fn recent_submit_marks_human_and_silence_marks_agent() {
         let now = Instant::now();
         let mut tracker = ProvenanceTracker::default();
         assert_eq!(
-            tracker.on_user_prompt("s1", "zrób push", KEYSTROKE, now),
+            tracker.on_user_prompt("s1", "zrób push", SUBMIT, now),
             PromptOrigin::Human
         );
         assert_eq!(
@@ -267,7 +277,7 @@ mod tests {
             PromptOrigin::Agent
         );
         assert_eq!(
-            tracker.on_user_prompt("s2", "cli", KEYSTROKE, now + 11 * MINUTE),
+            tracker.on_user_prompt("s2", "cli", SUBMIT, now + 11 * MINUTE),
             PromptOrigin::Human
         );
     }
@@ -308,7 +318,7 @@ mod tests {
         tracker.record_injection("s1", "answer", now);
         assert_eq!(tracker.last_typed_at("s2", now), None);
         assert_eq!(
-            tracker.on_user_prompt("s2", "answer", KEYSTROKE, now),
+            tracker.on_user_prompt("s2", "answer", SUBMIT, now),
             PromptOrigin::Human
         );
         assert_eq!(

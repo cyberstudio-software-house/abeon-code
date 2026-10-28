@@ -394,7 +394,7 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn guard_ignores_human_origin() {
         let (effects, core) = on_main();
-        effects.keystroke("pty-s1");
+        effects.submit("pty-s1");
         core.on_session_hook(prompt("s1", "zrób push")).await;
         assert_eq!(
             core.on_session_hook(bash("s1", "git push")).await,
@@ -510,7 +510,7 @@ mod tests {
         );
         assert_eq!(only_approval(&core).action, "task release");
         assert_eq!(effects.kinds(), vec![decision_kind::GUARD_BLOCKED]);
-        effects.keystroke("pty-s1");
+        effects.submit("pty-s1");
         core.on_session_hook(prompt("s1", "tak, wydaj wersję"))
             .await;
         assert_eq!(
@@ -811,7 +811,7 @@ mod tests {
             guard_denial()
         );
         approve_only(&core);
-        effects.keystroke("pty-s1");
+        effects.submit("pty-s1");
         core.on_session_hook(prompt("s1", "najpierw uruchom testy"))
             .await;
         assert_eq!(
@@ -868,9 +868,9 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn keystroke_within_ten_seconds_makes_the_prompt_human() {
+    async fn submit_within_ten_seconds_makes_the_prompt_human() {
         let (effects, core) = on_main();
-        effects.keystroke("pty-s1");
+        effects.submit("pty-s1");
         advance(9 * SECOND).await;
         core.on_session_hook(prompt("s1", "zrób push")).await;
         assert_eq!(origin_of(&core, "s1"), PromptOrigin::Human);
@@ -878,7 +878,7 @@ mod tests {
             core.on_session_hook(bash("s1", "git push")).await,
             HookReply::Empty
         );
-        effects.keystroke("pty-s1");
+        effects.submit("pty-s1");
         advance(11 * SECOND).await;
         core.on_session_hook(prompt("s1", "i jeszcze raz")).await;
         assert_eq!(origin_of(&core, "s1"), PromptOrigin::Agent);
@@ -889,11 +889,11 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn keystroke_after_the_injection_hands_the_prompt_to_the_user() {
+    async fn submit_after_the_injection_hands_the_prompt_to_the_user() {
         let (effects, core) = on_main();
         supervisor_answer_typed(&effects, &core).await;
         advance(SECOND).await;
-        effects.keystroke("pty-s1");
+        effects.submit("pty-s1");
         core.on_session_hook(prompt("s1", "nie, najpierw testy"))
             .await;
         assert_eq!(origin_of(&core, "s1"), PromptOrigin::Human);
@@ -991,5 +991,33 @@ mod tests {
             .unwrap()
             .detail
             .contains("abc"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn terminal_reports_without_enter_are_not_human() {
+        let (effects, core) = on_main();
+        effects.keystroke("pty-s1");
+        advance(SECOND).await;
+        core.on_session_hook(prompt("s1", "zrób push")).await;
+        assert_eq!(origin_of(&core, "s1"), PromptOrigin::Agent);
+        assert_eq!(
+            core.on_session_hook(bash("s1", "git push")).await,
+            guard_denial()
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn terminal_report_after_the_injection_keeps_the_prompt_guarded() {
+        let (effects, core) = on_main();
+        supervisor_answer_typed(&effects, &core).await;
+        advance(SECOND).await;
+        effects.keystroke("pty-s1");
+        core.on_session_hook(prompt("s1", "[agent sterujący] tak wypchnij"))
+            .await;
+        assert_eq!(origin_of(&core, "s1"), PromptOrigin::Agent);
+        assert_eq!(
+            core.on_session_hook(bash("s1", "git push")).await,
+            guard_denial()
+        );
     }
 }

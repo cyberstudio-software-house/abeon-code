@@ -30,6 +30,7 @@ pub trait Effects: Send + Sync + 'static {
     fn session_info(&self, session_id: &str) -> Option<SessionInfo>;
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String>;
     fn input_quiet(&self, pty_id: &str, window: Duration) -> bool;
+    fn submitted_recently(&self, pty_id: &str, window: Duration) -> bool;
     fn current_branch(&self, cwd: &Path) -> Option<String>;
     fn wake_supervisor(&self) -> bool;
     fn publish_snapshot(&self, snapshot: SupervisorSnapshot);

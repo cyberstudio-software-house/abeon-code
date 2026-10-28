@@ -31,7 +31,7 @@ pub const ANSWER_PREFIX: &str = "[agent sterujący] ";
 pub const GUARD_REASON: &str =
     "Ta operacja wymaga zgody użytkownika. Nie ponawiaj jej — agent sterujący poprosił użytkownika o zgodę.";
 pub const QUIET_WINDOW: Duration = Duration::from_secs(5);
-pub const KEYSTROKE_WINDOW: Duration = Duration::from_secs(10);
+pub const SUBMIT_WINDOW: Duration = Duration::from_secs(10);
 pub const WAKE_DEBOUNCE: Duration = Duration::from_secs(10);
 pub const WAKE_RETRY: Duration = Duration::from_secs(120);
 pub const DECISION_WINDOW: Duration = Duration::from_secs(120);
@@ -815,7 +815,7 @@ impl SupervisorCore {
             return PromptEvidence {
                 pty_known: false,
                 quiet_since_typed: false,
-                recent_keystroke: false,
+                recent_submit: false,
             };
         };
         PromptEvidence {
@@ -824,7 +824,7 @@ impl SupervisorCore {
                 self.effects
                     .input_quiet(&pty_id, now.saturating_duration_since(typed_at))
             }),
-            recent_keystroke: !self.effects.input_quiet(&pty_id, KEYSTROKE_WINDOW),
+            recent_submit: self.effects.submitted_recently(&pty_id, SUBMIT_WINDOW),
         }
     }
 
@@ -1237,7 +1237,7 @@ mod tests {
             .await;
         advance(30 * SECOND).await;
         core.tick();
-        effects.keystroke("pty-s1");
+        effects.submit("pty-s1");
         let reply = core
             .on_session_hook(prompt("s1", "nie, najpierw testy"))
             .await;
@@ -1349,7 +1349,7 @@ mod tests {
         core.on_session_hook(stop("s1", "Czekam na decyzję użytkownika."))
             .await;
         assert!(core.take_events().is_empty());
-        effects.keystroke("pty-s1");
+        effects.submit("pty-s1");
         core.on_session_hook(prompt("s1", "wybierz zielony")).await;
         assert!(core.snapshot().escalations.is_empty());
         core.on_session_hook(stop("s1", "Gotowe. Czy commitować?"))
@@ -1436,6 +1436,7 @@ mod tests {
         effects.quiet.store(false, Ordering::SeqCst);
         core.answer_question(&question_id, Some("tak".into()), None, "plan")
             .unwrap();
+        effects.submit("pty-s1");
         core.on_session_hook(prompt("s1", "poczekaj, sprawdzę coś"))
             .await;
         effects.quiet.store(true, Ordering::SeqCst);

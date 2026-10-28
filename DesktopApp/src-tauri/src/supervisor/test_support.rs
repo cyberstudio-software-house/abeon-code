@@ -24,6 +24,7 @@ pub(crate) struct FakeEffects {
     pub(crate) sessions: Mutex<HashMap<String, SessionInfo>>,
     pub(crate) quiet: AtomicBool,
     pub(crate) keystrokes: Mutex<HashMap<String, Instant>>,
+    pub(crate) submits: Mutex<HashMap<String, Instant>>,
     pub(crate) type_fails: AtomicBool,
     pub(crate) wake_accepts: AtomicBool,
     pub(crate) wakes: AtomicUsize,
@@ -66,6 +67,7 @@ impl FakeEffects {
             sessions: Mutex::new(sessions),
             quiet: AtomicBool::new(true),
             keystrokes: Mutex::default(),
+            submits: Mutex::default(),
             type_fails: AtomicBool::new(false),
             wake_accepts: AtomicBool::new(true),
             wakes: AtomicUsize::new(0),
@@ -85,6 +87,13 @@ impl FakeEffects {
 
     pub(crate) fn keystroke(&self, pty_id: &str) {
         self.keystrokes
+            .lock()
+            .insert(pty_id.to_string(), tokio::time::Instant::now().into_std());
+    }
+
+    pub(crate) fn submit(&self, pty_id: &str) {
+        self.keystroke(pty_id);
+        self.submits
             .lock()
             .insert(pty_id.to_string(), tokio::time::Instant::now().into_std());
     }
@@ -142,6 +151,14 @@ impl Effects for FakeEffects {
             .lock()
             .get(pty_id)
             .is_none_or(|last| now.saturating_duration_since(*last) >= window)
+    }
+
+    fn submitted_recently(&self, pty_id: &str, window: Duration) -> bool {
+        let now = tokio::time::Instant::now().into_std();
+        self.submits
+            .lock()
+            .get(pty_id)
+            .is_some_and(|last| now.saturating_duration_since(*last) < window)
     }
 
     fn current_branch(&self, cwd: &Path) -> Option<String> {
