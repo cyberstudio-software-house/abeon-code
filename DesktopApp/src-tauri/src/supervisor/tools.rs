@@ -620,7 +620,12 @@ mod tests {
         let args = json!({"approval_id": approval.id});
         assert_eq!(
             handle_tool(&core, "get_approval", args.clone()).unwrap(),
-            json!({"status": "pending", "code": approval.code, "action": "git push → main"})
+            json!({
+                "status": "pending",
+                "code": approval.code,
+                "action": "git push → main",
+                "detail": "git push origin main"
+            })
         );
         core.resolve_approval(&approval.id, true).unwrap();
         assert_eq!(

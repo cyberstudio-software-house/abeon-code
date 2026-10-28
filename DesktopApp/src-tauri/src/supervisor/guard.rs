@@ -11,6 +11,18 @@ const BUILTIN_MCP_GLOBS: &[&str] = &[
     "mcp__bandzior__secret_create",
 ];
 
+const CONFIRM_GATED_TOOLS: &[&str] = &[
+    "mcp__bandzior__config_update",
+    "mcp__bandzior__resource_update",
+    "mcp__bandzior__env_vars_set",
+    "mcp__bandzior__deployment_deploy",
+    "mcp__bandzior__deployment_version_update",
+    "mcp__bandzior__deployment_containers_update",
+    "mcp__bandzior__deployment_update",
+];
+const BASH_TOOL: &str = "Bash";
+const DETAIL_CHARS: usize = 300;
+
 const PRODUCTION_BRANCHES: &[&str] = &["main", "master"];
 const WRAPPER_WORDS: &[&str] = &[
     "sudo", "env", "time", "nohup", "exec", "command", "nice", "xargs",
@@ -32,12 +44,68 @@ const PUSH_OPTIONS_WITH_VALUE: &[&str] = &[
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProductionAction {
     pub label: String,
+    pub detail: String,
+    pub fingerprint: String,
 }
 
 pub struct ProductionRules {
     task_release: Regex,
     mcp_patterns: Vec<Regex>,
     extra_bash: Vec<Regex>,
+}
+
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn detail_excerpt(text: &str) -> String {
+    if text.chars().count() <= DETAIL_CHARS {
+        return text.to_string();
+    }
+    let kept: String = text.chars().take(DETAIL_CHARS - 1).collect();
+    format!("{kept}…")
+}
+
+fn canonical_json(value: &Value) -> String {
+    match value {
+        Value::Object(map) => {
+            let mut entries: Vec<(&String, &Value)> = map.iter().collect();
+            entries.sort_by(|left, right| left.0.cmp(right.0));
+            let body = entries
+                .into_iter()
+                .map(|(key, item)| {
+                    format!("{}:{}", Value::String(key.clone()), canonical_json(item))
+                })
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{{{body}}}")
+        }
+        Value::Array(items) => {
+            let body = items
+                .iter()
+                .map(canonical_json)
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("[{body}]")
+        }
+        other => other.to_string(),
+    }
+}
+
+fn is_confirmed(confirm: Option<&Value>) -> bool {
+    match confirm {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => false,
+        Some(Value::String(text)) => {
+            let text = text.trim();
+            !(text.is_empty() || text == "0" || text.eq_ignore_ascii_case("false"))
+        }
+        Some(Value::Number(number)) => number.as_f64() != Some(0.0),
+        Some(_) => true,
+    }
+}
+
+fn is_preview(tool_name: &str, tool_input: &Value) -> bool {
+    CONFIRM_GATED_TOOLS.contains(&tool_name) && !is_confirmed(tool_input.get("confirm"))
 }
 
 fn glob_to_regex(glob: &str) -> Option<Regex> {
@@ -227,17 +295,33 @@ impl ProductionRules {
         &self,
         tool_name: &str,
         tool_input: &Value,
+        cwd: Option<&str>,
         current_branch: Option<&str>,
     ) -> Option<ProductionAction> {
-        let label = if tool_name == "Bash" {
+        if tool_name == BASH_TOOL {
             let command = tool_input.get("command").and_then(Value::as_str)?;
-            self.classify_command(command, current_branch)
-        } else if self.mcp_patterns.iter().any(|regex| regex.is_match(tool_name)) {
-            Some(tool_name.to_string())
-        } else {
-            None
-        };
-        label.map(|label| ProductionAction { label })
+            let label = self.classify_command(command, current_branch)?;
+            let command = collapse_whitespace(command);
+            return Some(ProductionAction {
+                label,
+                detail: detail_excerpt(&command),
+                fingerprint: format!("{tool_name}\0{}\0{command}", cwd.unwrap_or_default()),
+            });
+        }
+        let production = self
+            .mcp_patterns
+            .iter()
+            .any(|regex| regex.is_match(tool_name))
+            && !is_preview(tool_name, tool_input);
+        if !production {
+            return None;
+        }
+        let arguments = canonical_json(tool_input);
+        Some(ProductionAction {
+            label: tool_name.to_string(),
+            detail: detail_excerpt(&arguments),
+            fingerprint: format!("{tool_name}\0{arguments}"),
+        })
     }
 
     fn classify_command(&self, command: &str, current_branch: Option<&str>) -> Option<String> {
@@ -316,7 +400,15 @@ mod tests {
             Some(command) => json!({ "command": command }),
             None => json!({}),
         };
-        rules.classify(tool, &input, branch).map(|action| action.label)
+        rules
+            .classify(tool, &input, None, branch)
+            .map(|action| action.label)
+    }
+
+    fn classify_mcp(rules: &ProductionRules, tool: &str, input: Value) -> Option<String> {
+        rules
+            .classify(tool, &input, None, None)
+            .map(|action| action.label)
     }
 
     #[test]
@@ -390,9 +482,11 @@ mod tests {
             ("Bash", Some("cd ../other && bash -c 'git push'"), Some("feature/x"), some("git push → ?")),
             ("Bash", Some("task build"), None, None),
             ("Bash", Some("git log --oneline"), Some("main"), None),
-            ("mcp__bandzior__deployment_deploy", None, None, some("mcp__bandzior__deployment_deploy")),
-            ("mcp__bandzior__config_update", None, None, some("mcp__bandzior__config_update")),
-            ("mcp__bandzior__env_vars_set", None, None, some("mcp__bandzior__env_vars_set")),
+            ("mcp__bandzior__deployment_deploy", None, None, None),
+            ("mcp__bandzior__config_update", None, None, None),
+            ("mcp__bandzior__env_vars_set", None, None, None),
+            ("mcp__bandzior__deployment_create", None, None, some("mcp__bandzior__deployment_create")),
+            ("mcp__bandzior__resource_create", None, None, some("mcp__bandzior__resource_create")),
             ("mcp__bandzior__resource_delete", None, None, some("mcp__bandzior__resource_delete")),
             ("mcp__bandzior__secret_create", None, None, some("mcp__bandzior__secret_create")),
             ("mcp__bandzior__project_find", None, None, None),
@@ -437,6 +531,169 @@ mod tests {
     #[test]
     fn missing_command_is_not_production() {
         let rules = ProductionRules::new(&[]);
-        assert_eq!(rules.classify("Bash", &json!({}), Some("main")), None);
+        assert_eq!(rules.classify("Bash", &json!({}), None, Some("main")), None);
+    }
+
+    #[test]
+    fn bandzior_previews_are_not_production() {
+        let rules = ProductionRules::new(&[]);
+        let gated = [
+            "mcp__bandzior__config_update",
+            "mcp__bandzior__resource_update",
+            "mcp__bandzior__env_vars_set",
+            "mcp__bandzior__deployment_deploy",
+            "mcp__bandzior__deployment_version_update",
+            "mcp__bandzior__deployment_containers_update",
+            "mcp__bandzior__deployment_update",
+        ];
+        let always = [
+            "mcp__bandzior__deployment_create",
+            "mcp__bandzior__deployment_rollback",
+            "mcp__bandzior__resource_create",
+            "mcp__bandzior__resource_delete",
+            "mcp__bandzior__secret_create",
+        ];
+        let previews = [
+            json!({}),
+            json!({"confirm": false}),
+            json!({"confirm": "false"}),
+            json!({"confirm": null}),
+            json!({"confirm": ""}),
+            json!({"confirm": 0}),
+        ];
+        let confirmed = [
+            json!({"confirm": true, "change_id": "c1"}),
+            json!({"confirm": "true"}),
+            json!({"confirm": "TRUE"}),
+            json!({"confirm": 1}),
+            json!({"confirm": "yes"}),
+        ];
+        for tool in gated {
+            for input in &previews {
+                assert_eq!(
+                    classify_mcp(&rules, tool, input.clone()),
+                    None,
+                    "{tool} {input}"
+                );
+            }
+            for input in &confirmed {
+                assert_eq!(
+                    classify_mcp(&rules, tool, input.clone()),
+                    Some(tool.to_string()),
+                    "{tool} {input}"
+                );
+            }
+        }
+        for tool in always {
+            for input in previews.iter().chain(confirmed.iter()) {
+                assert_eq!(
+                    classify_mcp(&rules, tool, input.clone()),
+                    Some(tool.to_string()),
+                    "{tool} {input}"
+                );
+            }
+        }
+        assert_eq!(
+            classify_mcp(
+                &rules,
+                "mcp__bandzior__project_find",
+                json!({"confirm": true})
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn actions_carry_exact_fingerprint_and_detail() {
+        let rules = ProductionRules::new(&[]);
+        let bash = |command: &str, cwd: Option<&str>| {
+            rules
+                .classify("Bash", &json!({ "command": command }), cwd, Some("main"))
+                .expect("production")
+        };
+        let push = bash("git push origin main", Some("/repo"));
+        assert_eq!(push.label, "git push → main");
+        assert_eq!(push.detail, "git push origin main");
+        assert_eq!(
+            bash("  git   push\torigin main ", Some("/repo")).fingerprint,
+            push.fingerprint
+        );
+        assert_ne!(
+            bash("git push origin main", Some("/other")).fingerprint,
+            push.fingerprint
+        );
+        assert_ne!(
+            bash("git push origin main", None).fingerprint,
+            push.fingerprint
+        );
+        assert_ne!(
+            bash("git push --force origin main", Some("/repo")).fingerprint,
+            push.fingerprint
+        );
+        assert_ne!(
+            bash("git push", Some("/repo")).fingerprint,
+            push.fingerprint
+        );
+
+        let deploy = |input: Value| {
+            rules
+                .classify(
+                    "mcp__bandzior__deployment_deploy",
+                    &input,
+                    Some("/repo"),
+                    None,
+                )
+                .expect("production")
+        };
+        let first = deploy(json!({"confirm": true, "change_id": "c1", "env": {"b": 2, "a": 1}}));
+        let reordered =
+            deploy(json!({"env": {"a": 1, "b": 2}, "change_id": "c1", "confirm": true}));
+        assert_eq!(first.fingerprint, reordered.fingerprint);
+        assert_eq!(
+            first.detail,
+            r#"{"change_id":"c1","confirm":true,"env":{"a":1,"b":2}}"#
+        );
+        assert_eq!(first.label, "mcp__bandzior__deployment_deploy");
+        assert_ne!(
+            deploy(json!({"confirm": true, "change_id": "c2", "env": {"a": 1, "b": 2}}))
+                .fingerprint,
+            first.fingerprint
+        );
+        assert_ne!(
+            rules
+                .classify(
+                    "mcp__bandzior__deployment_update",
+                    &json!({"confirm": true, "change_id": "c1", "env": {"a": 1, "b": 2}}),
+                    Some("/repo"),
+                    None
+                )
+                .unwrap()
+                .fingerprint,
+            first.fingerprint
+        );
+        assert_eq!(
+            deploy(json!({"confirm": true, "change_id": "c1"})).fingerprint,
+            rules
+                .classify(
+                    "mcp__bandzior__deployment_deploy",
+                    &json!({"change_id": "c1", "confirm": true}),
+                    Some("/elsewhere"),
+                    None
+                )
+                .unwrap()
+                .fingerprint
+        );
+    }
+
+    #[test]
+    fn detail_is_capped_on_a_char_boundary() {
+        let rules = ProductionRules::new(&[]);
+        let long = format!("git push origin main # {}", "ż".repeat(400));
+        let action = rules
+            .classify("Bash", &json!({ "command": long }), None, Some("main"))
+            .expect("production");
+        assert_eq!(action.detail.chars().count(), 300);
+        assert!(action.detail.ends_with('…'));
+        assert!(action.detail.starts_with("git push origin main # ż"));
     }
 }

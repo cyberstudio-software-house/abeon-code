@@ -40,18 +40,28 @@ pub struct ApprovalStatus {
     pub status: ApprovalState,
     pub code: String,
     pub action: String,
+    pub detail: String,
 }
 
 pub(super) struct ApprovalRecord {
     label: String,
     project_id: Option<i64>,
-    action: String,
+    action: ProductionAction,
     code: String,
     created: Instant,
     outcome: Option<bool>,
 }
 
-fn approval_text(action: &str, approve: bool) -> String {
+fn describe_action(action: &ProductionAction) -> String {
+    if action.detail == action.label {
+        action.label.clone()
+    } else {
+        format!("{} ({})", action.label, action.detail)
+    }
+}
+
+fn approval_text(action: &ProductionAction, approve: bool) -> String {
+    let action = describe_action(action);
     if approve {
         format!("{ANSWER_PREFIX}Użytkownik zatwierdził: {action}. Wykonaj ją.")
     } else {
@@ -73,7 +83,8 @@ impl CoreState {
                     project_id: record.and_then(|record| record.project_id),
                     id: approval.id,
                     session_id: approval.session_id,
-                    action: approval.action,
+                    action: approval.action.label,
+                    detail: approval.action.detail,
                     code: approval.code,
                     created_at: approval.created_at_ms,
                 }
@@ -96,17 +107,17 @@ impl CoreState {
         };
         outbox.notifications.push((
             approval.session_id.clone(),
-            format!("{APPROVAL_TITLE}: {}", approval.action),
+            format!("{APPROVAL_TITLE}: {}", approval.action.label),
             format!(
-                "{label} — kod {}. Zatwierdź lub odrzuć w panelu agenta sterującego.",
-                approval.code
+                "{label} — kod {}: {}",
+                approval.code, approval.action.detail
             ),
         ));
         outbox.decisions.push(NewDecision {
             created_at: approval.created_at_ms,
             session_id: Some(approval.session_id.clone()),
             kind: decision_kind::GUARD_BLOCKED,
-            question: approval.action.clone(),
+            question: describe_action(&approval.action),
             decision: format!("{DECISION_BLOCKED} (kod {})", approval.code),
             rationale: rationale.to_string(),
         });
@@ -115,7 +126,8 @@ impl CoreState {
                 approval_id: approval.id.clone(),
                 session_id: approval.session_id.clone(),
                 label: label.clone(),
-                action: approval.action.clone(),
+                action: approval.action.label.clone(),
+                detail: approval.action.detail.clone(),
                 code: approval.code.clone(),
             },
             now,
@@ -153,7 +165,12 @@ impl SupervisorCore {
             _ => None,
         };
         let rules = ProductionRules::new(&settings.extra_rules);
-        match rules.classify(tool_name, &tool_input, branch.as_deref()) {
+        match rules.classify(
+            tool_name,
+            &tool_input,
+            input.cwd.as_deref(),
+            branch.as_deref(),
+        ) {
             Some(action) => self.hold_for_approval(&settings, &input.session_id, action),
             None => HookReply::Empty,
         }
@@ -190,14 +207,11 @@ impl SupervisorCore {
             if origin == PromptOrigin::Human
                 || state
                     .approvals
-                    .consume_token(session_id, &action.label, now)
+                    .consume_token(session_id, &action.fingerprint, now)
             {
                 return HookReply::Empty;
             }
-            let (approval, created) =
-                state
-                    .approvals
-                    .create(session_id, &action.label, now, now_ms());
+            let (approval, created) = state.approvals.create(session_id, &action, now, now_ms());
             if created {
                 state.block_production(approval, label, project_id, origin, now, &mut outbox);
             }
@@ -247,7 +261,7 @@ impl SupervisorCore {
                 created_at: now_ms(),
                 session_id: Some(approval.session_id),
                 kind,
-                question: approval.action,
+                question: describe_action(&approval.action),
                 decision: format!("{decision} (kod {})", approval.code),
                 rationale: RATIONALE_USER_DECISION.to_string(),
             }
@@ -278,7 +292,8 @@ impl SupervisorCore {
         Ok(ApprovalStatus {
             status,
             code: record.code.clone(),
-            action: record.action.clone(),
+            action: record.action.label.clone(),
+            detail: record.action.detail.clone(),
         })
     }
 }
@@ -296,8 +311,9 @@ mod tests {
     const DAY: Duration = Duration::from_secs(24 * 3600);
     const PUSH_ACTION: &str = "git push → main";
     const APPROVED_TEXT: &str =
-        "[agent sterujący] Użytkownik zatwierdził: git push → main. Wykonaj ją.";
-    const REJECTED_TEXT: &str = "[agent sterujący] Użytkownik nie zgodził się na: git push → main.";
+        "[agent sterujący] Użytkownik zatwierdził: git push → main (git push). Wykonaj ją.";
+    const REJECTED_TEXT: &str =
+        "[agent sterujący] Użytkownik nie zgodził się na: git push → main (git push).";
 
     fn guard_denial() -> HookReply {
         HookReply::Deny {
@@ -358,6 +374,19 @@ mod tests {
 
     fn require_send<F: Send>(_future: &F) {}
 
+    fn tool_call(session_id: &str, tool: &str, input: Value) -> HookInput {
+        HookInput {
+            tool_name: Some(tool.into()),
+            tool_input: Some(input),
+            ..hook(session_id, "PreToolUse")
+        }
+    }
+
+    fn approve_only(core: &SupervisorCore) {
+        let approval = only_approval(core);
+        core.resolve_approval(&approval.id, true).unwrap();
+    }
+
     #[test]
     fn session_hook_future_is_send() {
         let (_effects, core) = setup();
@@ -395,6 +424,7 @@ mod tests {
         let approval = only_approval(&core);
         assert_eq!(approval.code.chars().count(), 4);
         assert_eq!(approval.action, PUSH_ACTION);
+        assert_eq!(approval.detail, "git push");
         assert_eq!(approval.session_id, "s1");
         assert_eq!(approval.label, "projekt · s1");
         assert_eq!(approval.project_id, Some(1));
@@ -410,6 +440,7 @@ mod tests {
                 session_id: "s1".into(),
                 label: "projekt · s1".into(),
                 action: PUSH_ACTION.into(),
+                detail: "git push".into(),
                 code: approval.code.clone(),
             }]
         );
@@ -423,10 +454,10 @@ mod tests {
         assert_eq!(notifications[0].1, "Zgoda na: git push → main");
         assert!(notifications[0].2.contains("projekt · s1"));
         assert!(notifications[0].2.contains(&approval.code));
+        assert!(notifications[0].2.contains("git push"));
 
         assert_eq!(
-            core.on_session_hook(bash("s1", "git push origin main"))
-                .await,
+            core.on_session_hook(bash("s1", "git  push ")).await,
             guard_denial()
         );
         assert_eq!(only_approval(&core).id, approval.id);
@@ -521,11 +552,13 @@ mod tests {
         let (effects, core) = on_main();
         effects.settings.lock().extra_rules = vec!["bash:^kubectl apply".into()];
         agent_prompted(&core, "s1").await;
-        let deploy = HookInput {
-            tool_name: Some("mcp__bandzior__deployment_deploy".into()),
-            tool_input: Some(json!({"id": 3})),
-            ..hook("s1", "PreToolUse")
-        };
+        let preview = tool_call("s1", "mcp__bandzior__deployment_deploy", json!({"id": 3}));
+        assert_eq!(core.on_session_hook(preview).await, HookReply::Empty);
+        let deploy = tool_call(
+            "s1",
+            "mcp__bandzior__deployment_deploy",
+            json!({"id": 3, "confirm": true, "change_id": "c1"}),
+        );
         assert_eq!(core.on_session_hook(deploy).await, guard_denial());
         let lookup = HookInput {
             tool_name: Some("mcp__bandzior__project_find".into()),
@@ -672,6 +705,7 @@ mod tests {
                 status: ApprovalState::Pending,
                 code: first.code.clone(),
                 action: PUSH_ACTION.into(),
+                detail: "git push".into(),
             }
         );
         core.resolve_approval(&first.id, true).unwrap();
@@ -680,7 +714,7 @@ mod tests {
             ApprovalState::Approved
         );
         assert_eq!(
-            core.on_session_hook(bash("s1", "git push --force")).await,
+            core.on_session_hook(bash("s1", "git push")).await,
             HookReply::Empty
         );
         assert_eq!(
@@ -694,6 +728,7 @@ mod tests {
                 status: ApprovalState::Rejected,
                 code: second.code.clone(),
                 action: PUSH_ACTION.into(),
+                detail: "git push".into(),
             }
         );
         core.on_session_hook(bash("s2", "git push")).await;
@@ -706,5 +741,83 @@ mod tests {
         assert!(core.snapshot().approvals.is_empty());
         assert!(core.resolve_approval(&pending.id, true).is_err());
         assert!(core.approval_status("missing").is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn approval_covers_exactly_the_approved_call() {
+        let (_effects, core) = on_main();
+        agent_prompted(&core, "s1").await;
+        let push = "git push origin main";
+        assert_eq!(core.on_session_hook(bash("s1", push)).await, guard_denial());
+        approve_only(&core);
+        assert_eq!(
+            core.on_session_hook(bash("s1", "git push --force origin main"))
+                .await,
+            guard_denial()
+        );
+        let elsewhere = HookInput {
+            cwd: Some("/elsewhere".into()),
+            ..bash("s1", push)
+        };
+        assert_eq!(core.on_session_hook(elsewhere).await, guard_denial());
+        assert_eq!(core.snapshot().approvals.len(), 2);
+        assert_eq!(
+            core.on_session_hook(bash("s1", "git  push origin  main"))
+                .await,
+            HookReply::Empty
+        );
+        assert_eq!(core.on_session_hook(bash("s1", push)).await, guard_denial());
+        assert_eq!(core.snapshot().approvals.len(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn approval_covers_exactly_the_approved_mcp_arguments() {
+        let (_effects, core) = on_main();
+        agent_prompted(&core, "s1").await;
+        let deploy = |change_id: &str| {
+            tool_call(
+                "s1",
+                "mcp__bandzior__deployment_deploy",
+                json!({"confirm": true, "change_id": change_id, "project": 7}),
+            )
+        };
+        assert_eq!(core.on_session_hook(deploy("c1")).await, guard_denial());
+        let approval = only_approval(&core);
+        assert_eq!(
+            approval.detail,
+            r#"{"change_id":"c1","confirm":true,"project":7}"#
+        );
+        approve_only(&core);
+        assert_eq!(core.on_session_hook(deploy("c2")).await, guard_denial());
+        let reordered = tool_call(
+            "s1",
+            "mcp__bandzior__deployment_deploy",
+            json!({"project": 7, "change_id": "c1", "confirm": true}),
+        );
+        assert_eq!(core.on_session_hook(reordered).await, HookReply::Empty);
+        assert_eq!(core.on_session_hook(deploy("c1")).await, guard_denial());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn human_prompt_revokes_unused_tokens() {
+        let (effects, core) = on_main();
+        agent_prompted(&core, "s1").await;
+        assert_eq!(
+            core.on_session_hook(bash("s1", "git push")).await,
+            guard_denial()
+        );
+        approve_only(&core);
+        effects.keystroke("pty-s1");
+        core.on_session_hook(prompt("s1", "najpierw uruchom testy"))
+            .await;
+        assert_eq!(
+            core.state.lock().provenance.origin("s1"),
+            PromptOrigin::Human
+        );
+        agent_prompted(&core, "s1").await;
+        assert_eq!(
+            core.on_session_hook(bash("s1", "git push")).await,
+            guard_denial()
+        );
     }
 }

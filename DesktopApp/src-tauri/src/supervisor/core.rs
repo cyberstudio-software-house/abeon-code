@@ -762,6 +762,7 @@ impl SupervisorCore {
             session.at_prompt = false;
             session.awaiting_user = false;
             if origin == PromptOrigin::Human {
+                state.approvals.revoke_session(session_id);
                 state
                     .injections
                     .retain(|injection| injection.session_id != session_id);

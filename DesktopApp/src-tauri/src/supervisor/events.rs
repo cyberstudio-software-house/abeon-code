@@ -31,6 +31,7 @@ pub enum SupervisorEvent {
         session_id: String,
         label: String,
         action: String,
+        detail: String,
         code: String,
     },
     ApprovalResolved {
@@ -110,6 +111,7 @@ mod tests {
             session_id: "s".into(),
             label: "l".into(),
             action: "git push → main".into(),
+            detail: "git push origin main".into(),
             code: "K7QX".into(),
         }
         .wakes_supervisor());

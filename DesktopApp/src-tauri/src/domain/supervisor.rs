@@ -67,6 +67,7 @@ pub struct ApprovalView {
     pub project_id: Option<i64>,
     pub label: String,
     pub action: String,
+    pub detail: String,
     pub code: String,
     #[ts(type = "number")]
     pub created_at: i64,

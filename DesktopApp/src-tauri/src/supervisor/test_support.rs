@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use serde_json::{json, Value};
@@ -10,7 +10,7 @@ use tokio::task::JoinHandle;
 
 use crate::db::supervisor_decisions_repo::NewDecision;
 use crate::domain::supervisor::{SupervisorLevel, SupervisorSnapshot};
-use crate::supervisor::core::{SupervisorCore, QUIET_WINDOW};
+use crate::supervisor::core::SupervisorCore;
 use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
 use crate::supervisor::events::SupervisorEvent;
 use crate::supervisor::hook_io::{HookInput, HookReply};
@@ -23,6 +23,7 @@ pub(crate) struct FakeEffects {
     pub(crate) settings: Mutex<SupervisorSettings>,
     pub(crate) sessions: Mutex<HashMap<String, SessionInfo>>,
     pub(crate) quiet: AtomicBool,
+    pub(crate) keystrokes: Mutex<HashMap<String, Instant>>,
     pub(crate) wake_accepts: AtomicBool,
     pub(crate) wakes: AtomicUsize,
     pub(crate) typed: Mutex<Vec<(String, String)>>,
@@ -63,6 +64,7 @@ impl FakeEffects {
             }),
             sessions: Mutex::new(sessions),
             quiet: AtomicBool::new(true),
+            keystrokes: Mutex::default(),
             wake_accepts: AtomicBool::new(true),
             wakes: AtomicUsize::new(0),
             typed: Mutex::default(),
@@ -77,6 +79,12 @@ impl FakeEffects {
             opened: Mutex::default(),
             open_error: Mutex::default(),
         })
+    }
+
+    pub(crate) fn keystroke(&self, pty_id: &str) {
+        self.keystrokes
+            .lock()
+            .insert(pty_id.to_string(), tokio::time::Instant::now().into_std());
     }
 
     pub(crate) fn wakes(&self) -> usize {
@@ -120,9 +128,15 @@ impl Effects for FakeEffects {
         Ok(())
     }
 
-    fn input_quiet(&self, _pty_id: &str, window: Duration) -> bool {
-        assert_eq!(window, QUIET_WINDOW);
-        self.quiet.load(Ordering::SeqCst)
+    fn input_quiet(&self, pty_id: &str, window: Duration) -> bool {
+        if !self.quiet.load(Ordering::SeqCst) {
+            return false;
+        }
+        let now = tokio::time::Instant::now().into_std();
+        self.keystrokes
+            .lock()
+            .get(pty_id)
+            .is_none_or(|last| now.saturating_duration_since(*last) >= window)
     }
 
     fn current_branch(&self, cwd: &Path) -> Option<String> {
