@@ -47,12 +47,14 @@ fn glob_to_regex(glob: &str) -> Option<Regex> {
 }
 
 fn clean_token(token: &str) -> &str {
-    token.trim_matches(|c| c == '"' || c == '\'' || c == '`')
+    token
+        .trim_matches(|c| c == '"' || c == '\'')
+        .trim_end_matches('`')
 }
 
 fn split_segments(command: &str) -> Vec<&str> {
     command
-        .split(|c| matches!(c, ';' | '|' | '&' | '\n' | '\r' | '(' | ')' | '`'))
+        .split(|c| matches!(c, ';' | '|' | '&' | '\n' | '\r' | '(' | ')'))
         .map(str::trim)
         .filter(|segment| !segment.is_empty())
         .collect()
@@ -78,6 +80,20 @@ fn strip_branch(target: &str) -> &str {
     target.strip_prefix("refs/heads/").unwrap_or(target)
 }
 
+fn is_redirection_operator(token: &str) -> bool {
+    let rest = token.trim_start_matches(|c: char| c.is_ascii_digit());
+    matches!(rest, ">" | ">>" | "<" | ">&" | "&>")
+}
+
+fn is_redirection(token: &str) -> bool {
+    let rest = token.trim_start_matches(|c: char| c.is_ascii_digit());
+    rest.starts_with('>') || rest.starts_with('<') || rest.starts_with("&>") || token.ends_with('>')
+}
+
+fn is_unresolvable(target: &str) -> bool {
+    target.is_empty() || target.contains('$') || target.contains('`')
+}
+
 fn production_label(branch: &str) -> String {
     format!("git push → {branch}")
 }
@@ -87,6 +103,13 @@ fn classify_git_push(args: &[&str], current_branch: Option<&str>) -> Option<Stri
     let mut index = 0;
     while index < args.len() {
         let arg = args[index];
+        if arg.starts_with('#') {
+            break;
+        }
+        if is_redirection(arg) {
+            index += if is_redirection_operator(arg) { 2 } else { 1 };
+            continue;
+        }
         if arg == "--all" || arg == "--mirror" {
             return Some(production_label(arg));
         }
@@ -101,17 +124,18 @@ fn classify_git_push(args: &[&str], current_branch: Option<&str>) -> Option<Stri
     let refspecs: Vec<&str> = positionals.into_iter().skip(1).collect();
     let current = || current_branch.map(str::to_string);
     let targets: Vec<Option<String>> = if refspecs.is_empty() {
-        vec![current()]
+        vec![current().filter(|branch| !is_unresolvable(branch))]
     } else {
         refspecs
             .iter()
             .map(|refspec| {
                 let refspec = refspec.trim_start_matches('+');
-                match refspec.split_once(':') {
+                let target = match refspec.split_once(':') {
                     Some((_, destination)) => Some(strip_branch(destination).to_string()),
                     None if refspec == "HEAD" => current(),
                     None => Some(strip_branch(refspec).to_string()),
-                }
+                };
+                target.filter(|branch| !is_unresolvable(branch))
             })
             .collect()
     };
@@ -198,7 +222,7 @@ impl ProductionRules {
             }
         }
         let tokens = &tokens[start..];
-        let first = *tokens.first()?;
+        let first = tokens.first()?.trim_start_matches('`');
         let stripped = tokens.join(" ");
         if start > 0 && self.extra_bash.iter().any(|regex| regex.is_match(&stripped)) {
             return Some(stripped);
@@ -264,6 +288,21 @@ mod tests {
             ("Bash", Some("task release:patch --yes"), None, some("task release")),
             ("Bash", Some("echo \"git push origin main\""), None, None),
             ("Bash", Some("git status"), Some("main"), None),
+            ("Bash", Some("git push origin 2>&1 | tail -5"), Some("main"), some("git push → main")),
+            ("Bash", Some("git push origin 2>/dev/null"), Some("main"), some("git push → main")),
+            ("Bash", Some("git push > /tmp/log 2>&1"), Some("main"), some("git push → main")),
+            ("Bash", Some("git push origin # comment"), Some("main"), some("git push → main")),
+            ("Bash", Some("git push origin feature 2>&1"), Some("main"), None),
+            ("Bash", Some("git push origin feature > /tmp/log"), Some("main"), None),
+            ("Bash", Some("git push origin feature # main"), Some("main"), None),
+            ("Bash", Some("git push -u origin \"$(git branch --show-current)\""), Some("main"), some("git push → ?")),
+            ("Bash", Some("git push -u origin \"$(git branch --show-current)\""), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git push origin $BRANCH"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git push origin ${BRANCH}"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git push origin HEAD:$BRANCH"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git push origin `git branch --show-current`"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("OUT=$(git push origin main)"), None, some("git push → main")),
+            ("Bash", Some("`git push origin main`"), None, some("git push → main")),
             ("Bash", Some("git push"), None, some("git push → ?")),
             ("Bash", Some("git push origin HEAD"), Some("main"), some("git push → main")),
             ("Bash", Some("git push origin HEAD"), Some("feature/x"), None),
