@@ -26,6 +26,10 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(unix)]
+    if let Some(code) = supervisor::entry::try_run_subcommand(&std::env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     diagnostics::init();
     let db_path = db::db_path().expect("db path");
     let pool = db::init_pool(&db_path).expect("init pool");
