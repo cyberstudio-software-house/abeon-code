@@ -44,14 +44,112 @@ const LINE_BREAK: &str = " ⏎ ";
 const LABEL_SEPARATOR: &str = " + ";
 
 const PRODUCTION_BRANCHES: &[&str] = &["main", "master"];
-const WRAPPER_WORDS: &[&str] = &[
-    "sudo", "env", "time", "nohup", "exec", "command", "nice", "xargs",
+const SHELL_KEYWORDS: &[&str] = &[
+    "if", "then", "else", "elif", "do", "while", "until", "!", "{", "(",
 ];
+
+struct Wrapper {
+    name: &'static str,
+    value_options: &'static [&'static str],
+    relocating_options: &'static [&'static str],
+    positional_arguments: usize,
+    appends_arguments: bool,
+}
+
+const fn wrapper(name: &'static str, value_options: &'static [&'static str]) -> Wrapper {
+    Wrapper {
+        name,
+        value_options,
+        relocating_options: &[],
+        positional_arguments: 0,
+        appends_arguments: false,
+    }
+}
+
+const WRAPPERS: &[Wrapper] = &[
+    Wrapper {
+        relocating_options: &["-D", "--chdir"],
+        ..wrapper(
+            "sudo",
+            &[
+                "-u",
+                "-g",
+                "-U",
+                "-C",
+                "-p",
+                "-r",
+                "-t",
+                "-D",
+                "-T",
+                "-h",
+                "--user",
+                "--group",
+                "--other-user",
+                "--close-from",
+                "--prompt",
+                "--role",
+                "--type",
+                "--chdir",
+                "--command-timeout",
+                "--host",
+            ],
+        )
+    },
+    Wrapper {
+        relocating_options: &["-C", "--chdir"],
+        ..wrapper("env", &["-u", "--unset", "-C", "--chdir"])
+    },
+    Wrapper {
+        positional_arguments: 1,
+        ..wrapper("timeout", &["-s", "--signal", "-k", "--kill-after"])
+    },
+    wrapper("nice", &["-n", "--adjustment"]),
+    wrapper("nohup", &[]),
+    wrapper("command", &[]),
+    wrapper("builtin", &[]),
+    wrapper("exec", &["-a"]),
+    wrapper(
+        "stdbuf",
+        &["-i", "-o", "-e", "--input", "--output", "--error"],
+    ),
+    wrapper("time", &["-f", "-o", "--format", "--output"]),
+    Wrapper {
+        appends_arguments: true,
+        ..wrapper(
+            "xargs",
+            &[
+                "-a",
+                "-d",
+                "-E",
+                "-I",
+                "-L",
+                "-n",
+                "-P",
+                "-s",
+                "--arg-file",
+                "--delimiter",
+                "--eof",
+                "--replace",
+                "--max-lines",
+                "--max-args",
+                "--max-procs",
+                "--max-chars",
+            ],
+        )
+    },
+];
+
+#[derive(Default)]
+struct CommandPrefix {
+    start: usize,
+    relocated: bool,
+    appends_arguments: bool,
+}
 const SHELL_WORDS: &[&str] = &["bash", "sh", "zsh", "dash"];
 const GIT_GLOBAL_OPTIONS_WITH_VALUE: &[&str] =
     &["-C", "-c", "--git-dir", "--work-tree", "--namespace"];
 const RELOCATING_GIT_OPTIONS: &[&str] = &["-C", "--git-dir", "--work-tree"];
-const DIRECTORY_WORDS: &[&str] = &["cd", "pushd", "popd"];
+const DIRECTORY_WORDS: &[&str] = &["cd", "pushd", "popd", "source", "."];
 const REPOSITORY_VARIABLES: &[&str] = &["GIT_DIR=", "GIT_WORK_TREE="];
 const PUSH_OPTIONS_WITH_VALUE: &[&str] = &[
     "-o",
@@ -216,20 +314,34 @@ fn is_env_assignment(token: &str) -> bool {
     }
 }
 
-fn command_start(tokens: &[&str]) -> usize {
-    let mut start = 0;
-    while start < tokens.len() {
-        let token = tokens[start];
-        if is_env_assignment(token)
-            || WRAPPER_WORDS.contains(&token)
-            || (token.starts_with('-') && start > 0)
-        {
-            start += 1;
-        } else {
-            break;
+fn command_prefix(tokens: &[&str]) -> CommandPrefix {
+    let mut prefix = CommandPrefix::default();
+    let mut index = 0;
+    while let Some(&token) = tokens.get(index) {
+        if SHELL_KEYWORDS.contains(&token) || is_env_assignment(token) {
+            index += 1;
+            continue;
         }
+        let Some(wrapper) = WRAPPERS.iter().find(|wrapper| wrapper.name == token) else {
+            break;
+        };
+        index += 1;
+        prefix.appends_arguments |= wrapper.appends_arguments;
+        while let Some(&option) = tokens.get(index).filter(|option| option.starts_with('-')) {
+            index += 1;
+            if option == "--" {
+                break;
+            }
+            let name = option.split_once('=').map_or(option, |(name, _)| name);
+            prefix.relocated |= wrapper.relocating_options.contains(&name);
+            if !option.contains('=') && wrapper.value_options.contains(&option) {
+                index += 1;
+            }
+        }
+        index += wrapper.positional_arguments;
     }
-    start
+    prefix.start = index.min(tokens.len());
+    prefix
 }
 
 fn relocates(segment: &str) -> bool {
@@ -239,10 +351,18 @@ fn relocates(segment: &str) -> bool {
             .iter()
             .any(|variable| token.starts_with(variable))
     });
-    sets_repository
-        || tokens
-            .get(command_start(&tokens))
-            .is_some_and(|first| DIRECTORY_WORDS.contains(first))
+    if sets_repository {
+        return true;
+    }
+    let prefix = command_prefix(&tokens);
+    if prefix.relocated {
+        return true;
+    }
+    match tokens.get(prefix.start).copied() {
+        Some("eval") => relocates(&tokens[prefix.start + 1..].join(" ")),
+        Some(first) => DIRECTORY_WORDS.contains(&first),
+        None => false,
+    }
 }
 
 fn is_relocating_git_option(option: &str) -> bool {
@@ -274,14 +394,18 @@ fn is_redirection(token: &str) -> bool {
 }
 
 fn is_unresolvable(target: &str) -> bool {
-    target.is_empty() || target.contains('$') || target.contains('`')
+    target.is_empty() || target.contains(['$', '`', '*', '{', '}'])
 }
 
 fn production_label(branch: &str) -> String {
     format!("git push → {branch}")
 }
 
-fn classify_git_push(args: &[&str], current_branch: Option<&str>) -> Option<String> {
+fn classify_git_push(
+    args: &[&str],
+    current_branch: Option<&str>,
+    appends_arguments: bool,
+) -> Option<String> {
     let mut positionals: Vec<&str> = Vec::new();
     let mut index = 0;
     while index < args.len() {
@@ -293,7 +417,7 @@ fn classify_git_push(args: &[&str], current_branch: Option<&str>) -> Option<Stri
             index += if is_redirection_operator(arg) { 2 } else { 1 };
             continue;
         }
-        if arg == "--all" || arg == "--mirror" {
+        if arg == "--all" || arg == "--mirror" || arg == "--branches" {
             return Some(production_label(arg));
         }
         if arg.starts_with('-') {
@@ -306,7 +430,7 @@ fn classify_git_push(args: &[&str], current_branch: Option<&str>) -> Option<Stri
     }
     let refspecs: Vec<&str> = positionals.into_iter().skip(1).collect();
     let current = || current_branch.map(str::to_string);
-    let targets: Vec<Option<String>> = if refspecs.is_empty() {
+    let mut targets: Vec<Option<String>> = if refspecs.is_empty() {
         vec![current().filter(|branch| !is_unresolvable(branch))]
     } else {
         refspecs
@@ -315,13 +439,16 @@ fn classify_git_push(args: &[&str], current_branch: Option<&str>) -> Option<Stri
                 let refspec = refspec.trim_start_matches('+');
                 let target = match refspec.split_once(':') {
                     Some((_, destination)) => Some(strip_branch(destination).to_string()),
-                    None if refspec == "HEAD" => current(),
+                    None if refspec == "HEAD" || refspec == "@" => current(),
                     None => Some(strip_branch(refspec).to_string()),
                 };
                 target.filter(|branch| !is_unresolvable(branch))
             })
             .collect()
     };
+    if appends_arguments {
+        targets.push(None);
+    }
     targets.into_iter().find_map(|target| match target {
         None => Some(production_label("?")),
         Some(branch) if PRODUCTION_BRANCHES.contains(&branch.as_str()) => {
@@ -431,8 +558,14 @@ impl ProductionRules {
             return vec![segment.to_string()];
         }
         let tokens: Vec<&str> = segment.split_whitespace().map(clean_token).collect();
-        let start = command_start(&tokens);
+        let prefix = command_prefix(&tokens);
+        let start = prefix.start;
         let tokens = &tokens[start..];
+        let current_branch = if prefix.relocated {
+            None
+        } else {
+            current_branch
+        };
         let Some(first) = tokens.first().copied() else {
             return Vec::new();
         };
@@ -464,7 +597,7 @@ impl ProductionRules {
             }
             if tokens.get(index) == Some(&"push") {
                 let branch = if relocated { None } else { current_branch };
-                return classify_git_push(&tokens[index + 1..], branch)
+                return classify_git_push(&tokens[index + 1..], branch, prefix.appends_arguments)
                     .into_iter()
                     .collect();
             }
@@ -568,6 +701,61 @@ mod tests {
             ("Bash", Some("GIT_DIR=../other/.git git push"), Some("feature/x"), some("git push → ?")),
             ("Bash", Some("export GIT_WORK_TREE=../other && git push"), Some("feature/x"), some("git push → ?")),
             ("Bash", Some("cd ../other && bash -c 'git push'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("if git push origin main; then echo ok; fi"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("true; then git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("{ git push origin main; }"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("! git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("while true; do git push origin main; done"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("until false; do git push origin main; done"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("if true; then echo; else git push origin main; fi"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("if false; then :; elif git push origin main; then :; fi"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("time git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("time -p git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("timeout 60 git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("timeout -s KILL 60 git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("timeout --kill-after=5 60s git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("sudo -u root git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("sudo -g staff -u root git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("sudo --user=root git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("nice -n 10 git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("nice -10 git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("env -u X git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("env -u X FOO=1 git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("nohup git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("command git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("exec git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("exec -a pusher git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("stdbuf -oL git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("stdbuf -o L git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("stdbuf -i0 -e L git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("sudo -u root timeout 60 nice -n 5 git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("xargs -n 1 git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("git push origin @:main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("{ cd ../other; git push; }"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("builtin cd ../other && git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("eval cd ../other; git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("source env.sh && git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some(". ./env.sh; git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("env -C ../other git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("sudo -D ../other git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git push origin :"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git push origin +:"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git push origin 'refs/heads/*:refs/heads/*'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git push origin +refs/heads/*:refs/heads/*"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git push origin 'refs/heads/*'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git push --branches"), Some("feature/x"), some("git push → --branches")),
+            ("Bash", Some("git push origin @"), Some("main"), some("git push → main")),
+            ("Bash", Some("git push origin @"), Some("feature/x"), None),
+            ("Bash", Some("timeout 60 git push origin feature"), Some("main"), None),
+            ("Bash", Some("sudo -u root git push"), Some("main"), some("git push → main")),
+            ("Bash", Some("xargs git push origin feature"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("echo main | xargs git push origin"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("xargs -I {} git push origin {}"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("env - git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("sudo -- git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("command -v git"), Some("main"), None),
+            ("Bash", Some("time npm test"), Some("main"), None),
+            ("Bash", Some("if [ -f x ]; then echo done; fi"), Some("main"), None),
             ("Bash", Some("task build"), None, None),
             ("Bash", Some("git log --oneline"), Some("main"), None),
             ("mcp__bandzior__deployment_deploy", None, None, None),
@@ -581,13 +769,16 @@ mod tests {
             ("mcp__bandzior__resource_show", None, None, None),
             ("Read", None, None, None),
         ];
-        for (tool, command, branch, expected) in cases {
-            assert_eq!(
-                label(tool, command, branch, &rules),
-                expected,
-                "tool={tool} command={command:?} branch={branch:?}"
-            );
-        }
+        let failures: Vec<String> = cases
+            .into_iter()
+            .filter_map(|(tool, command, branch, expected)| {
+                let actual = label(tool, command, branch, &rules);
+                (actual != expected).then(|| {
+                    format!("{tool} {command:?} on {branch:?}: got {actual:?}, want {expected:?}")
+                })
+            })
+            .collect();
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
     }
 
     #[test]
