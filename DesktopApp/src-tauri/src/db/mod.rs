@@ -12,12 +12,14 @@ pub mod settings_repo;
 pub mod clickup_config_repo;
 pub mod clickup_links_repo;
 pub mod notes_repo;
+pub mod supervisor_decisions_repo;
 
 const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/002_session_titles.sql");
 const MIGRATION_003: &str = include_str!("migrations/003_action_pre_command.sql");
 const MIGRATION_004: &str = include_str!("migrations/004_clickup.sql");
 const MIGRATION_005: &str = include_str!("migrations/005_notes.sql");
+const MIGRATION_006: &str = include_str!("migrations/006_supervisor.sql");
 
 pub fn db_path() -> AppResult<PathBuf> {
     let mut dir = dirs::config_dir().ok_or_else(|| AppError::Other("no config dir".into()))?;
@@ -46,6 +48,7 @@ fn run_migrations(pool: &DbPool) -> AppResult<()> {
     if v < 3 { conn.execute_batch(MIGRATION_003)?; }
     if v < 4 { conn.execute_batch(MIGRATION_004)?; }
     if v < 5 { conn.execute_batch(MIGRATION_005)?; }
+    if v < 6 { conn.execute_batch(MIGRATION_006)?; }
     Ok(())
 }
 
@@ -118,7 +121,7 @@ mod tests {
             let pool = init_pool(&path).unwrap();
             let conn = pool.get().unwrap();
             let version: i64 = conn.query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0)).unwrap();
-            assert_eq!(version, 5);
+            assert_eq!(version, 6);
             let project = projects_repo::get(&conn, 7).unwrap();
             assert_eq!(project.name, "Existing");
             assert_eq!(project.path, "/existing");

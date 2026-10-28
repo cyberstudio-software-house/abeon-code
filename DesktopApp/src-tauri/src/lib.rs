@@ -13,6 +13,7 @@ pub mod diagnostics;
 pub mod git;
 pub mod remote;
 pub mod validation;
+pub mod supervisor;
 
 use state::AppState;
 use tauri::Manager;

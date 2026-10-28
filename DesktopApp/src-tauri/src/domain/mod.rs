@@ -12,6 +12,7 @@ pub mod provider;
 pub mod clickup;
 pub mod subagent;
 pub mod note;
+pub mod supervisor;
 
 pub use project::*;
 pub use action::*;
@@ -24,3 +25,4 @@ pub use model::*;
 pub use provider::Provider;
 pub use subagent::*;
 pub use note::*;
+pub use supervisor::*;
