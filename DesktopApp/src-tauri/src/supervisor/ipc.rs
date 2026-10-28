@@ -281,7 +281,12 @@ mod tests {
         let first = tokio::spawn(serve(path.clone(), Arc::new(StubHandler)));
         wait_until_serving(&path).await;
 
-        let second = serve(path.clone(), Arc::new(StubHandler)).await;
+        let second = tokio::time::timeout(
+            Duration::from_secs(5),
+            serve(path.clone(), Arc::new(StubHandler)),
+        )
+        .await
+        .expect("second serve must return instead of taking over the socket");
         assert_eq!(second.unwrap_err().kind(), std::io::ErrorKind::AddrInUse);
         assert!(call(&path, hook_request()).await.is_some());
         first.abort();
