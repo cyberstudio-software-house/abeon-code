@@ -18,6 +18,9 @@ const WRAPPER_WORDS: &[&str] = &[
 const SHELL_WORDS: &[&str] = &["bash", "sh", "zsh", "dash"];
 const GIT_GLOBAL_OPTIONS_WITH_VALUE: &[&str] =
     &["-C", "-c", "--git-dir", "--work-tree", "--namespace"];
+const RELOCATING_GIT_OPTIONS: &[&str] = &["-C", "--git-dir", "--work-tree"];
+const DIRECTORY_WORDS: &[&str] = &["cd", "pushd", "popd"];
+const REPOSITORY_VARIABLES: &[&str] = &["GIT_DIR=", "GIT_WORK_TREE="];
 const PUSH_OPTIONS_WITH_VALUE: &[&str] = &[
     "-o",
     "--push-option",
@@ -69,6 +72,44 @@ fn is_env_assignment(token: &str) -> bool {
         }
         None => false,
     }
+}
+
+fn command_start(tokens: &[&str]) -> usize {
+    let mut start = 0;
+    while start < tokens.len() {
+        let token = tokens[start];
+        if is_env_assignment(token)
+            || WRAPPER_WORDS.contains(&token)
+            || (token.starts_with('-') && start > 0)
+        {
+            start += 1;
+        } else {
+            break;
+        }
+    }
+    start
+}
+
+fn relocates(segment: &str) -> bool {
+    let tokens: Vec<&str> = segment.split_whitespace().map(clean_token).collect();
+    let sets_repository = tokens.iter().any(|token| {
+        REPOSITORY_VARIABLES
+            .iter()
+            .any(|variable| token.starts_with(variable))
+    });
+    sets_repository
+        || tokens
+            .get(command_start(&tokens))
+            .is_some_and(|first| DIRECTORY_WORDS.contains(first))
+}
+
+fn is_relocating_git_option(option: &str) -> bool {
+    RELOCATING_GIT_OPTIONS.iter().any(|relocating| {
+        option == *relocating
+            || option
+                .strip_prefix(relocating)
+                .is_some_and(|rest| rest.starts_with('='))
+    })
 }
 
 fn is_shell_command_flag(token: &str) -> bool {
@@ -200,15 +241,23 @@ impl ProductionRules {
     }
 
     fn classify_command(&self, command: &str, current_branch: Option<&str>) -> Option<String> {
-        split_segments(command).into_iter().find_map(|segment| {
-            self.classify_segment(segment, current_branch).or_else(|| {
+        let mut branch = current_branch;
+        for segment in split_segments(command) {
+            if relocates(segment) {
+                branch = None;
+            }
+            let found = self.classify_segment(segment, branch).or_else(|| {
                 segment
                     .split('`')
                     .map(str::trim)
                     .filter(|piece| !piece.is_empty() && *piece != segment)
-                    .find_map(|piece| self.classify_segment(piece, current_branch))
-            })
-        })
+                    .find_map(|piece| self.classify_segment(piece, branch))
+            });
+            if found.is_some() {
+                return found;
+            }
+        }
+        None
     }
 
     fn classify_segment(&self, segment: &str, current_branch: Option<&str>) -> Option<String> {
@@ -216,17 +265,7 @@ impl ProductionRules {
             return Some(segment.to_string());
         }
         let tokens: Vec<&str> = segment.split_whitespace().map(clean_token).collect();
-        let mut start = 0;
-        while start < tokens.len() {
-            let token = tokens[start];
-            if is_env_assignment(token) || WRAPPER_WORDS.contains(&token) {
-                start += 1;
-            } else if token.starts_with('-') && start > 0 {
-                start += 1;
-            } else {
-                break;
-            }
-        }
+        let start = command_start(&tokens);
         let tokens = &tokens[start..];
         let first = *tokens.first()?;
         let stripped = tokens.join(" ");
@@ -247,12 +286,15 @@ impl ProductionRules {
         }
         if first == "git" {
             let mut index = 1;
+            let mut relocated = false;
             while index < tokens.len() && tokens[index].starts_with('-') {
+                relocated |= is_relocating_git_option(tokens[index]);
                 let takes_value = GIT_GLOBAL_OPTIONS_WITH_VALUE.contains(&tokens[index]);
                 index += if takes_value { 2 } else { 1 };
             }
             if tokens.get(index) == Some(&"push") {
-                return classify_git_push(&tokens[index + 1..], current_branch);
+                let branch = if relocated { None } else { current_branch };
+                return classify_git_push(&tokens[index + 1..], branch);
             }
         }
         None
@@ -334,6 +376,18 @@ mod tests {
             ("Bash", Some("sh -c 'cd x && git push origin main'"), None, some("git push → main")),
             ("Bash", Some("git push -o ci.skip origin feature"), Some("main"), None),
             ("Bash", Some("cd x && task release"), None, some("task release")),
+            ("Bash", Some("cd ../other && git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git -C ../other push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git -C x push origin feature"), Some("main"), None),
+            ("Bash", Some("pushd ../other; git push; popd"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("cd ../other && git push origin HEAD"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("cd ../other && git push origin feature"), Some("main"), None),
+            ("Bash", Some("git push && cd ../other"), Some("feature/x"), None),
+            ("Bash", Some("git --work-tree=../other push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git --git-dir ../other/.git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("GIT_DIR=../other/.git git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("export GIT_WORK_TREE=../other && git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("cd ../other && bash -c 'git push'"), Some("feature/x"), some("git push → ?")),
             ("Bash", Some("task build"), None, None),
             ("Bash", Some("git log --oneline"), Some("main"), None),
             ("mcp__bandzior__deployment_deploy", None, None, some("mcp__bandzior__deployment_deploy")),
