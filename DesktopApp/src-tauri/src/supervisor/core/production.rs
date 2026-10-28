@@ -108,10 +108,7 @@ impl CoreState {
         outbox.notifications.push((
             approval.session_id.clone(),
             format!("{APPROVAL_TITLE}: {}", approval.action.label),
-            format!(
-                "{label} — kod {}: {}",
-                approval.code, approval.action.detail
-            ),
+            format!("{label} — {}, kod {}", approval.action.label, approval.code),
         ));
         outbox.decisions.push(NewDecision {
             created_at: approval.created_at_ms,
@@ -453,9 +450,10 @@ mod tests {
         assert_eq!(notifications.len(), 1);
         assert_eq!(notifications[0].0, "s1");
         assert_eq!(notifications[0].1, "Zgoda na: git push → main");
-        assert!(notifications[0].2.contains("projekt · s1"));
-        assert!(notifications[0].2.contains(&approval.code));
-        assert!(notifications[0].2.contains("git push"));
+        assert_eq!(
+            notifications[0].2,
+            format!("projekt · s1 — git push → main, kod {}", approval.code)
+        );
 
         assert_eq!(
             core.on_session_hook(bash("s1", "git  push ")).await,
@@ -943,5 +941,51 @@ mod tests {
         core.on_session_hook(prompt("s1", "[agent sterujący] tak"))
             .await;
         assert_eq!(origin_of(&core, "s1"), PromptOrigin::Agent);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn secrets_stay_out_of_notification_log_card_and_injection() {
+        let (effects, core) = on_main();
+        agent_prompted(&core, "s1").await;
+        let set_vars = tool_call(
+            "s1",
+            "mcp__bandzior__env_vars_set",
+            json!({"deployment_id": 5, "vars": {"API_KEY": "abc"}, "confirm": true}),
+        );
+        assert_eq!(core.on_session_hook(set_vars).await, guard_denial());
+        let approval = only_approval(&core);
+        assert!(!approval.detail.contains("abc"));
+        assert!(approval.detail.contains("deployment_id"));
+        let notifications = effects.notifications();
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(
+            notifications[0].2,
+            format!(
+                "projekt · s1 — mcp__bandzior__env_vars_set, kod {}",
+                approval.code
+            )
+        );
+        assert!(!notifications[0].2.contains(&approval.detail));
+        match core.take_events().as_slice() {
+            [SupervisorEvent::GuardBlocked { detail, .. }] => assert!(!detail.contains("abc")),
+            other => panic!("unexpected events {other:?}"),
+        }
+        core.on_session_hook(stop("s1", "Potrzebuję zgody.")).await;
+        core.resolve_approval(&approval.id, true).unwrap();
+        core.tick();
+        let typed = effects.typed();
+        assert_eq!(typed.len(), 1);
+        assert!(typed[0].1.contains("mcp__bandzior__env_vars_set"));
+        assert!(!typed[0].1.contains("abc"));
+        assert!(effects.decisions.lock().iter().all(|entry| {
+            !entry.question.contains("abc")
+                && !entry.decision.contains("abc")
+                && !entry.rationale.contains("abc")
+        }));
+        assert!(!core
+            .approval_status(&approval.id)
+            .unwrap()
+            .detail
+            .contains("abc"));
     }
 }

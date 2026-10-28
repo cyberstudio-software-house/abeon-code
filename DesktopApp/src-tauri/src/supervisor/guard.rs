@@ -20,6 +20,23 @@ const CONFIRM_GATED_TOOLS: &[&str] = &[
     "mcp__bandzior__deployment_containers_update",
     "mcp__bandzior__deployment_update",
 ];
+const FULLY_REDACTED_TOOLS: &[&str] = &[
+    "mcp__bandzior__env_vars_set",
+    "mcp__bandzior__secret_create",
+];
+const SENSITIVE_KEY_PARTS: &[&str] = &[
+    "secret",
+    "password",
+    "passwd",
+    "token",
+    "key",
+    "value",
+    "data",
+    "env",
+    "credential",
+];
+const IDENTIFIER_KEYS: &[&str] = &["id", "name", "project", "namespace", "deployment"];
+const REDACTED: &str = "***";
 const BASH_TOOL: &str = "Bash";
 const DETAIL_CHARS: usize = 300;
 
@@ -89,6 +106,43 @@ fn canonical_json(value: &Value) -> String {
             format!("[{body}]")
         }
         other => other.to_string(),
+    }
+}
+
+fn is_sensitive_key(key: &str) -> bool {
+    let key = key.to_lowercase();
+    SENSITIVE_KEY_PARTS.iter().any(|part| key.contains(part))
+}
+
+fn is_identifier_key(key: &str) -> bool {
+    let key = key.to_lowercase();
+    IDENTIFIER_KEYS.contains(&key.as_str()) || key.ends_with("_id")
+}
+
+fn redact(value: &Value, key: Option<&str>, every_string: bool) -> Value {
+    match value {
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(name, item)| {
+                    let item = if is_sensitive_key(name) {
+                        Value::String(REDACTED.to_string())
+                    } else {
+                        redact(item, Some(name), every_string)
+                    };
+                    (name.clone(), item)
+                })
+                .collect(),
+        ),
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(|item| redact(item, key, every_string))
+                .collect(),
+        ),
+        Value::String(_) if every_string && !key.is_some_and(is_identifier_key) => {
+            Value::String(REDACTED.to_string())
+        }
+        other => other.clone(),
     }
 }
 
@@ -316,11 +370,11 @@ impl ProductionRules {
         if !production {
             return None;
         }
-        let arguments = canonical_json(tool_input);
+        let redacted = redact(tool_input, None, FULLY_REDACTED_TOOLS.contains(&tool_name));
         Some(ProductionAction {
             label: tool_name.to_string(),
-            detail: detail_excerpt(&arguments),
-            fingerprint: format!("{tool_name}\0{arguments}"),
+            detail: detail_excerpt(&canonical_json(&redacted)),
+            fingerprint: format!("{tool_name}\0{}", canonical_json(tool_input)),
         })
     }
 
@@ -645,17 +699,17 @@ mod tests {
                 )
                 .expect("production")
         };
-        let first = deploy(json!({"confirm": true, "change_id": "c1", "env": {"b": 2, "a": 1}}));
+        let first = deploy(json!({"confirm": true, "change_id": "c1", "spec": {"b": 2, "a": 1}}));
         let reordered =
-            deploy(json!({"env": {"a": 1, "b": 2}, "change_id": "c1", "confirm": true}));
+            deploy(json!({"spec": {"a": 1, "b": 2}, "change_id": "c1", "confirm": true}));
         assert_eq!(first.fingerprint, reordered.fingerprint);
         assert_eq!(
             first.detail,
-            r#"{"change_id":"c1","confirm":true,"env":{"a":1,"b":2}}"#
+            r#"{"change_id":"c1","confirm":true,"spec":{"a":1,"b":2}}"#
         );
         assert_eq!(first.label, "mcp__bandzior__deployment_deploy");
         assert_ne!(
-            deploy(json!({"confirm": true, "change_id": "c2", "env": {"a": 1, "b": 2}}))
+            deploy(json!({"confirm": true, "change_id": "c2", "spec": {"a": 1, "b": 2}}))
                 .fingerprint,
             first.fingerprint
         );
@@ -663,7 +717,7 @@ mod tests {
             rules
                 .classify(
                     "mcp__bandzior__deployment_update",
-                    &json!({"confirm": true, "change_id": "c1", "env": {"a": 1, "b": 2}}),
+                    &json!({"confirm": true, "change_id": "c1", "spec": {"a": 1, "b": 2}}),
                     Some("/repo"),
                     None
                 )
@@ -683,6 +737,81 @@ mod tests {
                 .unwrap()
                 .fingerprint
         );
+    }
+
+    #[test]
+    fn mcp_detail_redacts_secrets_but_fingerprint_keeps_them() {
+        let rules = ProductionRules::new(&[]);
+        let action = |tool: &str, input: Value| {
+            rules
+                .classify(tool, &input, None, None)
+                .expect("production")
+        };
+        let env = action(
+            "mcp__bandzior__env_vars_set",
+            json!({"deployment_id": 5, "vars": {"API_KEY": "abc"}, "confirm": true}),
+        );
+        assert!(!env.detail.contains("abc"), "{}", env.detail);
+        assert!(
+            env.detail.contains(r#""deployment_id":5"#),
+            "{}",
+            env.detail
+        );
+        assert!(env.detail.contains(r#""API_KEY":"***""#), "{}", env.detail);
+        assert_ne!(
+            action(
+                "mcp__bandzior__env_vars_set",
+                json!({"deployment_id": 5, "vars": {"API_KEY": "abd"}, "confirm": true}),
+            )
+            .fingerprint,
+            env.fingerprint
+        );
+        let plain = action(
+            "mcp__bandzior__env_vars_set",
+            json!({"name": "web", "vars": {"LOG_LEVEL": "debug"}, "confirm": "true"}),
+        );
+        assert_eq!(
+            plain.detail,
+            r#"{"confirm":"***","name":"web","vars":{"LOG_LEVEL":"***"}}"#
+        );
+        let secret = action(
+            "mcp__bandzior__secret_create",
+            json!({
+                "namespace": "cs-app-x",
+                "name": "db",
+                "project_id": "p-1",
+                "note": "plain",
+                "items": [{"password": "p4ss"}, "loose"]
+            }),
+        );
+        assert_eq!(
+            secret.detail,
+            r#"{"items":[{"password":"***"},"***"],"name":"db","namespace":"cs-app-x","note":"***","project_id":"p-1"}"#
+        );
+        let create = action(
+            "mcp__bandzior__deployment_create",
+            json!({
+                "project": "shop",
+                "image": "nginx:1.27",
+                "Environment": {"A": "1"},
+                "auth_token": "t0k",
+                "nested": [{"secret_value": "s3"}, {"Data": [1, 2]}],
+                "replicas": 2
+            }),
+        );
+        assert_eq!(
+            create.detail,
+            r#"{"Environment":"***","auth_token":"***","image":"nginx:1.27","nested":[{"secret_value":"***"},{"Data":"***"}],"project":"shop","replicas":2}"#
+        );
+        let bash = rules
+            .classify(
+                "Bash",
+                &json!({"command": "API_KEY=abc task release"}),
+                None,
+                None,
+            )
+            .expect("production");
+        assert_eq!(bash.detail, "API_KEY=abc task release");
     }
 
     #[test]
