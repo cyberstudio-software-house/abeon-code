@@ -69,6 +69,21 @@ fn excerpt(text: &str, max_chars: usize) -> String {
     }
 }
 
+fn single_line(text: &str) -> String {
+    text.chars()
+        .map(|character| {
+            if character.is_control() {
+                ' '
+            } else {
+                character
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn describe_answers(answers: &HashMap<String, String>) -> String {
     answers
         .iter()
@@ -485,9 +500,10 @@ impl CoreState {
         self.reset_wake();
     }
 
-    fn queue_injection(&mut self, session_id: &str, text: String) {
-        if text.trim().is_empty() {
-            return;
+    fn queue_injection(&mut self, session_id: &str, text: &str) -> bool {
+        let text = single_line(text);
+        if text.is_empty() {
+            return false;
         }
         self.next_injection += 1;
         self.injections.push(Injection {
@@ -495,6 +511,7 @@ impl CoreState {
             session_id: session_id.to_string(),
             text,
         });
+        true
     }
 
     fn injection_candidates(&self) -> Vec<(u64, String, String)> {
@@ -971,15 +988,13 @@ impl SupervisorCore {
                 state.provenance.mark_supervisor(&question.session_id);
                 question.decision(decision_kind::ANSWERED, decision, rationale)
             } else {
-                let text = text
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|text| !text.is_empty())
-                    .ok_or_else(|| ERROR_MISSING_TEXT.to_string())?
-                    .to_string();
+                let text = single_line(text.as_deref().unwrap_or_default());
+                if text.is_empty() {
+                    return Err(ERROR_MISSING_TEXT.to_string());
+                }
                 let question = state.questions.remove(index);
                 state.discard_queued_question(&question.id);
-                state.queue_injection(&question.session_id, format!("{ANSWER_PREFIX}{text}"));
+                state.queue_injection(&question.session_id, &format!("{ANSWER_PREFIX}{text}"));
                 question.decision(decision_kind::ANSWERED, text, rationale)
             }
         };
@@ -1710,5 +1725,65 @@ mod tests {
         settle().await;
         assert!(core.snapshot().cards.is_empty());
         assert!(effects.last_snapshot().unwrap().cards.is_empty());
+    }
+
+    #[test]
+    fn injections_are_flattened_to_one_line() {
+        assert_eq!(
+            single_line("  a\r\nb\tc\x1b\x03\x7fd\u{85}e\u{2028}f  "),
+            "a b c d e f"
+        );
+        let mut state = CoreState::default();
+        assert!(!state.queue_injection("s1", "\r\n\x1b\x03\t"));
+        assert!(state.injections.is_empty());
+        assert!(state.queue_injection("s1", "[agent sterujący] tak\rgit push"));
+        assert_eq!(state.injections[0].text, "[agent sterujący] tak git push");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn answer_with_control_characters_is_typed_as_one_line() {
+        let (effects, core) = setup();
+        core.set_away(true);
+        core.on_session_hook(stop("s1", "Czy kontynuować?")).await;
+        let question_id = only_question_id(core.take_events());
+        core.answer_question(
+            &question_id,
+            Some("tak\rgit push\x1b origin\x03main".into()),
+            None,
+            "x",
+        )
+        .unwrap();
+        core.tick();
+        core.tick();
+        assert_eq!(
+            effects.typed(),
+            vec![(
+                "pty-s1".to_string(),
+                "[agent sterujący] tak git push origin main\r".to_string()
+            )]
+        );
+        core.on_session_hook(prompt("s1", "[agent sterujący] tak git push origin main"))
+            .await;
+        assert_eq!(
+            core.state.lock().provenance.origin("s1"),
+            PromptOrigin::Supervisor
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn control_only_answer_is_refused() {
+        let (effects, core) = setup();
+        core.set_away(true);
+        core.on_session_hook(stop("s1", "Czy kontynuować?")).await;
+        let question_id = only_question_id(core.take_events());
+        assert!(core
+            .answer_question(&question_id, Some("\r\n\x1b\x03\u{7f}".into()), None, "x")
+            .is_err());
+        core.tick();
+        assert!(effects.typed().is_empty());
+        assert!(effects.kinds().is_empty());
+        assert!(core
+            .answer_question(&question_id, Some("tak".into()), None, "x")
+            .is_ok());
     }
 }
