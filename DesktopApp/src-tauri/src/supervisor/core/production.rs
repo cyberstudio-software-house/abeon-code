@@ -552,12 +552,16 @@ mod tests {
         let (effects, core) = on_main();
         effects.settings.lock().extra_rules = vec!["bash:^kubectl apply".into()];
         agent_prompted(&core, "s1").await;
-        let preview = tool_call("s1", "mcp__bandzior__deployment_deploy", json!({"id": 3}));
+        let preview = tool_call(
+            "s1",
+            "mcp__bandzior__deployment_deploy",
+            json!({"deployment_id": "3"}),
+        );
         assert_eq!(core.on_session_hook(preview).await, HookReply::Empty);
         let deploy = tool_call(
             "s1",
             "mcp__bandzior__deployment_deploy",
-            json!({"id": 3, "confirm": true, "change_id": "c1"}),
+            json!({"deployment_id": "3", "confirm": "c1"}),
         );
         assert_eq!(core.on_session_hook(deploy).await, guard_denial());
         let lookup = HookInput {
@@ -774,25 +778,25 @@ mod tests {
     async fn approval_covers_exactly_the_approved_mcp_arguments() {
         let (_effects, core) = on_main();
         agent_prompted(&core, "s1").await;
-        let deploy = |change_id: &str| {
+        let deploy = |change: &str| {
             tool_call(
                 "s1",
                 "mcp__bandzior__deployment_deploy",
-                json!({"confirm": true, "change_id": change_id, "project": 7}),
+                json!({"deployment_id": "7", "confirm": change, "replicas": 2}),
             )
         };
         assert_eq!(core.on_session_hook(deploy("c1")).await, guard_denial());
         let approval = only_approval(&core);
         assert_eq!(
             approval.detail,
-            r#"{"change_id":"c1","confirm":true,"project":7}"#
+            r#"{"confirm":"c1","deployment_id":"7","replicas":2}"#
         );
         approve_only(&core);
         assert_eq!(core.on_session_hook(deploy("c2")).await, guard_denial());
         let reordered = tool_call(
             "s1",
             "mcp__bandzior__deployment_deploy",
-            json!({"project": 7, "change_id": "c1", "confirm": true}),
+            json!({"replicas": 2, "confirm": "c1", "deployment_id": "7"}),
         );
         assert_eq!(core.on_session_hook(reordered).await, HookReply::Empty);
         assert_eq!(core.on_session_hook(deploy("c1")).await, guard_denial());

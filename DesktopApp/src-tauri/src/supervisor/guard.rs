@@ -237,30 +237,45 @@ fn is_identifier_key(key: &str) -> bool {
     IDENTIFIER_KEYS.contains(&key.as_str()) || key.ends_with("_id")
 }
 
-fn redact(value: &Value, key: Option<&str>, every_string: bool) -> Value {
+fn redact_entries(
+    map: &serde_json::Map<String, Value>,
+    every_string: bool,
+    keeps_identifiers: bool,
+) -> Value {
+    Value::Object(
+        map.iter()
+            .map(|(name, item)| {
+                let item = if is_sensitive_key(name) {
+                    Value::String(REDACTED.to_string())
+                } else if keeps_identifiers && item.is_string() && is_identifier_key(name) {
+                    item.clone()
+                } else {
+                    redact(item, every_string)
+                };
+                (name.clone(), item)
+            })
+            .collect(),
+    )
+}
+
+fn redact(value: &Value, every_string: bool) -> Value {
     match value {
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .map(|(name, item)| {
-                    let item = if is_sensitive_key(name) {
-                        Value::String(REDACTED.to_string())
-                    } else {
-                        redact(item, Some(name), every_string)
-                    };
-                    (name.clone(), item)
-                })
-                .collect(),
-        ),
+        Value::Object(map) => redact_entries(map, every_string, false),
         Value::Array(items) => Value::Array(
             items
                 .iter()
-                .map(|item| redact(item, key, every_string))
+                .map(|item| redact(item, every_string))
                 .collect(),
         ),
-        Value::String(_) if every_string && !key.is_some_and(is_identifier_key) => {
-            Value::String(REDACTED.to_string())
-        }
+        Value::String(_) if every_string => Value::String(REDACTED.to_string()),
         other => other.clone(),
+    }
+}
+
+fn redact_arguments(arguments: &Value, every_string: bool) -> Value {
+    match arguments {
+        Value::Object(map) => redact_entries(map, every_string, true),
+        other => redact(other, every_string),
     }
 }
 
@@ -269,9 +284,8 @@ fn is_confirmed(confirm: Option<&Value>) -> bool {
         None | Some(Value::Null) | Some(Value::Bool(false)) => false,
         Some(Value::String(text)) => {
             let text = text.trim();
-            !(text.is_empty() || text == "0" || text.eq_ignore_ascii_case("false"))
+            !(text.is_empty() || text.eq_ignore_ascii_case("false"))
         }
-        Some(Value::Number(number)) => number.as_f64() != Some(0.0),
         Some(_) => true,
     }
 }
@@ -523,7 +537,7 @@ impl ProductionRules {
         if !production {
             return None;
         }
-        let redacted = redact(tool_input, None, FULLY_REDACTED_TOOLS.contains(&tool_name));
+        let redacted = redact_arguments(tool_input, FULLY_REDACTED_TOOLS.contains(&tool_name));
         Some(ProductionAction {
             label: tool_name.to_string(),
             detail: detail_excerpt(&canonical_json(&redacted), MCP_DETAIL_CHARS),
@@ -833,19 +847,21 @@ mod tests {
             "mcp__bandzior__secret_create",
         ];
         let previews = [
+            json!({"deployment_id": "7"}),
             json!({}),
-            json!({"confirm": false}),
-            json!({"confirm": "false"}),
-            json!({"confirm": null}),
-            json!({"confirm": ""}),
-            json!({"confirm": 0}),
+            json!({"deployment_id": "7", "confirm": false}),
+            json!({"deployment_id": "7", "confirm": "false"}),
+            json!({"deployment_id": "7", "confirm": null}),
+            json!({"deployment_id": "7", "confirm": ""}),
+            json!({"deployment_id": "7", "confirm": "  "}),
         ];
         let confirmed = [
-            json!({"confirm": true, "change_id": "c1"}),
+            json!({"deployment_id": "7", "confirm": "chg-42"}),
+            json!({"deployment_id": "7", "confirm": "0"}),
+            json!({"confirm": 0}),
+            json!({"confirm": true}),
             json!({"confirm": "true"}),
-            json!({"confirm": "TRUE"}),
             json!({"confirm": 1}),
-            json!({"confirm": "yes"}),
         ];
         for tool in gated {
             for input in &previews {
@@ -924,17 +940,18 @@ mod tests {
                 )
                 .expect("production")
         };
-        let first = deploy(json!({"confirm": true, "change_id": "c1", "spec": {"b": 2, "a": 1}}));
+        let first =
+            deploy(json!({"confirm": "c1", "deployment_id": "7", "spec": {"b": 2, "a": 1}}));
         let reordered =
-            deploy(json!({"spec": {"a": 1, "b": 2}, "change_id": "c1", "confirm": true}));
+            deploy(json!({"spec": {"a": 1, "b": 2}, "deployment_id": "7", "confirm": "c1"}));
         assert_eq!(first.fingerprint, reordered.fingerprint);
         assert_eq!(
             first.detail,
-            r#"{"change_id":"c1","confirm":true,"spec":{"a":1,"b":2}}"#
+            r#"{"confirm":"c1","deployment_id":"7","spec":{"a":1,"b":2}}"#
         );
         assert_eq!(first.label, "mcp__bandzior__deployment_deploy");
         assert_ne!(
-            deploy(json!({"confirm": true, "change_id": "c2", "spec": {"a": 1, "b": 2}}))
+            deploy(json!({"confirm": "c2", "deployment_id": "7", "spec": {"a": 1, "b": 2}}))
                 .fingerprint,
             first.fingerprint
         );
@@ -942,7 +959,7 @@ mod tests {
             rules
                 .classify(
                     "mcp__bandzior__deployment_update",
-                    &json!({"confirm": true, "change_id": "c1", "spec": {"a": 1, "b": 2}}),
+                    &json!({"confirm": "c1", "deployment_id": "7", "spec": {"a": 1, "b": 2}}),
                     Some("/repo"),
                     None
                 )
@@ -951,11 +968,11 @@ mod tests {
             first.fingerprint
         );
         assert_eq!(
-            deploy(json!({"confirm": true, "change_id": "c1"})).fingerprint,
+            deploy(json!({"confirm": "c1", "deployment_id": "7"})).fingerprint,
             rules
                 .classify(
                     "mcp__bandzior__deployment_deploy",
-                    &json!({"change_id": "c1", "confirm": true}),
+                    &json!({"deployment_id": "7", "confirm": "c1"}),
                     Some("/elsewhere"),
                     None
                 )
@@ -1040,6 +1057,32 @@ mod tests {
     }
 
     #[test]
+    fn identifier_exemption_covers_only_top_level_parameters() {
+        let rules = ProductionRules::new(&[]);
+        let detail = |tool: &str, input: Value| {
+            rules
+                .classify(tool, &input, None, None)
+                .expect("production")
+                .detail
+        };
+        let nested = detail(
+            "mcp__bandzior__env_vars_set",
+            json!({"deployment_id": "5", "variables": {"CLIENT_ID": "x"}, "confirm": "c-1"}),
+        );
+        assert!(!nested.contains(r#""x""#), "{nested}");
+        assert!(nested.contains(r#""deployment_id":"5""#), "{nested}");
+        assert!(nested.contains(r#""CLIENT_ID":"***""#), "{nested}");
+        let secret = detail(
+            "mcp__bandzior__secret_create",
+            json!({"namespace": "cs-app-x", "name": "db", "spec": {"name": "inner", "project": "p"}}),
+        );
+        assert_eq!(
+            secret,
+            r#"{"name":"db","namespace":"cs-app-x","spec":{"name":"***","project":"***"}}"#
+        );
+    }
+
+    #[test]
     fn detail_is_capped_on_a_char_boundary() {
         let rules = ProductionRules::new(&[]);
         let long = format!("git push origin main # {}", "ż".repeat(1200));
@@ -1062,7 +1105,12 @@ mod tests {
         let rules = ProductionRules::new(&[]);
         let classify = |command: &str| {
             rules
-                .classify("Bash", &json!({ "command": command }), Some("/repo"), Some("feature/x"))
+                .classify(
+                    "Bash",
+                    &json!({ "command": command }),
+                    Some("/repo"),
+                    Some("feature/x"),
+                )
                 .expect("production")
         };
         let hidden = classify("task release # bump\ngit push --force origin main");
@@ -1076,9 +1124,7 @@ mod tests {
             "x".repeat(400)
         ));
         assert_eq!(padded.label, "task release + git push → main");
-        assert!(padded
-            .detail
-            .ends_with(" ⏎ git push --force origin main"));
+        assert!(padded.detail.ends_with(" ⏎ git push --force origin main"));
         assert_eq!(
             classify("git push origin main && git push origin main; task release").label,
             "git push → main + task release"
