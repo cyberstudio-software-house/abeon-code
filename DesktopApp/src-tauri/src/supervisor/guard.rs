@@ -38,7 +38,10 @@ const SENSITIVE_KEY_PARTS: &[&str] = &[
 const IDENTIFIER_KEYS: &[&str] = &["id", "name", "project", "namespace", "deployment"];
 const REDACTED: &str = "***";
 const BASH_TOOL: &str = "Bash";
-const DETAIL_CHARS: usize = 300;
+const BASH_DETAIL_CHARS: usize = 1000;
+const MCP_DETAIL_CHARS: usize = 300;
+const LINE_BREAK: &str = " ⏎ ";
+const LABEL_SEPARATOR: &str = " + ";
 
 const PRODUCTION_BRANCHES: &[&str] = &["main", "master"];
 const WRAPPER_WORDS: &[&str] = &[
@@ -75,12 +78,29 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn detail_excerpt(text: &str) -> String {
-    if text.chars().count() <= DETAIL_CHARS {
+fn detail_excerpt(text: &str, limit: usize) -> String {
+    if text.chars().count() <= limit {
         return text.to_string();
     }
-    let kept: String = text.chars().take(DETAIL_CHARS - 1).collect();
+    let kept: String = text.chars().take(limit - 1).collect();
     format!("{kept}…")
+}
+
+fn bash_detail(command: &str) -> String {
+    let lines: Vec<String> = command
+        .split(['\n', '\r'])
+        .map(collapse_whitespace)
+        .filter(|line| !line.is_empty())
+        .collect();
+    detail_excerpt(&lines.join(LINE_BREAK), BASH_DETAIL_CHARS)
+}
+
+fn push_distinct(labels: &mut Vec<String>, found: Vec<String>) {
+    for label in found {
+        if !labels.contains(&label) {
+            labels.push(label);
+        }
+    }
 }
 
 fn canonical_json(value: &Value) -> String {
@@ -354,12 +374,18 @@ impl ProductionRules {
     ) -> Option<ProductionAction> {
         if tool_name == BASH_TOOL {
             let command = tool_input.get("command").and_then(Value::as_str)?;
-            let label = self.classify_command(command, current_branch)?;
-            let command = collapse_whitespace(command);
+            let labels = self.command_labels(command, current_branch);
+            if labels.is_empty() {
+                return None;
+            }
             return Some(ProductionAction {
-                label,
-                detail: detail_excerpt(&command),
-                fingerprint: format!("{tool_name}\0{}\0{command}", cwd.unwrap_or_default()),
+                label: labels.join(LABEL_SEPARATOR),
+                detail: bash_detail(command),
+                fingerprint: format!(
+                    "{tool_name}\0{}\0{}",
+                    cwd.unwrap_or_default(),
+                    collapse_whitespace(command)
+                ),
             });
         }
         let production = self
@@ -373,54 +399,60 @@ impl ProductionRules {
         let redacted = redact(tool_input, None, FULLY_REDACTED_TOOLS.contains(&tool_name));
         Some(ProductionAction {
             label: tool_name.to_string(),
-            detail: detail_excerpt(&canonical_json(&redacted)),
+            detail: detail_excerpt(&canonical_json(&redacted), MCP_DETAIL_CHARS),
             fingerprint: format!("{tool_name}\0{}", canonical_json(tool_input)),
         })
     }
 
-    fn classify_command(&self, command: &str, current_branch: Option<&str>) -> Option<String> {
+    fn command_labels(&self, command: &str, current_branch: Option<&str>) -> Vec<String> {
+        let mut labels = Vec::new();
         let mut branch = current_branch;
         for segment in split_segments(command) {
             if relocates(segment) {
                 branch = None;
             }
-            let found = self.classify_segment(segment, branch).or_else(|| {
-                segment
+            let mut found = self.classify_segment(segment, branch);
+            if found.is_empty() {
+                for piece in segment
                     .split('`')
                     .map(str::trim)
                     .filter(|piece| !piece.is_empty() && *piece != segment)
-                    .find_map(|piece| self.classify_segment(piece, branch))
-            });
-            if found.is_some() {
-                return found;
+                {
+                    push_distinct(&mut found, self.classify_segment(piece, branch));
+                }
             }
+            push_distinct(&mut labels, found);
         }
-        None
+        labels
     }
 
-    fn classify_segment(&self, segment: &str, current_branch: Option<&str>) -> Option<String> {
+    fn classify_segment(&self, segment: &str, current_branch: Option<&str>) -> Vec<String> {
         if self.extra_bash.iter().any(|regex| regex.is_match(segment)) {
-            return Some(segment.to_string());
+            return vec![segment.to_string()];
         }
         let tokens: Vec<&str> = segment.split_whitespace().map(clean_token).collect();
         let start = command_start(&tokens);
         let tokens = &tokens[start..];
-        let first = *tokens.first()?;
+        let Some(first) = tokens.first().copied() else {
+            return Vec::new();
+        };
         let stripped = tokens.join(" ");
         if start > 0 && self.extra_bash.iter().any(|regex| regex.is_match(&stripped)) {
-            return Some(stripped);
+            return vec![stripped];
         }
         if first == "eval" {
-            return self.classify_command(&tokens[1..].join(" "), current_branch);
+            return self.command_labels(&tokens[1..].join(" "), current_branch);
         }
         if SHELL_WORDS.contains(&first) {
-            if let Some(position) = tokens.iter().position(|t| is_shell_command_flag(t)) {
-                return self.classify_command(&tokens[position + 1..].join(" "), current_branch);
-            }
-            return None;
+            return match tokens.iter().position(|t| is_shell_command_flag(t)) {
+                Some(position) => {
+                    self.command_labels(&tokens[position + 1..].join(" "), current_branch)
+                }
+                None => Vec::new(),
+            };
         }
         if self.task_release.is_match(&stripped) {
-            return Some("task release".to_string());
+            return vec!["task release".to_string()];
         }
         if first == "git" {
             let mut index = 1;
@@ -432,10 +464,12 @@ impl ProductionRules {
             }
             if tokens.get(index) == Some(&"push") {
                 let branch = if relocated { None } else { current_branch };
-                return classify_git_push(&tokens[index + 1..], branch);
+                return classify_git_push(&tokens[index + 1..], branch)
+                    .into_iter()
+                    .collect();
             }
         }
-        None
+        Vec::new()
     }
 }
 
@@ -817,12 +851,54 @@ mod tests {
     #[test]
     fn detail_is_capped_on_a_char_boundary() {
         let rules = ProductionRules::new(&[]);
-        let long = format!("git push origin main # {}", "ż".repeat(400));
+        let long = format!("git push origin main # {}", "ż".repeat(1200));
         let action = rules
             .classify("Bash", &json!({ "command": long }), None, Some("main"))
             .expect("production");
-        assert_eq!(action.detail.chars().count(), 300);
+        assert_eq!(action.detail.chars().count(), 1000);
         assert!(action.detail.ends_with('…'));
         assert!(action.detail.starts_with("git push origin main # ż"));
+        let arguments = json!({"project": "x".repeat(600), "confirm": "c1"});
+        let deploy = rules
+            .classify("mcp__bandzior__deployment_deploy", &arguments, None, None)
+            .expect("production");
+        assert_eq!(deploy.detail.chars().count(), 300);
+        assert!(deploy.detail.ends_with('…'));
+    }
+
+    #[test]
+    fn label_names_every_production_segment_and_detail_shows_line_breaks() {
+        let rules = ProductionRules::new(&[]);
+        let classify = |command: &str| {
+            rules
+                .classify("Bash", &json!({ "command": command }), Some("/repo"), Some("feature/x"))
+                .expect("production")
+        };
+        let hidden = classify("task release # bump\ngit push --force origin main");
+        assert_eq!(hidden.label, "task release + git push → main");
+        assert_eq!(
+            hidden.detail,
+            "task release # bump ⏎ git push --force origin main"
+        );
+        let padded = classify(&format!(
+            "task release # {}\r\n\n  git push --force origin main",
+            "x".repeat(400)
+        ));
+        assert_eq!(padded.label, "task release + git push → main");
+        assert!(padded
+            .detail
+            .ends_with(" ⏎ git push --force origin main"));
+        assert_eq!(
+            classify("git push origin main && git push origin main; task release").label,
+            "git push → main + task release"
+        );
+        assert_eq!(
+            classify("git push origin master; git push origin main").label,
+            "git push → master + git push → main"
+        );
+        assert_eq!(
+            classify("bash -c 'task release && git push origin main'").label,
+            "task release + git push → main"
+        );
     }
 }
