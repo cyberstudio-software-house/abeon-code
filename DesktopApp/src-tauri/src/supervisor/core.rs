@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -12,16 +12,24 @@ use crate::domain::supervisor::{
     CardPhase, EscalationView, MenuQuestion, QuestionCardView, SupervisorLevel, SupervisorSnapshot,
 };
 use crate::sessions::reader::now_ms;
-use crate::supervisor::effects::{Effects, SessionInfo};
+use crate::supervisor::approvals::ApprovalBook;
+use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
 use crate::supervisor::events::{QuestionKind, ResolvedBy, SupervisorEvent};
 use crate::supervisor::hook_io::{menu_questions, HookInput, HookReply};
 use crate::supervisor::presence::Presence;
 use crate::supervisor::provenance::{PromptOrigin, ProvenanceTracker};
 use crate::supervisor::settings::SupervisorSettings;
 
+mod operations;
+mod production;
+
+pub use production::{ApprovalState, ApprovalStatus};
+
 pub const ESCALATED_REASON: &str =
     "Pytanie przekazane użytkownikowi — poczekaj na jego odpowiedź w kolejnej wiadomości.";
 pub const ANSWER_PREFIX: &str = "[agent sterujący] ";
+pub const GUARD_REASON: &str =
+    "Ta operacja wymaga zgody użytkownika. Nie ponawiaj jej — agent sterujący poprosił użytkownika o zgodę.";
 pub const QUIET_WINDOW: Duration = Duration::from_secs(5);
 pub const WAKE_DEBOUNCE: Duration = Duration::from_secs(10);
 pub const WAKE_RETRY: Duration = Duration::from_secs(120);
@@ -53,6 +61,9 @@ const RATIONALE_HUMAN_PROMPT: &str = "Użytkownik odpowiedział w sesji";
 const ERROR_UNKNOWN_QUESTION: &str = "Nie ma otwartego pytania o tym identyfikatorze";
 const ERROR_IN_GRACE: &str = "Pytanie czeka jeszcze na odpowiedź użytkownika";
 const ERROR_MISSING_ANSWERS: &str = "Odpowiedź na menu wymaga niepustego pola answers";
+const ERROR_RELAY_LEVEL: &str = "Poziom Przekaźnik: agent nie podejmuje decyzji — użyj escalate.";
+const ERROR_ANSWER_KEYS: &str = "Klucze answers muszą być dokładnie treściami pytań";
+const ERROR_BLANK_ANSWER: &str = "Pusta odpowiedź na pytanie";
 const ERROR_MISSING_TEXT: &str = "Odpowiedź wymaga niepustego pola text";
 const ERROR_UNKNOWN_CARD: &str = "Nie ma karty pytania o tym identyfikatorze";
 const ERROR_EMPTY_CARD_ANSWER: &str = "Wybierz odpowiedź";
@@ -82,6 +93,41 @@ fn single_line(text: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+fn quoted_list<'a>(items: impl IntoIterator<Item = &'a str>) -> String {
+    items
+        .into_iter()
+        .map(|item| format!("„{item}”"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn check_menu_answers(
+    questions: &[MenuQuestion],
+    answers: &HashMap<String, String>,
+) -> Result<(), String> {
+    let expected: BTreeSet<&str> = questions
+        .iter()
+        .map(|entry| entry.question.as_str())
+        .collect();
+    let given: BTreeSet<&str> = answers.keys().map(String::as_str).collect();
+    if expected != given {
+        let missing = quoted_list(expected.difference(&given).copied());
+        let extra = quoted_list(given.difference(&expected).copied());
+        return Err(format!(
+            "{ERROR_ANSWER_KEYS}. Brakuje: [{missing}]. Nadmiarowe: [{extra}]"
+        ));
+    }
+    let blank: BTreeSet<&str> = answers
+        .iter()
+        .filter(|(_, answer)| answer.trim().is_empty())
+        .map(|(question, _)| question.as_str())
+        .collect();
+    if !blank.is_empty() {
+        return Err(format!("{ERROR_BLANK_ANSWER}: {}", quoted_list(blank)));
+    }
+    Ok(())
 }
 
 fn describe_answers(answers: &HashMap<String, String>) -> String {
@@ -242,6 +288,8 @@ struct CoreState {
     events: Vec<SupervisorEvent>,
     wake: WakeState,
     last_snapshot: Option<SupervisorSnapshot>,
+    approvals: ApprovalBook,
+    approval_records: HashMap<String, production::ApprovalRecord>,
 }
 
 impl CoreState {
@@ -280,9 +328,19 @@ impl CoreState {
     }
 
     fn take_session_questions(&mut self, session_id: &str) -> Vec<Question> {
+        self.take_questions_where(|question| question.session_id == session_id)
+    }
+
+    fn take_session_turn_ends(&mut self, session_id: &str) -> Vec<Question> {
+        self.take_questions_where(|question| {
+            question.session_id == session_id && !question.is_menu()
+        })
+    }
+
+    fn take_questions_where(&mut self, selected: impl Fn(&Question) -> bool) -> Vec<Question> {
         let (taken, kept) = std::mem::take(&mut self.questions)
             .into_iter()
-            .partition(|question| question.session_id == session_id);
+            .partition(|question| selected(question));
         self.questions = kept;
         taken
     }
@@ -607,7 +665,7 @@ impl CoreState {
             present: self.presence.is_present(now, settings.presence),
             away: self.presence.away(),
             escalations: self.escalations.clone(),
-            approvals: Vec::new(),
+            approvals: self.approval_views(now),
             cards,
         }
     }
@@ -656,6 +714,7 @@ impl SupervisorCore {
             "PreToolUse" if input.tool_name.as_deref() == Some(ASK_USER_QUESTION) => {
                 self.on_menu(input).await
             }
+            "PreToolUse" => self.on_guarded_tool(&input).await,
             _ => HookReply::Empty,
         }
     }
@@ -701,24 +760,27 @@ impl SupervisorCore {
             let origin = state.provenance.on_user_prompt(session_id, prompt, now);
             let session = state.session_mut(session_id);
             session.at_prompt = false;
-            if origin != PromptOrigin::Human {
-                return;
-            }
             session.awaiting_user = false;
-            state
-                .injections
-                .retain(|injection| injection.session_id != session_id);
-            state
-                .escalations
-                .retain(|escalation| escalation.session_id != session_id);
-            for mut question in state.take_session_questions(session_id) {
-                question.reply(HookReply::Empty);
-                if state.withdraw_from_supervisor(&question) {
-                    outbox.decisions.push(question.decision(
-                        decision_kind::RELEASED_TO_USER,
-                        DECISION_RELEASED.to_string(),
-                        RATIONALE_HUMAN_PROMPT,
-                    ));
+            if origin == PromptOrigin::Human {
+                state
+                    .injections
+                    .retain(|injection| injection.session_id != session_id);
+                state
+                    .escalations
+                    .retain(|escalation| escalation.session_id != session_id);
+                for mut question in state.take_session_questions(session_id) {
+                    question.reply(HookReply::Empty);
+                    if state.withdraw_from_supervisor(&question) {
+                        outbox.decisions.push(question.decision(
+                            decision_kind::RELEASED_TO_USER,
+                            DECISION_RELEASED.to_string(),
+                            RATIONALE_HUMAN_PROMPT,
+                        ));
+                    }
+                }
+            } else {
+                for question in state.take_session_turn_ends(session_id) {
+                    state.withdraw_from_supervisor(&question);
                 }
             }
         }
@@ -967,6 +1029,9 @@ impl SupervisorCore {
         answers: Option<HashMap<String, String>>,
         rationale: &str,
     ) -> Result<(), String> {
+        if self.effects.settings().level == SupervisorLevel::Relay {
+            return Err(ERROR_RELAY_LEVEL.to_string());
+        }
         let entry = {
             let mut state = self.state.lock();
             let index = state
@@ -977,10 +1042,11 @@ impl SupervisorCore {
             if !state.questions[index].with_supervisor() {
                 return Err(ERROR_IN_GRACE.to_string());
             }
-            if state.questions[index].is_menu() {
+            if let QuestionBody::Menu { questions, .. } = &state.questions[index].body {
                 let answers = answers
                     .filter(|answers| !answers.is_empty())
                     .ok_or_else(|| ERROR_MISSING_ANSWERS.to_string())?;
+                check_menu_answers(questions, &answers)?;
                 let decision = describe_answers(&answers);
                 let mut question = state.questions.remove(index);
                 question.answer_menu(answers);

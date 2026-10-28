@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +29,13 @@ pub(crate) struct FakeEffects {
     pub(crate) snapshots: Mutex<Vec<SupervisorSnapshot>>,
     pub(crate) notifications: Mutex<Vec<(String, String, String)>>,
     pub(crate) decisions: Mutex<Vec<NewDecision>>,
+    pub(crate) branch: Mutex<Option<String>>,
+    pub(crate) branch_lookups: Mutex<Vec<PathBuf>>,
+    pub(crate) listings: Mutex<Vec<SessionListing>>,
+    pub(crate) transcripts: Mutex<HashMap<String, String>>,
+    pub(crate) reads: Mutex<Vec<(String, usize)>>,
+    pub(crate) opened: Mutex<Vec<(String, String)>>,
+    pub(crate) open_error: Mutex<Option<String>>,
 }
 
 impl FakeEffects {
@@ -62,6 +69,13 @@ impl FakeEffects {
             snapshots: Mutex::default(),
             notifications: Mutex::default(),
             decisions: Mutex::default(),
+            branch: Mutex::default(),
+            branch_lookups: Mutex::default(),
+            listings: Mutex::default(),
+            transcripts: Mutex::default(),
+            reads: Mutex::default(),
+            opened: Mutex::default(),
+            open_error: Mutex::default(),
         })
     }
 
@@ -111,8 +125,9 @@ impl Effects for FakeEffects {
         self.quiet.load(Ordering::SeqCst)
     }
 
-    fn current_branch(&self, _cwd: &Path) -> Option<String> {
-        None
+    fn current_branch(&self, cwd: &Path) -> Option<String> {
+        self.branch_lookups.lock().push(cwd.to_path_buf());
+        self.branch.lock().clone()
     }
 
     fn wake_supervisor(&self) -> bool {
@@ -137,14 +152,21 @@ impl Effects for FakeEffects {
     }
 
     fn list_sessions(&self) -> Vec<SessionListing> {
-        Vec::new()
+        self.listings.lock().clone()
     }
 
-    fn read_session(&self, _session_id: &str, _max_blocks: usize) -> Option<String> {
-        None
+    fn read_session(&self, session_id: &str, max_blocks: usize) -> Option<String> {
+        self.reads.lock().push((session_id.to_string(), max_blocks));
+        self.transcripts.lock().get(session_id).cloned()
     }
 
-    fn open_session(&self, _project_path: &str, _prompt: &str) -> Result<(), String> {
+    fn open_session(&self, project_path: &str, prompt: &str) -> Result<(), String> {
+        if let Some(error) = self.open_error.lock().clone() {
+            return Err(error);
+        }
+        self.opened
+            .lock()
+            .push((project_path.to_string(), prompt.to_string()));
         Ok(())
     }
 }
@@ -180,6 +202,14 @@ pub(crate) fn prompt(session_id: &str, text: &str) -> HookInput {
     HookInput {
         prompt: Some(text.to_string()),
         ..hook(session_id, "UserPromptSubmit")
+    }
+}
+
+pub(crate) fn bash(session_id: &str, command: &str) -> HookInput {
+    HookInput {
+        tool_name: Some("Bash".into()),
+        tool_input: Some(json!({ "command": command })),
+        ..hook(session_id, "PreToolUse")
     }
 }
 
