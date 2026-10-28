@@ -24,6 +24,7 @@ pub(crate) struct FakeEffects {
     pub(crate) sessions: Mutex<HashMap<String, SessionInfo>>,
     pub(crate) quiet: AtomicBool,
     pub(crate) keystrokes: Mutex<HashMap<String, Instant>>,
+    pub(crate) type_fails: AtomicBool,
     pub(crate) wake_accepts: AtomicBool,
     pub(crate) wakes: AtomicUsize,
     pub(crate) typed: Mutex<Vec<(String, String)>>,
@@ -65,6 +66,7 @@ impl FakeEffects {
             sessions: Mutex::new(sessions),
             quiet: AtomicBool::new(true),
             keystrokes: Mutex::default(),
+            type_fails: AtomicBool::new(false),
             wake_accepts: AtomicBool::new(true),
             wakes: AtomicUsize::new(0),
             typed: Mutex::default(),
@@ -122,6 +124,9 @@ impl Effects for FakeEffects {
     }
 
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String> {
+        if self.type_fails.load(Ordering::SeqCst) {
+            return Err("pty closed".into());
+        }
         self.typed
             .lock()
             .push((pty_id.to_string(), format!("{text}\r")));

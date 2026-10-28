@@ -10,6 +10,13 @@ pub enum PromptOrigin {
     Agent,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PromptEvidence {
+    pub pty_known: bool,
+    pub quiet_since_typed: bool,
+    pub recent_keystroke: bool,
+}
+
 #[derive(Default)]
 struct SessionProvenance {
     injections: Vec<(String, Instant)>,
@@ -17,8 +24,12 @@ struct SessionProvenance {
     origin: Option<PromptOrigin>,
 }
 
+fn is_fresh(recorded: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(recorded) < EXPIRY
+}
+
 fn take_match(entries: &mut Vec<(String, Instant)>, prompt: &str, now: Instant) -> bool {
-    entries.retain(|(_, recorded)| now.saturating_duration_since(*recorded) < EXPIRY);
+    entries.retain(|(_, recorded)| is_fresh(*recorded, now));
     match entries.iter().position(|(text, _)| text == prompt) {
         Some(index) => {
             entries.remove(index);
@@ -42,6 +53,28 @@ impl ProvenanceTracker {
             .push((text.trim().to_string(), now));
     }
 
+    pub fn forget_injection(&mut self, session_id: &str, typed_at: Instant) {
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            if let Some(index) = session
+                .injections
+                .iter()
+                .rposition(|(_, recorded)| *recorded == typed_at)
+            {
+                session.injections.remove(index);
+            }
+        }
+    }
+
+    pub fn last_typed_at(&self, session_id: &str, now: Instant) -> Option<Instant> {
+        self.sessions
+            .get(session_id)?
+            .injections
+            .iter()
+            .map(|(_, recorded)| *recorded)
+            .filter(|recorded| is_fresh(*recorded, now))
+            .max()
+    }
+
     pub fn expect_cli_prompt(&mut self, session_id: &str, text: &str, now: Instant) {
         self.sessions
             .entry(session_id.to_string())
@@ -50,15 +83,35 @@ impl ProvenanceTracker {
             .push((text.trim().to_string(), now));
     }
 
-    pub fn on_user_prompt(&mut self, session_id: &str, prompt: &str, now: Instant) -> PromptOrigin {
+    pub fn on_user_prompt(
+        &mut self,
+        session_id: &str,
+        prompt: &str,
+        evidence: PromptEvidence,
+        now: Instant,
+    ) -> PromptOrigin {
         let session = self.sessions.entry(session_id.to_string()).or_default();
         let prompt = prompt.trim();
-        let origin = if take_match(&mut session.injections, prompt, now) {
+        let typed: Vec<(String, Instant)> = std::mem::take(&mut session.injections)
+            .into_iter()
+            .filter(|(_, recorded)| is_fresh(*recorded, now))
+            .collect();
+        let injected = !typed.is_empty()
+            && (evidence.quiet_since_typed || typed.iter().any(|(text, _)| text == prompt));
+        let origin = if !evidence.pty_known {
+            if take_match(&mut session.cli_prompts, prompt, now) {
+                PromptOrigin::Agent
+            } else {
+                PromptOrigin::Human
+            }
+        } else if injected {
             PromptOrigin::Supervisor
         } else if take_match(&mut session.cli_prompts, prompt, now) {
             PromptOrigin::Agent
-        } else {
+        } else if evidence.recent_keystroke {
             PromptOrigin::Human
+        } else {
+            PromptOrigin::Agent
         };
         session.origin = Some(origin);
         origin
@@ -85,16 +138,71 @@ mod tests {
 
     const MINUTE: Duration = Duration::from_secs(60);
 
+    const TYPED_QUIETLY: PromptEvidence = PromptEvidence {
+        pty_known: true,
+        quiet_since_typed: true,
+        recent_keystroke: false,
+    };
+    const KEYSTROKE: PromptEvidence = PromptEvidence {
+        pty_known: true,
+        quiet_since_typed: false,
+        recent_keystroke: true,
+    };
+    const SILENT: PromptEvidence = PromptEvidence {
+        pty_known: true,
+        quiet_since_typed: false,
+        recent_keystroke: false,
+    };
+    const NO_PTY: PromptEvidence = PromptEvidence {
+        pty_known: false,
+        quiet_since_typed: false,
+        recent_keystroke: false,
+    };
+
     #[test]
-    fn injected_text_marks_supervisor() {
+    fn typed_injection_without_keystrokes_marks_supervisor_even_if_altered() {
+        let now = Instant::now();
+        let mut tracker = ProvenanceTracker::default();
+        tracker.record_injection("s1", "[agent sterujący] tak", now);
+        assert_eq!(tracker.last_typed_at("s1", now + MINUTE), Some(now));
+        assert_eq!(
+            tracker.on_user_prompt(
+                "s1",
+                "[agent sterujący] tak, ale…",
+                TYPED_QUIETLY,
+                now + MINUTE
+            ),
+            PromptOrigin::Supervisor
+        );
+        assert_eq!(tracker.origin("s1"), PromptOrigin::Supervisor);
+        assert_eq!(tracker.last_typed_at("s1", now + MINUTE), None);
+    }
+
+    #[test]
+    fn exact_typed_text_marks_supervisor_despite_a_keystroke() {
         let now = Instant::now();
         let mut tracker = ProvenanceTracker::default();
         tracker.record_injection("s1", "[agent sterujący] tak", now);
         assert_eq!(
-            tracker.on_user_prompt("s1", "  [agent sterujący] tak\n", now + MINUTE),
+            tracker.on_user_prompt("s1", "  [agent sterujący] tak\n", KEYSTROKE, now),
             PromptOrigin::Supervisor
         );
-        assert_eq!(tracker.origin("s1"), PromptOrigin::Supervisor);
+    }
+
+    #[test]
+    fn keystroke_after_injection_with_other_text_marks_human_and_drops_the_injection() {
+        let now = Instant::now();
+        let mut tracker = ProvenanceTracker::default();
+        tracker.record_injection("s1", "[agent sterujący] tak", now);
+        assert_eq!(
+            tracker.on_user_prompt("s1", "nie, poczekaj", KEYSTROKE, now),
+            PromptOrigin::Human
+        );
+        assert_eq!(tracker.last_typed_at("s1", now), None);
+        assert_eq!(
+            tracker.on_user_prompt("s1", "[agent sterujący] tak", SILENT, now),
+            PromptOrigin::Agent
+        );
     }
 
     #[test]
@@ -103,40 +211,84 @@ mod tests {
         let mut tracker = ProvenanceTracker::default();
         tracker.expect_cli_prompt("s1", "do the thing", now);
         assert_eq!(
-            tracker.on_user_prompt("s1", "do the thing", now + MINUTE),
+            tracker.on_user_prompt("s1", "do the thing", KEYSTROKE, now + MINUTE),
+            PromptOrigin::Agent
+        );
+        assert_eq!(tracker.origin("s1"), PromptOrigin::Agent);
+        assert_eq!(
+            tracker.on_user_prompt("s1", "do the thing", KEYSTROKE, now + MINUTE),
+            PromptOrigin::Human
+        );
+    }
+
+    #[test]
+    fn recent_keystroke_marks_human_and_silence_marks_agent() {
+        let now = Instant::now();
+        let mut tracker = ProvenanceTracker::default();
+        assert_eq!(
+            tracker.on_user_prompt("s1", "zrób push", KEYSTROKE, now),
+            PromptOrigin::Human
+        );
+        assert_eq!(
+            tracker.on_user_prompt("s1", "zrób push", SILENT, now),
             PromptOrigin::Agent
         );
         assert_eq!(tracker.origin("s1"), PromptOrigin::Agent);
     }
 
     #[test]
-    fn other_prompt_marks_human_and_resets() {
+    fn unknown_pty_is_human_unless_a_cli_prompt_matches() {
         let now = Instant::now();
         let mut tracker = ProvenanceTracker::default();
-        tracker.record_injection("s1", "answer", now);
+        tracker.expect_cli_prompt("s1", "przygotuj wydanie", now);
         assert_eq!(
-            tracker.on_user_prompt("s1", "answer", now),
-            PromptOrigin::Supervisor
+            tracker.on_user_prompt("s1", "przygotuj wydanie", NO_PTY, now),
+            PromptOrigin::Agent
         );
         assert_eq!(
-            tracker.on_user_prompt("s1", "something else", now),
-            PromptOrigin::Human
-        );
-        assert_eq!(tracker.origin("s1"), PromptOrigin::Human);
-        assert_eq!(
-            tracker.on_user_prompt("s1", "answer", now),
+            tracker.on_user_prompt("s1", "cokolwiek", NO_PTY, now),
             PromptOrigin::Human
         );
     }
 
     #[test]
-    fn injection_expires_after_ten_minutes() {
+    fn records_expire_after_ten_minutes() {
         let now = Instant::now();
         let mut tracker = ProvenanceTracker::default();
         tracker.record_injection("s1", "answer", now);
+        tracker.expect_cli_prompt("s2", "cli", now);
+        assert_eq!(tracker.last_typed_at("s1", now + 11 * MINUTE), None);
         assert_eq!(
-            tracker.on_user_prompt("s1", "answer", now + 11 * MINUTE),
+            tracker.on_user_prompt("s1", "answer", TYPED_QUIETLY, now + 11 * MINUTE),
+            PromptOrigin::Agent
+        );
+        assert_eq!(
+            tracker.on_user_prompt("s2", "cli", SILENT, now + 11 * MINUTE),
+            PromptOrigin::Agent
+        );
+        assert_eq!(
+            tracker.on_user_prompt("s2", "cli", KEYSTROKE, now + 11 * MINUTE),
             PromptOrigin::Human
+        );
+    }
+
+    #[test]
+    fn forgotten_injection_no_longer_counts() {
+        let now = Instant::now();
+        let mut tracker = ProvenanceTracker::default();
+        tracker.record_injection("s1", "first", now);
+        tracker.record_injection("s1", "second", now + MINUTE);
+        assert_eq!(
+            tracker.last_typed_at("s1", now + MINUTE),
+            Some(now + MINUTE)
+        );
+        tracker.forget_injection("s1", now + MINUTE);
+        assert_eq!(tracker.last_typed_at("s1", now + MINUTE), Some(now));
+        tracker.forget_injection("s1", now);
+        assert_eq!(tracker.last_typed_at("s1", now + MINUTE), None);
+        assert_eq!(
+            tracker.on_user_prompt("s1", "first", SILENT, now + MINUTE),
+            PromptOrigin::Agent
         );
     }
 
@@ -150,41 +302,17 @@ mod tests {
     }
 
     #[test]
-    fn several_pending_entries_per_session_are_consumed_individually() {
-        let now = Instant::now();
-        let mut tracker = ProvenanceTracker::default();
-        tracker.record_injection("s1", "first", now);
-        tracker.record_injection("s1", "second", now);
-        tracker.expect_cli_prompt("s1", "cli", now);
-        assert_eq!(
-            tracker.on_user_prompt("s1", "second", now),
-            PromptOrigin::Supervisor
-        );
-        assert_eq!(
-            tracker.on_user_prompt("s1", "first", now),
-            PromptOrigin::Supervisor
-        );
-        assert_eq!(
-            tracker.on_user_prompt("s1", "cli", now),
-            PromptOrigin::Agent
-        );
-        assert_eq!(
-            tracker.on_user_prompt("s1", "first", now),
-            PromptOrigin::Human
-        );
-    }
-
-    #[test]
     fn sessions_are_isolated() {
         let now = Instant::now();
         let mut tracker = ProvenanceTracker::default();
         tracker.record_injection("s1", "answer", now);
+        assert_eq!(tracker.last_typed_at("s2", now), None);
         assert_eq!(
-            tracker.on_user_prompt("s2", "answer", now),
+            tracker.on_user_prompt("s2", "answer", KEYSTROKE, now),
             PromptOrigin::Human
         );
         assert_eq!(
-            tracker.on_user_prompt("s1", "answer", now),
+            tracker.on_user_prompt("s1", "x", TYPED_QUIETLY, now),
             PromptOrigin::Supervisor
         );
     }

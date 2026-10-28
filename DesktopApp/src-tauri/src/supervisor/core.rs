@@ -17,7 +17,7 @@ use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
 use crate::supervisor::events::{QuestionKind, ResolvedBy, SupervisorEvent};
 use crate::supervisor::hook_io::{menu_questions, HookInput, HookReply};
 use crate::supervisor::presence::Presence;
-use crate::supervisor::provenance::{PromptOrigin, ProvenanceTracker};
+use crate::supervisor::provenance::{PromptEvidence, PromptOrigin, ProvenanceTracker};
 use crate::supervisor::settings::SupervisorSettings;
 
 mod operations;
@@ -31,6 +31,7 @@ pub const ANSWER_PREFIX: &str = "[agent sterujący] ";
 pub const GUARD_REASON: &str =
     "Ta operacja wymaga zgody użytkownika. Nie ponawiaj jej — agent sterujący poprosił użytkownika o zgodę.";
 pub const QUIET_WINDOW: Duration = Duration::from_secs(5);
+pub const KEYSTROKE_WINDOW: Duration = Duration::from_secs(10);
 pub const WAKE_DEBOUNCE: Duration = Duration::from_secs(10);
 pub const WAKE_RETRY: Duration = Duration::from_secs(120);
 pub const DECISION_WINDOW: Duration = Duration::from_secs(120);
@@ -607,7 +608,14 @@ impl CoreState {
         true
     }
 
-    fn requeue_injection(&mut self, injection_id: u64, session_id: String, text: String) {
+    fn requeue_injection(
+        &mut self,
+        injection_id: u64,
+        session_id: String,
+        text: String,
+        typed_at: Instant,
+    ) {
+        self.provenance.forget_injection(&session_id, typed_at);
         self.session_mut(&session_id).at_prompt = true;
         self.injections.insert(
             0,
@@ -754,10 +762,14 @@ impl SupervisorCore {
         let session_id = input.session_id.as_str();
         let prompt = input.prompt.as_deref().unwrap_or_default();
         let now = now();
+        let typed_at = self.state.lock().provenance.last_typed_at(session_id, now);
+        let evidence = self.prompt_evidence(session_id, typed_at, now);
         let mut outbox = Outbox::default();
         {
             let mut state = self.state.lock();
-            let origin = state.provenance.on_user_prompt(session_id, prompt, now);
+            let origin = state
+                .provenance
+                .on_user_prompt(session_id, prompt, evidence, now);
             let session = state.session_mut(session_id);
             session.at_prompt = false;
             session.awaiting_user = false;
@@ -787,6 +799,33 @@ impl SupervisorCore {
         }
         self.flush(outbox);
         self.publish();
+    }
+
+    fn prompt_evidence(
+        &self,
+        session_id: &str,
+        typed_at: Option<Instant>,
+        now: Instant,
+    ) -> PromptEvidence {
+        let pty_id = self
+            .effects
+            .session_info(session_id)
+            .and_then(|info| info.pty_id);
+        let Some(pty_id) = pty_id else {
+            return PromptEvidence {
+                pty_known: false,
+                quiet_since_typed: false,
+                recent_keystroke: false,
+            };
+        };
+        PromptEvidence {
+            pty_known: true,
+            quiet_since_typed: typed_at.is_some_and(|typed_at| {
+                self.effects
+                    .input_quiet(&pty_id, now.saturating_duration_since(typed_at))
+            }),
+            recent_keystroke: !self.effects.input_quiet(&pty_id, KEYSTROKE_WINDOW),
+        }
     }
 
     async fn on_menu(self: &Arc<Self>, input: HookInput) -> HookReply {
@@ -880,7 +919,7 @@ impl SupervisorCore {
             if self.effects.type_into_pty(&pty_id, &text).is_err() {
                 self.state
                     .lock()
-                    .requeue_injection(injection_id, session_id, text);
+                    .requeue_injection(injection_id, session_id, text, now);
             }
         }
     }
@@ -1198,6 +1237,7 @@ mod tests {
             .await;
         advance(30 * SECOND).await;
         core.tick();
+        effects.keystroke("pty-s1");
         let reply = core
             .on_session_hook(prompt("s1", "nie, najpierw testy"))
             .await;
@@ -1292,7 +1332,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn escalated_session_ignores_stop_until_human_prompt() {
-        let (_effects, core) = setup();
+        let (effects, core) = setup();
         core.set_away(true);
         let handle = spawn_menu(&core, "s1").await;
         assert_eq!(core.take_events().len(), 1);
@@ -1309,6 +1349,7 @@ mod tests {
         core.on_session_hook(stop("s1", "Czekam na decyzję użytkownika."))
             .await;
         assert!(core.take_events().is_empty());
+        effects.keystroke("pty-s1");
         core.on_session_hook(prompt("s1", "wybierz zielony")).await;
         assert!(core.snapshot().escalations.is_empty());
         core.on_session_hook(stop("s1", "Gotowe. Czy commitować?"))
