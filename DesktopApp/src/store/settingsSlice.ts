@@ -65,6 +65,8 @@ export type SettingsSlice = {
   supervisorPresenceMinutes: number;
   supervisorModelId: string;
   supervisorExtraRules: string[];
+  supervisorDiscordEnabled: boolean;
+  supervisorDiscordMuteWhenPresent: boolean;
 
   toggleProvider: (p: Provider) => void;
   setTheme: (t: ThemeMode) => void;
@@ -108,6 +110,8 @@ export type SettingsSlice = {
   setSupervisorPresenceMinutes: (minutes: number) => void;
   setSupervisorModelId: (modelId: string) => void;
   setSupervisorExtraRules: (rules: string[]) => void;
+  setSupervisorDiscordEnabled: (enabled: boolean) => void;
+  setSupervisorDiscordMuteWhenPresent: (mute: boolean) => void;
 };
 
 export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
@@ -148,6 +152,8 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   supervisorPresenceMinutes: 5,
   supervisorModelId: '',
   supervisorExtraRules: [],
+  supervisorDiscordEnabled: false,
+  supervisorDiscordMuteWhenPresent: true,
 
   toggleProvider: (p) => {
     const cur = get().enabledProviders;
@@ -241,4 +247,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   setSupervisorExtraRules: (rules) => set({
     supervisorExtraRules: rules.map(rule => rule.trim()).filter(rule => rule !== ''),
   }),
+  setSupervisorDiscordEnabled: (supervisorDiscordEnabled) => set({ supervisorDiscordEnabled }),
+  setSupervisorDiscordMuteWhenPresent: (supervisorDiscordMuteWhenPresent) =>
+    set({ supervisorDiscordMuteWhenPresent }),
 });

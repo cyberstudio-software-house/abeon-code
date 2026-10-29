@@ -6,6 +6,7 @@ import { buildClaudeModelRows, FALLBACK_EFFORT_LEVELS } from '../../lib/models';
 import {
   SUPERVISOR_GRACE_RANGE, SUPERVISOR_PRESENCE_RANGE,
 } from '../../store/settingsSlice';
+import { SupervisorDiscordSection } from './SupervisorDiscordSection';
 import type { ClaudeOptions, SupervisorLevel } from '../../types';
 
 const FIELD_BASE =
@@ -230,6 +231,11 @@ export function SupervisorSettingsTab() {
             Reguły bez prefiksu bash: lub mcp: nie będą działać ({invalidRules.length}).
           </p>
         )}
+      </div>
+
+      <div>
+        <h3 className="text-[12px] font-semibold text-fg mb-2">Discord</h3>
+        <SupervisorDiscordSection />
       </div>
 
       <div className="border-t border-border pt-4">

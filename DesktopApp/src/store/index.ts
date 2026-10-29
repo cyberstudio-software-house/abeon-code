@@ -84,6 +84,8 @@ type Persisted = {
   supervisorPresenceMinutes?: number;
   supervisorModelId?: string;
   supervisorExtraRules?: string[];
+  supervisorDiscordEnabled?: boolean;
+  supervisorDiscordMuteWhenPresent?: boolean;
 };
 
 const PERSISTED_KEYS = [
@@ -114,6 +116,8 @@ const PERSISTED_KEYS = [
   'supervisorPresenceMinutes',
   'supervisorModelId',
   'supervisorExtraRules',
+  'supervisorDiscordEnabled',
+  'supervisorDiscordMuteWhenPresent',
 ] as const satisfies readonly (keyof Persisted)[];
 
 type PersistedKey = typeof PERSISTED_KEYS[number];
@@ -158,6 +162,8 @@ function pickPersistedFields(state: AppState): Persisted {
     supervisorPresenceMinutes: state.supervisorPresenceMinutes,
     supervisorModelId: state.supervisorModelId,
     supervisorExtraRules: state.supervisorExtraRules,
+    supervisorDiscordEnabled: state.supervisorDiscordEnabled,
+    supervisorDiscordMuteWhenPresent: state.supervisorDiscordMuteWhenPresent,
   };
 }
 
@@ -175,6 +181,8 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'allowRemoteSpawn':
     case 'notificationsEnabled':
     case 'showActiveSessions':
+    case 'supervisorDiscordEnabled':
+    case 'supervisorDiscordMuteWhenPresent':
       return value ? 'true' : 'false';
     case 'modelEfforts':
     case 'customModels':
@@ -212,6 +220,8 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
     case 'allowRemoteSpawn':
     case 'notificationsEnabled':
     case 'showActiveSessions':
+    case 'supervisorDiscordEnabled':
+    case 'supervisorDiscordMuteWhenPresent':
       return raw === 'true';
     case 'modelEfforts':
     case 'customModels':
@@ -297,6 +307,10 @@ function applyPersistedToState(p: Persisted) {
     patch.supervisorPresenceMinutes = clampSupervisorPresence(p.supervisorPresenceMinutes);
   }
   if (typeof p.supervisorModelId === 'string') patch.supervisorModelId = p.supervisorModelId;
+  if (typeof p.supervisorDiscordEnabled === 'boolean') patch.supervisorDiscordEnabled = p.supervisorDiscordEnabled;
+  if (typeof p.supervisorDiscordMuteWhenPresent === 'boolean') {
+    patch.supervisorDiscordMuteWhenPresent = p.supervisorDiscordMuteWhenPresent;
+  }
   if (Array.isArray(p.supervisorExtraRules)) {
     patch.supervisorExtraRules = p.supervisorExtraRules.filter((x): x is string => typeof x === 'string');
   }

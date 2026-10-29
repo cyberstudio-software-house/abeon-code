@@ -130,4 +130,26 @@ describe('supervisor settings persistence', () => {
     const { useStore } = await import('./index');
     await vi.waitFor(() => expect(useStore.getState().supervisorExtraRules).toEqual(['bash:a', 'mcp:b']));
   });
+
+  it('persists the Discord toggles', async () => {
+    const { useStore } = await import('./index');
+    expect(useStore.getState().supervisorDiscordEnabled).toBe(false);
+    expect(useStore.getState().supervisorDiscordMuteWhenPresent).toBe(true);
+    useStore.getState().setSupervisorDiscordEnabled(true);
+    useStore.getState().setSupervisorDiscordMuteWhenPresent(false);
+    await vi.waitFor(() => expect(db).toEqual({
+      supervisorDiscordEnabled: 'true',
+      supervisorDiscordMuteWhenPresent: 'false',
+    }));
+
+    getAllSettings.mockResolvedValue({
+      migrated_v2: '1',
+      supervisorDiscordEnabled: 'true',
+      supervisorDiscordMuteWhenPresent: 'false',
+    });
+    vi.resetModules();
+    const reloaded = (await import('./index')).useStore;
+    await vi.waitFor(() => expect(reloaded.getState().supervisorDiscordEnabled).toBe(true));
+    expect(reloaded.getState().supervisorDiscordMuteWhenPresent).toBe(false);
+  });
 });

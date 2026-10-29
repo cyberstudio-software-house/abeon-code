@@ -37,6 +37,7 @@ describe('SupervisorPanel', () => {
         escalations: [{ id: 'es1', sessionId: 's2', projectId: 2, label: 'Sesja B', summary: 'Nie wiem co dalej', channel: 'app', createdAt: 1 }],
       }),
       supervisorPanelOpen: true,
+      supervisorDiscordEnabled: false,
     });
   });
 
@@ -130,5 +131,32 @@ describe('SupervisorPanel', () => {
     render(<SupervisorPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'Zamknij panel' }));
     expect(useStore.getState().supervisorPanelOpen).toBe(false);
+  });
+
+  it('marks escalations and approvals sent to Discord', () => {
+    useStore.setState({
+      supervisor: snapshot({
+        approvals: [{ id: 'ap1', sessionId: 's1', projectId: 1, label: 'Sesja A', action: 'Wypchnięcie na main', detail: 'git push origin main', code: 'K7', channel: 'discord', createdAt: 1 }],
+        escalations: [
+          { id: 'es1', sessionId: 's2', projectId: 2, label: 'Sesja B', summary: 'Pytanie B', channel: 'discord', createdAt: 1 },
+          { id: 'es2', sessionId: 's3', projectId: 3, label: 'Sesja C', summary: 'Pytanie C', channel: 'app', createdAt: 1 },
+        ],
+      }),
+    });
+    render(<SupervisorPanel />);
+    fireEvent.click(screen.getByRole('tab', { name: /Do decyzji/ }));
+    expect(screen.getAllByText('Discord')).toHaveLength(2);
+  });
+
+  it('shows the Discord connection status in the header only when Discord is enabled', () => {
+    useStore.setState({ supervisorDiscordEnabled: false });
+    const { rerender } = render(<SupervisorPanel />);
+    expect(screen.queryByText(/Discord (połączony|nieaktywny)/)).toBeNull();
+    useStore.setState({ supervisorDiscordEnabled: true });
+    rerender(<SupervisorPanel />);
+    expect(screen.getByText('Discord nieaktywny')).toBeInTheDocument();
+    useStore.setState({ supervisor: snapshot({ discordActive: true }) });
+    rerender(<SupervisorPanel />);
+    expect(screen.getByText('Discord połączony')).toBeInTheDocument();
   });
 });

@@ -6,7 +6,7 @@ import { formatTauriError } from '../../lib/errors';
 import { formatRelative } from '../../lib/format';
 import { TerminalView } from '../terminal/TerminalView';
 import { Icon } from '../shared/Icon';
-import type { ApprovalView, DecisionEntry, EscalationView } from '../../types';
+import type { ApprovalView, DecisionEntry, EscalationChannel, EscalationView } from '../../types';
 
 type View = 'conversation' | 'pending' | 'log';
 
@@ -37,10 +37,11 @@ function useAgeRefresh() {
   }, []);
 }
 
-function RowHeader({ label, createdAt }: { label: string; createdAt: number }) {
+function RowHeader({ label, createdAt, channel }: { label: string; createdAt: number; channel: EscalationChannel }) {
   return (
     <div className="flex items-center gap-2 text-[12px] text-muted">
       <span className="truncate">{label}</span>
+      {channel === 'discord' && <DiscordBadge />}
       <span className="shrink-0 tabular-nums" title={formatTime(createdAt)}>{formatRelative(createdAt)}</span>
     </div>
   );
@@ -50,6 +51,10 @@ const reportFailure = (message: string) => (error: unknown) => {
   toast.error(`${message}: ${formatTauriError(error)}`);
 };
 
+function DiscordBadge() {
+  return <span className="shrink-0 px-1.5 rounded bg-bg-elev-2 text-fg-secondary text-[10px]">Discord</span>;
+}
+
 const buttonClass = 'px-2.5 py-1 border border-border text-[12px] text-fg-secondary hover:text-fg rounded-md';
 const primaryButtonClass = 'px-2.5 py-1 bg-accent text-white text-[12px] rounded-md';
 
@@ -57,6 +62,7 @@ export function SupervisorPanel() {
   const snapshot = useStore(s => s.supervisor);
   const close = useStore(s => s.closeSupervisorPanel);
   const [view, setView] = useState<View>('conversation');
+  const discordEnabled = useStore(s => s.supervisorDiscordEnabled);
   const pending = (snapshot?.approvals.length ?? 0) + (snapshot?.escalations.length ?? 0);
 
   const tabs: Array<{ id: View; label: string; count?: number }> = [
@@ -88,9 +94,16 @@ export function SupervisorPanel() {
             </button>
           ))}
         </div>
-        <button onClick={close} aria-label="Zamknij panel" className="text-muted hover:text-fg p-1">
-          <Icon name="close" className="w-3.5 h-3.5" />
-        </button>
+        <div className="flex items-center gap-2">
+          {discordEnabled && (
+            <span className={`text-[11px] ${snapshot?.discordActive ? 'text-fg-secondary' : 'text-muted'}`}>
+              {snapshot?.discordActive ? 'Discord połączony' : 'Discord nieaktywny'}
+            </span>
+          )}
+          <button onClick={close} aria-label="Zamknij panel" className="text-muted hover:text-fg p-1">
+            <Icon name="close" className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
       <div className="flex-1 min-h-0">
         {view === 'conversation' && <ConversationView />}
@@ -169,7 +182,7 @@ function ApprovalRow({ approval }: { approval: ApprovalView }) {
     <li className="border border-border bg-bg-elev rounded-md p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <RowHeader label={approval.label} createdAt={approval.createdAt} />
+          <RowHeader label={approval.label} createdAt={approval.createdAt} channel={approval.channel} />
           <div className="text-[13px] font-medium text-fg break-words">{approval.action}</div>
           <pre className="text-[11.5px] font-mono text-fg-secondary whitespace-pre-wrap break-all">{approval.detail}</pre>
           <div className="text-[11px] text-muted">
@@ -194,7 +207,7 @@ function EscalationRow({ escalation, onOpen }: { escalation: EscalationView; onO
     <li className="border border-border bg-bg-elev rounded-md p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <RowHeader label={escalation.label} createdAt={escalation.createdAt} />
+          <RowHeader label={escalation.label} createdAt={escalation.createdAt} channel={escalation.channel} />
           <div className="text-[13px] text-fg break-words">{escalation.summary}</div>
         </div>
         <div className="flex gap-2 shrink-0">
