@@ -36,6 +36,7 @@ pub trait Effects: Send + Sync + 'static {
     fn wake_supervisor(&self) -> bool;
     fn publish_snapshot(&self, snapshot: SupervisorSnapshot);
     fn notify_desktop(&self, session_id: &str, title: &str, body: &str);
+    fn attention(&self, session_id: &str, message: &str);
     fn log_decision(&self, entry: NewDecision);
     fn list_sessions(&self) -> Vec<SessionListing>;
     fn read_session(&self, session_id: &str, max_blocks: usize) -> Option<String>;

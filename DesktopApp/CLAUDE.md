@@ -279,6 +279,9 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   shown to the user is redacted.
 - **Attention filter**: the supervisor's own `Notification` markers are dropped by workdir or session
   id (`runtime::attention_filter`), so it never raises a sidebar badge or desktop notification.
+  The other way round, a held `Menu` entering grace and every escalation emit the regular
+  `session-attention` event for that session (`Effects::attention`), because a held hook keeps
+  Claude's own `Notification` hook silent.
 - **Decision log**: table `supervisor_decisions` (migration 006), pruned to 30 days at start. Kinds:
   `answered`, `relayed`, `escalated`, `guard_blocked`, `approved`, `rejected`, `session_opened`,
   `released_to_user`. Read it in the panel's "Dziennik" tab or with

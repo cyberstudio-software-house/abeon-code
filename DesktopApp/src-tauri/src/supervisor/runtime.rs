@@ -19,6 +19,7 @@ use crate::domain::supervisor::{SupervisorLevel, SupervisorSnapshot};
 use crate::domain::SessionActivity;
 use crate::error::AppResult;
 use crate::notifications::marker::MarkerFilter;
+use crate::notifications::AttentionEvent;
 use crate::pty::input_activity::InputActivity;
 use crate::pty::session_registry::SessionPtyRegistry;
 use crate::pty::PtyManager;
@@ -49,6 +50,7 @@ const UNKNOWN_OWNER_TTL: Duration = Duration::from_secs(5);
 const TRANSCRIPT_CHARS: usize = 20_000;
 const DECISION_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 const SNAPSHOT_EVENT: &str = "supervisor:snapshot";
+const ATTENTION_REASON: &str = "hook";
 const SUBMIT_KEY: &[u8] = b"\r";
 const SHORT_ID_CHARS: usize = 8;
 #[cfg(unix)]
@@ -301,6 +303,17 @@ impl Effects for AppEffects {
             session_id.to_string(),
             title.to_string(),
             body.to_string(),
+        );
+    }
+
+    fn attention(&self, session_id: &str, message: &str) {
+        crate::notifications::emit_attention(
+            &self.app,
+            AttentionEvent {
+                session_id: session_id.to_string(),
+                reason: ATTENTION_REASON.to_string(),
+                message: Some(message.to_string()),
+            },
         );
     }
 

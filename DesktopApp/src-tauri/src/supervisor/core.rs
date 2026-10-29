@@ -55,6 +55,8 @@ const ELLIPSIS: char = '…';
 const SUMMARY_CHARS: usize = 500;
 const NOTIFICATION_CHARS: usize = 160;
 const ESCALATION_TITLE: &str = "Agent sterujący: potrzebna Twoja decyzja";
+const ATTENTION_MENU: &str = "Pytanie w sesji czeka na Twoją odpowiedź";
+const ATTENTION_ESCALATION: &str = "Agent sterujący przekazał Ci pytanie";
 const DECISION_ESCALATED: &str = "Przekazane użytkownikowi";
 const DECISION_RELEASED: &str = "Pytanie oddane użytkownikowi";
 const RATIONALE_DECISION_TIMEOUT: &str = "Agent nie podjął decyzji w ciągu 2 minut";
@@ -280,6 +282,7 @@ struct WakeState {
 struct Outbox {
     decisions: Vec<NewDecision>,
     notifications: Vec<(String, String, String)>,
+    attention: Vec<(String, String)>,
 }
 
 enum Step {
@@ -404,6 +407,7 @@ impl CoreState {
         session_id: &str,
         body: QuestionBody,
         now: Instant,
+        outbox: &mut Outbox,
     ) -> String {
         for mut previous in self.take_session_questions(session_id) {
             previous.reply(HookReply::Empty);
@@ -425,6 +429,14 @@ impl CoreState {
         });
         if !self.presence.is_present(now, settings.presence) {
             self.hand_off(&id, now);
+        } else if let Some(question) = self.questions.last().filter(|question| question.is_menu()) {
+            outbox.attention.push((
+                session_id.to_string(),
+                format!(
+                    "{ATTENTION_MENU}: {}",
+                    excerpt(&question.summary(), NOTIFICATION_CHARS)
+                ),
+            ));
         }
         id
     }
@@ -546,6 +558,13 @@ impl CoreState {
             reason: ESCALATED_REASON.to_string(),
         });
         self.session_mut(&question.session_id).awaiting_user = true;
+        outbox.attention.push((
+            question.session_id.clone(),
+            format!(
+                "{ATTENTION_ESCALATION}: {}",
+                excerpt(&summary, NOTIFICATION_CHARS)
+            ),
+        ));
         outbox.notifications.push((
             question.session_id.clone(),
             ESCALATION_TITLE.to_string(),
@@ -801,6 +820,7 @@ impl SupervisorCore {
             .trim()
             .to_string();
         let now = now();
+        let mut outbox = Outbox::default();
         {
             let mut state = self.state.lock();
             let session = state.session_mut(&input.session_id);
@@ -817,8 +837,10 @@ impl SupervisorCore {
                 &input.session_id,
                 QuestionBody::TurnEnded { text },
                 now,
+                &mut outbox,
             );
         }
+        self.flush(outbox);
         self.publish_with(&settings);
     }
 
@@ -900,6 +922,7 @@ impl SupervisorCore {
         let original = tool_input.get("questions").cloned().unwrap_or_default();
         let (sender, receiver) = oneshot::channel();
         let now = now();
+        let mut outbox = Outbox::default();
         let question_id = {
             let mut state = self.state.lock();
             state.session_mut(&input.session_id).at_prompt = false;
@@ -914,8 +937,9 @@ impl SupervisorCore {
                 questions,
                 reply: Some(sender),
             };
-            state.open_question(&settings, info, &input.session_id, body, now)
+            state.open_question(&settings, info, &input.session_id, body, now, &mut outbox)
         };
+        self.flush(outbox);
         self.publish_with(&settings);
         let pending = PendingMenu {
             core: Arc::clone(self),
@@ -1011,6 +1035,9 @@ impl SupervisorCore {
         }
         for (session_id, title, body) in outbox.notifications {
             self.effects.notify_desktop(&session_id, &title, &body);
+        }
+        for (session_id, message) in outbox.attention {
+            self.effects.attention(&session_id, &message);
         }
     }
 
@@ -1420,6 +1447,58 @@ mod tests {
                 ..
             }]
         ));
+        assert_eq!(
+            effects.attentions(),
+            vec![
+                (
+                    "s1".to_string(),
+                    format!("Pytanie w sesji czeka na Twoją odpowiedź: {COLOR_QUESTION}")
+                ),
+                (
+                    "s1".to_string(),
+                    format!("Agent sterujący przekazał Ci pytanie: {COLOR_QUESTION}")
+                ),
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_menus_waiting_for_the_user_raise_attention() {
+        let (effects, core) = setup();
+        core.report_activity(None);
+        core.on_session_hook(stop("s2", "Czy kontynuować?")).await;
+        assert!(effects.attentions().is_empty());
+        let held = spawn_menu(&core, "s1").await;
+        assert_eq!(effects.attentions().len(), 1);
+        assert_eq!(effects.attentions()[0].0, "s1");
+        core.release_card(&only_card(&core).question_id).unwrap();
+        assert_eq!(reply_of(held).await, HookReply::Empty);
+        core.set_away(true);
+        let away = spawn_menu(&core, "s1").await;
+        assert_eq!(effects.attentions().len(), 1);
+        let question_id = core
+            .take_events()
+            .into_iter()
+            .find_map(|event| match event {
+                SupervisorEvent::Question {
+                    question_id,
+                    kind: QuestionKind::Menu,
+                    ..
+                } => Some(question_id),
+                _ => None,
+            })
+            .unwrap();
+        core.escalate(&[question_id], "Kolor wybiera użytkownik")
+            .unwrap();
+        assert!(matches!(reply_of(away).await, HookReply::Deny { .. }));
+        assert_eq!(
+            effects.attentions().last(),
+            Some(&(
+                "s1".to_string(),
+                "Agent sterujący przekazał Ci pytanie: Kolor wybiera użytkownik".to_string()
+            ))
+        );
+        assert_eq!(effects.attentions().len(), 2);
     }
 
     #[tokio::test(start_paused = true)]

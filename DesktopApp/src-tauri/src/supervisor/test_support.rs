@@ -32,6 +32,7 @@ pub(crate) struct FakeEffects {
     pub(crate) typed: Mutex<Vec<(String, String)>>,
     pub(crate) snapshots: Mutex<Vec<SupervisorSnapshot>>,
     pub(crate) notifications: Mutex<Vec<(String, String, String)>>,
+    pub(crate) attentions: Mutex<Vec<(String, String)>>,
     pub(crate) decisions: Mutex<Vec<NewDecision>>,
     pub(crate) branch: Mutex<Option<String>>,
     pub(crate) branch_lookups: Mutex<Vec<PathBuf>>,
@@ -76,6 +77,7 @@ impl FakeEffects {
             typed: Mutex::default(),
             snapshots: Mutex::default(),
             notifications: Mutex::default(),
+            attentions: Mutex::default(),
             decisions: Mutex::default(),
             branch: Mutex::default(),
             branch_lookups: Mutex::default(),
@@ -118,6 +120,10 @@ impl FakeEffects {
 
     pub(crate) fn notifications(&self) -> Vec<(String, String, String)> {
         self.notifications.lock().clone()
+    }
+
+    pub(crate) fn attentions(&self) -> Vec<(String, String)> {
+        self.attentions.lock().clone()
     }
 
     pub(crate) fn last_snapshot(&self) -> Option<SupervisorSnapshot> {
@@ -213,6 +219,12 @@ impl Effects for FakeEffects {
             title.to_string(),
             body.to_string(),
         ));
+    }
+
+    fn attention(&self, session_id: &str, message: &str) {
+        self.attentions
+            .lock()
+            .push((session_id.to_string(), message.to_string()));
     }
 
     fn log_decision(&self, entry: NewDecision) {
