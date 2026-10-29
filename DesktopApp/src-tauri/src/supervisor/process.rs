@@ -17,7 +17,11 @@ use crate::domain::supervisor::SupervisorLevel;
 use crate::error::AppResult;
 use crate::sessions::encoding::encode_project_path;
 use crate::state::AppState;
+use crate::supervisor::claude_md::DiscordContext;
 use crate::supervisor::core::SupervisorCore;
+use crate::supervisor::discord::files::{clear_failure_cache, DiscordFiles};
+use crate::supervisor::discord::preflight::{discord_launch, with_path_prefix};
+use crate::supervisor::discord::DiscordLink;
 use crate::supervisor::settings::SupervisorSettings;
 use crate::supervisor::workdir;
 use crate::validation::{validate_model, validate_session_id};
@@ -205,13 +209,69 @@ fn write_workdir(
     app: &AppHandle,
     conn: &Connection,
     level: SupervisorLevel,
+    discord: Option<&DiscordContext>,
 ) -> Result<PathBuf, String> {
     let dir = workdir::supervisor_dir(app).map_err(|error| error.to_string())?;
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let claude_home = claude_home().ok_or_else(|| ERROR_NO_HOME.to_string())?;
-    workdir::write_supervisor_workdir(&dir, &exe, level, &read_roots(conn), &claude_home, None)
+    workdir::write_supervisor_workdir(&dir, &exe, level, &read_roots(conn), &claude_home, discord)
         .map_err(|error| error.to_string())?;
     Ok(dir)
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct LaunchedDiscord {
+    link: DiscordLink,
+    context: Option<DiscordContext>,
+}
+
+impl LaunchedDiscord {
+    fn live(&self) -> bool {
+        self.link.channel_active
+            && self
+                .context
+                .as_ref()
+                .is_some_and(|context| context.chat_id.is_some())
+    }
+}
+
+fn plan_discord(
+    settings: &SupervisorSettings,
+    env: HashMap<String, String>,
+    home: &Path,
+) -> (HashMap<String, String>, LaunchedDiscord) {
+    if !settings.discord_enabled {
+        return (env, LaunchedDiscord::default());
+    }
+    let claude_home = home.join(CLAUDE_DIR);
+    match discord_launch(&env, home, &DiscordFiles::for_claude_home(&claude_home)) {
+        Ok(launch) => {
+            if let Err(error) = clear_failure_cache(&claude_home) {
+                eprintln!("supervisor: cannot clear the Discord failure cache: {error}");
+            }
+            let env = with_path_prefix(env, launch.path_prefix.as_deref());
+            let discord = LaunchedDiscord {
+                link: DiscordLink {
+                    channel_active: true,
+                    blocker: None,
+                },
+                context: Some(DiscordContext {
+                    chat_id: settings.discord_chat_id.clone(),
+                }),
+            };
+            (env, discord)
+        }
+        Err(blocker) => {
+            let discord = LaunchedDiscord {
+                link: DiscordLink {
+                    channel_active: false,
+                    blocker: Some(blocker.to_string()),
+                },
+                context: None,
+            };
+            (env, discord)
+        }
+    }
 }
 
 struct Launch {
@@ -219,16 +279,23 @@ struct Launch {
     command: String,
     env: HashMap<String, String>,
     session: SupervisorSessionArg,
+    discord: LaunchedDiscord,
 }
 
 fn prepare_launch(app: &AppHandle) -> Result<Option<Launch>, String> {
     let state = app.state::<AppState>();
-    let conn = state.db.get().map_err(|error| error.to_string())?;
-    let settings = SupervisorSettings::load(&conn);
+    let (settings, shell) = {
+        let conn = state.db.get().map_err(|error| error.to_string())?;
+        (SupervisorSettings::load(&conn), resolve_shell(&conn))
+    };
     if settings.level == SupervisorLevel::Off {
         return Ok(None);
     }
-    let dir = write_workdir(app, &conn, settings.level)?;
+    let home = dirs::home_dir().ok_or_else(|| ERROR_NO_HOME.to_string())?;
+    let shell_env = supervisor_env(ensure_shell_env(&state, &shell));
+    let (env, discord) = plan_discord(&settings, shell_env, &home);
+    let conn = state.db.get().map_err(|error| error.to_string())?;
+    let dir = write_workdir(app, &conn, settings.level, discord.context.as_ref())?;
     let projects_root = claude_projects_root().ok_or_else(|| ERROR_NO_HOME.to_string())?;
     let stored = settings_repo::get(&conn, SESSION_ID_KEY).map_err(|error| error.to_string())?;
     let session = choose_session(stored.as_deref(), &projects_root, &dir);
@@ -240,16 +307,14 @@ fn prepare_launch(app: &AppHandle) -> Result<Option<Launch>, String> {
         session.clone(),
         model.as_deref(),
         &dir.join(workdir::MCP_CONFIG_FILE),
-        false,
+        discord.link.channel_active,
     );
-    let shell = resolve_shell(&conn);
-    drop(conn);
-    let env = supervisor_env(ensure_shell_env(&state, &shell));
     Ok(Some(Launch {
         dir,
         command,
         env,
         session,
+        discord,
     }))
 }
 
@@ -276,6 +341,7 @@ struct ProcessState {
     attempts: u32,
     failed_resumes: u32,
     restart_token: u64,
+    discord: LaunchedDiscord,
 }
 
 impl ProcessState {
@@ -319,6 +385,14 @@ impl SupervisorProcess {
     pub fn ready_pty(&self) -> Option<String> {
         let state = self.state.lock();
         state.pty_id.clone().filter(|_| state.ready)
+    }
+
+    pub fn discord_link(&self) -> DiscordLink {
+        let state = self.state.lock();
+        DiscordLink {
+            channel_active: state.pty_id.is_some() && state.discord.link.channel_active,
+            blocker: state.discord.link.blocker.clone(),
+        }
     }
 
     pub fn session_id(&self) -> Option<String> {
@@ -381,9 +455,13 @@ impl SupervisorProcess {
 
     pub fn refresh_instructions(&self, app: &AppHandle) {
         let _lifecycle = self.lifecycle.lock();
-        if !self.state.lock().serving {
-            return;
-        }
+        let discord = {
+            let state = self.state.lock();
+            if !state.serving {
+                return;
+            }
+            state.discord.context.clone()
+        };
         let state = app.state::<AppState>();
         let outcome = state
             .db
@@ -394,7 +472,7 @@ impl SupervisorProcess {
                 if level == SupervisorLevel::Off {
                     return Ok(());
                 }
-                write_workdir(app, &conn, level).map(|_| ())
+                write_workdir(app, &conn, level, discord.as_ref()).map(|_| ())
             });
         if let Err(error) = outcome {
             eprintln!("supervisor: cannot refresh the supervisor instructions: {error}");
@@ -446,9 +524,11 @@ impl SupervisorProcess {
             Some(hook),
         );
         match spawned {
-            Ok(pty_id) => self.attach_locked(&mut state, pty_id, launch.session),
+            Ok(pty_id) => self.attach_locked(&mut state, pty_id, launch.session, launch.discord),
             Err(error) => {
                 eprintln!("supervisor: cannot start the supervisor session: {error}");
+                state.discord = launch.discord;
+                self.core.set_discord_active(false);
                 let (delay, token) = state.plan_restart(Duration::ZERO);
                 drop(state);
                 self.schedule_restart(app, delay, token);
@@ -524,7 +604,7 @@ impl SupervisorProcess {
     #[cfg(test)]
     pub(crate) fn attach(&self, pty_id: String, session: SupervisorSessionArg) {
         let mut state = self.state.lock();
-        self.attach_locked(&mut state, pty_id, session);
+        self.attach_locked(&mut state, pty_id, session, LaunchedDiscord::default());
     }
 
     fn attach_locked(
@@ -532,12 +612,16 @@ impl SupervisorProcess {
         state: &mut ProcessState,
         pty_id: String,
         session: SupervisorSessionArg,
+        discord: LaunchedDiscord,
     ) {
+        let live = discord.live();
         state.pty_id = Some(pty_id.clone());
         state.session = Some(session);
         state.ready = false;
         state.started = Some(now());
+        state.discord = discord;
         self.core.set_supervisor_state(true, false, Some(pty_id));
+        self.core.set_discord_active(live);
     }
 
     fn detach(&self, pty_id: &str) -> Exit {
@@ -556,6 +640,7 @@ impl SupervisorProcess {
         state.ready = false;
         state.started = None;
         self.core.set_supervisor_state(false, false, None);
+        self.core.set_discord_active(false);
         if !state.wanted {
             return Exit::Stopped;
         }
@@ -586,6 +671,7 @@ impl SupervisorProcess {
         state.started = None;
         let previous = state.pty_id.take();
         self.core.set_supervisor_state(false, false, None);
+        self.core.set_discord_active(false);
         previous
     }
 
@@ -891,6 +977,140 @@ mod tests {
 
         process.attach("pty-unwanted".into(), fresh());
         assert_eq!(process.detach("pty-unwanted"), Exit::Stopped);
+    }
+
+    fn discord_settings(enabled: bool, chat_id: Option<&str>) -> SupervisorSettings {
+        SupervisorSettings {
+            level: SupervisorLevel::Assistant,
+            discord_enabled: enabled,
+            discord_chat_id: chat_id.map(str::to_string),
+            ..SupervisorSettings::default()
+        }
+    }
+
+    fn launched(channel: bool, chat_id: Option<&str>, blocker: Option<&str>) -> LaunchedDiscord {
+        LaunchedDiscord {
+            link: DiscordLink {
+                channel_active: channel,
+                blocker: blocker.map(str::to_string),
+            },
+            context: channel.then(|| DiscordContext {
+                chat_id: chat_id.map(str::to_string),
+            }),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn discord_plan_follows_the_setup() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path();
+        let env = HashMap::from([("PATH".to_string(), "/nonexistent".to_string())]);
+
+        let (unchanged, discord) = plan_discord(&discord_settings(false, None), env.clone(), home);
+        assert_eq!(unchanged, env);
+        assert_eq!(discord, LaunchedDiscord::default());
+
+        let (unchanged, discord) =
+            plan_discord(&discord_settings(true, Some("dm-1")), env.clone(), home);
+        assert_eq!(unchanged, env);
+        assert_eq!(
+            discord,
+            launched(false, None, Some("Nie znaleziono Bun (~/.bun/bin/bun)"))
+        );
+
+        let bun_dir = home.join(".bun").join("bin");
+        std::fs::create_dir_all(&bun_dir).unwrap();
+        std::fs::write(bun_dir.join("bun"), "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(bun_dir.join("bun"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        let (_, discord) = plan_discord(&discord_settings(true, Some("dm-1")), env.clone(), home);
+        assert_eq!(
+            discord,
+            launched(false, None, Some("Brak tokenu bota Discord"))
+        );
+
+        let claude_home = home.join(".claude");
+        let channel_dir = claude_home.join("channels").join("discord");
+        std::fs::create_dir_all(&channel_dir).unwrap();
+        std::fs::write(channel_dir.join(".env"), "DISCORD_BOT_TOKEN=abc\n").unwrap();
+        let cache = claude_home.join("mcp-needs-auth-cache.json");
+        std::fs::write(
+            &cache,
+            r#"{"plugin:discord:discord":{"timestamp":1},"plugin:other:other":{"timestamp":2}}"#,
+        )
+        .unwrap();
+
+        let (env_with_bun, discord) =
+            plan_discord(&discord_settings(true, Some("dm-1")), env.clone(), home);
+        assert_eq!(
+            env_with_bun["PATH"],
+            format!("{}:/nonexistent", bun_dir.display())
+        );
+        assert_eq!(discord, launched(true, Some("dm-1"), None));
+        assert!(discord.live());
+        let cache: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&cache).unwrap()).unwrap();
+        assert!(cache.get("plugin:discord:discord").is_none());
+        assert!(cache.get("plugin:other:other").is_some());
+
+        let (_, unlinked) = plan_discord(&discord_settings(true, None), env, home);
+        assert_eq!(unlinked, launched(true, None, None));
+        assert!(!unlinked.live());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn discord_activity_follows_the_launched_process() {
+        let (_effects, core) = setup();
+        let process = SupervisorProcess::new(core.clone());
+        let attach = |pty_id: &str, discord: LaunchedDiscord| {
+            let mut state = process.state.lock();
+            process.attach_locked(&mut state, pty_id.to_string(), fresh(), discord);
+        };
+
+        attach("pty-1", launched(true, Some("dm-1"), None));
+        assert!(core.snapshot().discord_active);
+        assert_eq!(
+            process.discord_link(),
+            DiscordLink {
+                channel_active: true,
+                blocker: None
+            }
+        );
+        assert_eq!(process.detach("pty-1"), Exit::Stopped);
+        assert!(!core.snapshot().discord_active);
+        assert_eq!(process.discord_link(), DiscordLink::default());
+        assert_eq!(
+            process.state.lock().discord.context,
+            Some(DiscordContext {
+                chat_id: Some("dm-1".to_string())
+            })
+        );
+
+        attach("pty-2", launched(true, None, None));
+        assert!(!core.snapshot().discord_active);
+        assert!(process.discord_link().channel_active);
+
+        attach("pty-3", launched(true, Some("dm-1"), None));
+        assert!(core.snapshot().discord_active);
+        assert_eq!(process.halt().as_deref(), Some("pty-3"));
+        assert!(!core.snapshot().discord_active);
+        assert!(!process.discord_link().channel_active);
+
+        attach(
+            "pty-4",
+            launched(false, None, Some("Brak tokenu bota Discord")),
+        );
+        assert!(!core.snapshot().discord_active);
+        assert_eq!(
+            process.discord_link(),
+            DiscordLink {
+                channel_active: false,
+                blocker: Some("Brak tokenu bota Discord".to_string())
+            }
+        );
+        assert_eq!(process.state.lock().discord.context, None);
     }
 
     #[tokio::test(start_paused = true)]

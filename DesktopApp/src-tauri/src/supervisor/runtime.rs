@@ -12,9 +12,9 @@ use crate::commands::pty::MAX_INITIAL_PROMPT_BYTES;
 use crate::commands::sessions::{
     active_sessions_snapshot, history_blocks_for_session, locate_session,
 };
-use crate::db::projects_repo;
 use crate::db::supervisor_decisions_repo::{self, NewDecision};
 use crate::db::DbPool;
+use crate::db::{projects_repo, settings_repo};
 use crate::domain::supervisor::{SessionRebound, SupervisorLevel, SupervisorSnapshot};
 use crate::domain::SessionActivity;
 use crate::error::AppResult;
@@ -32,7 +32,7 @@ use crate::supervisor::discord::files::DiscordFiles;
 use crate::supervisor::discord::poll::{poll_approvals, POLL_INTERVAL};
 use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
 use crate::supervisor::process::{claude_home, SupervisorProcess};
-use crate::supervisor::settings::SupervisorSettings;
+use crate::supervisor::settings::{SupervisorSettings, DISCORD_CHAT_ID_KEY};
 use crate::supervisor::{transcript, workdir};
 
 #[cfg(unix)]
@@ -395,11 +395,47 @@ impl Effects for AppEffects {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct AppliedSettings {
+    level: SupervisorLevel,
+    discord_enabled: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Transition {
+    Unchanged,
+    Start,
+    Stop,
+    Restart,
+    Refresh,
+}
+
+impl AppliedSettings {
+    fn of(settings: &SupervisorSettings) -> AppliedSettings {
+        AppliedSettings {
+            level: settings.level,
+            discord_enabled: settings.discord_enabled,
+        }
+    }
+}
+
+fn transition(previous: AppliedSettings, next: AppliedSettings) -> Transition {
+    let was_on = previous.level != SupervisorLevel::Off;
+    let is_on = next.level != SupervisorLevel::Off;
+    match (was_on, is_on) {
+        (false, true) => Transition::Start,
+        (true, false) => Transition::Stop,
+        (true, true) if previous.discord_enabled != next.discord_enabled => Transition::Restart,
+        (true, true) if previous.level != next.level => Transition::Refresh,
+        _ => Transition::Unchanged,
+    }
+}
+
 pub struct SupervisorRuntime {
     effects: Arc<AppEffects>,
     process: Arc<SupervisorProcess>,
     active: AtomicBool,
-    level: Mutex<SupervisorLevel>,
+    applied: Mutex<AppliedSettings>,
     session_hooks: Mutex<Option<PathBuf>>,
 }
 
@@ -422,23 +458,26 @@ impl SupervisorRuntime {
     }
 
     fn apply_settings(&self, app: &AppHandle, core: &SupervisorCore) {
-        let mut last = self.level.lock();
-        let level = self.effects.reload_settings().level;
-        let previous = std::mem::replace(&mut *last, level);
-        if previous == level {
-            return;
+        let mut last = self.applied.lock();
+        let next = AppliedSettings::of(&self.effects.reload_settings());
+        let previous = std::mem::replace(&mut *last, next);
+        if next.discord_enabled && !previous.discord_enabled {
+            link_discord_chat(app);
         }
-        if level == SupervisorLevel::Off {
+        match transition(previous, next) {
+            Transition::Unchanged => return,
+            Transition::Stop => {
+                core.level_changed();
+                self.process.stop(app);
+                return;
+            }
+            Transition::Start => self.process.ensure_running(app),
+            Transition::Refresh => self.process.refresh_instructions(app),
+            Transition::Restart => self.process.restart(app),
+        }
+        if previous.level != next.level {
             core.level_changed();
-            self.process.stop(app);
-            return;
         }
-        if previous == SupervisorLevel::Off {
-            self.process.ensure_running(app);
-        } else {
-            self.process.refresh_instructions(app);
-        }
-        core.level_changed();
     }
 }
 
@@ -477,7 +516,7 @@ pub fn start(app: AppHandle) {
     let process = SupervisorProcess::new(core.clone());
     let _ = effects.process.set(Arc::downgrade(&process));
     let runtime = Arc::new(SupervisorRuntime {
-        level: Mutex::new(effects.settings().level),
+        applied: Mutex::new(AppliedSettings::of(&effects.settings())),
         effects,
         process,
         active: AtomicBool::new(cfg!(unix)),
@@ -493,6 +532,7 @@ pub fn start(app: AppHandle) {
     tauri::async_runtime::spawn_blocking(move || {
         hooks_runtime.session_hooks(&hooks_app);
     });
+    link_discord_chat(&app);
     #[cfg(unix)]
     spawn_ipc(app, runtime.clone(), core.clone());
     spawn_ticks(runtime.clone(), core.clone());
@@ -619,6 +659,70 @@ pub fn new_conversation(app: &AppHandle) -> AppResult<()> {
         Some(runtime) => runtime.process.new_conversation(app),
         None => Ok(()),
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ChatLinkRequest {
+    token: String,
+    recipient: String,
+}
+
+fn chat_link_request(
+    settings: &SupervisorSettings,
+    files: &DiscordFiles,
+) -> Option<ChatLinkRequest> {
+    if !settings.discord_enabled || settings.discord_chat_id.is_some() {
+        return None;
+    }
+    let recipient = files.access().allow_from.into_iter().next()?;
+    let token = files.token()?;
+    Some(ChatLinkRequest { token, recipient })
+}
+
+fn store_chat_id(db: &DbPool, chat_id: &str) -> Result<bool, String> {
+    let conn = db.get().map_err(|error| error.to_string())?;
+    if SupervisorSettings::load(&conn).discord_chat_id.is_some() {
+        return Ok(false);
+    }
+    settings_repo::set(&conn, DISCORD_CHAT_ID_KEY, chat_id).map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+pub fn link_discord_chat(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let db = app.state::<AppState>().db.clone();
+        let reader = db.clone();
+        let request = tauri::async_runtime::spawn_blocking(move || {
+            let settings = load_settings(&reader)?;
+            let claude_home = claude_home()?;
+            chat_link_request(&settings, &DiscordFiles::for_claude_home(&claude_home))
+        })
+        .await
+        .ok()
+        .flatten();
+        let Some(request) = request else {
+            return;
+        };
+        let chat_id = match DiscordClient::new(request.token)
+            .open_dm(&request.recipient)
+            .await
+        {
+            Ok(chat_id) => chat_id,
+            Err(error) => {
+                eprintln!("supervisor: cannot link the Discord chat: {error}");
+                return;
+            }
+        };
+        let _ = tauri::async_runtime::spawn_blocking(move || match store_chat_id(&db, &chat_id) {
+            Ok(true) => {
+                let _ = restart_supervisor(&app);
+            }
+            Ok(false) => {}
+            Err(error) => eprintln!("supervisor: cannot store the Discord chat: {error}"),
+        })
+        .await;
+    });
 }
 
 fn same_directory(left: &Path, right: &Path) -> bool {
@@ -871,6 +975,136 @@ mod tests {
             Some(&missing),
             None
         ));
+    }
+
+    fn applied(level: SupervisorLevel, discord_enabled: bool) -> AppliedSettings {
+        AppliedSettings {
+            level,
+            discord_enabled,
+        }
+    }
+
+    #[test]
+    fn transition_starts_and_stops_with_the_level() {
+        use SupervisorLevel::{Assistant, Off, Relay};
+        assert_eq!(
+            transition(applied(Off, false), applied(Assistant, false)),
+            Transition::Start
+        );
+        assert_eq!(
+            transition(applied(Off, false), applied(Relay, true)),
+            Transition::Start
+        );
+        assert_eq!(
+            transition(applied(Assistant, false), applied(Off, false)),
+            Transition::Stop
+        );
+        assert_eq!(
+            transition(applied(Relay, false), applied(Off, true)),
+            Transition::Stop
+        );
+    }
+
+    #[test]
+    fn transition_restarts_when_discord_toggles() {
+        use SupervisorLevel::{Assistant, Autonomous};
+        assert_eq!(
+            transition(applied(Assistant, false), applied(Assistant, true)),
+            Transition::Restart
+        );
+        assert_eq!(
+            transition(applied(Assistant, true), applied(Assistant, false)),
+            Transition::Restart
+        );
+        assert_eq!(
+            transition(applied(Assistant, false), applied(Autonomous, true)),
+            Transition::Restart
+        );
+    }
+
+    #[test]
+    fn transition_refreshes_on_level_change_only() {
+        use SupervisorLevel::{Assistant, Relay};
+        assert_eq!(
+            transition(applied(Assistant, false), applied(Relay, false)),
+            Transition::Refresh
+        );
+        assert_eq!(
+            transition(applied(Assistant, true), applied(Relay, true)),
+            Transition::Refresh
+        );
+    }
+
+    #[test]
+    fn transition_ignores_unrelated_changes() {
+        use SupervisorLevel::{Assistant, Off};
+        assert_eq!(
+            transition(applied(Assistant, true), applied(Assistant, true)),
+            Transition::Unchanged
+        );
+        assert_eq!(
+            transition(applied(Off, false), applied(Off, false)),
+            Transition::Unchanged
+        );
+        assert_eq!(
+            transition(applied(Off, false), applied(Off, true)),
+            Transition::Unchanged
+        );
+    }
+
+    fn link_settings(enabled: bool, chat_id: Option<&str>) -> SupervisorSettings {
+        SupervisorSettings {
+            discord_enabled: enabled,
+            discord_chat_id: chat_id.map(str::to_string),
+            ..SupervisorSettings::default()
+        }
+    }
+
+    #[test]
+    fn chat_link_needs_discord_on_a_paired_user_a_token_and_no_chat() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("discord");
+        std::fs::create_dir_all(&dir).unwrap();
+        let files = DiscordFiles::new(dir.clone());
+        let ready = link_settings(true, None);
+        assert_eq!(chat_link_request(&ready, &files), None);
+
+        std::fs::write(
+            dir.join("access.json"),
+            r#"{"dmPolicy":"allowlist","allowFrom":["user-1","user-2"],"pending":{}}"#,
+        )
+        .unwrap();
+        assert_eq!(chat_link_request(&ready, &files), None);
+
+        std::fs::write(dir.join(".env"), "DISCORD_BOT_TOKEN=secret\n").unwrap();
+        assert_eq!(
+            chat_link_request(&ready, &files),
+            Some(ChatLinkRequest {
+                token: "secret".to_string(),
+                recipient: "user-1".to_string(),
+            })
+        );
+        assert_eq!(chat_link_request(&link_settings(false, None), &files), None);
+        assert_eq!(
+            chat_link_request(&link_settings(true, Some("dm-1")), &files),
+            None
+        );
+
+        std::fs::write(dir.join("access.json"), r#"{"allowFrom":[]}"#).unwrap();
+        assert_eq!(chat_link_request(&ready, &files), None);
+    }
+
+    #[test]
+    fn chat_id_is_stored_once() {
+        let root = tempfile::tempdir().unwrap();
+        let db = crate::db::init_pool(&root.path().join("abeoncode.db")).unwrap();
+        assert_eq!(store_chat_id(&db, "dm-1"), Ok(true));
+        assert_eq!(store_chat_id(&db, "dm-2"), Ok(false));
+        let conn = db.get().unwrap();
+        assert_eq!(
+            SupervisorSettings::load(&conn).discord_chat_id.as_deref(),
+            Some("dm-1")
+        );
     }
 
     #[test]

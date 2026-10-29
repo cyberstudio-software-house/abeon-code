@@ -262,7 +262,8 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
 - **Remote resumes**: sessions resumed from the mobile app (`spawn_claude_resume`) run without the per-session hooks, so the supervisor neither sees nor guards them.
 - **Supervisor workdir** (`<app_data>/supervisor`): `CLAUDE.md` (regenerated), `preferences.md`
   (created once, the supervisor may edit it), `mcp.json`, `.claude/settings.json`. The process runs
-  with `--permission-mode dontAsk --strict-mcp-config` and never skip-permissions; settings carry no
+  with `--permission-mode dontAsk` (plus `--strict-mcp-config` while Discord is off, see below) and
+  never skip-permissions; settings carry no
   `ask` key, allow `mcp__abeoncode__*` and `Read(//<abs root>/**)` (the absolute `//` syntax), deny
   Bash/Web/Task/Agent, `AskUserQuestion` and the plan-mode tools (the wake-up `\r` would answer such
   a menu blindly) and credential directories, disable the user's plugins, and turn Remote Control
@@ -296,7 +297,7 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   `printf`, and whose raw text has the word `git` (or `…/git`) followed by `push` is `git push → ?`
   (only when no exact push label was found), which always needs approval; so are a script piped into
   a shell or an interpreter and nesting past the cap. A blocked action creates an approval (expires after 24 h) shown in the panel's "Do
-  decyzji" tab; the user approves in the app only. An approval mints a one-shot token for the exact
+  decyzji" tab; the user approves in the app or by a coded Discord DM reply (below). An approval mints a one-shot token for the exact
   action fingerprint (cwd + normalised command, or tool + canonical args), valid 30 min, and the
   app then types an approval notice into the session so it retries (a rejection notice on reject). A Human prompt revokes the session's tokens.
   Confirm-style bandzior tools are guarded only when `confirm` is truthy (previews pass). Detail
@@ -310,6 +311,42 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   `answered`, `relayed`, `escalated`, `guard_blocked`, `approved`, `rejected`, `session_opened`,
   `released_to_user`. Read it in the panel's "Dziennik" tab or with
   `sqlite3 ~/.config/AbeonCode/abeoncode.db "select datetime(created_at/1000,'unixepoch'), kind, decision from supervisor_decisions order by created_at desc limit 20"`.
+- **Discord spawn** (`process::prepare_launch`, `discord/`): with `supervisorDiscordEnabled` and a
+  passing preflight (Bun + bot token) the supervisor gets `--channels
+  plugin:discord@claude-plugins-official` and **no** `--strict-mcp-config`, which hides plugin MCP
+  servers too, so the channel would never start. A failed preflight launches exactly as without
+  Discord and records the Polish blocker (`SupervisorProcess::discord_link`). The core's
+  `discord_active` is true only while a supervisor launched with the channel **and** a stored DM chat
+  id (`supervisorDiscordChatId`) runs. `runtime::link_discord_chat` (at start, when Discord is
+  switched on, after a token save) derives the id with `POST /users/@me/channels` for `allowFrom[0]`,
+  stores it and restarts once; it does nothing when an id is stored and only logs REST errors.
+  Settings changes go through `runtime::transition`: Discord toggled with the level on restarts, a
+  level-only change rewrites the workdir with the Discord context of the last launch.
+- **Bun on `PATH`**: the plugin server runs on Bun, which the installer adds to `PATH` only in
+  `~/.zshrc`, and the app's PTY env comes from `<shell> -lc 'env -0'`, a login non-interactive
+  shell that skips `~/.zshrc`. `discord/preflight.rs` tries `PATH`, then `$BUN_INSTALL/bin/bun`, then
+  `~/.bun/bin/bun`, and prepends the found directory to the supervisor's `PATH` only; without it the
+  plugin fails with `Executable not found in $PATH: "bun"`.
+- **Failure cache**: Claude Code caches a failed plugin start for 15 minutes across all sessions
+  under the key `plugin:discord:discord` in `~/.claude/mcp-needs-auth-cache.json`. Before each
+  Discord launch the app removes only that key (atomic read-modify-write, other keys untouched); an
+  error is logged and the launch goes on.
+- **Plugin scope**: an enabled plugin starts its server and logs in with the bot token in every Claude
+  session, so the setup turns `discord@claude-plugins-official` off in the global `enabledPlugins`
+  (after the user confirms), and the workdir's `.claude/settings.json` enables it, and allows
+  `mcp__plugin_discord_discord__*`, only for a Discord launch. Without `--strict-mcp-config` the
+  user's global MCP servers load too; `dontAsk` denies their tools and `mcp__bandzior` has an
+  explicit deny rule.
+- **DM approvals** (`discord/poll.rs`, `discord/replies.rs`): every 10 s, only while an approval is
+  pending and Discord is enabled, linked and has a token, the app reads the DM over REST (paged from
+  the oldest pending request, at most 10 pages) and accepts `zatwierdzam <KOD>` / `odrzucam <KOD>`
+  only from non-bot authors in `allowFrom`, posted after the request was created, with the exact
+  4-character code. A match resolves the approval and reacts ✅/❌. The token is never logged.
+- **Routing**: present with `supervisorDiscordMuteWhenPresent` on -> app; otherwise Discord when the
+  channel is live (`discord_active`); otherwise app. When the user goes from present to away while
+  the channel is live, open app escalations and pending approvals switch to `discord` and reach the
+  supervisor as one `Forwarded` event (one DM); a menu the app escalates itself on timeout while
+  away is forwarded the same way.
 
 ## Gotchas
 
