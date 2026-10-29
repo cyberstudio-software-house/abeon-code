@@ -2,6 +2,8 @@ import { HistoryView } from '../history/HistoryView';
 import { SubagentView } from '../history/SubagentView';
 import { TerminalView } from '../terminal/TerminalView';
 import { ProviderPicker } from './ProviderPicker';
+import { QuestionCard } from '../supervisor/QuestionCard';
+import { useStore } from '../../store';
 import type { Tab } from '../../store/tabsSlice';
 
 type SessionTab = Extract<Tab, { kind: 'session' }>;
@@ -43,6 +45,13 @@ function SessionBody({ tab, visible, focused = true, takeFocus }: { tab: Session
   );
 }
 
+function SessionQuestionCard({ tab, visible }: { tab: SessionTab; visible: boolean }) {
+  const liveSessionId = tab.linkedSessionId ?? tab.sessionId;
+  const card = useStore(s => s.supervisor?.cards.find(c => c.sessionId === liveSessionId));
+  if (tab.mode !== 'terminal' || !card) return null;
+  return <QuestionCard key={card.questionId} card={card} visible={visible} />;
+}
+
 export function TabPanel({ tab, visible, focused = true, takeFocus, focusToken, onExit }: {
   tab: Tab;
   visible: boolean;
@@ -69,6 +78,7 @@ export function TabPanel({ tab, visible, focused = true, takeFocus, focusToken, 
             <SubagentView projectId={tab.projectId} sessionId={subagentSessionId} agentId={agentId} tabId={tab.id} />
           </div>
         ) : null}
+        <SessionQuestionCard tab={tab} visible={visible} />
       </>
     );
   }

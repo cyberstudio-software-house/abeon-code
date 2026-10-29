@@ -124,3 +124,68 @@ describe('TabPanel keyboard and exit wiring', () => {
     expect(counters.lastProps).toMatchObject({ kind: 'agent', focused: true, takeFocus: false });
   });
 });
+
+describe('TabPanel question card', () => {
+  const baseSnapshot = {
+    level: 'assistant' as const, running: true, ready: true, ptyId: 'p1', present: true, away: false,
+    escalations: [], approvals: [],
+  };
+  const card = (sessionId: string) => ({
+    questionId: 'q1',
+    sessionId,
+    questions: [{ question: 'Which color?', header: null, options: ['Red'], multiSelect: false }],
+    phase: 'paused' as const,
+    deadlineMs: null,
+  });
+
+  beforeEach(() => {
+    counters.terminalMounts = 0;
+    useStore.setState({ tabs: [], activeTabId: null, mruOrder: [], supervisor: null });
+  });
+
+  it('shows the card of the tab session without remounting the terminal', () => {
+    useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1' });
+    const { getByTestId, queryByText } = render(<TabPanels />);
+    const terminal = getByTestId('terminal');
+    expect(queryByText('Which color?')).toBeNull();
+
+    act(() => { useStore.setState({ supervisor: { ...baseSnapshot, cards: [card('s1')] } }); });
+    expect(queryByText('Which color?')).toBeTruthy();
+    expect(getByTestId('terminal')).toBe(terminal);
+
+    act(() => { useStore.setState({ supervisor: { ...baseSnapshot, cards: [] } }); });
+    expect(queryByText('Which color?')).toBeNull();
+    expect(getByTestId('terminal')).toBe(terminal);
+    expect(counters.terminalMounts).toBe(1);
+  });
+
+  it('matches on the linked session id', () => {
+    useStore.setState({
+      tabs: [{ ...sessionTab, sessionId: 'new-1', linkedSessionId: 's9' }],
+      activeTabId: 'session:s1',
+      supervisor: { ...baseSnapshot, cards: [card('s9')] },
+    });
+    const { queryByText } = render(<TabPanels />);
+    expect(queryByText('Which color?')).toBeTruthy();
+  });
+
+  it('ignores cards of other sessions', () => {
+    useStore.setState({
+      tabs: [sessionTab],
+      activeTabId: 'session:s1',
+      supervisor: { ...baseSnapshot, cards: [card('other')] },
+    });
+    const { queryByText } = render(<TabPanels />);
+    expect(queryByText('Which color?')).toBeNull();
+  });
+
+  it('hides the card of an inactive tab', () => {
+    useStore.setState({
+      tabs: [sessionTab, { kind: 'terminal', id: 'terminal:t1', projectId: 1, title: 'Terminal' }],
+      activeTabId: 'terminal:t1',
+      supervisor: { ...baseSnapshot, cards: [card('s1')] },
+    });
+    const { getByRole } = render(<TabPanels />);
+    expect(getByRole('group', { hidden: true }).className).toContain('invisible');
+  });
+});
