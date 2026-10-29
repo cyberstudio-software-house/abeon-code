@@ -257,6 +257,9 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   (`markSessionPtyStarted`), and `ResumedTerminal` (`TabContent.tsx`) freezes the `--resume` id at
   mount, so relinking a live tab never remounts `TerminalView` or respawns its PTY.
 - **Known residual**: hook payloads cannot be authenticated against the session's own tools (same env and uid), so a forged `UserPromptSubmit` within 10 s of a real Enter in the same terminal still counts as Human.
+- **Not a sandbox**: the guard is a tripwire against agent and supervisor mistakes; an unguarded `Write` followed by `bash script.sh`, or a nested `claude -p`, bypasses it.
+- **Resume elsewhere**: `/resume A` in another terminal is refused while A is still homed on its first live PTY, so A's prompts count as Agent there.
+- **Remote resumes**: sessions resumed from the mobile app (`spawn_claude_resume`) run without the per-session hooks, so the supervisor neither sees nor guards them.
 - **Supervisor workdir** (`<app_data>/supervisor`): `CLAUDE.md` (regenerated), `preferences.md`
   (created once, the supervisor may edit it), `mcp.json`, `.claude/settings.json`. The process runs
   with `--permission-mode dontAsk --strict-mcp-config` and never skip-permissions; settings carry no
