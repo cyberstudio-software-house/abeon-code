@@ -111,7 +111,7 @@ fn classify(data: &[u8]) -> InputKind {
             continue;
         }
         keys = true;
-        if !in_paste && matches!(data[index], b'\r' | b'\n') {
+        if !in_paste && data[index] == b'\r' {
             submit = true;
         }
         index += 1;
@@ -202,7 +202,7 @@ mod tests {
         b"\x1b[I\x1b[12;40R\x1b]11;rgb:0000/0000/0000\x07",
     ];
 
-    const KEYSTROKES: [&[u8]; 8] = [
+    const KEYSTROKES: [&[u8]; 11] = [
         b"a",
         b"\x1b",
         b"\x1b[A",
@@ -211,14 +211,17 @@ mod tests {
         b"\x1b[Ia",
         b"\x1b[200~line one\rline two\n\x1b[201~",
         b"\x1b[13;2u",
+        b"\n",
+        b"line one\nline two",
+        b"git push\n",
     ];
 
     const SUBMITS: [&[u8]; 5] = [
         b"\r",
         b"fix the bug\r",
-        b"\n",
         b"\x1b[200~pasted text\x1b[201~\r",
         b"\x1b[O\r",
+        b"line one\nline two\r",
     ];
 
     #[test]

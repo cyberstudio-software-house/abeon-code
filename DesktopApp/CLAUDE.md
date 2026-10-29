@@ -258,7 +258,8 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   `PtyManager::write`/`resize` clone the handle and drop the global map lock before touching the PTY,
   so a session that stops reading stdin cannot stall `pty_write` for the other terminals.
 - **Provenance** (`UserPromptSubmit`): typed injection with no keystroke since (or exact text) ->
-  Supervisor; prompt the app passed on the CLI -> Agent; Enter within 10 s in the session's known
+  Supervisor; prompt the app passed on the CLI -> Agent; Enter (`\r` outside escape sequences and
+  bracketed paste; `\n` from Ctrl+J or a raw paste does not count) within 10 s in the session's known
   PTY -> Human; otherwise, including a session with no known PTY, Agent. `pty_write` feeds
   `input_activity`, which ignores terminal reports (focus, cursor position, device status) so they
   never count as typing.
