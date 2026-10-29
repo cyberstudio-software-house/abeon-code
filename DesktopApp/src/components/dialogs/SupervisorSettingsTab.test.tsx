@@ -42,6 +42,8 @@ describe('SupervisorSettingsTab', () => {
     render(<SupervisorSettingsTab />);
     expect(screen.getByText(/git push → main\/master/)).toBeInTheDocument();
     expect(screen.getByText(/task release/)).toBeInTheDocument();
+    expect(screen.getByText(/gh pr merge/)).toBeInTheDocument();
+    expect(screen.getByText(/bkt pr merge/)).toBeInTheDocument();
     expect(screen.getByText(/deployment_\*/)).toBeInTheDocument();
   });
 

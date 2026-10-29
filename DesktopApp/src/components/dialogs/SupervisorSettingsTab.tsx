@@ -28,6 +28,7 @@ const LEVEL_HINTS: Record<SupervisorLevel, string> = {
 const BUILT_IN_RULES: string[] = [
   'git push → main/master',
   'task release',
+  'Scalanie PR: gh pr merge, bkt pr merge',
   'Narzędzia zapisu bandzior: config_update, deployment_*, env_vars_set, resource_create/update/delete, secret_create',
 ];
 

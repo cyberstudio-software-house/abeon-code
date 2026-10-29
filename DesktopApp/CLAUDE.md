@@ -256,7 +256,13 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   `input_activity`, which ignores terminal reports (focus, cursor position, device status) so they
   never count as typing.
 - **Guard** (`PreToolUse` on `Bash|mcp__.*`): applies whenever the level is not Off and the origin is
-  not Human. A blocked action creates an approval (expires after 24 h) shown in the panel's "Do
+  not Human. Built-in Bash rules: `git push` to `main`/`master`, `task release`, `gh pr merge` and
+  `bkt pr merge`; extra `bash:` rules are labelled `reguła: <pattern>` so command text never reaches
+  the notification title. The parser (`guard.rs`) is quote-aware, joins `\`-newline continuations,
+  strips wrappers (sudo, env, timeout, flock, setsid, doas, ionice, systemd-run, …) and caps
+  `eval` / `<shell> -c` nesting at 8 levels. Anything it cannot resolve that still mentions `git`
+  and `push` (an unknown wrapper, a script piped into a shell, nesting past the cap) is
+  `git push → ?`, which always needs approval. A blocked action creates an approval (expires after 24 h) shown in the panel's "Do
   decyzji" tab; the user approves in the app only. An approval mints a one-shot token for the exact
   action fingerprint (cwd + normalised command, or tool + canonical args), valid 30 min, and the
   app then types an approval notice into the session so it retries (a rejection notice on reject). A Human prompt revokes the session's tokens.

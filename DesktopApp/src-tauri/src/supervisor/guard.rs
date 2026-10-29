@@ -43,6 +43,37 @@ const MCP_DETAIL_CHARS: usize = 300;
 const LINE_BREAK: &str = " ⏎ ";
 const LABEL_SEPARATOR: &str = " + ";
 
+const MAX_NESTING: usize = 8;
+const UNRESOLVED_TARGET: &str = "?";
+const GIT_PUSH_LABEL: &str = "git push";
+const TASK_RELEASE_LABEL: &str = "task release";
+const MERGE_LABEL: &str = "merge PR";
+const RULE_LABEL: &str = "reguła";
+const GIT_PROGRAM: &str = "git";
+const PUSH_COMMAND: &str = "push";
+const EVAL_WORD: &str = "eval";
+const TASK_PROGRAM: &str = "task";
+const TASK_RELEASE_PREFIX: &str = "release";
+const TASK_OPTIONS_WITH_VALUE: &[&str] = &[
+    "-d",
+    "--dir",
+    "-t",
+    "--taskfile",
+    "-o",
+    "--output",
+    "-C",
+    "--concurrency",
+    "-I",
+    "--interval",
+    "--sort",
+    "--output-group-begin",
+    "--output-group-end",
+];
+const MERGE_PROGRAMS: &[&str] = &["gh", "bkt"];
+const MERGE_SUBCOMMAND: [&str; 2] = ["pr", "merge"];
+const STDIN_SCRIPT_FLAG: &str = "-s";
+const HERE_DOCUMENT: &str = "<<";
+
 const PRODUCTION_BRANCHES: &[&str] = &["main", "master"];
 const SHELL_KEYWORDS: &[&str] = &[
     "if", "then", "else", "elif", "do", "while", "until", "!", "{", "(",
@@ -52,6 +83,7 @@ struct Wrapper {
     name: &'static str,
     value_options: &'static [&'static str],
     relocating_options: &'static [&'static str],
+    script_options: &'static [&'static str],
     positional_arguments: usize,
     appends_arguments: bool,
 }
@@ -61,6 +93,7 @@ const fn wrapper(name: &'static str, value_options: &'static [&'static str]) -> 
         name,
         value_options,
         relocating_options: &[],
+        script_options: &[],
         positional_arguments: 0,
         appends_arguments: false,
     }
@@ -137,15 +170,103 @@ const WRAPPERS: &[Wrapper] = &[
             ],
         )
     },
+    wrapper("setsid", &[]),
+    wrapper("doas", &["-u", "-C", "-a"]),
+    wrapper(
+        "ionice",
+        &[
+            "-c",
+            "--class",
+            "-n",
+            "--classdata",
+            "-p",
+            "--pid",
+            "-P",
+            "--pgid",
+            "-u",
+            "--uid",
+        ],
+    ),
+    Wrapper {
+        positional_arguments: 1,
+        script_options: &["-c", "--command"],
+        ..wrapper(
+            "flock",
+            &["-w", "--wait", "--timeout", "-E", "--conflict-exit-code"],
+        )
+    },
+    Wrapper {
+        relocating_options: &["--working-directory"],
+        ..wrapper(
+            "systemd-run",
+            &[
+                "-u",
+                "--unit",
+                "-p",
+                "--property",
+                "--description",
+                "--slice",
+                "-E",
+                "--setenv",
+                "--uid",
+                "--gid",
+                "--nice",
+                "-M",
+                "--machine",
+                "-H",
+                "--host",
+                "--service-type",
+                "--working-directory",
+                "--on-active",
+                "--on-boot",
+                "--on-startup",
+                "--on-unit-active",
+                "--on-unit-inactive",
+                "--on-calendar",
+                "--timer-property",
+                "--path-property",
+                "--socket-property",
+            ],
+        )
+    },
 ];
+
+#[derive(Default)]
+struct Classified {
+    labels: Vec<String>,
+    relocates: bool,
+}
+
+impl Classified {
+    fn labels(labels: Vec<String>) -> Classified {
+        Classified {
+            labels,
+            relocates: false,
+        }
+    }
+
+    fn label(label: String) -> Classified {
+        Classified::labels(vec![label])
+    }
+}
 
 #[derive(Default)]
 struct CommandPrefix {
     start: usize,
     relocated: bool,
     appends_arguments: bool,
+    script: Option<usize>,
 }
-const SHELL_WORDS: &[&str] = &["bash", "sh", "zsh", "dash"];
+
+impl CommandPrefix {
+    fn with_script(mut self, index: usize, length: usize) -> CommandPrefix {
+        self.start = length;
+        self.script = (index < length).then_some(index);
+        self
+    }
+}
+
+const SHELL_WORDS: &[&str] = &["bash", "sh", "zsh", "dash", "ksh"];
 const GIT_GLOBAL_OPTIONS_WITH_VALUE: &[&str] =
     &["-C", "-c", "--git-dir", "--work-tree", "--namespace"];
 const RELOCATING_GIT_OPTIONS: &[&str] = &["-C", "--git-dir", "--work-tree"];
@@ -167,13 +288,21 @@ pub struct ProductionAction {
 }
 
 pub struct ProductionRules {
-    task_release: Regex,
     mcp_patterns: Vec<Regex>,
     extra_bash: Vec<Regex>,
 }
 
 fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn command_fingerprint(command: &str) -> String {
+    command
+        .split(['\n', '\r'])
+        .map(collapse_whitespace)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn detail_excerpt(text: &str, limit: usize) -> String {
@@ -303,10 +432,72 @@ fn glob_to_regex(glob: &str) -> Option<Regex> {
     Regex::new(&format!("^{body}$")).ok()
 }
 
-fn clean_token(token: &str) -> &str {
-    token
-        .trim_matches(|c| c == '"' || c == '\'')
-        .trim_end_matches('`')
+fn join_continuations(command: &str) -> String {
+    command.replace("\\\r\n", "").replace("\\\n", "")
+}
+
+fn shell_words(segment: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut in_word = false;
+    let mut chars = segment.chars();
+    while let Some(character) = chars.next() {
+        match character {
+            '\'' => {
+                in_word = true;
+                for quoted in chars.by_ref() {
+                    if quoted == '\'' {
+                        break;
+                    }
+                    word.push(quoted);
+                }
+            }
+            '"' => {
+                in_word = true;
+                while let Some(quoted) = chars.next() {
+                    match quoted {
+                        '"' => break,
+                        '\\' => match chars.next() {
+                            Some(escaped @ ('"' | '\\' | '$' | '`')) => word.push(escaped),
+                            Some(other) => {
+                                word.push('\\');
+                                word.push(other);
+                            }
+                            None => word.push('\\'),
+                        },
+                        other => word.push(other),
+                    }
+                }
+            }
+            '\\' => {
+                in_word = true;
+                if let Some(escaped) = chars.next() {
+                    word.push(escaped);
+                }
+            }
+            blank if blank.is_whitespace() => {
+                if in_word {
+                    words.push(std::mem::take(&mut word));
+                    in_word = false;
+                }
+            }
+            other => {
+                in_word = true;
+                word.push(other);
+            }
+        }
+    }
+    if in_word {
+        words.push(word);
+    }
+    words
+        .into_iter()
+        .map(|word| word.trim_end_matches('`').to_string())
+        .collect()
+}
+
+fn program_name(token: &str) -> &str {
+    token.rsplit('/').next().unwrap_or(token)
 }
 
 fn split_segments(command: &str) -> Vec<&str> {
@@ -328,6 +519,16 @@ fn is_env_assignment(token: &str) -> bool {
     }
 }
 
+fn option_matches(option: &str, names: &[&str]) -> bool {
+    let name = option.split_once('=').map_or(option, |(name, _)| name);
+    if names.contains(&name) {
+        return true;
+    }
+    !option.starts_with("--")
+        && option.len() > 2
+        && option.get(..2).is_some_and(|short| names.contains(&short))
+}
+
 fn command_prefix(tokens: &[&str]) -> CommandPrefix {
     let mut prefix = CommandPrefix::default();
     let mut index = 0;
@@ -336,47 +537,103 @@ fn command_prefix(tokens: &[&str]) -> CommandPrefix {
             index += 1;
             continue;
         }
-        let Some(wrapper) = WRAPPERS.iter().find(|wrapper| wrapper.name == token) else {
+        let name = program_name(token);
+        let Some(wrapper) = WRAPPERS.iter().find(|wrapper| wrapper.name == name) else {
             break;
         };
         index += 1;
         prefix.appends_arguments |= wrapper.appends_arguments;
         while let Some(&option) = tokens.get(index).filter(|option| option.starts_with('-')) {
+            if wrapper.script_options.contains(&option) {
+                return prefix.with_script(index + 1, tokens.len());
+            }
             index += 1;
             if option == "--" {
                 break;
             }
-            let name = option.split_once('=').map_or(option, |(name, _)| name);
-            prefix.relocated |= wrapper.relocating_options.contains(&name);
+            prefix.relocated |= option_matches(option, wrapper.relocating_options);
             if !option.contains('=') && wrapper.value_options.contains(&option) {
                 index += 1;
             }
         }
         index += wrapper.positional_arguments;
+        if tokens
+            .get(index)
+            .is_some_and(|token| wrapper.script_options.contains(token))
+        {
+            return prefix.with_script(index + 1, tokens.len());
+        }
     }
     prefix.start = index.min(tokens.len());
     prefix
 }
 
-fn relocates(segment: &str) -> bool {
-    let tokens: Vec<&str> = segment.split_whitespace().map(clean_token).collect();
+fn shell_script(tokens: &[&str]) -> Option<String> {
+    let position = tokens
+        .iter()
+        .position(|token| is_shell_command_flag(token))?;
+    Some(tokens[position + 1..].join(" "))
+}
+
+fn relocates_directly(tokens: &[&str], prefix: &CommandPrefix) -> bool {
     let sets_repository = tokens.iter().any(|token| {
         REPOSITORY_VARIABLES
             .iter()
             .any(|variable| token.starts_with(variable))
     });
-    if sets_repository {
-        return true;
+    sets_repository
+        || prefix.relocated
+        || tokens
+            .get(prefix.start)
+            .is_some_and(|first| DIRECTORY_WORDS.contains(first))
+}
+
+fn reads_script_from_stdin(command: &[&str]) -> bool {
+    if !command
+        .first()
+        .is_some_and(|first| SHELL_WORDS.contains(&program_name(first)))
+    {
+        return false;
     }
-    let prefix = command_prefix(&tokens);
-    if prefix.relocated {
-        return true;
+    let mut index = 1;
+    while let Some(&token) = command.get(index) {
+        if is_shell_command_flag(token) {
+            return false;
+        }
+        if token == STDIN_SCRIPT_FLAG || token.starts_with(HERE_DOCUMENT) {
+            return true;
+        }
+        if is_redirection(token) {
+            index += if is_redirection_operator(token) { 2 } else { 1 };
+            continue;
+        }
+        if !token.starts_with('-') {
+            return false;
+        }
+        index += 1;
     }
-    match tokens.get(prefix.start).copied() {
-        Some("eval") => relocates(&tokens[prefix.start + 1..].join(" ")),
-        Some(first) => DIRECTORY_WORDS.contains(&first),
-        None => false,
-    }
+    true
+}
+
+fn mentions_git_push(text: &str) -> bool {
+    let words: Vec<&str> = text
+        .split(|character: char| {
+            !(character.is_alphanumeric() || matches!(character, '-' | '_' | '.' | '/'))
+        })
+        .filter(|word| !word.is_empty())
+        .collect();
+    words
+        .iter()
+        .position(|word| program_name(word) == GIT_PROGRAM)
+        .is_some_and(|index| words[index + 1..].contains(&PUSH_COMMAND))
+}
+
+fn calls_git_push_indirectly(tokens: &[&str], start: usize) -> bool {
+    tokens
+        .iter()
+        .enumerate()
+        .position(|(index, token)| index != start && program_name(token) == GIT_PROGRAM)
+        .is_some_and(|index| tokens[index + 1..].contains(&PUSH_COMMAND))
 }
 
 fn is_relocating_git_option(option: &str) -> bool {
@@ -412,7 +669,54 @@ fn is_unresolvable(target: &str) -> bool {
 }
 
 fn production_label(branch: &str) -> String {
-    format!("git push → {branch}")
+    format!("{GIT_PUSH_LABEL} → {branch}")
+}
+
+fn runs_task_release(arguments: &[&str]) -> bool {
+    let mut index = 0;
+    while let Some(&argument) = arguments.get(index) {
+        if argument == "--" || argument.starts_with('#') {
+            return false;
+        }
+        if argument.starts_with('-') {
+            index += if TASK_OPTIONS_WITH_VALUE.contains(&argument) {
+                2
+            } else {
+                1
+            };
+            continue;
+        }
+        if argument.starts_with(TASK_RELEASE_PREFIX) {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+fn merges_pull_request(arguments: &[&str]) -> bool {
+    arguments
+        .windows(2)
+        .any(|pair| pair == MERGE_SUBCOMMAND.as_slice())
+}
+
+fn classify_git(
+    arguments: &[&str],
+    current_branch: Option<&str>,
+    appends_arguments: bool,
+) -> Option<String> {
+    let mut index = 0;
+    let mut relocated = false;
+    while index < arguments.len() && arguments[index].starts_with('-') {
+        relocated |= is_relocating_git_option(arguments[index]);
+        let takes_value = GIT_GLOBAL_OPTIONS_WITH_VALUE.contains(&arguments[index]);
+        index += if takes_value { 2 } else { 1 };
+    }
+    if arguments.get(index) != Some(&PUSH_COMMAND) {
+        return None;
+    }
+    let branch = if relocated { None } else { current_branch };
+    classify_git_push(&arguments[index + 1..], branch, appends_arguments)
 }
 
 fn classify_git_push(
@@ -464,7 +768,7 @@ fn classify_git_push(
         targets.push(None);
     }
     targets.into_iter().find_map(|target| match target {
-        None => Some(production_label("?")),
+        None => Some(production_label(UNRESOLVED_TARGET)),
         Some(branch) if PRODUCTION_BRANCHES.contains(&branch.as_str()) => {
             Some(production_label(&branch))
         }
@@ -500,7 +804,6 @@ impl ProductionRules {
             }
         }
         ProductionRules {
-            task_release: Regex::new(r"^task\s+release").expect("valid task release regex"),
             mcp_patterns,
             extra_bash,
         }
@@ -515,7 +818,7 @@ impl ProductionRules {
     ) -> Option<ProductionAction> {
         if tool_name == BASH_TOOL {
             let command = tool_input.get("command").and_then(Value::as_str)?;
-            let labels = self.command_labels(command, current_branch);
+            let labels = self.command_labels(command, current_branch, 0).labels;
             if labels.is_empty() {
                 return None;
             }
@@ -525,7 +828,7 @@ impl ProductionRules {
                 fingerprint: format!(
                     "{tool_name}\0{}\0{}",
                     cwd.unwrap_or_default(),
-                    collapse_whitespace(command)
+                    command_fingerprint(command)
                 ),
             });
         }
@@ -545,78 +848,147 @@ impl ProductionRules {
         })
     }
 
-    fn command_labels(&self, command: &str, current_branch: Option<&str>) -> Vec<String> {
+    fn command_labels(
+        &self,
+        command: &str,
+        current_branch: Option<&str>,
+        depth: usize,
+    ) -> Classified {
+        if depth > MAX_NESTING {
+            let labels = if mentions_git_push(command) {
+                vec![production_label(UNRESOLVED_TARGET)]
+            } else {
+                Vec::new()
+            };
+            return Classified {
+                labels,
+                relocates: true,
+            };
+        }
+        let command = join_continuations(command);
         let mut labels = Vec::new();
         let mut branch = current_branch;
-        for segment in split_segments(command) {
-            if relocates(segment) {
+        let mut relocated = false;
+        let mut feeds_shell = false;
+        for segment in split_segments(&command) {
+            let words = shell_words(segment);
+            let tokens: Vec<&str> = words.iter().map(String::as_str).collect();
+            let prefix = command_prefix(&tokens);
+            if relocates_directly(&tokens, &prefix) {
                 branch = None;
+                relocated = true;
             }
-            let mut found = self.classify_segment(segment, branch);
+            feeds_shell |= reads_script_from_stdin(&tokens[prefix.start..]);
+            let classified = self.classify_tokens(segment, &tokens, &prefix, branch, depth);
+            let mut found = classified.labels;
+            if classified.relocates {
+                branch = None;
+                relocated = true;
+            }
             if found.is_empty() {
                 for piece in segment
                     .split('`')
                     .map(str::trim)
                     .filter(|piece| !piece.is_empty() && *piece != segment)
                 {
-                    push_distinct(&mut found, self.classify_segment(piece, branch));
+                    push_distinct(
+                        &mut found,
+                        self.classify_segment(piece, branch, depth + 1).labels,
+                    );
                 }
+            }
+            if found.is_empty() && calls_git_push_indirectly(&tokens, prefix.start) {
+                found.push(production_label(UNRESOLVED_TARGET));
             }
             push_distinct(&mut labels, found);
         }
-        labels
+        let pushes = labels.iter().any(|label| label.starts_with(GIT_PUSH_LABEL));
+        if feeds_shell && !pushes && mentions_git_push(&command) {
+            labels.push(production_label(UNRESOLVED_TARGET));
+        }
+        Classified {
+            labels,
+            relocates: relocated,
+        }
     }
 
-    fn classify_segment(&self, segment: &str, current_branch: Option<&str>) -> Vec<String> {
-        if self.extra_bash.iter().any(|regex| regex.is_match(segment)) {
-            return vec![segment.to_string()];
-        }
-        let tokens: Vec<&str> = segment.split_whitespace().map(clean_token).collect();
+    fn extra_rule_label(&self, text: &str) -> Option<String> {
+        self.extra_bash
+            .iter()
+            .find(|regex| regex.is_match(text))
+            .map(|regex| format!("{RULE_LABEL}: {}", regex.as_str()))
+    }
+
+    fn classify_segment(
+        &self,
+        segment: &str,
+        current_branch: Option<&str>,
+        depth: usize,
+    ) -> Classified {
+        let words = shell_words(segment);
+        let tokens: Vec<&str> = words.iter().map(String::as_str).collect();
         let prefix = command_prefix(&tokens);
-        let start = prefix.start;
-        let tokens = &tokens[start..];
-        let current_branch = if prefix.relocated {
+        let branch = if relocates_directly(&tokens, &prefix) {
             None
         } else {
             current_branch
         };
-        let Some(first) = tokens.first().copied() else {
-            return Vec::new();
+        self.classify_tokens(segment, &tokens, &prefix, branch, depth)
+    }
+
+    fn classify_tokens(
+        &self,
+        segment: &str,
+        tokens: &[&str],
+        prefix: &CommandPrefix,
+        current_branch: Option<&str>,
+        depth: usize,
+    ) -> Classified {
+        if let Some(label) = self.extra_rule_label(segment) {
+            return Classified::label(label);
+        }
+        let branch = if prefix.relocated {
+            None
+        } else {
+            current_branch
         };
-        let stripped = tokens.join(" ");
-        if start > 0 && self.extra_bash.iter().any(|regex| regex.is_match(&stripped)) {
-            return vec![stripped];
+        if let Some(script) = prefix.script {
+            return self.command_labels(tokens[script], branch, depth + 1);
         }
-        if first == "eval" {
-            return self.command_labels(&tokens[1..].join(" "), current_branch);
+        let rest = &tokens[prefix.start..];
+        let Some(&first) = rest.first() else {
+            return Classified::default();
+        };
+        if prefix.start > 0 {
+            if let Some(label) = self.extra_rule_label(&rest.join(" ")) {
+                return Classified::label(label);
+            }
         }
-        if SHELL_WORDS.contains(&first) {
-            return match tokens.iter().position(|t| is_shell_command_flag(t)) {
-                Some(position) => {
-                    self.command_labels(&tokens[position + 1..].join(" "), current_branch)
-                }
-                None => Vec::new(),
+        let program = program_name(first);
+        let arguments = &rest[1..];
+        if program == EVAL_WORD {
+            return self.command_labels(&arguments.join(" "), branch, depth + 1);
+        }
+        if SHELL_WORDS.contains(&program) {
+            return match shell_script(rest) {
+                Some(script) => self.command_labels(&script, branch, depth + 1),
+                None => Classified::default(),
             };
         }
-        if self.task_release.is_match(&stripped) {
-            return vec!["task release".to_string()];
+        if program == TASK_PROGRAM && runs_task_release(arguments) {
+            return Classified::label(TASK_RELEASE_LABEL.to_string());
         }
-        if first == "git" {
-            let mut index = 1;
-            let mut relocated = false;
-            while index < tokens.len() && tokens[index].starts_with('-') {
-                relocated |= is_relocating_git_option(tokens[index]);
-                let takes_value = GIT_GLOBAL_OPTIONS_WITH_VALUE.contains(&tokens[index]);
-                index += if takes_value { 2 } else { 1 };
-            }
-            if tokens.get(index) == Some(&"push") {
-                let branch = if relocated { None } else { current_branch };
-                return classify_git_push(&tokens[index + 1..], branch, prefix.appends_arguments)
+        if MERGE_PROGRAMS.contains(&program) && merges_pull_request(arguments) {
+            return Classified::label(MERGE_LABEL.to_string());
+        }
+        if program == GIT_PROGRAM {
+            return Classified::labels(
+                classify_git(arguments, branch, prefix.appends_arguments)
                     .into_iter()
-                    .collect();
-            }
+                    .collect(),
+            );
         }
-        Vec::new()
+        Classified::default()
     }
 }
 
@@ -772,6 +1144,63 @@ mod tests {
             ("Bash", Some("if [ -f x ]; then echo done; fi"), Some("main"), None),
             ("Bash", Some("task build"), None, None),
             ("Bash", Some("git log --oneline"), Some("main"), None),
+            ("Bash", Some("bash -c 'cd ../other && git push'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("sh -c \"cd x; git push\""), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("bash -c \"cd ../other\"; git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("env -C../x git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("sudo -D../x git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("env --chdir=../x git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("/usr/bin/git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("/usr/bin/git push"), Some("main"), some("git push → main")),
+            ("Bash", Some("\\git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("/usr/bin/sudo git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("setsid git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("setsid -f git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("flock /tmp/l git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("flock -w 5 /tmp/l git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("flock /tmp/l -c 'git push origin main'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("flock /tmp/l git push origin feature"), Some("main"), None),
+            ("Bash", Some("doas git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("doas -u root git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("ionice -c2 -n7 git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("ionice -c 3 git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("systemd-run --user --scope git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("systemd-run -p Nice=5 git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("systemd-run --working-directory=../x git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("echo 'git push origin main' | sh"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("printf 'git push origin main' | bash -s"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("echo 'git push origin main' | sudo zsh"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("bash <<< 'git push origin main'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("bash <<<'git push origin main'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("echo \"git push origin main\" | cat"), Some("feature/x"), None),
+            ("Bash", Some("echo 'git status' | sh"), Some("main"), None),
+            ("Bash", Some("bash deploy.sh"), Some("main"), None),
+            ("Bash", Some("GIT_SSH_COMMAND=\"ssh -i key\" git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("GIT_SSH_COMMAND='ssh -i key' git push"), Some("main"), some("git push → main")),
+            ("Bash", Some("git -c core.sshCommand=\"ssh -i key\" push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("chrt -r 10 git push origin feature"), Some("main"), some("git push → ?")),
+            ("Bash", Some("taskset -c 0 /usr/bin/git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("git log --grep push"), Some("main"), None),
+            ("Bash", Some("git -C x log --grep push"), Some("main"), None),
+            ("Bash", Some("task -d X release:patch"), None, some("task release")),
+            ("Bash", Some("task --yes release:patch"), None, some("task release")),
+            ("Bash", Some("task -t Taskfile.yml release"), None, some("task release")),
+            ("Bash", Some("/usr/local/bin/task release:minor"), None, some("task release")),
+            ("Bash", Some("task build release"), None, some("task release")),
+            ("Bash", Some("task --list"), None, None),
+            ("Bash", Some("task build -- release"), None, None),
+            ("Bash", Some("git push \\\n  origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("git \\\npush origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("cd ../other \\\n  && git push"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("eval eval git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("eval eval eval eval eval eval eval eval eval eval git push origin feature"), Some("main"), some("git push → ?")),
+            ("Bash", Some("eval eval eval eval eval eval eval eval eval eval ls"), Some("main"), None),
+            ("Bash", Some("gh pr merge 12 --squash"), Some("feature/x"), some("merge PR")),
+            ("Bash", Some("bkt pr merge 5"), None, some("merge PR")),
+            ("Bash", Some("cd x && gh pr merge --auto 3"), None, some("merge PR")),
+            ("Bash", Some("gh pr view 12"), None, None),
+            ("Bash", Some("gh pr create --fill"), None, None),
+            ("Bash", Some("bkt pr list"), None, None),
             ("mcp__bandzior__deployment_deploy", None, None, None),
             ("mcp__bandzior__config_update", None, None, None),
             ("mcp__bandzior__env_vars_set", None, None, None),
@@ -806,12 +1235,26 @@ mod tests {
         ]);
         assert_eq!(
             label("Bash", Some("make deploy prod"), None, &rules),
-            Some("make deploy prod".to_string())
+            Some("reguła: ^make deploy".to_string())
         );
         assert_eq!(
             label("Bash", Some("cd x && make deploy prod"), None, &rules),
-            Some("make deploy prod".to_string())
+            Some("reguła: ^make deploy".to_string())
         );
+        assert_eq!(
+            label("Bash", Some("sudo make deploy TOKEN=s3cret"), None, &rules),
+            Some("reguła: ^make deploy".to_string())
+        );
+        let action = rules
+            .classify(
+                "Bash",
+                &json!({ "command": "make deploy TOKEN=s3cret" }),
+                None,
+                None,
+            )
+            .expect("production");
+        assert!(!action.label.contains("s3cret"), "{}", action.label);
+        assert_eq!(action.detail, "make deploy TOKEN=s3cret");
         assert_eq!(
             label("mcp__foo__bar", None, None, &rules),
             Some("mcp__foo__bar".to_string())
@@ -819,6 +1262,41 @@ mod tests {
         assert_eq!(label("mcp__baz__bar", None, None, &rules), None);
         assert_eq!(label("Bash", Some("make build"), None, &rules), None);
         assert_eq!(label("Bash", Some("ls"), None, &rules), None);
+    }
+
+    fn nested_shell(depth: usize, innermost: &str) -> String {
+        (0..depth).fold(innermost.to_string(), |script, _| {
+            format!("bash -c '{}'", script.replace('\'', "'\\''"))
+        })
+    }
+
+    #[test]
+    fn nesting_is_capped_without_overflowing_the_stack() {
+        let rules = ProductionRules::new(&[]);
+        assert_eq!(
+            label("Bash", Some(&nested_shell(3, "git push origin main")), Some("feature/x"), &rules),
+            Some("git push → main".to_string())
+        );
+        assert_eq!(
+            label("Bash", Some(&nested_shell(10, "git push origin feature")), Some("main"), &rules),
+            Some("git push → ?".to_string())
+        );
+        assert_eq!(
+            label("Bash", Some(&nested_shell(10, "ls -la")), Some("main"), &rules),
+            None
+        );
+        let deep_eval = format!("{}git push origin main", "eval ".repeat(20_000));
+        assert_eq!(
+            label("Bash", Some(&deep_eval), Some("feature/x"), &rules),
+            Some("git push → ?".to_string())
+        );
+        let deep_harmless = format!("{}ls", "eval ".repeat(20_000));
+        assert_eq!(label("Bash", Some(&deep_harmless), Some("main"), &rules), None);
+        let deep_shell = format!("{}git push", "bash -c ".repeat(20_000));
+        assert_eq!(
+            label("Bash", Some(&deep_shell), Some("feature/x"), &rules),
+            Some("git push → ?".to_string())
+        );
     }
 
     #[test]
@@ -928,6 +1406,15 @@ mod tests {
         assert_ne!(
             bash("git push", Some("/repo")).fingerprint,
             push.fingerprint
+        );
+        let one_line = bash("task release # bump git push --force origin main", Some("/repo"));
+        let two_lines = bash("task release # bump\ngit push --force origin main", Some("/repo"));
+        assert_ne!(one_line.label, two_lines.label);
+        assert_ne!(one_line.fingerprint, two_lines.fingerprint);
+        assert_eq!(
+            bash("task release # bump \n\n  git push   --force origin main\r\n", Some("/repo"))
+                .fingerprint,
+            two_lines.fingerprint
         );
 
         let deploy = |input: Value| {

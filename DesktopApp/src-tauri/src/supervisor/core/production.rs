@@ -589,10 +589,7 @@ mod tests {
         actions.sort();
         assert_eq!(
             actions,
-            vec![
-                "kubectl apply -f prod.yaml",
-                "mcp__bandzior__deployment_deploy"
-            ]
+            vec!["mcp__bandzior__deployment_deploy", "reguła: ^kubectl apply"]
         );
     }
 
