@@ -43,3 +43,4 @@ export type { EscalationView } from './EscalationView';
 export type { ApprovalView } from './ApprovalView';
 export type { SupervisorSnapshot } from './SupervisorSnapshot';
 export type { DecisionEntry } from './DecisionEntry';
+export type { SessionRebound } from './SessionRebound';

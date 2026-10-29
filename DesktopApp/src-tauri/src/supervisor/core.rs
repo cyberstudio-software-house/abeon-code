@@ -10,7 +10,8 @@ use uuid::Uuid;
 use crate::commands::pty::MAX_INITIAL_PROMPT_BYTES;
 use crate::db::supervisor_decisions_repo::NewDecision;
 use crate::domain::supervisor::{
-    CardPhase, EscalationView, MenuQuestion, QuestionCardView, SupervisorLevel, SupervisorSnapshot,
+    CardPhase, EscalationView, MenuQuestion, QuestionCardView, SessionRebound, SupervisorLevel,
+    SupervisorSnapshot,
 };
 use crate::pty::session_registry::SessionClaim;
 use crate::sessions::reader::now_ms;
@@ -803,9 +804,6 @@ impl SupervisorCore {
         else {
             return;
         };
-        if displaced.is_empty() {
-            return;
-        }
         let mut outbox = Outbox::default();
         {
             let mut state = self.state.lock();
@@ -814,6 +812,10 @@ impl SupervisorCore {
             }
         }
         self.flush(outbox);
+        self.effects.session_rebound(SessionRebound {
+            pty_id: pty_id.to_string(),
+            session_id: session_id.to_string(),
+        });
         self.publish();
     }
 
@@ -2040,6 +2042,27 @@ mod tests {
             .await;
         assert_eq!(effects.session_info("s3"), None);
         assert_eq!(effects.session_info("s4"), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_rebound_terminal_is_announced_with_its_new_session() {
+        let (effects, core) = setup();
+        core.on_session_hook(on_terminal(hook("s1", "SessionStart"), "pty-s1"))
+            .await;
+        core.on_session_hook(on_terminal(hook("s1", "SessionStart"), "pty-s2"))
+            .await;
+        core.on_session_hook(on_terminal(prompt("s3", "cześć"), "pty-s1"))
+            .await;
+        assert!(effects.rebounds.lock().is_empty());
+        core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
+            .await;
+        core.on_session_hook(on_terminal(hook("s1", "SessionStart"), "pty-s1"))
+            .await;
+        let rebound = |session_id: &str| SessionRebound {
+            pty_id: "pty-s1".into(),
+            session_id: session_id.into(),
+        };
+        assert_eq!(*effects.rebounds.lock(), vec![rebound("s3"), rebound("s1")]);
     }
 
     #[tokio::test(start_paused = true)]

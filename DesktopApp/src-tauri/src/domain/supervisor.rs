@@ -88,6 +88,14 @@ pub struct SupervisorSnapshot {
     pub cards: Vec<QuestionCardView>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRebound {
+    pub pty_id: String,
+    pub session_id: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
 #[ts(export, export_to = "../../src/types/")]
 #[serde(rename_all = "camelCase")]

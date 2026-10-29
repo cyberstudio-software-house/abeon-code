@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tokio::task::JoinHandle;
 
 use crate::db::supervisor_decisions_repo::NewDecision;
-use crate::domain::supervisor::{SupervisorLevel, SupervisorSnapshot};
+use crate::domain::supervisor::{SessionRebound, SupervisorLevel, SupervisorSnapshot};
 use crate::pty::session_registry::{SessionClaim, SessionPtyRegistry};
 use crate::supervisor::core::SupervisorCore;
 use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
@@ -25,6 +25,7 @@ pub(crate) struct FakeEffects {
     pub(crate) sessions: Mutex<HashMap<String, SessionInfo>>,
     pub(crate) live_ptys: Mutex<HashSet<String>>,
     pub(crate) registry: SessionPtyRegistry,
+    pub(crate) rebounds: Mutex<Vec<SessionRebound>>,
     pub(crate) quiet: AtomicBool,
     pub(crate) keystrokes: Mutex<HashMap<String, Instant>>,
     pub(crate) submits: Mutex<HashMap<String, Instant>>,
@@ -77,6 +78,7 @@ impl FakeEffects {
             sessions: Mutex::new(sessions),
             live_ptys: Mutex::new(HashSet::from(["pty-s1".to_string(), "pty-s2".to_string()])),
             registry,
+            rebounds: Mutex::default(),
             quiet: AtomicBool::new(true),
             keystrokes: Mutex::default(),
             submits: Mutex::default(),
@@ -174,6 +176,10 @@ impl Effects for FakeEffects {
                 pty_id: Some(pty_id.to_string()),
             });
         claim
+    }
+
+    fn session_rebound(&self, rebound: SessionRebound) {
+        self.rebounds.lock().push(rebound);
     }
 
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String> {

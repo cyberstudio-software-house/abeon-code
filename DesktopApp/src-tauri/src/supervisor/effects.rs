@@ -4,7 +4,7 @@ use std::time::Duration;
 use serde::Serialize;
 
 use crate::db::supervisor_decisions_repo::NewDecision;
-use crate::domain::supervisor::SupervisorSnapshot;
+use crate::domain::supervisor::{SessionRebound, SupervisorSnapshot};
 use crate::pty::session_registry::SessionClaim;
 use crate::supervisor::settings::SupervisorSettings;
 
@@ -30,6 +30,7 @@ pub trait Effects: Send + Sync + 'static {
     fn settings(&self) -> SupervisorSettings;
     fn session_info(&self, session_id: &str) -> Option<SessionInfo>;
     fn bind_session(&self, session_id: &str, pty_id: &str) -> SessionClaim;
+    fn session_rebound(&self, rebound: SessionRebound);
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String>;
     fn input_quiet(&self, pty_id: &str, window: Duration) -> bool;
     fn submitted_recently(&self, pty_id: &str, window: Duration) -> bool;

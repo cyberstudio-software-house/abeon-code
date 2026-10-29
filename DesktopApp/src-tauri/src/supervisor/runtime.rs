@@ -15,7 +15,7 @@ use crate::commands::sessions::{
 use crate::db::projects_repo;
 use crate::db::supervisor_decisions_repo::{self, NewDecision};
 use crate::db::DbPool;
-use crate::domain::supervisor::{SupervisorLevel, SupervisorSnapshot};
+use crate::domain::supervisor::{SessionRebound, SupervisorLevel, SupervisorSnapshot};
 use crate::domain::SessionActivity;
 use crate::error::AppResult;
 use crate::notifications::marker::MarkerFilter;
@@ -50,6 +50,7 @@ const UNKNOWN_OWNER_TTL: Duration = Duration::from_secs(5);
 const TRANSCRIPT_CHARS: usize = 20_000;
 const DECISION_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 const SNAPSHOT_EVENT: &str = "supervisor:snapshot";
+const SESSION_REBOUND_EVENT: &str = "supervisor:session-rebound";
 const ATTENTION_REASON: &str = "hook";
 const SUBMIT_KEY: &[u8] = b"\r";
 const SHORT_ID_CHARS: usize = 8;
@@ -242,6 +243,12 @@ impl Effects for AppEffects {
             return SessionClaim::Refused;
         }
         self.session_pty.claim(session_id, pty_id)
+    }
+
+    fn session_rebound(&self, rebound: SessionRebound) {
+        if let Err(error) = self.app.emit(SESSION_REBOUND_EVENT, rebound) {
+            eprintln!("supervisor: session rebound emit failed: {error}");
+        }
     }
 
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String> {
