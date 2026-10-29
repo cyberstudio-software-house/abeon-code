@@ -1,8 +1,9 @@
 use super::{
-    decision_kind, excerpt, single_line, Outbox, SessionListing, SupervisorCore, ANSWER_PREFIX,
-    SUMMARY_CHARS,
+    decision_kind, excerpt, now, single_line, Outbox, SessionListing, SupervisorCore,
+    ANSWER_PREFIX, SUMMARY_CHARS,
 };
 use crate::db::supervisor_decisions_repo::NewDecision;
+use crate::domain::supervisor::EscalationChannel;
 use crate::sessions::reader::now_ms;
 
 const RATIONALE_RELAY: &str = "Wiadomość od agenta sterującego";
@@ -15,8 +16,18 @@ const ERROR_NOT_ESCALATABLE: &str =
     "Te pytania nie są otwarte albo nie zostały przekazane agentowi";
 const ERROR_EMPTY_FIELD: &str = "Pole nie może być puste";
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct EscalateOutcome {
+    pub skipped: Vec<String>,
+    pub channel: EscalationChannel,
+}
+
 impl SupervisorCore {
-    pub fn escalate(&self, question_ids: &[String], summary: &str) -> Result<Vec<String>, String> {
+    pub fn escalate(
+        &self,
+        question_ids: &[String],
+        summary: &str,
+    ) -> Result<EscalateOutcome, String> {
         let summary = summary.trim();
         if summary.is_empty() {
             return Err(ERROR_EMPTY_SUMMARY.to_string());
@@ -30,9 +41,11 @@ impl SupervisorCore {
         if unique.is_empty() {
             return Err(ERROR_NO_QUESTIONS.to_string());
         }
+        let settings = self.effects.settings();
+        let now = now();
         let mut outbox = Outbox::default();
         let mut skipped = Vec::new();
-        let mut escalated = 0;
+        let mut channel = None;
         {
             let mut state = self.state.lock();
             for question_id in unique {
@@ -50,16 +63,22 @@ impl SupervisorCore {
                     continue;
                 };
                 state.discard_queued_question(question_id);
-                state.escalate_question(question, summary.to_string(), summary, &mut outbox);
-                escalated += 1;
+                channel = Some(state.escalate_question(
+                    question,
+                    summary.to_string(),
+                    summary,
+                    &settings,
+                    now,
+                    &mut outbox,
+                ));
             }
         }
-        if escalated == 0 {
+        let Some(channel) = channel else {
             return Err(format!("{ERROR_NOT_ESCALATABLE}: {}", skipped.join(", ")));
-        }
+        };
         self.flush(outbox);
-        self.publish();
-        Ok(skipped)
+        self.publish_with(&settings);
+        Ok(EscalateOutcome { skipped, channel })
     }
 
     pub fn send_to_session(&self, session_id: &str, text: &str) -> Result<(), String> {

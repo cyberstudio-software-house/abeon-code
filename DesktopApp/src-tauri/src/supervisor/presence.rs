@@ -1,5 +1,15 @@
 use std::time::{Duration, Instant};
 
+use crate::domain::supervisor::EscalationChannel;
+
+pub fn route(discord_active: bool, present: bool, mute_when_present: bool) -> EscalationChannel {
+    if discord_active && !(present && mute_when_present) {
+        EscalationChannel::Discord
+    } else {
+        EscalationChannel::App
+    }
+}
+
 #[derive(Default)]
 pub struct Presence {
     last_activity: Option<Instant>,
@@ -82,5 +92,21 @@ mod tests {
         assert_eq!(presence.focused_session(), Some("s1"));
         presence.record_activity(now, None);
         assert_eq!(presence.focused_session(), None);
+    }
+
+    #[test]
+    fn route_follows_presence_and_mute() {
+        for present in [false, true] {
+            for mute_when_present in [false, true] {
+                assert_eq!(
+                    route(false, present, mute_when_present),
+                    EscalationChannel::App
+                );
+            }
+        }
+        assert_eq!(route(true, true, true), EscalationChannel::App);
+        assert_eq!(route(true, true, false), EscalationChannel::Discord);
+        assert_eq!(route(true, false, true), EscalationChannel::Discord);
+        assert_eq!(route(true, false, false), EscalationChannel::Discord);
     }
 }

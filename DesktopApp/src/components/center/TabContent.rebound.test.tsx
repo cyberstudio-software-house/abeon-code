@@ -50,7 +50,7 @@ vi.mock('../../lib/tauri', () => ({
     detectDefaultShell: vi.fn(async () => ''),
     takePendingOpenPaths: vi.fn(async () => []),
     supervisorSnapshot: vi.fn(async () => ({
-      level: 'assistant', running: true, ready: true, ptyId: 'pty-sup', present: true, away: false,
+      level: 'assistant', running: true, ready: true, ptyId: 'pty-sup', present: true, away: false, discordActive: false,
       escalations: [], approvals: [], cards: [],
     })),
     onSupervisorSnapshot: vi.fn(async (cb: (snapshot: SupervisorSnapshot) => void) => {
@@ -94,7 +94,7 @@ function Shell() {
 }
 
 const snapshotWithCard = (sessionId: string): SupervisorSnapshot => ({
-  level: 'assistant', running: true, ready: true, ptyId: 'pty-sup', present: true, away: false,
+  level: 'assistant', running: true, ready: true, ptyId: 'pty-sup', present: true, away: false, discordActive: false,
   escalations: [], approvals: [],
   cards: [{
     questionId: 'q1',

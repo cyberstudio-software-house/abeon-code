@@ -7,15 +7,15 @@ import { toast } from 'sonner';
 import type { SupervisorSnapshot } from '../../types';
 
 const snapshot = (over: Partial<SupervisorSnapshot> = {}): SupervisorSnapshot => ({
-  level: 'assistant', running: true, ready: true, ptyId: 'p1', present: true, away: false,
+  level: 'assistant', running: true, ready: true, ptyId: 'p1', present: true, away: false, discordActive: false,
   escalations: [], approvals: [], cards: [], ...over,
 });
 
 const approval = (id: string) => ({
-  id, sessionId: 's', projectId: 1, label: 'Sesja', action: 'git push', detail: 'git push origin main', code: 'ABC', createdAt: 1,
+  id, sessionId: 's', projectId: 1, label: 'Sesja', action: 'git push', detail: 'git push origin main', code: 'ABC', channel: 'app' as const, createdAt: 1,
 });
 const escalation = (id: string) => ({
-  id, sessionId: 's', projectId: 1, label: 'Sesja', summary: 'Pytanie', createdAt: 1,
+  id, sessionId: 's', projectId: 1, label: 'Sesja', summary: 'Pytanie', channel: 'app' as const, createdAt: 1,
 });
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));

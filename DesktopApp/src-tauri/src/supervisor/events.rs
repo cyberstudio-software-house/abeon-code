@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::domain::supervisor::{MenuQuestion, SupervisorLevel};
+use crate::domain::supervisor::{EscalationChannel, MenuQuestion, SupervisorLevel};
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -13,6 +13,21 @@ pub enum QuestionKind {
 #[serde(rename_all = "camelCase")]
 pub enum ResolvedBy {
     User,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct ForwardedEscalation {
+    pub session_id: String,
+    pub label: String,
+    pub summary: String,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct ForwardedApproval {
+    pub approval_id: String,
+    pub label: String,
+    pub action: String,
+    pub code: String,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -33,6 +48,7 @@ pub enum SupervisorEvent {
         action: String,
         detail: String,
         code: String,
+        channel: EscalationChannel,
     },
     ApprovalResolved {
         approval_id: String,
@@ -45,13 +61,19 @@ pub enum SupervisorEvent {
     LevelChanged {
         level: SupervisorLevel,
     },
+    Forwarded {
+        escalations: Vec<ForwardedEscalation>,
+        approvals: Vec<ForwardedApproval>,
+    },
 }
 
 impl SupervisorEvent {
     pub fn wakes_supervisor(&self) -> bool {
         matches!(
             self,
-            SupervisorEvent::Question { .. } | SupervisorEvent::GuardBlocked { .. }
+            SupervisorEvent::Question { .. }
+                | SupervisorEvent::GuardBlocked { .. }
+                | SupervisorEvent::Forwarded { .. }
         )
     }
 }
@@ -104,17 +126,85 @@ mod tests {
         );
     }
 
-    #[test]
-    fn only_actionable_events_wake_the_supervisor() {
-        assert!(SupervisorEvent::GuardBlocked {
+    fn guard_blocked(channel: EscalationChannel) -> SupervisorEvent {
+        SupervisorEvent::GuardBlocked {
             approval_id: "a".into(),
             session_id: "s".into(),
             label: "l".into(),
             action: "git push → main".into(),
             detail: "git push origin main".into(),
             code: "K7QX".into(),
+            channel,
+        }
+    }
+
+    #[test]
+    fn guard_blocked_carries_its_channel() {
+        assert_eq!(
+            serde_json::to_value(guard_blocked(EscalationChannel::Discord)).unwrap(),
+            json!({
+                "type": "guardBlocked",
+                "approval_id": "a",
+                "session_id": "s",
+                "label": "l",
+                "action": "git push → main",
+                "detail": "git push origin main",
+                "code": "K7QX",
+                "channel": "discord",
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(guard_blocked(EscalationChannel::App)).unwrap()["channel"],
+            "app"
+        );
+    }
+
+    #[test]
+    fn forwarded_event_json_shape() {
+        let event = SupervisorEvent::Forwarded {
+            escalations: vec![ForwardedEscalation {
+                session_id: "s1".into(),
+                label: "projekt · s1".into(),
+                summary: "Który kolor?".into(),
+            }],
+            approvals: vec![ForwardedApproval {
+                approval_id: "a1".into(),
+                label: "projekt · s2".into(),
+                action: "git push → main".into(),
+                code: "K7QX".into(),
+            }],
+        };
+        assert_eq!(
+            serde_json::to_value(&event).unwrap(),
+            json!({
+                "type": "forwarded",
+                "escalations": [{
+                    "session_id": "s1",
+                    "label": "projekt · s1",
+                    "summary": "Który kolor?",
+                }],
+                "approvals": [{
+                    "approval_id": "a1",
+                    "label": "projekt · s2",
+                    "action": "git push → main",
+                    "code": "K7QX",
+                }],
+            })
+        );
+    }
+
+    #[test]
+    fn forwarded_wakes_the_supervisor() {
+        assert!(SupervisorEvent::Forwarded {
+            escalations: Vec::new(),
+            approvals: Vec::new(),
         }
         .wakes_supervisor());
+    }
+
+    #[test]
+    fn only_actionable_events_wake_the_supervisor() {
+        assert!(guard_blocked(EscalationChannel::App).wakes_supervisor());
         assert!(!SupervisorEvent::ApprovalResolved {
             approval_id: "a".into(),
             approved: true,

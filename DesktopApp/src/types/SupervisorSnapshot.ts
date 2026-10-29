@@ -4,4 +4,4 @@ import type { EscalationView } from "./EscalationView";
 import type { QuestionCardView } from "./QuestionCardView";
 import type { SupervisorLevel } from "./SupervisorLevel";
 
-export type SupervisorSnapshot = { level: SupervisorLevel, running: boolean, ready: boolean, ptyId: string | null, present: boolean, away: boolean, escalations: Array<EscalationView>, approvals: Array<ApprovalView>, cards: Array<QuestionCardView>, };
+export type SupervisorSnapshot = { level: SupervisorLevel, running: boolean, ready: boolean, ptyId: string | null, present: boolean, away: boolean, discordActive: boolean, escalations: Array<EscalationView>, approvals: Array<ApprovalView>, cards: Array<QuestionCardView>, };

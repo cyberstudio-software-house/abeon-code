@@ -15,7 +15,7 @@ vi.mock('../terminal/TerminalView', () => ({
 }));
 
 const snapshot = (over: Partial<SupervisorSnapshot> = {}): SupervisorSnapshot => ({
-  level: 'assistant', running: true, ready: true, ptyId: 'p1', present: true, away: false,
+  level: 'assistant', running: true, ready: true, ptyId: 'p1', present: true, away: false, discordActive: false,
   escalations: [], approvals: [], cards: [], ...over,
 });
 
@@ -33,8 +33,8 @@ describe('SupervisorPanel', () => {
     vi.spyOn(tauri, 'supervisorRestart').mockResolvedValue(undefined);
     useStore.setState({
       supervisor: snapshot({
-        approvals: [{ id: 'ap1', sessionId: 's1', projectId: 1, label: 'Sesja A', action: 'Wypchnięcie na main', detail: 'git push origin main', code: 'K7', createdAt: 1 }],
-        escalations: [{ id: 'es1', sessionId: 's2', projectId: 2, label: 'Sesja B', summary: 'Nie wiem co dalej', createdAt: 1 }],
+        approvals: [{ id: 'ap1', sessionId: 's1', projectId: 1, label: 'Sesja A', action: 'Wypchnięcie na main', detail: 'git push origin main', code: 'K7', channel: 'app', createdAt: 1 }],
+        escalations: [{ id: 'es1', sessionId: 's2', projectId: 2, label: 'Sesja B', summary: 'Nie wiem co dalej', channel: 'app', createdAt: 1 }],
       }),
       supervisorPanelOpen: true,
     });
@@ -79,8 +79,8 @@ describe('SupervisorPanel', () => {
     const now = Date.now();
     useStore.setState({
       supervisor: snapshot({
-        approvals: [{ id: 'ap1', sessionId: 's1', projectId: 1, label: 'Sesja A', action: 'git push → main', detail: 'git push', code: 'K7', createdAt: now - 12 * 60_000 }],
-        escalations: [{ id: 'es1', sessionId: 's2', projectId: 2, label: 'Sesja B', summary: 'Nie wiem co dalej', createdAt: now - 3 * 3_600_000 }],
+        approvals: [{ id: 'ap1', sessionId: 's1', projectId: 1, label: 'Sesja A', action: 'git push → main', detail: 'git push', code: 'K7', channel: 'app', createdAt: now - 12 * 60_000 }],
+        escalations: [{ id: 'es1', sessionId: 's2', projectId: 2, label: 'Sesja B', summary: 'Nie wiem co dalej', channel: 'app', createdAt: now - 3 * 3_600_000 }],
       }),
     });
     render(<SupervisorPanel />);

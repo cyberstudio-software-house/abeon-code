@@ -9,9 +9,10 @@ use super::{
     SupervisorEvent, SupervisorLevel, SupervisorSettings, ANSWER_PREFIX, GUARD_REASON,
 };
 use crate::db::supervisor_decisions_repo::NewDecision;
-use crate::domain::supervisor::ApprovalView;
+use crate::domain::supervisor::{ApprovalView, EscalationChannel};
 use crate::sessions::reader::now_ms;
 use crate::supervisor::approvals::Approval;
+use crate::supervisor::events::ForwardedApproval;
 use crate::supervisor::guard::{ProductionAction, ProductionRules};
 
 const BASH_TOOL: &str = "Bash";
@@ -50,6 +51,7 @@ pub(super) struct ApprovalRecord {
     code: String,
     created: Instant,
     outcome: Option<bool>,
+    channel: EscalationChannel,
 }
 
 fn describe_action(action: &ProductionAction) -> String {
@@ -81,6 +83,7 @@ impl CoreState {
                         .map(|record| record.label.clone())
                         .unwrap_or_else(|| approval.session_id.clone()),
                     project_id: record.and_then(|record| record.project_id),
+                    channel: record.map_or(EscalationChannel::App, |record| record.channel),
                     id: approval.id,
                     session_id: approval.session_id,
                     action: approval.action.label,
@@ -92,24 +95,50 @@ impl CoreState {
             .collect()
     }
 
+    pub(super) fn forward_pending_approvals(&mut self, now: Instant) -> Vec<ForwardedApproval> {
+        let mut forwarded = Vec::new();
+        for approval in self.approvals.pending(now) {
+            let Some(record) = self
+                .approval_records
+                .get_mut(&approval.id)
+                .filter(|record| {
+                    record.outcome.is_none() && record.channel == EscalationChannel::App
+                })
+            else {
+                continue;
+            };
+            record.channel = EscalationChannel::Discord;
+            forwarded.push(ForwardedApproval {
+                approval_id: approval.id,
+                label: record.label.clone(),
+                action: record.action.label.clone(),
+                code: record.code.clone(),
+            });
+        }
+        forwarded
+    }
+
     fn block_production(
         &mut self,
         approval: Approval,
         label: String,
         project_id: Option<i64>,
-        origin: PromptOrigin,
+        settings: &SupervisorSettings,
         now: Instant,
         outbox: &mut Outbox,
     ) {
-        let rationale = match origin {
+        let rationale = match self.provenance.origin(&approval.session_id) {
             PromptOrigin::Agent => RATIONALE_AGENT_ORIGIN,
             _ => RATIONALE_SUPERVISOR_ORIGIN,
         };
-        outbox.notifications.push((
-            approval.session_id.clone(),
-            format!("{APPROVAL_TITLE}: {}", approval.action.label),
-            format!("{label} — {}, kod {}", approval.action.label, approval.code),
-        ));
+        let channel = self.channel(settings, now);
+        if channel == EscalationChannel::App {
+            outbox.notifications.push((
+                approval.session_id.clone(),
+                format!("{APPROVAL_TITLE}: {}", approval.action.label),
+                format!("{label} — {}, kod {}", approval.action.label, approval.code),
+            ));
+        }
         outbox.decisions.push(NewDecision {
             created_at: approval.created_at_ms,
             session_id: Some(approval.session_id.clone()),
@@ -126,6 +155,7 @@ impl CoreState {
                 action: approval.action.label.clone(),
                 detail: approval.action.detail.clone(),
                 code: approval.code.clone(),
+                channel,
             },
             now,
         );
@@ -140,6 +170,7 @@ impl CoreState {
                 code: approval.code,
                 created: now,
                 outcome: None,
+                channel,
             },
         );
     }
@@ -210,7 +241,7 @@ impl SupervisorCore {
             }
             let (approval, created) = state.approvals.create(session_id, &action, now, now_ms());
             if created {
-                state.block_production(approval, label, project_id, origin, now, &mut outbox);
+                state.block_production(approval, label, project_id, settings, now, &mut outbox);
             }
             created
         };
@@ -298,7 +329,7 @@ impl SupervisorCore {
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use crate::domain::supervisor::ApprovalView;
+    use crate::domain::supervisor::{ApprovalView, EscalationChannel};
     use crate::supervisor::test_support::*;
     use serde_json::json;
     use std::path::PathBuf;
@@ -434,6 +465,7 @@ mod tests {
         assert_eq!(approval.session_id, "s1");
         assert_eq!(approval.label, "projekt · s1");
         assert_eq!(approval.project_id, Some(1));
+        assert_eq!(approval.channel, EscalationChannel::App);
         assert!(approval.created_at > 0);
         assert_eq!(
             effects.last_snapshot().unwrap().approvals,
@@ -448,6 +480,7 @@ mod tests {
                 action: PUSH_ACTION.into(),
                 detail: "git push".into(),
                 code: approval.code.clone(),
+                channel: EscalationChannel::App,
             }]
         );
         assert_eq!(

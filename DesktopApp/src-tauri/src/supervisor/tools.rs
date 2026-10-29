@@ -8,7 +8,6 @@ use crate::supervisor::core::SupervisorCore;
 
 const DEFAULT_MAX_BLOCKS: usize = 40;
 const MAX_BLOCKS_LIMIT: usize = 200;
-const APP_CHANNEL: &str = "app";
 const ERROR_UNKNOWN_TOOL: &str = "Nieznane narzędzie";
 const ERROR_MISSING_ARGUMENT: &str = "Brak wymaganego argumentu";
 const ERROR_NOT_TEXT: &str = "Argument musi być tekstem";
@@ -116,10 +115,10 @@ pub fn handle_tool(core: &Arc<SupervisorCore>, name: &str, args: Value) -> Resul
         "escalate" => {
             let question_ids = args.text_list("question_ids")?;
             let summary = args.text("summary")?;
-            let skipped = core.escalate(&question_ids, summary)?;
-            let mut result = json!({ "channel": APP_CHANNEL });
-            if !skipped.is_empty() {
-                result["skipped"] = json!(skipped);
+            let outcome = core.escalate(&question_ids, summary)?;
+            let mut result = json!({ "channel": outcome.channel });
+            if !outcome.skipped.is_empty() {
+                result["skipped"] = json!(outcome.skipped);
             }
             Ok(result)
         }
@@ -207,7 +206,7 @@ pub fn tool_definitions() -> Value {
         ),
         tool(
             "escalate",
-            "Przekazuje pytania użytkownikowi. Wstrzymane menu dostaje odmowę, a sesja czeka na odpowiedź użytkownika. Zwraca channel: \"app\" — pytanie pokazuje wtedy aplikacja i nie piszesz o nim na Discordzie.",
+            "Przekazuje pytania użytkownikowi. Wstrzymane menu dostaje odmowę, a sesja czeka na odpowiedź użytkownika. Zwraca channel: \"app\" albo \"discord\". Przy \"app\" pytanie pokazuje aplikacja i nie piszesz o nim na Discordzie; przy \"discord\" przekazujesz je użytkownikowi jedną wiadomością na Discordzie.",
             json!({
                 "question_ids": {
                     "type": "array",
@@ -243,7 +242,7 @@ pub fn tool_definitions() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::supervisor::SupervisorLevel;
+    use crate::domain::supervisor::{EscalationChannel, SupervisorLevel};
     use crate::supervisor::core::{decision_kind, ESCALATED_REASON, WAKE_DEBOUNCE};
     use crate::supervisor::effects::SessionListing;
     use crate::supervisor::events::SupervisorEvent;
@@ -483,8 +482,7 @@ mod tests {
             json!({"question_ids": [question_id, "nope"], "summary": summary}),
         )
         .unwrap();
-        assert_eq!(result["channel"], "app");
-        assert_eq!(result["skipped"], json!(["nope"]));
+        assert_eq!(result, json!({"channel": "app", "skipped": ["nope"]}));
         assert_eq!(
             reply_of(handle).await,
             HookReply::Deny {
@@ -496,6 +494,7 @@ mod tests {
         assert_eq!(escalations[0].session_id, "s1");
         assert_eq!(escalations[0].label, "projekt · s1");
         assert_eq!(escalations[0].summary, summary);
+        assert_eq!(escalations[0].channel, EscalationChannel::App);
         let notifications = effects.notifications();
         assert_eq!(notifications.len(), 1);
         assert!(notifications[0].2.contains("projekt · s1"));
@@ -508,6 +507,45 @@ mod tests {
             json!({"question_ids": [question_id], "summary": summary})
         )
         .is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn escalate_reports_the_discord_channel() {
+        let (effects, core) = setup();
+        core.set_discord_active(true);
+        core.set_away(true);
+        core.on_session_hook(stop("s1", "Który wariant wybrać?"))
+            .await;
+        let question_id = only_question_id(core.take_events());
+        assert_eq!(
+            handle_tool(
+                &core,
+                "escalate",
+                json!({"question_ids": [question_id], "summary": "Wariant wybiera użytkownik"})
+            )
+            .unwrap(),
+            json!({"channel": "discord"})
+        );
+        assert!(effects.notifications().is_empty());
+        assert_eq!(
+            core.snapshot().escalations[0].channel,
+            EscalationChannel::Discord
+        );
+    }
+
+    #[test]
+    fn escalate_description_names_both_channels() {
+        let definitions = tool_definitions();
+        let description = definitions
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|tool| tool["name"] == "escalate")
+            .and_then(|tool| tool["description"].as_str())
+            .unwrap()
+            .to_string();
+        assert!(description.contains("\"app\""), "{description}");
+        assert!(description.contains("\"discord\""), "{description}");
     }
 
     #[tokio::test(start_paused = true)]

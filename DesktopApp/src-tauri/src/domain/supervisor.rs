@@ -43,6 +43,14 @@ pub struct QuestionCardView {
     pub deadline_ms: Option<i64>,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub enum EscalationChannel {
+    App,
+    Discord,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
 #[ts(export, export_to = "../../src/types/")]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +61,7 @@ pub struct EscalationView {
     pub project_id: Option<i64>,
     pub label: String,
     pub summary: String,
+    pub channel: EscalationChannel,
     #[ts(type = "number")]
     pub created_at: i64,
 }
@@ -69,6 +78,7 @@ pub struct ApprovalView {
     pub action: String,
     pub detail: String,
     pub code: String,
+    pub channel: EscalationChannel,
     #[ts(type = "number")]
     pub created_at: i64,
 }
@@ -83,6 +93,7 @@ pub struct SupervisorSnapshot {
     pub pty_id: Option<String>,
     pub present: bool,
     pub away: bool,
+    pub discord_active: bool,
     pub escalations: Vec<EscalationView>,
     pub approvals: Vec<ApprovalView>,
     pub cards: Vec<QuestionCardView>,

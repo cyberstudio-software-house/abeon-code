@@ -13,6 +13,7 @@ const snapshot = (overrides: Partial<SupervisorSnapshot> = {}): SupervisorSnapsh
   ptyId: null,
   present: true,
   away: false,
+  discordActive: false,
   escalations: [],
   approvals: [],
   cards: [],

@@ -132,7 +132,7 @@ describe('TabPanel keyboard and exit wiring', () => {
 
 describe('TabPanel question card', () => {
   const baseSnapshot = {
-    level: 'assistant' as const, running: true, ready: true, ptyId: 'p1', present: true, away: false,
+    level: 'assistant' as const, running: true, ready: true, ptyId: 'p1', present: true, away: false, discordActive: false,
     escalations: [], approvals: [],
   };
   const card = (sessionId: string) => ({
@@ -197,7 +197,7 @@ describe('TabPanel question card', () => {
 
 describe('TabPanel and the supervisor question card', () => {
   const withCard = (): SupervisorSnapshot => ({
-    level: 'assistant', running: true, ready: true, ptyId: 'sup', present: true, away: false,
+    level: 'assistant', running: true, ready: true, ptyId: 'sup', present: true, away: false, discordActive: false,
     escalations: [], approvals: [],
     cards: [{
       questionId: 'q1',

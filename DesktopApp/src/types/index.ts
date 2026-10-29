@@ -39,6 +39,7 @@ export type { SupervisorLevel } from './SupervisorLevel';
 export type { MenuQuestion } from './MenuQuestion';
 export type { CardPhase } from './CardPhase';
 export type { QuestionCardView } from './QuestionCardView';
+export type { EscalationChannel } from './EscalationChannel';
 export type { EscalationView } from './EscalationView';
 export type { ApprovalView } from './ApprovalView';
 export type { SupervisorSnapshot } from './SupervisorSnapshot';
