@@ -1,5 +1,7 @@
 import { useStore } from '../../store';
+import { toast } from 'sonner';
 import { tauri } from '../../lib/tauri';
+import { formatTauriError } from '../../lib/errors';
 
 const STARTING_HINT = 'Uruchamianie… — otwórz panel i zaakceptuj zaufanie do folderu, jeśli pyta';
 
@@ -41,7 +43,11 @@ export function SupervisorEntry() {
         )}
       </button>
       <button
-        onClick={() => { void tauri.supervisorSetAway(!away).catch(() => {}); }}
+        onClick={() => {
+          tauri.supervisorSetAway(!away).catch((error: unknown) => {
+            toast.error(`Nie udało się zmienić statusu „Nie ma mnie”: ${formatTauriError(error)}`);
+          });
+        }}
         aria-pressed={away}
         className={`shrink-0 px-1.5 py-0.5 rounded border text-[10.5px] transition-colors ${
           away ? 'bg-accent text-white border-accent' : 'border-border text-muted hover:text-fg'

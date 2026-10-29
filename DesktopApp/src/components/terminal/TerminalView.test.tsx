@@ -73,6 +73,7 @@ import { useStore } from '../../store';
 import { TerminalView } from './TerminalView';
 import { tauri } from '../../lib/tauri';
 import { toast } from 'sonner';
+import { supervisorProcess } from '../../lib/supervisorProcess';
 
 function Panes({ focused }: { focused: 'left' | 'right' }) {
   return (
@@ -349,5 +350,77 @@ describe('TerminalView initial prompt', () => {
     vi.mocked(tauri.spawnPty).mockRejectedValueOnce(new Error('boom'));
     await act(async () => { render(view()); });
     expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('TerminalView supervisor kind', () => {
+  beforeEach(() => {
+    probe.writes = [];
+    probe.sinks = [];
+    probe.exits = [];
+    probe.spawned = 0;
+    probe.openedContainers = [];
+    supervisorProcess.reset();
+    vi.mocked(tauri.spawnPty).mockClear();
+    vi.mocked(tauri.ptyKill).mockClear();
+    vi.mocked(tauri.ptyResize).mockClear();
+    vi.mocked(tauri.onPtyOutput).mockClear();
+    useStore.setState({ projects: [], activeAgentPtyId: null });
+  });
+
+  const flush = () => act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+  it('never spawns a pty', async () => {
+    await act(async () => { render(<TerminalView kind="supervisor" ptyId="sup-1" />); });
+    expect(tauri.spawnPty).not.toHaveBeenCalled();
+  });
+
+  it('never kills the pty on unmount', async () => {
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<TerminalView kind="supervisor" ptyId="sup-1" />); });
+    await flush();
+    view.unmount();
+    expect(tauri.ptyKill).not.toHaveBeenCalled();
+  });
+
+  it('never claims the active agent pty', async () => {
+    await act(async () => { render(<TerminalView kind="supervisor" ptyId="sup-1" visible focused />); });
+    await flush();
+    expect(useStore.getState().activeAgentPtyId).toBeNull();
+  });
+
+  it('replays bytes buffered before mount into the terminal', async () => {
+    supervisorProcess.track('sup-1');
+    await flush();
+    act(() => { probe.sinks[0](new Uint8Array([1, 2, 3])); });
+    expect(probe.writes).toHaveLength(0);
+
+    await act(async () => { render(<TerminalView kind="supervisor" ptyId="sup-1" />); });
+
+    expect(probe.writes).toEqual([new Uint8Array([1, 2, 3])]);
+    expect(tauri.ptyResize).toHaveBeenCalledWith('sup-1', 80, 24);
+  });
+
+  it('stops delivering after unmount', async () => {
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<TerminalView kind="supervisor" ptyId="sup-1" />); });
+    await flush();
+    view.unmount();
+    act(() => { probe.sinks[0](new Uint8Array([9])); });
+    expect(probe.writes).toHaveLength(0);
+  });
+
+  it('reattaches to the new pty when ptyId changes', async () => {
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<TerminalView kind="supervisor" ptyId="sup-1" />); });
+    await flush();
+    await act(async () => { view.rerender(<TerminalView kind="supervisor" ptyId="sup-2" />); });
+    await flush();
+
+    expect(vi.mocked(tauri.onPtyOutput).mock.calls.map(c => c[0])).toEqual(['sup-1', 'sup-2']);
+    expect(tauri.ptyResize).toHaveBeenLastCalledWith('sup-2', 80, 24);
+    act(() => { probe.sinks[1](new Uint8Array([5])); });
+    expect(probe.writes).toEqual([new Uint8Array([5])]);
+    expect(tauri.ptyKill).not.toHaveBeenCalled();
   });
 });

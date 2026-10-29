@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
+import { formatTauriError } from '../../lib/errors';
 import { TerminalView } from '../terminal/TerminalView';
 import { Icon } from '../shared/Icon';
 import type { ApprovalView, DecisionEntry, EscalationView } from '../../types';
@@ -23,6 +25,10 @@ const KIND_LABEL: Record<string, string> = {
 
 const formatTime = (ms: number) =>
   new Date(ms).toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' });
+
+const reportFailure = (message: string) => (error: unknown) => {
+  toast.error(`${message}: ${formatTauriError(error)}`);
+};
 
 const buttonClass = 'px-2.5 py-1 border border-border text-[12px] text-fg-secondary hover:text-fg rounded-md';
 const primaryButtonClass = 'px-2.5 py-1 bg-accent text-white text-[12px] rounded-md';
@@ -83,7 +89,7 @@ function ConversationView() {
       <div className="h-full grid place-items-center">
         <div className="text-center space-y-3">
           <div className="text-[13px] text-fg-secondary">Agent nie działa</div>
-          <button onClick={() => { void tauri.supervisorRestart().catch(() => {}); }} className={primaryButtonClass}>
+          <button onClick={() => { void tauri.supervisorRestart().catch(reportFailure('Nie udało się uruchomić agenta ponownie')); }} className={primaryButtonClass}>
             Uruchom ponownie
           </button>
         </div>
@@ -112,6 +118,7 @@ function ConversationView() {
 function PendingView() {
   const snapshot = useStore(s => s.supervisor);
   const openSessionTab = useStore(s => s.openSessionTab);
+  const closePanel = useStore(s => s.closeSupervisorPanel);
   const approvals = snapshot?.approvals ?? [];
   const escalations = snapshot?.escalations ?? [];
 
@@ -126,7 +133,10 @@ function PendingView() {
         <EscalationRow
           key={e.id}
           escalation={e}
-          onOpen={e.projectId == null ? undefined : () => openSessionTab(e.projectId!, e.sessionId, e.label)}
+          onOpen={e.projectId == null ? undefined : () => {
+            openSessionTab(e.projectId!, e.sessionId, e.label);
+            closePanel();
+          }}
         />
       ))}
     </ul>
@@ -146,10 +156,10 @@ function ApprovalRow({ approval }: { approval: ApprovalView }) {
           </div>
         </div>
         <div className="flex gap-2 shrink-0">
-          <button onClick={() => { void tauri.supervisorResolveApproval(approval.id, true).catch(() => {}); }} className={primaryButtonClass}>
+          <button onClick={() => { void tauri.supervisorResolveApproval(approval.id, true).catch(reportFailure('Nie udało się zapisać decyzji')); }} className={primaryButtonClass}>
             Zatwierdź
           </button>
-          <button onClick={() => { void tauri.supervisorResolveApproval(approval.id, false).catch(() => {}); }} className={buttonClass}>
+          <button onClick={() => { void tauri.supervisorResolveApproval(approval.id, false).catch(reportFailure('Nie udało się zapisać decyzji')); }} className={buttonClass}>
             Odrzuć
           </button>
         </div>
@@ -168,7 +178,7 @@ function EscalationRow({ escalation, onOpen }: { escalation: EscalationView; onO
         </div>
         <div className="flex gap-2 shrink-0">
           <button onClick={onOpen} disabled={!onOpen} className={`${primaryButtonClass} disabled:opacity-50`}>Przejdź do sesji</button>
-          <button onClick={() => { void tauri.supervisorDismissEscalation(escalation.id).catch(() => {}); }} className={buttonClass}>
+          <button onClick={() => { void tauri.supervisorDismissEscalation(escalation.id).catch(reportFailure('Nie udało się zapisać decyzji')); }} className={buttonClass}>
             Odrzuć
           </button>
         </div>

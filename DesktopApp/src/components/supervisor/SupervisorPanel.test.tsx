@@ -3,7 +3,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SupervisorPanel } from './SupervisorPanel';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
+import { toast } from 'sonner';
 import type { DecisionEntry, SupervisorSnapshot } from '../../types';
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 
 vi.mock('../terminal/TerminalView', () => ({
   TerminalView: (props: { kind: string; ptyId?: string }) => (
@@ -79,6 +82,16 @@ describe('SupervisorPanel', () => {
     fireEvent.click(screen.getByRole('tab', { name: /Do decyzji/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Przejdź do sesji' }));
     expect(openSessionTab).toHaveBeenCalledWith(2, 's2', 'Sesja B');
+    expect(useStore.getState().supervisorPanelOpen).toBe(false);
+  });
+
+  it('shows a Polish toast when approving fails', async () => {
+    vi.mocked(toast.error).mockClear();
+    vi.spyOn(tauri, 'supervisorResolveApproval').mockRejectedValue(new Error('boom'));
+    render(<SupervisorPanel />);
+    fireEvent.click(screen.getByRole('tab', { name: /Do decyzji/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Zatwierdź' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Nie udało się zapisać decyzji: boom'));
   });
 
   it('dismisses an escalation', () => {

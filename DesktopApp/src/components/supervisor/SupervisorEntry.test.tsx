@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SupervisorEntry } from './SupervisorEntry';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
+import { toast } from 'sonner';
 import type { SupervisorSnapshot } from '../../types';
 
 const snapshot = (over: Partial<SupervisorSnapshot> = {}): SupervisorSnapshot => ({
@@ -16,6 +17,8 @@ const approval = (id: string) => ({
 const escalation = (id: string) => ({
   id, sessionId: 's', projectId: 1, label: 'Sesja', summary: 'Pytanie', createdAt: 1,
 });
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 
 describe('SupervisorEntry', () => {
   beforeEach(() => {
@@ -45,6 +48,14 @@ describe('SupervisorEntry', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Nie ma mnie' }));
     expect(tauri.supervisorSetAway).toHaveBeenCalledWith(true);
     expect(useStore.getState().supervisorPanelOpen).toBe(false);
+  });
+
+  it('shows a Polish toast when toggling away fails', async () => {
+    vi.mocked(toast.error).mockClear();
+    vi.spyOn(tauri, 'supervisorSetAway').mockRejectedValue(new Error('boom'));
+    render(<SupervisorEntry />);
+    fireEvent.click(screen.getByRole('button', { name: 'Nie ma mnie' }));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Nie udało się zmienić statusu „Nie ma mnie”: boom'));
   });
 
   it('turns away off when it is already on', () => {

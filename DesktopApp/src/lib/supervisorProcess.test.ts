@@ -17,7 +17,6 @@ describe('supervisorProcess', () => {
     vi.spyOn(tauri, 'onPtyExit').mockImplementation(async (_id, cb) => { exitCb = cb; return unlistenExit; });
     vi.spyOn(tauri, 'ptyWrite').mockResolvedValue(undefined);
     vi.spyOn(tauri, 'ptyResize').mockResolvedValue(undefined);
-    vi.spyOn(tauri, 'ptyKill').mockResolvedValue(undefined);
   });
 
   it('replays buffered bytes to a late sink and then delivers live output', async () => {
@@ -42,12 +41,6 @@ describe('supervisorProcess', () => {
     const second: number[] = [];
     supervisorProcess.attach('p1', { write: (b) => second.push(...b) });
     expect(second).toEqual([7, 8]);
-  });
-
-  it('never kills the pty', async () => {
-    const detach = supervisorProcess.attach('p1', { write: () => {} });
-    detach();
-    expect(tauri.ptyKill).not.toHaveBeenCalled();
   });
 
   it('appends an exit marker for the sinks', async () => {
