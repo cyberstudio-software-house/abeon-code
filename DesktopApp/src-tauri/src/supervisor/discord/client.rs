@@ -6,6 +6,7 @@ pub const API_BASE: &str = "https://discord.com/api/v10";
 
 const MESSAGE_CONTENT_INTENT_MASK: u64 = (1 << 18) | (1 << 19);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+pub const MESSAGES_PAGE_LIMIT: usize = 100;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DiscordError {
@@ -156,7 +157,10 @@ impl DiscordClient {
         let path = format!("/channels/{}/messages", encode_path_segment(channel_id));
         let request = self
             .request(reqwest::Method::GET, &path)
-            .query(&[("after", after), ("limit", "100")]);
+            .query(&[
+                ("after", after.to_string()),
+                ("limit", MESSAGES_PAGE_LIMIT.to_string()),
+            ]);
         let resp = Self::send(request).await?;
         let dtos: Vec<MessageDto> = resp.json().await.map_err(decode_error)?;
         let mut messages: Vec<(u64, DiscordMessage)> =
