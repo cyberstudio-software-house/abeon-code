@@ -30,13 +30,20 @@ const BUN_HOME_DIR: &str = ".bun";
 const BIN_DIR: &str = "bin";
 const PATH_KEY: &str = "PATH";
 const BUN_INSTALL_KEY: &str = "BUN_INSTALL";
+#[cfg(unix)]
 const EXECUTE_BITS: u32 = 0o111;
 
+#[cfg(unix)]
 fn is_executable_file(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     std::fs::metadata(path)
         .map(|meta| meta.is_file() && meta.permissions().mode() & EXECUTE_BITS != 0)
         .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    path.is_file()
 }
 
 fn bun_on_path(env: &HashMap<String, String>) -> Option<PathBuf> {
@@ -96,7 +103,7 @@ pub fn with_path_prefix(
     env
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
