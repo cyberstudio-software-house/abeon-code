@@ -6,7 +6,8 @@ use tauri::{AppHandle, Manager};
 use crate::commands::pty::shell_single_quote;
 use crate::domain::supervisor::SupervisorLevel;
 use crate::error::{AppError, AppResult};
-use crate::supervisor::claude_md;
+use crate::supervisor::claude_md::{self, DiscordContext};
+use crate::supervisor::discord::{PLUGIN_ID, PLUGIN_TOOLS};
 
 const SUPERVISOR_DIR: &str = "supervisor";
 const SESSION_HOOKS_FILE: &str = "session-hooks.json";
@@ -34,7 +35,7 @@ const ALLOWED_AFTER_READ: [&str; 4] = [
     "Edit(./preferences.md)",
     "Write(./preferences.md)",
 ];
-const DENIED_TOOLS: [&str; 18] = [
+const DENIED_TOOLS: [&str; 19] = [
     "Bash",
     "WebFetch",
     "WebSearch",
@@ -53,6 +54,7 @@ const DENIED_TOOLS: [&str; 18] = [
     "Read(~/.git-credentials)",
     "Read(~/.config/gh/**)",
     "Read(~/.claude/channels/**)",
+    "mcp__bandzior",
 ];
 const PREFERENCES_TEMPLATE: &str = "# Preferencje użytkownika
 
@@ -134,12 +136,18 @@ fn user_enabled_plugins(user_settings: &Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn supervisor_settings(exe: &Path, read_roots: &[PathBuf], user_plugins: &[String]) -> Value {
+fn supervisor_settings(
+    exe: &Path,
+    read_roots: &[PathBuf],
+    user_plugins: &[String],
+    discord: Option<&DiscordContext>,
+) -> Value {
     let allow: Vec<String> = ALLOWED_TOOLS
         .iter()
         .map(|rule| rule.to_string())
         .chain(read_roots.iter().filter_map(|root| read_rule(root)))
         .chain(ALLOWED_AFTER_READ.iter().map(|rule| rule.to_string()))
+        .chain(discord.map(|_| PLUGIN_TOOLS.to_string()))
         .collect();
     let command = hook_command(exe, SUPERVISOR_CHANNEL);
     let mut settings = json!({
@@ -151,13 +159,12 @@ fn supervisor_settings(exe: &Path, read_roots: &[PathBuf], user_plugins: &[Strin
     for flag in DISABLED_USER_FLAGS {
         settings[flag] = json!(false);
     }
-    if !user_plugins.is_empty() {
-        let disabled: serde_json::Map<String, Value> = user_plugins
-            .iter()
-            .map(|key| (key.clone(), json!(false)))
-            .collect();
-        settings[ENABLED_PLUGINS_KEY] = Value::Object(disabled);
-    }
+    let mut plugins: serde_json::Map<String, Value> = user_plugins
+        .iter()
+        .map(|key| (key.clone(), json!(false)))
+        .collect();
+    plugins.insert(PLUGIN_ID.to_string(), json!(discord.is_some()));
+    settings[ENABLED_PLUGINS_KEY] = Value::Object(plugins);
     settings
 }
 
@@ -203,6 +210,7 @@ pub fn write_supervisor_workdir(
     level: SupervisorLevel,
     read_roots: &[PathBuf],
     claude_home: &Path,
+    discord: Option<&DiscordContext>,
 ) -> std::io::Result<()> {
     let settings_dir = dir.join(CLAUDE_SETTINGS_DIR);
     std::fs::create_dir_all(&settings_dir)?;
@@ -213,7 +221,7 @@ pub fn write_supervisor_workdir(
     let user_plugins = user_enabled_plugins(&claude_home.join(CLAUDE_SETTINGS_FILE));
     write_json(
         &settings_dir.join(CLAUDE_SETTINGS_FILE),
-        &supervisor_settings(exe, read_roots, &user_plugins),
+        &supervisor_settings(exe, read_roots, &user_plugins, discord),
     )
 }
 
@@ -323,12 +331,21 @@ mod tests {
 
     const MISSING_CLAUDE_HOME: &str = "/nonexistent/abeoncode-test/.claude";
 
-    fn write_workdir_with(dir: &Path, level: SupervisorLevel, claude_home: &Path) {
+    fn write_workdir_discord(
+        dir: &Path,
+        level: SupervisorLevel,
+        claude_home: &Path,
+        discord: Option<&DiscordContext>,
+    ) {
         let roots = [
             PathBuf::from("/home/u/projects/app"),
             PathBuf::from("/home/u/.claude/projects"),
         ];
-        write_supervisor_workdir(dir, Path::new(EXE), level, &roots, claude_home).unwrap();
+        write_supervisor_workdir(dir, Path::new(EXE), level, &roots, claude_home, discord).unwrap();
+    }
+
+    fn write_workdir_with(dir: &Path, level: SupervisorLevel, claude_home: &Path) {
+        write_workdir_discord(dir, level, claude_home, None);
     }
 
     fn write_workdir(dir: &Path, level: SupervisorLevel) {
@@ -380,6 +397,7 @@ mod tests {
                 "Read(~/.git-credentials)",
                 "Read(~/.config/gh/**)",
                 "Read(~/.claude/channels/**)",
+                "mcp__bandzior",
             ]
         );
         let hooks = settings["hooks"].as_object().unwrap();
@@ -474,15 +492,62 @@ mod tests {
         for flag in DISABLED_FLAGS {
             assert_eq!(settings[flag], false, "{flag}");
         }
+
+        let with_discord = dir.path().join("with-discord");
+        let context = DiscordContext { chat_id: None };
+        write_workdir_discord(
+            &with_discord,
+            SupervisorLevel::Assistant,
+            &claude_home,
+            Some(&context),
+        );
+        assert_eq!(
+            workdir_settings(&with_discord)["enabledPlugins"],
+            serde_json::json!({
+                "superpowers@claude-plugins-official": false,
+                "discord@claude-plugins-official": true,
+                "explanatory-output-style@claude-plugins-official": false
+            })
+        );
     }
 
     #[test]
-    fn missing_or_invalid_user_settings_add_no_plugin_overrides() {
+    fn discord_workdir_enables_the_plugin_and_its_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let context = DiscordContext {
+            chat_id: Some("156".to_string()),
+        };
+        write_workdir_discord(
+            dir.path(),
+            SupervisorLevel::Assistant,
+            Path::new(MISSING_CLAUDE_HOME),
+            Some(&context),
+        );
+        let settings = workdir_settings(dir.path());
+        assert_eq!(settings["enabledPlugins"][PLUGIN_ID], true);
+        assert!(strings(&settings["permissions"]["allow"]).contains(&PLUGIN_TOOLS));
+        assert!(settings["permissions"].get("ask").is_none());
+    }
+
+    #[test]
+    fn workdir_without_discord_keeps_the_plugin_off() {
+        let dir = tempfile::tempdir().unwrap();
+        write_workdir(dir.path(), SupervisorLevel::Assistant);
+        let settings = workdir_settings(dir.path());
+        assert_eq!(settings["enabledPlugins"][PLUGIN_ID], false);
+        assert!(!strings(&settings["permissions"]["allow"]).contains(&PLUGIN_TOOLS));
+    }
+
+    #[test]
+    fn missing_or_invalid_user_settings_only_switch_the_discord_plugin_off() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("missing");
         write_workdir(&missing, SupervisorLevel::Assistant);
         let settings = workdir_settings(&missing);
-        assert!(settings.get("enabledPlugins").is_none());
+        assert_eq!(
+            settings["enabledPlugins"],
+            serde_json::json!({ PLUGIN_ID: false })
+        );
         for flag in DISABLED_FLAGS {
             assert_eq!(settings[flag], false, "{flag}");
         }
@@ -500,8 +565,9 @@ mod tests {
             std::fs::write(claude_home.join("settings.json"), body).unwrap();
             let workdir = dir.path().join(name).join("supervisor");
             write_workdir_with(&workdir, SupervisorLevel::Assistant, &claude_home);
-            assert!(
-                workdir_settings(&workdir).get("enabledPlugins").is_none(),
+            assert_eq!(
+                workdir_settings(&workdir)["enabledPlugins"],
+                serde_json::json!({ PLUGIN_ID: false }),
                 "{name}"
             );
         }

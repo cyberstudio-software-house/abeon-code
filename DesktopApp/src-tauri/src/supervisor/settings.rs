@@ -5,6 +5,9 @@ use std::time::Duration;
 
 const DEFAULT_GRACE_SECONDS: u64 = 60;
 const DEFAULT_PRESENCE_MINUTES: u64 = 5;
+const DISCORD_ENABLED_KEY: &str = "supervisorDiscordEnabled";
+const DISCORD_MUTE_KEY: &str = "supervisorDiscordMuteWhenPresent";
+pub const DISCORD_CHAT_ID_KEY: &str = "supervisorDiscordChatId";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SupervisorSettings {
@@ -13,6 +16,9 @@ pub struct SupervisorSettings {
     pub presence: Duration,
     pub model_id: Option<String>,
     pub extra_rules: Vec<String>,
+    pub discord_enabled: bool,
+    pub discord_mute_when_present: bool,
+    pub discord_chat_id: Option<String>,
 }
 
 impl Default for SupervisorSettings {
@@ -23,6 +29,9 @@ impl Default for SupervisorSettings {
             presence: Duration::from_secs(DEFAULT_PRESENCE_MINUTES * 60),
             model_id: None,
             extra_rules: Vec::new(),
+            discord_enabled: false,
+            discord_mute_when_present: true,
+            discord_chat_id: None,
         }
     }
 }
@@ -60,12 +69,20 @@ impl SupervisorSettings {
         let extra_rules = read(conn, "supervisorExtraRules")
             .and_then(|value| serde_json::from_str::<Vec<String>>(&value).ok())
             .unwrap_or_default();
+        let discord_enabled = read(conn, DISCORD_ENABLED_KEY).as_deref() == Some("true");
+        let discord_mute_when_present = read(conn, DISCORD_MUTE_KEY).as_deref() != Some("false");
+        let discord_chat_id = read(conn, DISCORD_CHAT_ID_KEY)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
         SupervisorSettings {
             level,
             grace: Duration::from_secs(grace),
             presence: Duration::from_secs(presence * 60),
             model_id,
             extra_rules,
+            discord_enabled,
+            discord_mute_when_present,
+            discord_chat_id,
         }
     }
 }
@@ -95,6 +112,24 @@ mod tests {
         assert_eq!(settings.presence, Duration::from_secs(300));
         assert_eq!(settings.model_id, None);
         assert!(settings.extra_rules.is_empty());
+        assert!(!settings.discord_enabled);
+        assert!(settings.discord_mute_when_present);
+        assert_eq!(settings.discord_chat_id, None);
+    }
+
+    #[test]
+    fn discord_keys_parse() {
+        let pool = pool();
+        let conn = pool.get().unwrap();
+        settings_repo::set(&conn, "supervisorDiscordEnabled", "true").unwrap();
+        settings_repo::set(&conn, "supervisorDiscordMuteWhenPresent", "false").unwrap();
+        settings_repo::set(&conn, DISCORD_CHAT_ID_KEY, " 156 ").unwrap();
+        let settings = SupervisorSettings::load(&conn);
+        assert!(settings.discord_enabled);
+        assert!(!settings.discord_mute_when_present);
+        assert_eq!(settings.discord_chat_id.as_deref(), Some("156"));
+        settings_repo::set(&conn, DISCORD_CHAT_ID_KEY, "").unwrap();
+        assert_eq!(SupervisorSettings::load(&conn).discord_chat_id, None);
     }
 
     #[test]

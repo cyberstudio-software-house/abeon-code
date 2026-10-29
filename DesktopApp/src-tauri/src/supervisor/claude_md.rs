@@ -3,6 +3,11 @@ use std::path::Path;
 use crate::domain::supervisor::SupervisorLevel;
 use crate::supervisor::core::ANSWER_PREFIX;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiscordContext {
+    pub chat_id: Option<String>,
+}
+
 pub const WAKE_TEXT: &str = "[abeon] nowe zdarzenia";
 
 const OFF_SEMANTICS: &str = "\

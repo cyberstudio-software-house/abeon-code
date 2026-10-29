@@ -74,6 +74,7 @@ impl FakeEffects {
                 presence: Duration::from_secs(300),
                 model_id: None,
                 extra_rules: Vec::new(),
+                ..SupervisorSettings::default()
             }),
             sessions: Mutex::new(sessions),
             live_ptys: Mutex::new(HashSet::from(["pty-s1".to_string(), "pty-s2".to_string()])),

@@ -73,6 +73,7 @@ pub fn build_supervisor_command(
     session: SupervisorSessionArg,
     model: Option<&str>,
     mcp_json: &Path,
+    discord_channel: bool,
 ) -> String {
     let mut cmd = String::from("claude");
     match session {
@@ -87,7 +88,14 @@ pub fn build_supervisor_command(
         " --mcp-config {}",
         shell_single_quote(&mcp_json.to_string_lossy())
     ));
-    cmd.push_str(" --strict-mcp-config");
+    if discord_channel {
+        cmd.push_str(&format!(
+            " --channels {}",
+            crate::supervisor::discord::CHANNEL_ARG
+        ));
+    } else {
+        cmd.push_str(" --strict-mcp-config");
+    }
     cmd
 }
 
@@ -201,7 +209,7 @@ fn write_workdir(
     let dir = workdir::supervisor_dir(app).map_err(|error| error.to_string())?;
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let claude_home = claude_home().ok_or_else(|| ERROR_NO_HOME.to_string())?;
-    workdir::write_supervisor_workdir(&dir, &exe, level, &read_roots(conn), &claude_home)
+    workdir::write_supervisor_workdir(&dir, &exe, level, &read_roots(conn), &claude_home, None)
         .map_err(|error| error.to_string())?;
     Ok(dir)
 }
@@ -232,6 +240,7 @@ fn prepare_launch(app: &AppHandle) -> Result<Option<Launch>, String> {
         session.clone(),
         model.as_deref(),
         &dir.join(workdir::MCP_CONFIG_FILE),
+        false,
     );
     let shell = resolve_shell(&conn);
     drop(conn);
@@ -607,6 +616,7 @@ mod tests {
             fresh(),
             Some("claude-opus-5-5"),
             Path::new("/data/supervisor/mcp.json"),
+            false,
         );
         assert!(cmd.contains("--permission-mode dontAsk"));
         assert!(cmd.contains("--strict-mcp-config"));
@@ -620,6 +630,7 @@ mod tests {
                 fresh(),
                 Some("claude-opus-4-8[1m]"),
                 &Path::new(WORKDIR).join("mcp.json"),
+                false,
             ),
             format!(
                 "claude --session-id {ID} --model 'claude-opus-4-8[1m]' --permission-mode dontAsk \
@@ -630,6 +641,7 @@ mod tests {
             SupervisorSessionArg::Resume(ID.to_string()),
             None,
             Path::new("/w/mcp.json"),
+            false,
         );
         assert_eq!(
             resumed,
@@ -642,6 +654,22 @@ mod tests {
         assert!(resumed.ends_with(" --strict-mcp-config"));
     }
 
+    #[test]
+    fn discord_command_drops_strict_mcp_and_adds_the_channel() {
+        assert_eq!(
+            build_supervisor_command(
+                fresh(),
+                Some("claude-opus-5-5"),
+                Path::new("/w/mcp.json"),
+                true,
+            ),
+            format!(
+                "claude --session-id {ID} --model 'claude-opus-5-5' --permission-mode dontAsk \
+                 --mcp-config '/w/mcp.json' --channels plugin:discord@claude-plugins-official"
+            )
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn supervisor_command_survives_the_shell() {
@@ -649,6 +677,7 @@ mod tests {
             fresh(),
             Some("claude-opus-4-8[1m]"),
             Path::new("/tmp/it's $(id)/mcp.json"),
+            false,
         );
         let arguments = cmd.strip_prefix("claude").unwrap();
         let output = std::process::Command::new("bash")

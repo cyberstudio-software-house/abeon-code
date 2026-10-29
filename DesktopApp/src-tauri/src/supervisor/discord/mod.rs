@@ -1,5 +1,6 @@
 pub mod client;
 pub mod files;
+pub mod preflight;
 pub mod replies;
 
 pub const PLUGIN_ID: &str = "discord@claude-plugins-official";
