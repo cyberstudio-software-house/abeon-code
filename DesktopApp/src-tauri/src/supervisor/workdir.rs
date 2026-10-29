@@ -34,13 +34,16 @@ const ALLOWED_AFTER_READ: [&str; 4] = [
     "Edit(./preferences.md)",
     "Write(./preferences.md)",
 ];
-const DENIED_TOOLS: [&str; 15] = [
+const DENIED_TOOLS: [&str; 18] = [
     "Bash",
     "WebFetch",
     "WebSearch",
     "NotebookEdit",
     "Task",
     "Agent",
+    "AskUserQuestion",
+    "EnterPlanMode",
+    "ExitPlanMode",
     "Read(~/.ssh/**)",
     "Read(~/.aws/**)",
     "Read(~/.gnupg/**)",
@@ -365,6 +368,9 @@ mod tests {
                 "NotebookEdit",
                 "Task",
                 "Agent",
+                "AskUserQuestion",
+                "EnterPlanMode",
+                "ExitPlanMode",
                 "Read(~/.ssh/**)",
                 "Read(~/.aws/**)",
                 "Read(~/.gnupg/**)",

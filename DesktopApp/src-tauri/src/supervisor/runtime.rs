@@ -12,6 +12,7 @@ use crate::commands::pty::MAX_INITIAL_PROMPT_BYTES;
 use crate::commands::sessions::{
     active_sessions_snapshot, history_blocks_for_session, locate_session,
 };
+use crate::db::projects_repo;
 use crate::db::supervisor_decisions_repo::{self, NewDecision};
 use crate::db::DbPool;
 use crate::domain::supervisor::{SupervisorLevel, SupervisorSnapshot};
@@ -55,6 +56,8 @@ const SESSION_START_EVENT: &str = "SessionStart";
 const ERROR_NOT_A_DIRECTORY: &str =
     "Ścieżka projektu musi być bezwzględną ścieżką istniejącego katalogu";
 const ERROR_PROMPT_SIZE: &str = "Polecenie musi być niepuste, bez znaku NUL i mieć najwyżej";
+const ERROR_UNREGISTERED_PROJECT: &str =
+    "Sesję można otworzyć tylko w projekcie zarejestrowanym w AbeonCode";
 
 fn session_label(project_name: &str, title: &str) -> String {
     format!("{project_name} · {title}")
@@ -77,6 +80,13 @@ fn neutralize_controls(text: &str) -> String {
             }
         })
         .collect()
+}
+
+fn is_registered_project(registered: &[String], project_path: &str) -> bool {
+    let wanted = Path::new(project_path);
+    registered
+        .iter()
+        .any(|path| same_directory(Path::new(path), wanted))
 }
 
 fn typed_text(text: &str) -> String {
@@ -338,6 +348,17 @@ impl Effects for AppEffects {
 
     fn open_session(&self, project_path: &str, prompt: &str) -> Result<(), String> {
         check_open_request(project_path, prompt)?;
+        let registered: Vec<String> = self
+            .db
+            .get()
+            .map_err(|error| error.to_string())
+            .and_then(|conn| projects_repo::list(&conn).map_err(|error| error.to_string()))?
+            .into_iter()
+            .map(|project| project.path)
+            .collect();
+        if !is_registered_project(&registered, project_path) {
+            return Err(format!("{ERROR_UNREGISTERED_PROJECT}: {project_path}"));
+        }
         crate::cli::dispatch_open(
             &self.app,
             OpenRequest {
@@ -664,6 +685,37 @@ mod tests {
             neutralize_controls("zażółć gęślą jaźń"),
             "zażółć gęślą jaźń"
         );
+    }
+
+    #[test]
+    fn only_registered_project_directories_can_be_opened() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("app");
+        let nested = project.join("src");
+        let other = root.path().join("other");
+        for dir in [&nested, &other] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let registered = vec![project.to_string_lossy().to_string()];
+        let path = |dir: &Path| dir.to_string_lossy().to_string();
+        assert!(is_registered_project(&registered, &path(&project)));
+        assert!(is_registered_project(
+            &registered,
+            &format!("{}/", path(&project))
+        ));
+        assert!(is_registered_project(
+            &registered,
+            &path(&nested.join(".."))
+        ));
+        assert!(!is_registered_project(&registered, &path(&nested)));
+        assert!(!is_registered_project(&registered, &path(&other)));
+        assert!(!is_registered_project(&[], &path(&project)));
+        #[cfg(unix)]
+        {
+            let link = root.path().join("link");
+            std::os::unix::fs::symlink(&project, &link).unwrap();
+            assert!(is_registered_project(&registered, &path(&link)));
+        }
     }
 
     #[test]

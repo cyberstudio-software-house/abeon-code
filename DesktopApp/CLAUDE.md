@@ -248,8 +248,9 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   (created once, the supervisor may edit it), `mcp.json`, `.claude/settings.json`. The process runs
   with `--permission-mode dontAsk --strict-mcp-config` and never skip-permissions; settings carry no
   `ask` key, allow `mcp__abeoncode__*` and `Read(//<abs root>/**)` (the absolute `//` syntax), deny
-  Bash/Web/Task/Agent and credential directories, disable the user's plugins, and turn Remote Control
-  and push notifications off.
+  Bash/Web/Task/Agent, `AskUserQuestion` and the plan-mode tools (the wake-up `\r` would answer such
+  a menu blindly) and credential directories, disable the user's plugins, and turn Remote Control
+  and push notifications off. `open_session` accepts only paths of registered projects.
 - **Readiness**: only the supervisor's own `SessionStart` hook with a matching session id marks it
   ready. Nothing is typed into its PTY before that, and queued events survive.
 - **Wake-up**: plain text `[abeon] nowe zdarzenia`, written only after a 5 s window with no keystrokes
