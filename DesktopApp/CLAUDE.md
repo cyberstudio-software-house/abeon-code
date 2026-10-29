@@ -211,6 +211,58 @@ dropped the app because its main thread stopped reading events (see the main-thr
 
 Pattern when adding a new global shortcut that may conflict with xterm: register on `document` in `useEffect` with `{ capture: true }`, then `preventDefault()` + `stopPropagation()`.
 
+## Supervisor agent
+
+A background Claude session ("Agent sterujący") that answers the other sessions' `AskUserQuestion`
+menus and end-of-turn questions, and gates production actions. Levels: Off, Relay (only forwards),
+Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent-design.md`.
+
+- **Module map** (`src-tauri/src/supervisor/`): `settings`, `guard` (production rules, redaction),
+  `provenance` (who authored a prompt), `approvals`, `presence`, `hook_io`, `transcript`, `core`
+  (state machine; `core/production.rs` guard flow, `core/operations.rs`), `effects` (side-effect
+  trait), `events`, `tools` + `mcp` (the `abeoncode` MCP server the supervisor calls), `ipc`,
+  `entry` (`hook`/`mcp` subcommands), `runtime` (wiring, tick, wake-up, attention filter),
+  `workdir`, `process` (PTY lifecycle, backoff), `claude_md`; `test_support` is test-only. Commands
+  in `commands/supervisor.rs`. Frontend: `components/supervisor/*`, `lib/supervisorProcess.ts`,
+  `lib/usePresenceReporter.ts`, `lib/useSupervisorSnapshot.ts`, `store/supervisorSlice.ts`.
+- **Socket**: `$XDG_RUNTIME_DIR/abeoncode/supervisor.sock` (fallback
+  `<data_local_dir>/pl.cyberstudio.abeoncode/run/supervisor.sock`), dir `0700`, socket `0600`. A live
+  socket is never stolen; a dead one is unlinked; a second instance runs inert. `ipc`, `entry` and
+  `mcp` are `#[cfg(unix)]`. `abeoncode hook <channel>` and `abeoncode mcp` are handled in
+  `run()` before `diagnostics::init()`; with no server a hook prints nothing and exits 0.
+- **Per-session hooks**: `<app_data>/supervisor/session-hooks.json` is passed via `--settings` only to
+  AbeonCode-spawned Claude sessions, and only while the level is not Off. It merges with the user's
+  global hooks. Stop 15 s, UserPromptSubmit 15 s, PreToolUse `AskUserQuestion` 600 s, PreToolUse
+  `Bash|mcp__.*` 15 s. The command embeds `current_exe()`; the file is rewritten on every start.
+- **Supervisor workdir** (`<app_data>/supervisor`): `CLAUDE.md` (regenerated), `preferences.md`
+  (created once, the supervisor may edit it), `mcp.json`, `.claude/settings.json`. The process runs
+  with `--permission-mode dontAsk --strict-mcp-config` and never skip-permissions; settings carry no
+  `ask` key, allow `mcp__abeoncode__*` and `Read(//<abs root>/**)` (the absolute `//` syntax), deny
+  Bash/Web/Task/Agent and credential directories, disable the user's plugins, and turn Remote Control
+  and push notifications off.
+- **Readiness**: only the supervisor's own `SessionStart` hook with a matching session id marks it
+  ready. Nothing is typed into its PTY before that, and queued events survive.
+- **Wake-up**: plain text `[abeon] nowe zdarzenia`, written only after a 5 s window with no keystrokes
+  in the supervisor PTY. Text and `\r` are two writes ~250 ms apart; the answer prefix for sessions
+  is `[agent sterujący] `.
+- **Provenance** (`UserPromptSubmit`): typed injection with no keystroke since (or exact text) ->
+  Supervisor; prompt the app passed on the CLI -> Agent; Enter within 10 s (or unknown PTY) -> Human;
+  otherwise Agent. `pty_write` feeds `input_activity`, which ignores terminal reports (focus, cursor
+  position, device status) so they never count as typing.
+- **Guard** (`PreToolUse` on `Bash|mcp__.*`): applies whenever the level is not Off and the origin is
+  not Human. A blocked action creates an approval (expires after 24 h) shown in the panel's "Do
+  decyzji" tab; the user approves in the app only. An approval mints a one-shot token for the exact
+  action fingerprint (cwd + normalised command, or tool + canonical args), valid 30 min, and the
+  app then types an approval notice into the session so it retries (a rejection notice on reject). A Human prompt revokes the session's tokens.
+  Confirm-style bandzior tools are guarded only when `confirm` is truthy (previews pass). Detail
+  shown to the user is redacted.
+- **Attention filter**: the supervisor's own `Notification` markers are dropped by workdir or session
+  id (`runtime::attention_filter`), so it never raises a sidebar badge or desktop notification.
+- **Decision log**: table `supervisor_decisions` (migration 006), pruned to 30 days at start. Kinds:
+  `answered`, `relayed`, `escalated`, `guard_blocked`, `approved`, `rejected`, `session_opened`,
+  `released_to_user`. Read it in the panel's "Dziennik" tab or with
+  `sqlite3 ~/.config/AbeonCode/abeoncode.db "select datetime(created_at/1000,'unixepoch'), kind, decision from supervisor_decisions order by created_at desc limit 20"`.
+
 ## Gotchas
 
 - **Heavy Tauri commands must be `#[tauri::command(async)]`** — a plain `#[tauri::command] fn` runs
@@ -225,6 +277,7 @@ Pattern when adding a new global shortcut that may conflict with xterm: register
 - **Content layers must also keep their relative order** — `computePaneLayers` sorts them by id.
   React moves reordered keyed siblings with `insertBefore`, which detaches the node for a moment and
   resets xterm's scroll position and focus.
+- **Never type into the supervisor PTY before it is ready** — Claude's workspace-trust dialog defaults to "No, exit", so a stray `\r` (or the wake-up text) kills the supervisor session. Readiness comes only from its `SessionStart` hook.
 - **Middle-click on tabs needs `e.preventDefault()` in `onMouseDown`** — otherwise webview activates autoscroll cursor.
 - **xterm input is base64-encoded** over IPC (`pty_write` / `pty:*:output`). The encoding/decoding is centralized in `lib/tauri.ts` — components never deal with base64 directly.
 - **PTY output during hidden tabs is buffered** in `TerminalView.pendingWrites` and flushed on `visible` change. Don't bypass this — writing to an un-fitted xterm corrupts layout.
