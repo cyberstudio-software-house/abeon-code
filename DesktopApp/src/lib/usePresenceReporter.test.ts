@@ -92,10 +92,76 @@ describe('usePresenceReporter', () => {
     expect(report).toHaveBeenCalledWith(null);
   });
 
-  it('does not report a focused-session change while the window is not focused', () => {
+  it('never reports a session id while the window is not focused', () => {
     hasFocus.mockReturnValue(false);
     renderHook(() => usePresenceReporter());
     act(() => { useStore.setState({ activeAgentPtyId: 'pty-1' }); });
+    act(() => { pressKey(); });
+    expect(report).not.toHaveBeenCalledWith('s1');
+    expect(report).toHaveBeenCalledWith(null);
+  });
+
+  it('reports null immediately on blur even inside the throttle window', () => {
+    useStore.setState({ activeAgentPtyId: 'pty-1' });
+    renderHook(() => usePresenceReporter());
+    act(() => { pressKey(); });
+    report.mockClear();
+    act(() => { vi.advanceTimersByTime(1_000); });
+    hasFocus.mockReturnValue(false);
+    act(() => { window.dispatchEvent(new Event('blur')); });
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(null);
+  });
+
+  it('reports the session again when focus returns right after a blur', () => {
+    useStore.setState({ activeAgentPtyId: 'pty-1' });
+    renderHook(() => usePresenceReporter());
+    act(() => { pressKey(); });
+    hasFocus.mockReturnValue(false);
+    act(() => { window.dispatchEvent(new Event('blur')); });
+    hasFocus.mockReturnValue(true);
+    report.mockClear();
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(report).toHaveBeenCalledWith('s1');
+  });
+
+  it('reports null after 300 ms when the focused session is left', () => {
+    useStore.setState({ activeAgentPtyId: 'pty-1' });
+    renderHook(() => usePresenceReporter());
+    act(() => { useStore.setState({ activeAgentPtyId: null }); });
+    expect(report).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(299); });
+    expect(report).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith(null);
+  });
+
+  it('reports only the new session when a tab switch blips through null', () => {
+    useStore.setState({ activeAgentPtyId: 'pty-1' });
+    renderHook(() => usePresenceReporter());
+    act(() => { useStore.setState({ activeAgentPtyId: null }); });
+    act(() => { vi.advanceTimersByTime(100); });
+    act(() => { useStore.setState({ activeAgentPtyId: 'pty-2' }); });
+    act(() => { vi.advanceTimersByTime(1_000); });
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith('s2');
+  });
+
+  it('reports a direct switch to another session immediately', () => {
+    useStore.setState({ activeAgentPtyId: 'pty-1' });
+    renderHook(() => usePresenceReporter());
+    act(() => { useStore.setState({ activeAgentPtyId: 'pty-2' }); });
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith('s2');
+  });
+
+  it('drops a pending null report on unmount', () => {
+    useStore.setState({ activeAgentPtyId: 'pty-1' });
+    const { unmount } = renderHook(() => usePresenceReporter());
+    act(() => { useStore.setState({ activeAgentPtyId: null }); });
+    unmount();
+    act(() => { vi.advanceTimersByTime(1_000); });
     expect(report).not.toHaveBeenCalled();
   });
 

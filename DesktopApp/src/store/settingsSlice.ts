@@ -229,8 +229,14 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
     });
   },
   setSupervisorLevel: (supervisorLevel) => set({ supervisorLevel }),
-  setSupervisorGraceSeconds: (seconds) => set({ supervisorGraceSeconds: clampSupervisorGrace(seconds) }),
-  setSupervisorPresenceMinutes: (minutes) => set({ supervisorPresenceMinutes: clampSupervisorPresence(minutes) }),
+  setSupervisorGraceSeconds: (seconds) => {
+    if (!Number.isFinite(seconds)) return;
+    set({ supervisorGraceSeconds: clampSupervisorGrace(seconds) });
+  },
+  setSupervisorPresenceMinutes: (minutes) => {
+    if (!Number.isFinite(minutes)) return;
+    set({ supervisorPresenceMinutes: clampSupervisorPresence(minutes) });
+  },
   setSupervisorModelId: (supervisorModelId) => set({ supervisorModelId }),
   setSupervisorExtraRules: (rules) => set({
     supervisorExtraRules: rules.map(rule => rule.trim()).filter(rule => rule !== ''),

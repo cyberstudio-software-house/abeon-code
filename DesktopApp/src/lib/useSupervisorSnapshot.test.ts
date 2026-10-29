@@ -62,10 +62,47 @@ describe('useSupervisorSnapshot', () => {
     expect(unlisten).toHaveBeenCalledTimes(1);
   });
 
-  it('survives a failing backend', async () => {
+  it('registers the listener before it asks for the initial snapshot', async () => {
+    const order: string[] = [];
+    vi.spyOn(tauri, 'onSupervisorSnapshot').mockImplementation(async (cb) => {
+      order.push('listen');
+      emit = cb;
+      return unlisten;
+    });
+    vi.spyOn(tauri, 'supervisorSnapshot').mockImplementation(async () => {
+      order.push('snapshot');
+      return snapshot();
+    });
+    renderHook(() => useSupervisorSnapshot());
+    await waitFor(() => expect(order).toEqual(['listen', 'snapshot']));
+  });
+
+  it('releases a listener that registers after unmount', async () => {
+    let finishRegistration: (fn: () => void) => void = () => {};
+    vi.spyOn(tauri, 'onSupervisorSnapshot').mockImplementation(
+      () => new Promise<() => void>(resolve => { finishRegistration = resolve; }),
+    );
+    const initial = vi.spyOn(tauri, 'supervisorSnapshot').mockResolvedValue(snapshot());
+    const { unmount } = renderHook(() => useSupervisorSnapshot());
+    unmount();
+    await act(async () => { finishRegistration(unlisten); });
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(initial).not.toHaveBeenCalled();
+  });
+
+  it('logs a failing backend instead of swallowing it', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(tauri, 'supervisorSnapshot').mockRejectedValue(new Error('no backend'));
     renderHook(() => useSupervisorSnapshot());
-    await act(async () => {});
+    await waitFor(() => expect(logged).toHaveBeenCalled());
     expect(useStore.getState().supervisor).toBeNull();
+  });
+
+  it('logs a failing listener registration', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(tauri, 'onSupervisorSnapshot').mockRejectedValue(new Error('no events'));
+    vi.spyOn(tauri, 'supervisorSnapshot').mockResolvedValue(snapshot());
+    renderHook(() => useSupervisorSnapshot());
+    await waitFor(() => expect(logged).toHaveBeenCalled());
   });
 });

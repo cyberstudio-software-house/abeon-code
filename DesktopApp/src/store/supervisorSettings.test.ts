@@ -38,6 +38,18 @@ describe('supervisor settings persistence', () => {
     expect(s.supervisorExtraRules).toEqual([]);
   });
 
+  it('ignores non-finite grace and presence values', async () => {
+    const { useStore } = await import('./index');
+    useStore.getState().setSupervisorGraceSeconds(90);
+    useStore.getState().setSupervisorPresenceMinutes(10);
+    for (const bad of [NaN, Infinity, -Infinity]) {
+      useStore.getState().setSupervisorGraceSeconds(bad);
+      useStore.getState().setSupervisorPresenceMinutes(bad);
+    }
+    expect(useStore.getState().supervisorGraceSeconds).toBe(90);
+    expect(useStore.getState().supervisorPresenceMinutes).toBe(10);
+  });
+
   it('serializes the five keys as the backend loader expects', async () => {
     const { useStore } = await import('./index');
     useStore.getState().setSupervisorLevel('assistant');

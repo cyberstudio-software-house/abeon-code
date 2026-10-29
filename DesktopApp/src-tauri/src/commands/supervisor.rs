@@ -67,14 +67,14 @@ pub fn supervisor_answer_card(
         .map_err(AppError::InvalidInput)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn supervisor_release_card(state: State<AppState>, question_id: String) -> AppResult<()> {
     require_core(&state)?
         .release_card(&question_id)
         .map_err(AppError::InvalidInput)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn supervisor_resolve_approval(
     state: State<AppState>,
     approval_id: String,
