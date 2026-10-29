@@ -116,6 +116,17 @@ mod tests {
     }
 
     #[test]
+    fn parses_stop_hook_active() {
+        let active: HookInput = serde_json::from_str(
+            r#"{"session_id":"s","hook_event_name":"Stop","stop_hook_active":true,"pty_id":"forged"}"#,
+        )
+        .unwrap();
+        assert_eq!(active.stop_hook_active, Some(true));
+        assert_eq!(active.pty_id, None);
+        assert_eq!(spike_input().stop_hook_active, None);
+    }
+
+    #[test]
     fn menu_questions_extracts_labels() {
         let input = spike_input();
         let questions = menu_questions(input.tool_input.as_ref().unwrap());

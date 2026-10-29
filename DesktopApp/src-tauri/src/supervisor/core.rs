@@ -745,7 +745,7 @@ impl SupervisorCore {
             self.track_terminal(&input.session_id, pty_id);
         }
         match input.hook_event_name.as_str() {
-            "Stop" => {
+            "Stop" if input.stop_hook_active != Some(true) => {
                 self.on_stop(&input);
                 HookReply::Empty
             }
@@ -1277,6 +1277,27 @@ mod tests {
                 ..
             }]
         ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_fired_by_an_active_stop_hook_is_ignored() {
+        let (_effects, core) = setup();
+        core.set_away(true);
+        let continued = HookInput {
+            stop_hook_active: Some(true),
+            ..stop("s1", "Czy kontynuować?")
+        };
+        assert_eq!(core.on_session_hook(continued).await, HookReply::Empty);
+        assert!(core.take_events().is_empty());
+        assert!(!core.state.lock().at_prompt("s1"));
+        assert!(core.send_to_session("s1", "Dalej").is_err());
+        let settled = HookInput {
+            stop_hook_active: Some(false),
+            ..stop("s1", "Czy kontynuować?")
+        };
+        core.on_session_hook(settled).await;
+        assert_eq!(core.take_events().len(), 1);
+        assert!(core.state.lock().at_prompt("s1"));
     }
 
     #[tokio::test(start_paused = true)]
