@@ -1,5 +1,9 @@
 import { create } from 'zustand';
-import { createSettingsSlice, isSessionRestoreMode, type SessionRestoreMode, type SettingsSlice } from './settingsSlice';
+import {
+  clampSupervisorGrace, clampSupervisorPresence, createSettingsSlice, isSessionRestoreMode, isSupervisorLevel,
+  type SessionRestoreMode, type SettingsSlice,
+} from './settingsSlice';
+import { createSupervisorSlice, type SupervisorSlice } from './supervisorSlice';
 import { createProjectsSlice, type ProjectsSlice } from './projectsSlice';
 import { createSessionsSlice, type SessionsSlice } from './sessionsSlice';
 import { createTabsSlice, type TabsSlice } from './tabsSlice';
@@ -21,11 +25,11 @@ const windowMode = parseWindowMode(window.location.search);
 // Guard on the raw `view` param, not on the parsed mode: a payload we failed to
 // parse must still never write the main window's tabs or settings.
 const isDetachedWindow = new URLSearchParams(window.location.search).has('view');
-import type { Provider } from '../types';
+import type { Provider, SupervisorLevel } from '../types';
 import { isProvider } from '../lib/providers';
 import { migrateClaudeModelSettings } from '../lib/models';
 
-export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice & TerminalDrawersSlice;
+export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice & TerminalDrawersSlice & SupervisorSlice;
 
 export const useStore = create<AppState>()((...a) => ({
   ...createSettingsSlice(...a),
@@ -37,6 +41,7 @@ export const useStore = create<AppState>()((...a) => ({
   ...createClickUpSlice(...a),
   ...createPanesSlice(...a),
   ...createTerminalDrawersSlice(...a),
+  ...createSupervisorSlice(...a),
 }));
 
 const PERSIST_KEY = 'abeoncode.settings';
@@ -74,6 +79,11 @@ type Persisted = {
   opencodeModelId?: string;
   opencodeTitleGenModelId?: string;
   opencodeCustomModels?: string[];
+  supervisorLevel?: SupervisorLevel;
+  supervisorGraceSeconds?: number;
+  supervisorPresenceMinutes?: number;
+  supervisorModelId?: string;
+  supervisorExtraRules?: string[];
 };
 
 const PERSISTED_KEYS = [
@@ -99,6 +109,11 @@ const PERSISTED_KEYS = [
   'opencodeModelId',
   'opencodeTitleGenModelId',
   'opencodeCustomModels',
+  'supervisorLevel',
+  'supervisorGraceSeconds',
+  'supervisorPresenceMinutes',
+  'supervisorModelId',
+  'supervisorExtraRules',
 ] as const satisfies readonly (keyof Persisted)[];
 
 type PersistedKey = typeof PERSISTED_KEYS[number];
@@ -138,6 +153,11 @@ function pickPersistedFields(state: AppState): Persisted {
     opencodeModelId: state.opencodeModelId,
     opencodeTitleGenModelId: state.opencodeTitleGenModelId,
     opencodeCustomModels: state.opencodeCustomModels,
+    supervisorLevel: state.supervisorLevel,
+    supervisorGraceSeconds: state.supervisorGraceSeconds,
+    supervisorPresenceMinutes: state.supervisorPresenceMinutes,
+    supervisorModelId: state.supervisorModelId,
+    supervisorExtraRules: state.supervisorExtraRules,
   };
 }
 
@@ -147,6 +167,8 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'leftWidth':
     case 'rightWidth':
     case 'terminalDrawerSize':
+    case 'supervisorGraceSeconds':
+    case 'supervisorPresenceMinutes':
       return String(value as number);
     case 'skipPermissions':
     case 'remoteBridgeEnabled':
@@ -160,6 +182,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'enabledProviders':
     case 'codexCustomModels':
     case 'opencodeCustomModels':
+    case 'supervisorExtraRules':
       return JSON.stringify(value);
     default:
       return String(value);
@@ -167,7 +190,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
 }
 
 function deserializeValue(key: PersistedKey, raw: string): unknown {
-  if (key === 'defaultModelId' || key === 'titleGenModelId') return raw;
+  if (key === 'defaultModelId' || key === 'titleGenModelId' || key === 'supervisorModelId') return raw;
   if (raw === '') return undefined;
   switch (key) {
     case 'leftWidth':
@@ -176,6 +199,14 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
       return clamp(Number(raw), 220, 480);
     case 'terminalDrawerSize':
       return clamp(Number(raw), DRAWER_MIN_SIZE, DRAWER_MAX_SIZE);
+    case 'supervisorGraceSeconds': {
+      const grace = Number(raw);
+      return Number.isFinite(grace) ? clampSupervisorGrace(grace) : undefined;
+    }
+    case 'supervisorPresenceMinutes': {
+      const minutes = Number(raw);
+      return Number.isFinite(minutes) ? clampSupervisorPresence(minutes) : undefined;
+    }
     case 'skipPermissions':
     case 'remoteBridgeEnabled':
     case 'allowRemoteSpawn':
@@ -188,6 +219,7 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
     case 'enabledProviders':
     case 'codexCustomModels':
     case 'opencodeCustomModels':
+    case 'supervisorExtraRules':
       try { return JSON.parse(raw); } catch { return undefined; }
     default:
       return raw;
@@ -256,6 +288,17 @@ function applyPersistedToState(p: Persisted) {
   if (typeof p.opencodeTitleGenModelId === 'string') patch.opencodeTitleGenModelId = p.opencodeTitleGenModelId;
   if (Array.isArray(p.opencodeCustomModels)) {
     patch.opencodeCustomModels = p.opencodeCustomModels.filter((x): x is string => typeof x === 'string');
+  }
+  if (isSupervisorLevel(p.supervisorLevel)) patch.supervisorLevel = p.supervisorLevel;
+  if (typeof p.supervisorGraceSeconds === 'number' && Number.isFinite(p.supervisorGraceSeconds)) {
+    patch.supervisorGraceSeconds = clampSupervisorGrace(p.supervisorGraceSeconds);
+  }
+  if (typeof p.supervisorPresenceMinutes === 'number' && Number.isFinite(p.supervisorPresenceMinutes)) {
+    patch.supervisorPresenceMinutes = clampSupervisorPresence(p.supervisorPresenceMinutes);
+  }
+  if (typeof p.supervisorModelId === 'string') patch.supervisorModelId = p.supervisorModelId;
+  if (Array.isArray(p.supervisorExtraRules)) {
+    patch.supervisorExtraRules = p.supervisorExtraRules.filter((x): x is string => typeof x === 'string');
   }
   if (Object.keys(patch).length > 0) useStore.setState(patch);
 }

@@ -166,6 +166,13 @@ pub fn run() {
             commands::supervisor::supervisor_snapshot,
             commands::supervisor::supervisor_new_conversation,
             commands::supervisor::supervisor_restart,
+            commands::supervisor::supervisor_report_activity,
+            commands::supervisor::supervisor_set_away,
+            commands::supervisor::supervisor_answer_card,
+            commands::supervisor::supervisor_release_card,
+            commands::supervisor::supervisor_resolve_approval,
+            commands::supervisor::supervisor_dismiss_escalation,
+            commands::supervisor::supervisor_list_decisions,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

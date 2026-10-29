@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DecisionEntry } from '../types';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
 import type { ClickUpSpace } from '../types/ClickUpSpace';
@@ -203,4 +203,19 @@ export const tauri = {
   supervisorSnapshot: () => invoke<SupervisorSnapshot>('supervisor_snapshot'),
   supervisorNewConversation: () => invoke<void>('supervisor_new_conversation'),
   supervisorRestart: () => invoke<void>('supervisor_restart'),
+  supervisorReportActivity: (focusedSessionId: string | null) =>
+    invoke<void>('supervisor_report_activity', { focusedSessionId }),
+  supervisorSetAway: (away: boolean) => invoke<void>('supervisor_set_away', { away }),
+  supervisorAnswerCard: (questionId: string, answers: Record<string, string>) =>
+    invoke<void>('supervisor_answer_card', { questionId, answers }),
+  supervisorReleaseCard: (questionId: string) =>
+    invoke<void>('supervisor_release_card', { questionId }),
+  supervisorResolveApproval: (approvalId: string, approve: boolean) =>
+    invoke<void>('supervisor_resolve_approval', { approvalId, approve }),
+  supervisorDismissEscalation: (id: string) =>
+    invoke<void>('supervisor_dismiss_escalation', { id }),
+  supervisorListDecisions: (limit: number) =>
+    invoke<DecisionEntry[]>('supervisor_list_decisions', { limit }),
+  onSupervisorSnapshot: (cb: (snapshot: SupervisorSnapshot) => void): Promise<UnlistenFn> =>
+    listen<SupervisorSnapshot>('supervisor:snapshot', e => cb(e.payload)),
 };

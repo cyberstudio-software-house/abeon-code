@@ -13,6 +13,8 @@ import { formatWindowTitle } from '../../lib/windowTitle';
 import { isTabLiveProcess } from '../../lib/tabProcess';
 import { visibleSessionIds } from '../../lib/visibleTabs';
 import type { WindowMode } from '../../lib/windowMode';
+import { usePresenceReporter } from '../../lib/usePresenceReporter';
+import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
 
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 
@@ -39,6 +41,9 @@ export function DetachedShell({ mode }: { mode: DetachedWindowMode }) {
   });
 
   const [confirming, setConfirming] = useState(false);
+
+  usePresenceReporter();
+  useSupervisorSnapshot();
 
   useEffect(() => { void loadProjects(); }, [loadProjects]);
 

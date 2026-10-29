@@ -3,7 +3,7 @@ import type { ThemeMode } from '../styles/theme';
 import type { ClaudeCustomModel } from '../lib/models';
 import { DEFAULT_MODEL_ID, DEFAULT_TITLE_GEN_MODEL_ID } from '../lib/models';
 import type { NotificationTrigger } from '../lib/attention';
-import type { Provider } from '../types';
+import type { Provider, SupervisorLevel } from '../types';
 import { DRAWER_DEFAULT_SIZE } from '../lib/drawerGeometry';
 
 export type SortMode = 'manual' | 'alpha' | 'activity';
@@ -13,6 +13,19 @@ export type SessionRestoreMode = 'ask' | 'always' | 'never';
 
 export const isSessionRestoreMode = (value: unknown): value is SessionRestoreMode =>
   value === 'ask' || value === 'always' || value === 'never';
+
+export const SUPERVISOR_LEVELS: readonly SupervisorLevel[] = ['off', 'relay', 'assistant', 'autonomous'];
+export const SUPERVISOR_GRACE_RANGE = { min: 15, max: 300 } as const;
+export const SUPERVISOR_PRESENCE_RANGE = { min: 1, max: 60 } as const;
+
+export const isSupervisorLevel = (value: unknown): value is SupervisorLevel =>
+  SUPERVISOR_LEVELS.includes(value as SupervisorLevel);
+
+export const clampSupervisorGrace = (value: number) =>
+  Math.max(SUPERVISOR_GRACE_RANGE.min, Math.min(SUPERVISOR_GRACE_RANGE.max, Math.round(value)));
+
+export const clampSupervisorPresence = (value: number) =>
+  Math.max(SUPERVISOR_PRESENCE_RANGE.min, Math.min(SUPERVISOR_PRESENCE_RANGE.max, Math.round(value)));
 
 export type SettingsSlice = {
   theme: ThemeMode;
@@ -47,6 +60,11 @@ export type SettingsSlice = {
   opencodeModelId: string;
   opencodeTitleGenModelId: string;
   opencodeCustomModels: string[];
+  supervisorLevel: SupervisorLevel;
+  supervisorGraceSeconds: number;
+  supervisorPresenceMinutes: number;
+  supervisorModelId: string;
+  supervisorExtraRules: string[];
 
   toggleProvider: (p: Provider) => void;
   setTheme: (t: ThemeMode) => void;
@@ -85,6 +103,11 @@ export type SettingsSlice = {
   setOpencodeTitleGenModel: (modelId: string) => void;
   addOpencodeCustomModel: (modelId: string) => void;
   removeOpencodeCustomModel: (modelId: string) => void;
+  setSupervisorLevel: (level: SupervisorLevel) => void;
+  setSupervisorGraceSeconds: (seconds: number) => void;
+  setSupervisorPresenceMinutes: (minutes: number) => void;
+  setSupervisorModelId: (modelId: string) => void;
+  setSupervisorExtraRules: (rules: string[]) => void;
 };
 
 export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
@@ -120,6 +143,11 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   opencodeModelId: '',
   opencodeTitleGenModelId: '',
   opencodeCustomModels: [],
+  supervisorLevel: 'off',
+  supervisorGraceSeconds: 60,
+  supervisorPresenceMinutes: 5,
+  supervisorModelId: '',
+  supervisorExtraRules: [],
 
   toggleProvider: (p) => {
     const cur = get().enabledProviders;
@@ -200,4 +228,11 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
       ...(get().opencodeTitleGenModelId === modelId ? { opencodeTitleGenModelId: '' } : {}),
     });
   },
+  setSupervisorLevel: (supervisorLevel) => set({ supervisorLevel }),
+  setSupervisorGraceSeconds: (seconds) => set({ supervisorGraceSeconds: clampSupervisorGrace(seconds) }),
+  setSupervisorPresenceMinutes: (minutes) => set({ supervisorPresenceMinutes: clampSupervisorPresence(minutes) }),
+  setSupervisorModelId: (supervisorModelId) => set({ supervisorModelId }),
+  setSupervisorExtraRules: (rules) => set({
+    supervisorExtraRules: rules.map(rule => rule.trim()).filter(rule => rule !== ''),
+  }),
 });

@@ -16,6 +16,8 @@ import { formatWindowTitle } from '../../lib/windowTitle';
 import { shouldNotify } from '../../lib/attention';
 import { visibleSessionIds } from '../../lib/visibleTabs';
 import { useMouseNavigation } from '../../hooks/useMouseNavigation';
+import { usePresenceReporter } from '../../lib/usePresenceReporter';
+import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
 import { openProjectPath } from '../../lib/openProject';
 import { DragHandle, clamp } from './DragHandle';
 import { checkForUpdate, type AvailableUpdate } from '../../lib/updater';
@@ -59,6 +61,9 @@ export function AppShell() {
   const [confirmingClose, setConfirmingClose] = useState(false);
   const startActivityPolling = useStore(s => s.startActivityPolling);
   const stopActivityPolling = useStore(s => s.stopActivityPolling);
+
+  usePresenceReporter();
+  useSupervisorSnapshot();
 
   useEffect(() => {
     startActivityPolling();

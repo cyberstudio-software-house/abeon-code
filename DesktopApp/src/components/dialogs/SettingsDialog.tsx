@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useMemo, useCallback, type ReactElement, type ReactNode } from 'react';
 import { PairingDialog } from './PairingDialog';
+import { SupervisorSettingsTab } from './SupervisorSettingsTab';
 import { ConfirmDialog } from './ConfirmDialog';
 import { open } from '@tauri-apps/plugin-dialog';
 import { useShallow } from 'zustand/react/shallow';
@@ -42,7 +43,7 @@ const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: 'Systemowy' },
 ];
 
-type SettingsTab = 'general' | 'cli' | 'models' | 'shortcuts' | 'cloud' | 'clickup';
+type SettingsTab = 'general' | 'cli' | 'models' | 'shortcuts' | 'cloud' | 'clickup' | 'supervisor';
 
 const EFFORT_LABELS: Record<string, string> = {
   low: 'Niski',
@@ -102,6 +103,7 @@ export function SettingsDialog() {
           <TabButton active={tab === 'shortcuts'} onClick={() => setTab('shortcuts')}>Skróty</TabButton>
           <TabButton active={tab === 'cloud'} onClick={() => setTab('cloud')}>Cloud</TabButton>
           <TabButton active={tab === 'clickup'} onClick={() => setTab('clickup')}>ClickUp</TabButton>
+          <TabButton active={tab === 'supervisor'} onClick={() => setTab('supervisor')}>Agent sterujący</TabButton>
         </div>
 
         <div className="flex-1 min-h-0 overflow-auto p-5">
@@ -111,6 +113,7 @@ export function SettingsDialog() {
           {tab === 'shortcuts' && <ShortcutsTab />}
           {tab === 'cloud' && <CloudTab />}
           {tab === 'clickup' && <ClickUpTab />}
+          {tab === 'supervisor' && <SupervisorSettingsTab />}
         </div>
       </div>
     </div>
