@@ -19,9 +19,14 @@ vi.mock('../history/SubagentView', () => ({
   SubagentView: () => <div data-testid="subagent" />,
 }));
 
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
+
+import { fireEvent, screen } from '@testing-library/react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
+import { tauri } from '../../lib/tauri';
 import { TabPanel } from './TabContent';
+import type { SupervisorSnapshot } from '../../types';
 
 // Stands in for the layer stack PaneLayout renders: every tab mounted at once,
 // only the pane's active one visible.
@@ -187,5 +192,57 @@ describe('TabPanel question card', () => {
     });
     const { getByRole } = render(<TabPanels />);
     expect(getByRole('group', { hidden: true }).className).toContain('invisible');
+  });
+});
+
+describe('TabPanel and the supervisor question card', () => {
+  const withCard = (): SupervisorSnapshot => ({
+    level: 'assistant', running: true, ready: true, ptyId: 'sup', present: true, away: false,
+    escalations: [], approvals: [],
+    cards: [{
+      questionId: 'q1',
+      sessionId: 's1',
+      questions: [{ question: 'Który kolor?', header: null, options: ['Czerwony', 'Zielony'], multiSelect: false }],
+      phase: 'grace',
+      deadlineMs: null,
+    }],
+  });
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    useStore.setState({ tabs: [], activeTabId: null, mruOrder: [], supervisor: withCard() });
+  });
+
+  it('returns the keyboard to the session terminal after the card is answered', async () => {
+    vi.spyOn(tauri, 'supervisorAnswerCard').mockResolvedValue(undefined);
+    render(<TabPanel tab={sessionTab} visible focused />);
+    const before = Number(counters.lastProps?.focusToken ?? 0);
+    fireEvent.click(screen.getByRole('button', { name: 'Zielony' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Wyślij' }));
+    });
+    expect(tauri.supervisorAnswerCard).toHaveBeenCalledWith('q1', { 'Który kolor?': 'Zielony' });
+    expect(counters.lastProps?.focusToken).toBe(before + 1);
+  });
+
+  it('returns the keyboard to the session terminal after the menu goes back to the terminal', async () => {
+    vi.spyOn(tauri, 'supervisorReleaseCard').mockResolvedValue(undefined);
+    render(<TabPanel tab={sessionTab} visible focused />);
+    const before = Number(counters.lastProps?.focusToken ?? 0);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Odpowiem w terminalu' }));
+    });
+    expect(counters.lastProps?.focusToken).toBe(before + 1);
+  });
+
+  it('leaves the keyboard alone when sending fails', async () => {
+    vi.spyOn(tauri, 'supervisorAnswerCard').mockRejectedValue('boom');
+    render(<TabPanel tab={sessionTab} visible focused />);
+    const before = counters.lastProps?.focusToken;
+    fireEvent.click(screen.getByRole('button', { name: 'Zielony' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Wyślij' }));
+    });
+    expect(counters.lastProps?.focusToken).toBe(before);
   });
 });

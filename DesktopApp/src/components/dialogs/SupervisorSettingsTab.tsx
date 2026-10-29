@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
@@ -20,10 +20,13 @@ const LEVEL_OPTIONS: { value: SupervisorLevel; label: string }[] = [
 
 const LEVEL_HINTS: Record<SupervisorLevel, string> = {
   off: 'Agent sterujący nie działa, a pytania sesji trafiają do Ciebie jak dotychczas.',
-  relay: 'Agent tylko przekazuje Ci pytania i prośby o zgodę, sam niczego nie rozstrzyga.',
-  assistant: 'Agent odpowiada na pytania, gdy Cię nie ma przy komputerze, i pyta o zgodę przy operacjach produkcyjnych.',
-  autonomous: 'Agent sam prowadzi sesje i odpowiada na pytania, także gdy jesteś przy komputerze.',
+  relay: 'Agent sam niczego nie rozstrzyga: każde pytanie sesji przekazuje Tobie (po karencji, gdy jesteś przy komputerze). Przekazuje Twoje odpowiedzi, robi podsumowania i wykonuje polecenia na Twoją prośbę.',
+  assistant: 'Agent odpowiada na pytania sesji w zakresie zadania: po karencji, gdy jesteś przy komputerze, od razu, gdy Cię nie ma. Sprawy zastrzeżone dla Ciebie i te, których nie jest pewien, przekazuje Tobie. Nowe sesje otwiera tylko na Twoją prośbę.',
+  autonomous: 'Jak Asystent, a do tego może sam otwierać nowe sesje agentów i mówi Ci, co uruchomił.',
 };
+
+const UNSUPERVISED_NOTE =
+  'Sesje uruchomione, gdy agent był wyłączony, nie są nadzorowane, dopóki ich nie uruchomisz ponownie.';
 
 const BUILT_IN_RULES: string[] = [
   'git push → main/master',
@@ -112,6 +115,13 @@ export function SupervisorSettingsTab() {
   const rulesText = extraRules.join('\n');
   const [rulesDraft, setRulesDraft] = useState(rulesText);
   useEffect(() => { setRulesDraft(rulesText); }, [rulesText]);
+  const rulesDraftRef = useRef(rulesDraft);
+  useEffect(() => { rulesDraftRef.current = rulesDraft; }, [rulesDraft]);
+  useEffect(() => () => {
+    const state = useStore.getState();
+    const rules = parseRules(rulesDraftRef.current);
+    if (rules.join('\n') !== state.supervisorExtraRules.join('\n')) state.setSupervisorExtraRules(rules);
+  }, []);
   const invalidRules = parseRules(rulesDraft).filter(rule => !RULE_PREFIXES.some(prefix => rule.startsWith(prefix)));
 
   const [busy, setBusy] = useState(false);
@@ -145,6 +155,7 @@ export function SupervisorSettingsTab() {
           </select>
         </div>
         <p className="text-[11px] text-muted mt-2">{LEVEL_HINTS[level]}</p>
+        <p className="text-[11px] text-muted mt-1">{UNSUPERVISED_NOTE}</p>
       </div>
 
       <div className="space-y-2">

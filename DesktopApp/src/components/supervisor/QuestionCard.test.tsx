@@ -134,6 +134,32 @@ describe('QuestionCard', () => {
     expect(screen.getByRole('button', { name: 'Wyślij' })).toBeEnabled();
   });
 
+  it('hands the keyboard back after a successful send or release', async () => {
+    const onDone = vi.fn();
+    const { unmount } = render(<QuestionCard card={card()} onDone={onDone} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Green' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Wyślij' }));
+    });
+    expect(onDone).toHaveBeenCalledTimes(1);
+    unmount();
+    render(<QuestionCard card={card()} onDone={onDone} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Odpowiem w terminalu' }));
+    });
+    expect(onDone).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the keyboard on the card when the request fails', async () => {
+    vi.spyOn(tauri, 'supervisorReleaseCard').mockRejectedValue('boom');
+    const onDone = vi.fn();
+    render(<QuestionCard card={card()} onDone={onDone} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Odpowiem w terminalu' }));
+    });
+    expect(onDone).not.toHaveBeenCalled();
+  });
+
   it('does not take keyboard focus on mount', () => {
     render(<QuestionCard card={card()} />);
     expect(document.body).toHaveFocus();

@@ -1,3 +1,4 @@
+import { useCallback, useState } from 'react';
 import { HistoryView } from '../history/HistoryView';
 import { SubagentView } from '../history/SubagentView';
 import { TerminalView } from '../terminal/TerminalView';
@@ -10,7 +11,7 @@ type SessionTab = Extract<Tab, { kind: 'session' }>;
 
 const layer = (visible: boolean) => `absolute inset-0 ${visible ? '' : 'invisible pointer-events-none'}`;
 
-function SessionBody({ tab, visible, focused = true, takeFocus }: { tab: SessionTab; visible: boolean; focused?: boolean; takeFocus?: boolean }) {
+function SessionBody({ tab, visible, focused = true, takeFocus, focusToken }: { tab: SessionTab; visible: boolean; focused?: boolean; takeFocus?: boolean; focusToken?: number }) {
   if (tab.mode === 'history') {
     const historySessionId = tab.linkedSessionId ?? tab.sessionId;
     return (
@@ -33,6 +34,7 @@ function SessionBody({ tab, visible, focused = true, takeFocus }: { tab: Session
           visible={visible}
           focused={focused}
           takeFocus={takeFocus}
+          focusToken={focusToken}
         />
       </div>
     );
@@ -40,16 +42,16 @@ function SessionBody({ tab, visible, focused = true, takeFocus }: { tab: Session
   const resumeId = tab.linkedSessionId ?? (tab.sessionId.startsWith('new-') ? undefined : tab.sessionId);
   return (
     <div className={layer(visible)}>
-      <TerminalView projectId={tab.projectId} kind="agent" provider={provider} tabId={tab.id} sessionId={resumeId} visible={visible} focused={focused} takeFocus={takeFocus} />
+      <TerminalView projectId={tab.projectId} kind="agent" provider={provider} tabId={tab.id} sessionId={resumeId} visible={visible} focused={focused} takeFocus={takeFocus} focusToken={focusToken} />
     </div>
   );
 }
 
-function SessionQuestionCard({ tab, visible }: { tab: SessionTab; visible: boolean }) {
+function SessionQuestionCard({ tab, visible, onDone }: { tab: SessionTab; visible: boolean; onDone: () => void }) {
   const liveSessionId = tab.linkedSessionId ?? tab.sessionId;
   const card = useStore(s => s.supervisor?.cards.find(c => c.sessionId === liveSessionId));
   if (tab.mode !== 'terminal' || !card) return null;
-  return <QuestionCard key={card.questionId} card={card} visible={visible} />;
+  return <QuestionCard key={card.questionId} card={card} visible={visible} onDone={onDone} />;
 }
 
 export function TabPanel({ tab, visible, focused = true, takeFocus, focusToken, onExit }: {
@@ -60,6 +62,8 @@ export function TabPanel({ tab, visible, focused = true, takeFocus, focusToken, 
   focusToken?: number;
   onExit?: (code: number) => void;
 }) {
+  const [cardFocusToken, setCardFocusToken] = useState(0);
+  const returnFocusFromCard = useCallback(() => setCardFocusToken(token => token + 1), []);
   if (tab.kind === 'providerPicker') {
     return (
       <div className={layer(visible)}>
@@ -72,13 +76,13 @@ export function TabPanel({ tab, visible, focused = true, takeFocus, focusToken, 
     const subagentSessionId = tab.linkedSessionId ?? tab.sessionId;
     return (
       <>
-        <SessionBody tab={tab} visible={visible && !agentId} focused={focused} takeFocus={takeFocus} />
+        <SessionBody tab={tab} visible={visible && !agentId} focused={focused} takeFocus={takeFocus} focusToken={cardFocusToken} />
         {agentId ? (
           <div className={layer(visible)}>
             <SubagentView projectId={tab.projectId} sessionId={subagentSessionId} agentId={agentId} tabId={tab.id} />
           </div>
         ) : null}
-        <SessionQuestionCard tab={tab} visible={visible} />
+        <SessionQuestionCard tab={tab} visible={visible} onDone={returnFocusFromCard} />
       </>
     );
   }

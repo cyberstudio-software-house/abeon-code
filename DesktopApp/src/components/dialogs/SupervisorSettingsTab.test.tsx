@@ -67,6 +67,44 @@ describe('SupervisorSettingsTab', () => {
     expect(useStore.getState().supervisorExtraRules).toEqual(['bash:^rm -rf', 'mcp:foo__*']);
   });
 
+  it('keeps typed extra rules when the tab closes before the field blurs', () => {
+    const { unmount } = render(<SupervisorSettingsTab />);
+    fireEvent.change(screen.getByLabelText('Dodatkowe reguły'), { target: { value: ' bash:^make deploy \n' } });
+    unmount();
+    expect(useStore.getState().supervisorExtraRules).toEqual(['bash:^make deploy']);
+  });
+
+  it('writes nothing on close when the rules did not change', () => {
+    useStore.setState({ supervisorExtraRules: ['mcp:foo__*'] });
+    const setter = vi.fn();
+    useStore.setState({ setSupervisorExtraRules: setter });
+    const { unmount } = render(<SupervisorSettingsTab />);
+    unmount();
+    expect(setter).not.toHaveBeenCalled();
+  });
+
+  it('describes what each level decides', () => {
+    render(<SupervisorSettingsTab />);
+    const choose = (label: string) => {
+      const option = screen.getByRole('option', { name: label }) as HTMLOptionElement;
+      fireEvent.change(screen.getByLabelText('Poziom'), { target: { value: option.value } });
+    };
+    choose('Przekaźnik');
+    expect(screen.getByText(/niczego nie rozstrzyga/)).toBeInTheDocument();
+    expect(screen.getByText(/każde pytanie sesji przekazuje Tobie/)).toBeInTheDocument();
+    choose('Asystent (zalecany)');
+    expect(screen.getByText(/po karencji, gdy jesteś przy komputerze, od razu, gdy Cię nie ma/)).toBeInTheDocument();
+    expect(screen.getByText(/Nowe sesje otwiera tylko na Twoją prośbę/)).toBeInTheDocument();
+    choose('Samodzielny');
+    expect(screen.getByText(/Jak Asystent/)).toBeInTheDocument();
+    expect(screen.getByText(/może sam otwierać nowe sesje/)).toBeInTheDocument();
+  });
+
+  it('explains that sessions started while switched off stay unsupervised', () => {
+    render(<SupervisorSettingsTab />);
+    expect(screen.getByText(/uruchomione, gdy agent był wyłączony, nie są nadzorowane/)).toBeInTheDocument();
+  });
+
   it('selects the model from the detected Claude models, with Domyślny as empty', async () => {
     useStore.setState({ supervisorModelId: 'claude-opus-5-5' });
     render(<SupervisorSettingsTab />);

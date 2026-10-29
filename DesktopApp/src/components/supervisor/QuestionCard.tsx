@@ -90,7 +90,11 @@ function QuestionBlock({
   );
 }
 
-export function QuestionCard({ card, visible = true }: { card: QuestionCardView; visible?: boolean }) {
+export function QuestionCard({ card, visible = true, onDone }: {
+  card: QuestionCardView;
+  visible?: boolean;
+  onDone?: () => void;
+}) {
   const [selections, setSelections] = useState<Record<number, string[]>>({});
   const [freeTexts, setFreeTexts] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
@@ -121,6 +125,7 @@ export function QuestionCard({ card, visible = true }: { card: QuestionCardView;
     setBusy(true);
     void tauri
       .supervisorAnswerCard(card.questionId, answers)
+      .then(() => onDone?.())
       .catch(reportFailure('Nie udało się wysłać odpowiedzi'))
       .finally(() => setBusy(false));
   };
@@ -129,6 +134,7 @@ export function QuestionCard({ card, visible = true }: { card: QuestionCardView;
     setBusy(true);
     void tauri
       .supervisorReleaseCard(card.questionId)
+      .then(() => onDone?.())
       .catch(reportFailure('Nie udało się oddać pytania użytkownikowi'))
       .finally(() => setBusy(false));
   };

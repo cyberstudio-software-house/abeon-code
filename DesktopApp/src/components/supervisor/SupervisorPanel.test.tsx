@@ -75,6 +75,20 @@ describe('SupervisorPanel', () => {
     expect(tauri.supervisorResolveApproval).toHaveBeenCalledWith('ap1', false);
   });
 
+  it('shows how long each approval and escalation has been waiting', () => {
+    const now = Date.now();
+    useStore.setState({
+      supervisor: snapshot({
+        approvals: [{ id: 'ap1', sessionId: 's1', projectId: 1, label: 'Sesja A', action: 'git push → main', detail: 'git push', code: 'K7', createdAt: now - 12 * 60_000 }],
+        escalations: [{ id: 'es1', sessionId: 's2', projectId: 2, label: 'Sesja B', summary: 'Nie wiem co dalej', createdAt: now - 3 * 3_600_000 }],
+      }),
+    });
+    render(<SupervisorPanel />);
+    fireEvent.click(screen.getByRole('tab', { name: /Do decyzji/ }));
+    expect(screen.getByText('12 min temu')).toBeInTheDocument();
+    expect(screen.getByText('3 h temu')).toBeInTheDocument();
+  });
+
   it('opens the escalated session tab', () => {
     const openSessionTab = vi.fn();
     useStore.setState({ openSessionTab } as never);

@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import { formatTauriError } from '../../lib/errors';
+import { formatRelative } from '../../lib/format';
 import { TerminalView } from '../terminal/TerminalView';
 import { Icon } from '../shared/Icon';
 import type { ApprovalView, DecisionEntry, EscalationView } from '../../types';
@@ -23,8 +24,27 @@ const KIND_LABEL: Record<string, string> = {
   released_to_user: 'Oddano użytkownikowi',
 };
 
+const AGE_REFRESH_MS = 30_000;
+
 const formatTime = (ms: number) =>
   new Date(ms).toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' });
+
+function useAgeRefresh() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const interval = setInterval(() => setTick(tick => tick + 1), AGE_REFRESH_MS);
+    return () => clearInterval(interval);
+  }, []);
+}
+
+function RowHeader({ label, createdAt }: { label: string; createdAt: number }) {
+  return (
+    <div className="flex items-center gap-2 text-[12px] text-muted">
+      <span className="truncate">{label}</span>
+      <span className="shrink-0 tabular-nums" title={formatTime(createdAt)}>{formatRelative(createdAt)}</span>
+    </div>
+  );
+}
 
 const reportFailure = (message: string) => (error: unknown) => {
   toast.error(`${message}: ${formatTauriError(error)}`);
@@ -121,6 +141,7 @@ function PendingView() {
   const closePanel = useStore(s => s.closeSupervisorPanel);
   const approvals = snapshot?.approvals ?? [];
   const escalations = snapshot?.escalations ?? [];
+  useAgeRefresh();
 
   if (approvals.length === 0 && escalations.length === 0) {
     return <div className="h-full grid place-items-center text-[13px] text-muted">Brak oczekujących decyzji</div>;
@@ -148,7 +169,7 @@ function ApprovalRow({ approval }: { approval: ApprovalView }) {
     <li className="border border-border bg-bg-elev rounded-md p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <div className="text-[12px] text-muted">{approval.label}</div>
+          <RowHeader label={approval.label} createdAt={approval.createdAt} />
           <div className="text-[13px] font-medium text-fg break-words">{approval.action}</div>
           <pre className="text-[11.5px] font-mono text-fg-secondary whitespace-pre-wrap break-all">{approval.detail}</pre>
           <div className="text-[11px] text-muted">
@@ -173,7 +194,7 @@ function EscalationRow({ escalation, onOpen }: { escalation: EscalationView; onO
     <li className="border border-border bg-bg-elev rounded-md p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <div className="text-[12px] text-muted">{escalation.label}</div>
+          <RowHeader label={escalation.label} createdAt={escalation.createdAt} />
           <div className="text-[13px] text-fg break-words">{escalation.summary}</div>
         </div>
         <div className="flex gap-2 shrink-0">

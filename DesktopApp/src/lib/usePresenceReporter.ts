@@ -57,6 +57,8 @@ export function usePresenceReporter() {
       if (document.hasFocus()) send(session);
     });
 
+    if (document.hasFocus()) send(trackedSession);
+
     window.addEventListener('focus', onActivity);
     window.addEventListener('blur', onBlur);
     window.addEventListener('keydown', onActivity, true);

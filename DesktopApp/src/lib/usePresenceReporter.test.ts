@@ -37,6 +37,21 @@ describe('usePresenceReporter', () => {
     vi.restoreAllMocks();
   });
 
+  it('reports presence once on mount while the window has focus', () => {
+    useStore.setState({ activeAgentPtyId: 'pty-1' });
+    renderHook(() => usePresenceReporter());
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledWith('s1');
+    act(() => { pressKey(); });
+    expect(report).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not report on mount without focus', () => {
+    hasFocus.mockReturnValue(false);
+    renderHook(() => usePresenceReporter());
+    expect(report).not.toHaveBeenCalled();
+  });
+
   it('reports at most once per 20 seconds for repeated keydowns', () => {
     renderHook(() => usePresenceReporter());
     act(() => { pressKey(); });
@@ -128,6 +143,7 @@ describe('usePresenceReporter', () => {
   it('reports null after 300 ms when the focused session is left', () => {
     useStore.setState({ activeAgentPtyId: 'pty-1' });
     renderHook(() => usePresenceReporter());
+    report.mockClear();
     act(() => { useStore.setState({ activeAgentPtyId: null }); });
     expect(report).not.toHaveBeenCalled();
     act(() => { vi.advanceTimersByTime(299); });
@@ -140,6 +156,7 @@ describe('usePresenceReporter', () => {
   it('reports only the new session when a tab switch blips through null', () => {
     useStore.setState({ activeAgentPtyId: 'pty-1' });
     renderHook(() => usePresenceReporter());
+    report.mockClear();
     act(() => { useStore.setState({ activeAgentPtyId: null }); });
     act(() => { vi.advanceTimersByTime(100); });
     act(() => { useStore.setState({ activeAgentPtyId: 'pty-2' }); });
@@ -151,6 +168,7 @@ describe('usePresenceReporter', () => {
   it('reports a direct switch to another session immediately', () => {
     useStore.setState({ activeAgentPtyId: 'pty-1' });
     renderHook(() => usePresenceReporter());
+    report.mockClear();
     act(() => { useStore.setState({ activeAgentPtyId: 'pty-2' }); });
     expect(report).toHaveBeenCalledTimes(1);
     expect(report).toHaveBeenCalledWith('s2');
@@ -159,6 +177,7 @@ describe('usePresenceReporter', () => {
   it('drops a pending null report on unmount', () => {
     useStore.setState({ activeAgentPtyId: 'pty-1' });
     const { unmount } = renderHook(() => usePresenceReporter());
+    report.mockClear();
     act(() => { useStore.setState({ activeAgentPtyId: null }); });
     unmount();
     act(() => { vi.advanceTimersByTime(1_000); });
@@ -168,6 +187,7 @@ describe('usePresenceReporter', () => {
   it('stops listening after unmount', () => {
     const { unmount } = renderHook(() => usePresenceReporter());
     unmount();
+    report.mockClear();
     act(() => { pressKey(); });
     expect(report).not.toHaveBeenCalled();
   });
