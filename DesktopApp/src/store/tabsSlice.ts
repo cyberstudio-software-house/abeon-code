@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { GroupWindowMode, SessionWindowMode } from '../lib/windowMode';
 import type { Provider } from '../types';
 import type { SettingsSlice } from './settingsSlice';
+import type { SupervisorSlice } from './supervisorSlice';
 import type { AppState } from './index';
 import { pushNav, stepBack, stepForward, pruneNav } from '../lib/navHistory';
 import { findLeaf } from '../lib/paneTree';
@@ -104,6 +105,8 @@ export function tabsFromGroupMode(mode: GroupWindowMode): Tab[] {
 
 const moveToFront = (order: string[], id: string) => [id, ...order.filter(x => x !== id)];
 
+const closedSupervisorPanel = { supervisorPanelOpen: false } as const;
+
 const withoutIds = (ids: string[], removed: ReadonlySet<string>) =>
   ids.some(id => removed.has(id)) ? ids.filter(id => !removed.has(id)) : ids;
 
@@ -117,7 +120,7 @@ const withNav = (get: () => TabsSlice, id: string) => {
   return { navHistory: nav.history, navIndex: nav.index };
 };
 
-export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], TabsSlice> = (set, get) => ({
+export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice & SupervisorSlice, [], [], TabsSlice> = (set, get) => ({
   tabs: [],
   activeTabId: null,
   mruOrder: [],
@@ -137,7 +140,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
   openSessionTab: (projectId, sessionId, title, provider) => {
     const id = sessionTabId(sessionId);
     const existing = get().tabs.find(t => t.id === id || (t.kind === 'session' && t.linkedSessionId === sessionId));
-    if (existing) { set({ activeTabId: existing.id, mruOrder: moveToFront(get().mruOrder, existing.id), ...withNav(get, existing.id) }); return; }
+    if (existing) { set({ activeTabId: existing.id, mruOrder: moveToFront(get().mruOrder, existing.id), ...withNav(get, existing.id), ...closedSupervisorPanel }); return; }
     const tab: Tab = { kind: 'session', id, projectId, sessionId, title, mode: 'history', preview: true, ...(provider ? { provider } : {}) };
     const focused = findLeaf((get() as AppState).layout, (get() as AppState).focusedPaneId);
     const preview = get().tabs.find(t => t.kind === 'session' && t.preview && (focused?.tabIds.includes(t.id) ?? true));
@@ -149,6 +152,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
         mruOrder: moveToFront(get().mruOrder.filter(x => x !== preview.id), id),
         navHistory: nav.history,
         navIndex: nav.index,
+        ...closedSupervisorPanel,
       });
       return;
     }
@@ -157,6 +161,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
       ...withNav(get, id),
+      ...closedSupervisorPanel,
     });
   },
   openNewSessionTab: (projectId) => {
@@ -168,6 +173,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
         activeTabId: id,
         mruOrder: moveToFront(get().mruOrder, id),
         ...withNav(get, id),
+        ...closedSupervisorPanel,
       });
       return;
     }
@@ -181,6 +187,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
       ...withNav(get, id),
+      ...closedSupervisorPanel,
     });
     (get() as AppState).scheduleNewSessionRefresh(projectId);
   },
@@ -229,6 +236,7 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
       ...withNav(get, id),
+      ...closedSupervisorPanel,
     });
   },
   setSessionMode: (tabId, mode) => set({
@@ -280,16 +288,16 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice, [], [], Ta
       pendingResumeTabIds: withoutIds(get().pendingResumeTabIds, removed),
     });
   },
-  setActive: (id) => set({ activeTabId: id, mruOrder: moveToFront(get().mruOrder, id), ...withNav(get, id) }),
+  setActive: (id) => set({ activeTabId: id, mruOrder: moveToFront(get().mruOrder, id), ...withNav(get, id), ...closedSupervisorPanel }),
   goBack: () => {
     const step = stepBack({ history: get().navHistory, index: get().navIndex });
     if (!step) return;
-    set({ navIndex: step.index, activeTabId: step.targetId, mruOrder: moveToFront(get().mruOrder, step.targetId) });
+    set({ navIndex: step.index, activeTabId: step.targetId, mruOrder: moveToFront(get().mruOrder, step.targetId), ...closedSupervisorPanel });
   },
   goForward: () => {
     const step = stepForward({ history: get().navHistory, index: get().navIndex });
     if (!step) return;
-    set({ navIndex: step.index, activeTabId: step.targetId, mruOrder: moveToFront(get().mruOrder, step.targetId) });
+    set({ navIndex: step.index, activeTabId: step.targetId, mruOrder: moveToFront(get().mruOrder, step.targetId), ...closedSupervisorPanel });
   },
   renameTab: (id, title) => set({
     tabs: get().tabs.map(t => t.id === id ? { ...t, title } : t),

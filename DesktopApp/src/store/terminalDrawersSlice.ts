@@ -197,6 +197,7 @@ export const createTerminalDrawersSlice: StateCreator<AppState, [], [], Terminal
     openTerminal: (projectId, { toggle }) => {
       const active = get().tabs.find(t => t.id === get().activeTabId);
       if (active?.kind === 'session' && active.projectId === projectId) {
+        set({ supervisorPanelOpen: false });
         reveal(active.id, toggle);
         return;
       }
