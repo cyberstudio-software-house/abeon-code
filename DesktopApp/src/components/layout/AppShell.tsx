@@ -18,6 +18,8 @@ import { visibleSessionIds } from '../../lib/visibleTabs';
 import { useMouseNavigation } from '../../hooks/useMouseNavigation';
 import { usePresenceReporter } from '../../lib/usePresenceReporter';
 import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
+import { useSupervisorAutoOpen } from '../../lib/useSupervisorAutoOpen';
+import { SupervisorPanel } from '../supervisor/SupervisorPanel';
 import { openProjectPath } from '../../lib/openProject';
 import { DragHandle, clamp } from './DragHandle';
 import { checkForUpdate, type AvailableUpdate } from '../../lib/updater';
@@ -42,6 +44,7 @@ export function AppShell() {
   const activeTabId = useStore(s => s.activeTabId);
   const layout = useStore(s => s.layout);
   const tabLayoutMode = useStore(s => s.tabLayoutMode);
+  const supervisorPanelOpen = useStore(s => s.supervisorPanelOpen);
   const hasActiveProject = tabs.some(t => t.id === activeTabId);
   const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
   const activeProjectName = useStore(s => {
@@ -64,6 +67,7 @@ export function AppShell() {
 
   usePresenceReporter();
   useSupervisorSnapshot();
+  useSupervisorAutoOpen();
 
   useEffect(() => {
     startActivityPolling();
@@ -247,8 +251,9 @@ export function AppShell() {
           <Sidebar />
         </div>
         <DragHandle onDrag={onLeftDrag} ariaLabel="Resize sidebar" />
-        <div className="flex-1 h-full min-w-0">
+        <div className="relative flex-1 h-full min-w-0">
           <CenterPanel />
+          {supervisorPanelOpen && <SupervisorPanel />}
         </div>
         {hasActiveProject && (
           <>

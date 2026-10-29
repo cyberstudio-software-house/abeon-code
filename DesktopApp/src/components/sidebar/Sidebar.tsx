@@ -7,6 +7,7 @@ import { ProjectItem } from './ProjectItem';
 import { SidebarFooter } from './SidebarFooter';
 import { SortMenu } from './SortMenu';
 import { ActiveSessionsPanel } from './ActiveSessionsPanel';
+import { SupervisorEntry } from '../supervisor/SupervisorEntry';
 import { Icon } from '../shared/Icon';
 import { Kbd } from '../shared/Kbd';
 import { AddProjectDialog } from '../dialogs/AddProjectDialog';
@@ -17,6 +18,7 @@ export function Sidebar() {
   const load = useStore(s => s.loadProjects);
   const loadActivity = useStore(s => s.loadActivity);
   const refreshActiveSessions = useStore(s => s.refreshActiveSessions);
+  const supervisorEnabled = useStore(s => s.supervisorLevel !== 'off');
   const [query, setQuery] = useState('');
   const [addOpen, setAddOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -87,6 +89,8 @@ export function Sidebar() {
         />
         <Kbd>{searchBinding}</Kbd>
       </div>
+
+      {supervisorEnabled && <SupervisorEntry />}
 
       <ActiveSessionsPanel />
 

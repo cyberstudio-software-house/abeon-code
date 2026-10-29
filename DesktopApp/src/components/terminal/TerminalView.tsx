@@ -7,14 +7,16 @@ import '@xterm/xterm/css/xterm.css';
 import { tauri, type PtyKindClient } from '../../lib/tauri';
 import { useStore } from '../../store';
 import { processManager } from '../../lib/processManager';
+import { supervisorProcess } from '../../lib/supervisorProcess';
 import { getCliModelString } from '../../lib/models';
 import type { Provider } from '../../types';
 import { formatTauriError } from '../../lib/errors';
 import { toast } from 'sonner';
 
 type Props = {
-  projectId: number;
-  kind: 'agent' | 'action' | 'shell';
+  projectId?: number;
+  kind: 'agent' | 'action' | 'shell' | 'supervisor';
+  ptyId?: string;
   provider?: Provider;
   sessionId?: string;
   fresh?: boolean;
@@ -101,7 +103,7 @@ function createFilePathProvider(term: Terminal, projectPathRef: { current: strin
   };
 }
 
-export function TerminalView({ projectId, kind, provider, sessionId, fresh, actionId, tabId, visible = true, focused = true, takeFocus, focusToken, onExit }: Props) {
+export function TerminalView({ projectId, kind, ptyId, provider, sessionId, fresh, actionId, tabId, visible = true, focused = true, takeFocus, focusToken, onExit }: Props) {
   const defaultModelId = useStore(s => s.defaultModelId);
   const modelEfforts = useStore(s => s.modelEfforts);
   const codexModelId = useStore(s => s.codexModelId);
@@ -111,7 +113,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
   const markSessionPtyStarted = useStore(s => s.markSessionPtyStarted);
   const consumeInitialPrompt = useStore(s => s.consumeInitialPrompt);
   const [agentPtyId, setAgentPtyId] = useState<string | null>(null);
-  const projectPath = useStore(s => s.projects.find(p => p.id === projectId)?.path ?? '');
+  const projectPath = useStore(s => projectId == null ? '' : s.projects.find(p => p.id === projectId)?.path ?? '');
   const projectPathRef = useRef(projectPath);
   projectPathRef.current = projectPath;
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -203,7 +205,7 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
           : { kind: 'shell' };
 
     let cancelled = false;
-    if (kind !== 'action') {
+    if (projectId != null && (kind === 'agent' || kind === 'shell')) {
     tauri.spawnPty(projectId, ptyKind, cols, rows).then(async (id) => {
       if (cancelled) {
         tauri.ptyKill(id).catch(() => {});
@@ -333,6 +335,30 @@ export function TerminalView({ projectId, kind, provider, sessionId, fresh, acti
 
     return () => { detach(); offData.dispose(); offResize.dispose(); };
   }, [kind, actionId, actionPtyId]);
+
+  useEffect(() => {
+    if (kind !== 'supervisor' || !ptyId) return;
+    const term = termRef.current;
+    if (!term) return;
+
+    term.reset();
+    pendingWrites.current = [];
+    const sink = {
+      write: (bytes: Uint8Array) => {
+        if (visibleRef.current) term.write(bytes);
+        else pendingWrites.current.push(bytes);
+      },
+    };
+    const detach = supervisorProcess.attach(ptyId, sink);
+    const offData = term.onData((d) => {
+      const enc = btoa(unescape(encodeURIComponent(d)));
+      supervisorProcess.write(ptyId, enc);
+    });
+    const offResize = term.onResize(({ cols, rows }) => supervisorProcess.resize(ptyId, cols, rows));
+    supervisorProcess.resize(ptyId, term.cols, term.rows);
+
+    return () => { detach(); offData.dispose(); offResize.dispose(); };
+  }, [kind, ptyId]);
 
   useEffect(() => {
     if (!visible || !termRef.current || !fitRef.current) return;

@@ -1,13 +1,19 @@
 import { useEffect } from 'react';
 import { useStore } from '../store';
 import { tauri } from './tauri';
+import { supervisorProcess } from './supervisorProcess';
+import type { SupervisorSnapshot } from '../types';
 
 export function useSupervisorSnapshot() {
   useEffect(() => {
     let disposed = false;
     let receivedEvent = false;
     let unlisten: (() => void) | null = null;
-    const apply = useStore.getState().setSupervisorSnapshot;
+    const setSnapshot = useStore.getState().setSupervisorSnapshot;
+    const apply = (snapshot: SupervisorSnapshot) => {
+      if (snapshot.ptyId) supervisorProcess.track(snapshot.ptyId);
+      setSnapshot(snapshot);
+    };
 
     const start = async () => {
       try {
