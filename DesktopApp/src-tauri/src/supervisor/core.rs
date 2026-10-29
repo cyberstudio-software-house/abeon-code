@@ -32,7 +32,7 @@ pub const ESCALATED_REASON: &str =
     "Pytanie przekazane użytkownikowi — poczekaj na jego odpowiedź w kolejnej wiadomości.";
 pub const ANSWER_PREFIX: &str = "[agent sterujący] ";
 pub const GUARD_REASON: &str =
-    "Ta operacja wymaga zgody użytkownika. Nie ponawiaj jej — agent sterujący poprosił użytkownika o zgodę.";
+    "Ta operacja wymaga zgody użytkownika. Nie ponawiaj jej — agent sterujący poprosił użytkownika o zgodę. Nie obchodź tej blokady innym poleceniem ani skryptem.";
 pub const QUIET_WINDOW: Duration = Duration::from_secs(5);
 pub const SUBMIT_WINDOW: Duration = Duration::from_secs(10);
 pub const WAKE_DEBOUNCE: Duration = Duration::from_secs(10);

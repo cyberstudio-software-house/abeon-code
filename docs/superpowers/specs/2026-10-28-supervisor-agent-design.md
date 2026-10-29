@@ -270,7 +270,7 @@ session, or from the user pressing an explicit approval.
 
 **Block:** if the session's `last_prompt_origin` is `Supervisor`, the hook returns `deny` with the
 reason "Ta operacja wymaga zgody użytkownika. Nie ponawiaj jej — agent sterujący poprosił
-użytkownika o zgodę." The core then creates an approval request and queues an event for the
+użytkownika o zgodę. Nie obchodź tej blokady innym poleceniem ani skryptem." The core then creates an approval request and queues an event for the
 supervisor.
 
 **Approval:** the decision must reach the core by a path the supervisor model cannot fake.

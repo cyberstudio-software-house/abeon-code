@@ -314,7 +314,7 @@ mod tests {
 
     fn guard_denial() -> HookReply {
         HookReply::Deny {
-            reason: "Ta operacja wymaga zgody użytkownika. Nie ponawiaj jej — agent sterujący poprosił użytkownika o zgodę.".into(),
+            reason: GUARD_REASON.to_string(),
         }
     }
 
@@ -382,6 +382,14 @@ mod tests {
     fn approve_only(core: &SupervisorCore) {
         let approval = only_approval(core);
         core.resolve_approval(&approval.id, true).unwrap();
+    }
+
+    #[test]
+    fn guard_reason_forbids_working_around_the_block() {
+        assert_eq!(
+            GUARD_REASON,
+            "Ta operacja wymaga zgody użytkownika. Nie ponawiaj jej — agent sterujący poprosił użytkownika o zgodę. Nie obchodź tej blokady innym poleceniem ani skryptem."
+        );
     }
 
     #[test]
