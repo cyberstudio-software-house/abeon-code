@@ -73,6 +73,8 @@ const MERGE_PROGRAMS: &[&str] = &["gh", "bkt"];
 const MERGE_SUBCOMMAND: [&str; 2] = ["pr", "merge"];
 const STDIN_SCRIPT_FLAG: &str = "-s";
 const HERE_DOCUMENT: &str = "<<";
+const FALLBACK_EXEMPT_PROGRAMS: &[&str] = &["git", "gh", "bkt", "echo", "printf"];
+const RUN_SUBCOMMAND: &str = "run";
 
 const PRODUCTION_BRANCHES: &[&str] = &["main", "master"];
 const SHELL_KEYWORDS: &[&str] = &[
@@ -81,6 +83,7 @@ const SHELL_KEYWORDS: &[&str] = &[
 
 struct Wrapper {
     name: &'static str,
+    subcommand: Option<&'static str>,
     value_options: &'static [&'static str],
     relocating_options: &'static [&'static str],
     script_options: &'static [&'static str],
@@ -91,6 +94,7 @@ struct Wrapper {
 const fn wrapper(name: &'static str, value_options: &'static [&'static str]) -> Wrapper {
     Wrapper {
         name,
+        subcommand: None,
         value_options,
         relocating_options: &[],
         script_options: &[],
@@ -230,43 +234,130 @@ const WRAPPERS: &[Wrapper] = &[
             ],
         )
     },
+    Wrapper {
+        subcommand: Some(RUN_SUBCOMMAND),
+        relocating_options: &["--directory", "--project"],
+        ..wrapper(
+            "uv",
+            &[
+                "--with",
+                "--with-editable",
+                "--with-requirements",
+                "--python",
+                "-p",
+                "--project",
+                "--directory",
+                "--package",
+                "--env-file",
+                "--extra",
+                "--group",
+                "--index",
+                "--default-index",
+                "--index-url",
+                "--extra-index-url",
+                "--find-links",
+                "-f",
+            ],
+        )
+    },
+    Wrapper {
+        subcommand: Some(RUN_SUBCOMMAND),
+        ..wrapper("poetry", &[])
+    },
+    Wrapper {
+        subcommand: Some(RUN_SUBCOMMAND),
+        ..wrapper(
+            "pipx",
+            &[
+                "--spec",
+                "--python",
+                "--pip-args",
+                "--index-url",
+                "--backend",
+            ],
+        )
+    },
+    Wrapper {
+        script_options: &["-c", "--call"],
+        ..wrapper(
+            "npx",
+            &[
+                "-p",
+                "--package",
+                "--cache",
+                "--userconfig",
+                "-w",
+                "--workspace",
+            ],
+        )
+    },
+    wrapper("bunx", &["-p", "--package"]),
 ];
 
 struct Interpreter {
     name: &'static str,
     script_letters: &'static str,
+    value_letters: &'static str,
     script_options: &'static [&'static str],
     attached_script: bool,
 }
 
+const PYTHON_LIKE: Interpreter = Interpreter {
+    name: "python",
+    script_letters: "c",
+    value_letters: "WXm",
+    script_options: &[],
+    attached_script: true,
+};
+
+const NODE_LIKE: Interpreter = Interpreter {
+    name: "node",
+    script_letters: "ep",
+    value_letters: "r",
+    script_options: &["--eval", "--print"],
+    attached_script: false,
+};
+
 const INTERPRETERS: &[Interpreter] = &[
+    PYTHON_LIKE,
     Interpreter {
-        name: "python",
-        script_letters: "c",
-        script_options: &[],
-        attached_script: true,
+        name: "pypy",
+        ..PYTHON_LIKE
     },
-    Interpreter {
-        name: "node",
-        script_letters: "ep",
-        script_options: &["--eval", "--print"],
-        attached_script: false,
-    },
+    NODE_LIKE,
     Interpreter {
         name: "nodejs",
-        script_letters: "ep",
-        script_options: &["--eval", "--print"],
-        attached_script: false,
+        ..NODE_LIKE
+    },
+    Interpreter {
+        name: "bun",
+        ..NODE_LIKE
     },
     Interpreter {
         name: "perl",
         script_letters: "eE",
+        value_letters: "MmIxFCd",
         script_options: &[],
         attached_script: true,
     },
     Interpreter {
         name: "ruby",
         script_letters: "e",
+        value_letters: "rICEFx",
+        script_options: &[],
+        attached_script: true,
+    },
+    Interpreter {
+        name: "php",
+        script_letters: "rBRE",
+        value_letters: "cdfztS",
+        script_options: &[],
+        attached_script: true,
+    },
+    Interpreter {
+        name: "lua",
+        script_letters: "e",
+        value_letters: "l",
         script_options: &[],
         attached_script: true,
     },
@@ -582,19 +673,37 @@ fn quoted_segments(command: &str) -> Vec<&str> {
     segments
 }
 
-fn attached_value<'a>(option: &'a str, names: &[&str]) -> Option<&'a str> {
-    if let Some((name, value)) = option.split_once('=') {
-        if name.starts_with("--") && names.contains(&name) {
-            return Some(value);
+fn long_value<'a>(option: &'a str, names: &[&str]) -> Option<&'a str> {
+    let (name, value) = option.split_once('=')?;
+    (name.starts_with("--") && names.contains(&name)).then_some(value)
+}
+
+fn is_short_option(options: &[&str], letter: char) -> bool {
+    options.iter().any(|option| {
+        let mut characters = option.chars();
+        characters.next() == Some('-')
+            && characters.next() == Some(letter)
+            && characters.next().is_none()
+    })
+}
+
+fn cluster_script<'a>(
+    argument: &'a str,
+    is_script: impl Fn(char) -> bool,
+    is_value: impl Fn(char) -> bool,
+) -> Option<&'a str> {
+    let cluster = argument
+        .strip_prefix('-')
+        .filter(|cluster| !cluster.starts_with('-'))?;
+    for (position, letter) in cluster.char_indices() {
+        if is_script(letter) {
+            return cluster.get(position + letter.len_utf8()..);
+        }
+        if is_value(letter) {
+            return None;
         }
     }
-    if option.starts_with("--") || option.len() <= 2 {
-        return None;
-    }
-    option
-        .get(..2)
-        .filter(|short| names.contains(short))
-        .and_then(|_| option.get(2..))
+    None
 }
 
 fn is_version_of(program: &str, name: &str) -> bool {
@@ -611,27 +720,23 @@ fn interpreter(program: &str) -> Option<&'static Interpreter> {
         .find(|interpreter| is_version_of(program, interpreter.name))
 }
 
-fn short_script<'a>(argument: &'a str, interpreter: &Interpreter) -> Option<&'a str> {
-    let cluster = argument
-        .strip_prefix('-')
-        .filter(|cluster| !cluster.starts_with('-'))?;
-    let position = cluster.find(|letter| interpreter.script_letters.contains(letter))?;
-    cluster.get(position + 1..)
-}
-
 fn interpreter_scripts(command: &[&str]) -> Option<Vec<String>> {
     let interpreter = interpreter(program_name(command.first()?))?;
     let mut scripts = Vec::new();
     let mut arguments = command[1..].iter().copied();
     while let Some(argument) = arguments.next() {
-        if let Some(script) = attached_value(argument, interpreter.script_options) {
+        if let Some(script) = long_value(argument, interpreter.script_options) {
             scripts.push(script.to_string());
             continue;
         }
         let attached = if interpreter.script_options.contains(&argument) {
             ""
         } else {
-            match short_script(argument, interpreter) {
+            match cluster_script(
+                argument,
+                |letter| interpreter.script_letters.contains(letter),
+                |letter| interpreter.value_letters.contains(letter),
+            ) {
                 Some(attached) => attached,
                 None => continue,
             }
@@ -688,17 +793,34 @@ fn command_prefix(tokens: &[&str]) -> CommandPrefix {
             continue;
         }
         let name = program_name(token);
-        let Some(wrapper) = WRAPPERS.iter().find(|wrapper| wrapper.name == name) else {
+        let Some(wrapper) = WRAPPERS.iter().find(|wrapper| {
+            wrapper.name == name
+                && wrapper
+                    .subcommand
+                    .is_none_or(|subcommand| tokens.get(index + 1) == Some(&subcommand))
+        }) else {
             break;
         };
-        index += 1;
+        index += 1 + usize::from(wrapper.subcommand.is_some());
         prefix.appends_arguments |= wrapper.appends_arguments;
         while let Some(&option) = tokens.get(index).filter(|option| option.starts_with('-')) {
             if wrapper.script_options.contains(&option) {
                 return prefix.with_script(tokens.get(index + 1).copied(), tokens.len());
             }
-            if let Some(script) = attached_value(option, wrapper.script_options) {
+            if let Some(script) = long_value(option, wrapper.script_options) {
                 return prefix.with_script(Some(script), tokens.len());
+            }
+            if let Some(script) = cluster_script(
+                option,
+                |letter| is_short_option(wrapper.script_options, letter),
+                |letter| is_short_option(wrapper.value_options, letter),
+            ) {
+                let script = if script.is_empty() {
+                    tokens.get(index + 1).copied()
+                } else {
+                    Some(script)
+                };
+                return prefix.with_script(script, tokens.len());
             }
             index += 1;
             if option == "--" {
@@ -779,6 +901,19 @@ fn mentions_git_push(text: &str) -> bool {
         .iter()
         .position(|word| program_name(word) == GIT_PROGRAM)
         .is_some_and(|index| words[index + 1..].contains(&PUSH_COMMAND))
+}
+
+fn mentions_unexempt_push(segment: &str) -> bool {
+    if !mentions_git_push(segment) {
+        return false;
+    }
+    let words = shell_words(segment);
+    let tokens: Vec<&str> = words.iter().map(String::as_str).collect();
+    let prefix = command_prefix(&tokens);
+    prefix.script.is_some()
+        || !tokens
+            .get(prefix.start)
+            .is_some_and(|first| FALLBACK_EXEMPT_PROGRAMS.contains(&program_name(first)))
 }
 
 fn calls_git_push_indirectly(tokens: &[&str], start: usize) -> bool {
@@ -1023,6 +1158,7 @@ impl ProductionRules {
         let mut branch = current_branch;
         let mut relocated = false;
         let mut feeds_shell = false;
+        let mut unresolved = false;
         for segment in split_segments(&command) {
             let words = shell_words(segment);
             let tokens: Vec<&str> = words.iter().map(String::as_str).collect();
@@ -1050,9 +1186,9 @@ impl ProductionRules {
                     );
                 }
             }
-            if found.is_empty() && calls_git_push_indirectly(&tokens, prefix.start) {
-                found.push(production_label(UNRESOLVED_TARGET));
-            }
+            unresolved |= found.is_empty()
+                && (calls_git_push_indirectly(&tokens, prefix.start)
+                    || mentions_unexempt_push(segment));
             push_distinct(&mut labels, found);
         }
         let unsplit_branch = if relocated { None } else { current_branch };
@@ -1060,13 +1196,12 @@ impl ProductionRules {
             .into_iter()
             .filter(|segment| segment.contains(is_segment_separator))
         {
-            push_distinct(
-                &mut labels,
-                self.classify_segment(segment, unsplit_branch, depth).labels,
-            );
+            let found = self.classify_segment(segment, unsplit_branch, depth).labels;
+            unresolved |= found.is_empty() && mentions_unexempt_push(segment);
+            push_distinct(&mut labels, found);
         }
         let pushes = labels.iter().any(|label| label.starts_with(GIT_PUSH_LABEL));
-        if feeds_shell && !pushes && mentions_git_push(&command) {
+        if !pushes && (unresolved || (feeds_shell && mentions_git_push(&command))) {
             labels.push(production_label(UNRESOLVED_TARGET));
         }
         Classified {
@@ -1414,6 +1549,43 @@ mod tests {
             ("Bash", Some("python3 - <<'EOF'\nimport os\nos.system(\"git push origin main\")\nEOF"), Some("feature/x"), some("git push → ?")),
             ("Bash", Some("echo 'import os; os.system(\"git push origin main\")' | python3"), Some("feature/x"), some("git push → ?")),
             ("Bash", Some("python3 manage.py test"), Some("main"), None),
+            ("Bash", Some("ruby -rtime -e 'system(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("ruby -rdate -e 'system(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("perl -I/usr/share -e 'system(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("perl -MIO::Handle -e 'system(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("perl -Mautodie -e 'system(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("env -vS 'git push origin main'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("env -iS 'git push origin main'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("env -u X -S 'git push origin main'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("env -uSSH_AUTH_SOCK git push origin main"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("uv run python -c \"import os; os.system('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("uv run --with requests python -c \"import os; os.system('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("poetry run python -c \"import os; os.system('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("pipx run --spec black python -c \"import os; os.system('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("npx --yes node -e \"require('child_process').execSync('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("npx -c 'git push origin main'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("bunx node -e \"require('child_process').execSync('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("awk 'BEGIN{system(\"git push origin main\")}'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("php -r 'system(\"git push origin main\");'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("bun -e 'require(\"child_process\").execSync(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("pypy3 -c 'import os; os.system(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("lua -e 'os.execute(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("time python3 -c \"import os; os.system('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("nice -n 5 python3 -c \"import os; os.system('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("deno eval \"new Deno.Command('git', {args: ['push','origin','main']}).outputSync()\""), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("mytool 'git push origin main'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("mytool --run '/usr/bin/git push'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("uv --quiet run python -c 'import os; os.system(\"git push origin main\")'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("bash -c 'git push origin feature'"), Some("main"), some("git push → ?")),
+            ("Bash", Some("git commit -m \"docs: explain git push\""), Some("main"), None),
+            ("Bash", Some("gh pr create --body \"run git push\""), Some("main"), None),
+            ("Bash", Some("printf 'git push origin main\\n'"), Some("main"), None),
+            ("Bash", Some("ruby -rtime -e 'puts Time.now'"), Some("main"), None),
+            ("Bash", Some("perl -Mstrict -e 'print 1'"), Some("main"), None),
+            ("Bash", Some("env -iS 'git status'"), Some("main"), None),
+            ("Bash", Some("uv run pytest -x"), Some("main"), None),
+            ("Bash", Some("npx prettier --write ."), Some("main"), None),
+            ("Bash", Some("python -m pip install -e ."), Some("main"), None),
             ("Bash", Some("gh pr view 12"), None, None),
             ("Bash", Some("gh pr create --fill"), None, None),
             ("Bash", Some("bkt pr list"), None, None),

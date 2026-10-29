@@ -282,14 +282,17 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   Built-in Bash rules: `git push` to `main`/`master`, `task release`, `gh pr merge` and
   `bkt pr merge`; extra `bash:` rules are labelled `reguła: <pattern>` so command text never reaches
   the notification title. The parser (`guard.rs`) is quote-aware, joins `\`-newline continuations,
-  strips wrappers (sudo, env, timeout, flock, setsid, doas, ionice, systemd-run, …) and caps
-  `eval` / `<shell> -c` / `env -S` nesting at 8 levels. Segments are split quote-unaware first (so
-  `$(…)` inside double quotes is still seen); a second, quote-aware pass re-reads every segment that
-  the first split cut inside quotes, so a quoted script reaches classification intact. Inline
-  scripts of `python*`, `node`, `perl` and `ruby` (`-c`, `-e`/`--eval`, `-p`/`--print`, `-E`) are
-  classified with their quotes blanked out. Anything it cannot resolve that still mentions `git`
-  and `push` (an unknown wrapper, a script piped into a shell or an interpreter, an interpreter
-  script, nesting past the cap) is `git push → ?`, which always needs approval. A blocked action creates an approval (expires after 24 h) shown in the panel's "Do
+  strips wrappers (sudo, env, timeout, flock, setsid, doas, ionice, systemd-run, `uv run`,
+  `poetry run`, `pipx run`, npx, bunx, …) and caps `eval` / `<shell> -c` / `env -S` nesting at 8
+  levels. Segments are split quote-unaware first (so `$(…)` inside double quotes is still seen); a
+  second, quote-aware pass re-reads every segment that the first split cut inside quotes, so a quoted
+  script reaches classification intact. Inline scripts of `python*`/`pypy*`, `node`, `bun`, `perl`,
+  `ruby`, `php` and `lua` are classified with their quotes blanked out; short-option clusters are
+  scanned until a value-taking letter (`ruby -rtime -e`, `perl -Mautodie -e`, `env -vS`). Fail
+  closed: a segment that classifies as nothing, whose program is not `git`, `gh`, `bkt`, `echo` or
+  `printf`, and whose raw text has the word `git` (or `…/git`) followed by `push` is `git push → ?`
+  (only when no exact push label was found), which always needs approval; so are a script piped into
+  a shell or an interpreter and nesting past the cap. A blocked action creates an approval (expires after 24 h) shown in the panel's "Do
   decyzji" tab; the user approves in the app only. An approval mints a one-shot token for the exact
   action fingerprint (cwd + normalised command, or tool + canonical args), valid 30 min, and the
   app then types an approval notice into the session so it retries (a rejection notice on reject). A Human prompt revokes the session's tokens.
