@@ -85,21 +85,90 @@ impl PtyManager {
         self.inner.lock().contains_key(id)
     }
 
+    fn handle(&self, id: &str) -> AppResult<Arc<PtyHandle>> {
+        self.inner
+            .lock()
+            .get(id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("pty {id}")))
+    }
+
     pub fn write(&self, id: &str, data: &[u8]) -> AppResult<()> {
-        let g = self.inner.lock();
-        let h = g.get(id).ok_or_else(|| AppError::NotFound(format!("pty {id}")))?;
-        h.write(data)
+        self.handle(id)?.write(data)
     }
 
     pub fn resize(&self, id: &str, cols: u16, rows: u16) -> AppResult<()> {
-        let g = self.inner.lock();
-        let h = g.get(id).ok_or_else(|| AppError::NotFound(format!("pty {id}")))?;
-        h.resize(cols, rows)
+        self.handle(id)?.resize(cols, rows)
     }
 
     pub fn kill(&self, id: &str) -> AppResult<()> {
-        let mut g = self.inner.lock();
-        if let Some(h) = g.remove(id) { let _ = h.kill(); }
+        let removed = self.inner.lock().remove(id);
+        if let Some(h) = removed { let _ = h.kill(); }
         Ok(())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use portable_pty::{native_pty_system, PtySize};
+    use std::io::Write;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    struct StalledWriter {
+        entered: mpsc::Sender<()>,
+        release: mpsc::Receiver<()>,
+    }
+
+    impl Write for StalledWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let _ = self.entered.send(());
+            let _ = self.release.recv();
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn insert(manager: &PtyManager, id: &str, writer: Box<dyn Write + Send>) {
+        let pair = native_pty_system()
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .unwrap();
+        let handle = PtyHandle::from_parts(id, pair.master, writer);
+        manager.inner.lock().insert(id.to_string(), Arc::new(handle));
+    }
+
+    #[test]
+    fn a_stalled_write_leaves_other_ptys_usable() {
+        let manager = PtyManager::new();
+        let (entered, entered_signal) = mpsc::channel();
+        let (release_signal, release) = mpsc::channel();
+        insert(&manager, "stalled", Box::new(StalledWriter { entered, release }));
+        insert(&manager, "live", Box::new(std::io::sink()));
+        let stalled = {
+            let manager = manager.clone();
+            std::thread::spawn(move || manager.write("stalled", b"long injection"))
+        };
+        entered_signal.recv_timeout(Duration::from_secs(5)).unwrap();
+        let (done, outcome) = mpsc::channel();
+        {
+            let manager = manager.clone();
+            std::thread::spawn(move || {
+                let _ = done.send((
+                    manager.contains("live"),
+                    manager.write("live", b"x").is_ok(),
+                    manager.resize("live", 100, 30).is_ok(),
+                    manager.kill("gone").is_ok(),
+                ));
+            });
+        }
+        let result = outcome.recv_timeout(Duration::from_secs(2));
+        release_signal.send(()).unwrap();
+        stalled.join().unwrap().unwrap();
+        assert_eq!(result, Ok((true, true, true, true)));
+        assert!(manager.write("missing", b"x").is_err());
     }
 }

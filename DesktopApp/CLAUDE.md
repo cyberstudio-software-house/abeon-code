@@ -254,7 +254,9 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   ready. Nothing is typed into its PTY before that, and queued events survive.
 - **Wake-up**: plain text `[abeon] nowe zdarzenia`, written only after a 5 s window with no keystrokes
   in the supervisor PTY. Text and `\r` are two writes ~250 ms apart; the answer prefix for sessions
-  is `[agent sterujący] `.
+  is `[agent sterujący] `. Injected text is capped at `MAX_INITIAL_PROMPT_BYTES`, and
+  `PtyManager::write`/`resize` clone the handle and drop the global map lock before touching the PTY,
+  so a session that stops reading stdin cannot stall `pty_write` for the other terminals.
 - **Provenance** (`UserPromptSubmit`): typed injection with no keystroke since (or exact text) ->
   Supervisor; prompt the app passed on the CLI -> Agent; Enter within 10 s in the session's known
   PTY -> Human; otherwise, including a session with no known PTY, Agent. `pty_write` feeds

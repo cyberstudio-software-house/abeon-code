@@ -88,6 +88,20 @@ impl PtyHandle {
         })
     }
 
+    #[cfg(all(test, unix))]
+    pub(crate) fn from_parts(
+        id: &str,
+        master: Box<dyn MasterPty + Send>,
+        writer: Box<dyn Write + Send>,
+    ) -> PtyHandle {
+        PtyHandle {
+            id: id.to_string(),
+            master: Arc::new(Mutex::new(master)),
+            writer: Arc::new(Mutex::new(writer)),
+            pid: AtomicU32::new(0),
+        }
+    }
+
     pub fn write(&self, data: &[u8]) -> AppResult<()> {
         self.writer.lock().unwrap().write_all(data).map_err(AppError::Io)
     }

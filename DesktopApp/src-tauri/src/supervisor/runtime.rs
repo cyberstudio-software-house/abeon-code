@@ -24,7 +24,7 @@ use crate::pty::PtyManager;
 use crate::sessions::reader::now_ms;
 use crate::state::AppState;
 use crate::supervisor::claude_md::WAKE_TEXT;
-use crate::supervisor::core::{SupervisorCore, QUIET_WINDOW};
+use crate::supervisor::core::{cap_bytes, SupervisorCore, QUIET_WINDOW};
 use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
 use crate::supervisor::process::SupervisorProcess;
 use crate::supervisor::settings::SupervisorSettings;
@@ -77,6 +77,10 @@ fn neutralize_controls(text: &str) -> String {
             }
         })
         .collect()
+}
+
+fn typed_text(text: &str) -> String {
+    cap_bytes(&neutralize_controls(text), MAX_INITIAL_PROMPT_BYTES)
 }
 
 fn check_open_request(project_path: &str, prompt: &str) -> Result<(), String> {
@@ -229,7 +233,7 @@ impl Effects for AppEffects {
 
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String> {
         self.pty
-            .write(pty_id, neutralize_controls(text).as_bytes())
+            .write(pty_id, typed_text(text).as_bytes())
             .map_err(|error| error.to_string())?;
         let pty = self.pty.clone();
         let pty_id = pty_id.to_string();
@@ -660,6 +664,15 @@ mod tests {
             neutralize_controls("zażółć gęślą jaźń"),
             "zażółć gęślą jaźń"
         );
+    }
+
+    #[test]
+    fn typed_text_is_capped_without_control_characters() {
+        let typed = typed_text(&format!("a\r{}", "ż".repeat(MAX_INITIAL_PROMPT_BYTES)));
+        assert!(typed.len() <= MAX_INITIAL_PROMPT_BYTES);
+        assert!(typed.starts_with("a ż"));
+        assert!(typed.ends_with('…'));
+        assert_eq!(typed_text("tak\x1b[A"), "tak [A");
     }
 
     #[test]

@@ -7,6 +7,7 @@ use serde_json::Value;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+use crate::commands::pty::MAX_INITIAL_PROMPT_BYTES;
 use crate::db::supervisor_decisions_repo::NewDecision;
 use crate::domain::supervisor::{
     CardPhase, EscalationView, MenuQuestion, QuestionCardView, SupervisorLevel, SupervisorSnapshot,
@@ -50,6 +51,7 @@ pub mod decision_kind {
 }
 
 const ASK_USER_QUESTION: &str = "AskUserQuestion";
+const ELLIPSIS: char = '…';
 const SUMMARY_CHARS: usize = 500;
 const NOTIFICATION_CHARS: usize = 160;
 const ESCALATION_TITLE: &str = "Agent sterujący: potrzebna Twoja decyzja";
@@ -96,6 +98,17 @@ fn single_line(text: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+pub(crate) fn cap_bytes(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    let mut cut = max_bytes.saturating_sub(ELLIPSIS.len_utf8());
+    while !text.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}{ELLIPSIS}", &text[..cut])
 }
 
 fn quoted_list<'a>(items: impl IntoIterator<Item = &'a str>) -> String {
@@ -595,6 +608,7 @@ impl CoreState {
         if text.is_empty() {
             return false;
         }
+        let text = cap_bytes(&text, MAX_INITIAL_PROMPT_BYTES);
         self.next_injection += 1;
         self.injections.push(Injection {
             id: self.next_injection,
@@ -1893,6 +1907,21 @@ mod tests {
             effects.typed(),
             vec![("pty-s1".to_string(), "[agent sterujący] tak\r".to_string())]
         );
+    }
+
+    #[test]
+    fn injections_are_capped_on_a_char_boundary() {
+        let mut state = CoreState::default();
+        let long = format!("[agent sterujący] {}", "ż".repeat(MAX_INITIAL_PROMPT_BYTES));
+        assert!(state.queue_injection("s1", &long));
+        let queued = &state.injections[0].text;
+        assert!(queued.len() <= MAX_INITIAL_PROMPT_BYTES, "{}", queued.len());
+        assert!(queued.len() > MAX_INITIAL_PROMPT_BYTES - 8);
+        assert!(queued.starts_with("[agent sterujący] żż"));
+        assert!(queued.ends_with('…'));
+        let exact = "a".repeat(MAX_INITIAL_PROMPT_BYTES);
+        assert!(state.queue_injection("s2", &exact));
+        assert_eq!(state.injections[1].text, exact);
     }
 
     #[test]
