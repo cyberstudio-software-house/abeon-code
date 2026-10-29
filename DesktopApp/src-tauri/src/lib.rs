@@ -173,6 +173,10 @@ pub fn run() {
             commands::supervisor::supervisor_resolve_approval,
             commands::supervisor::supervisor_dismiss_escalation,
             commands::supervisor::supervisor_list_decisions,
+            commands::supervisor::supervisor_discord_status,
+            commands::supervisor::supervisor_discord_save_token,
+            commands::supervisor::supervisor_discord_pair,
+            commands::supervisor::supervisor_discord_disable_global_plugin,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

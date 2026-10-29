@@ -121,3 +121,30 @@ pub struct DecisionEntry {
     pub decision: String,
     pub rationale: String,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct DiscordBotView {
+    pub name: String,
+    pub message_content_intent: bool,
+    #[ts(type = "number | null")]
+    pub guild_count: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct DiscordSetupStatus {
+    pub bun_path: Option<String>,
+    pub token_stored: bool,
+    pub bot: Option<DiscordBotView>,
+    pub bot_error: Option<String>,
+    pub paired_users: usize,
+    pub pending_pairings: usize,
+    pub policy: String,
+    pub chat_linked: bool,
+    pub global_plugin_enabled: bool,
+    pub channel_active: bool,
+    pub blocker: Option<String>,
+}

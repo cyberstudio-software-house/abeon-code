@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DecisionEntry, SessionRebound } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound } from '../types';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
 import type { ClickUpSpace } from '../types/ClickUpSpace';
@@ -216,6 +216,12 @@ export const tauri = {
     invoke<void>('supervisor_dismiss_escalation', { id }),
   supervisorListDecisions: (limit: number) =>
     invoke<DecisionEntry[]>('supervisor_list_decisions', { limit }),
+  supervisorDiscordStatus: () => invoke<DiscordSetupStatus>('supervisor_discord_status'),
+  supervisorDiscordSaveToken: (token: string) =>
+    invoke<void>('supervisor_discord_save_token', { token }),
+  supervisorDiscordPair: (code: string) => invoke<void>('supervisor_discord_pair', { code }),
+  supervisorDiscordDisableGlobalPlugin: () =>
+    invoke<void>('supervisor_discord_disable_global_plugin'),
   onSupervisorSnapshot: (cb: (snapshot: SupervisorSnapshot) => void): Promise<UnlistenFn> =>
     listen<SupervisorSnapshot>('supervisor:snapshot', e => cb(e.payload)),
   onSupervisorSessionRebound: (cb: (rebound: SessionRebound) => void): Promise<UnlistenFn> =>

@@ -78,6 +78,8 @@ impl DiscordFiles {
     }
 
     pub fn save_token(&self, token: &str) -> std::io::Result<()> {
+        let token = validate_token(token)
+            .map_err(|reason| std::io::Error::new(std::io::ErrorKind::InvalidInput, reason))?;
         self.ensure_dir()?;
         let path = self.dir.join(ENV_FILE);
         let existing = std::fs::read_to_string(&path).unwrap_or_default();
@@ -357,6 +359,16 @@ mod tests {
             }}
         });
         fs::write(dir.join("access.json"), body.to_string()).unwrap();
+    }
+
+    #[test]
+    fn save_token_rejects_a_token_with_a_newline() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = DiscordFiles::new(dir.path().join("discord"));
+        let error = files.save_token("abc\nDISCORD_EVIL=1").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!dir.path().join("discord").join(".env").exists());
+        assert_eq!(files.token(), None);
     }
 
     #[test]

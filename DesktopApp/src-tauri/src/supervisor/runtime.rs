@@ -29,6 +29,7 @@ use crate::supervisor::claude_md::WAKE_TEXT;
 use crate::supervisor::core::{cap_bytes, SupervisorCore, QUIET_WINDOW};
 use crate::supervisor::discord::client::DiscordClient;
 use crate::supervisor::discord::files::DiscordFiles;
+use crate::supervisor::discord::DiscordLink;
 use crate::supervisor::discord::poll::{poll_approvals, POLL_INTERVAL};
 use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
 use crate::supervisor::process::{claude_home, SupervisorProcess};
@@ -652,6 +653,12 @@ pub fn restart_supervisor(app: &AppHandle) -> AppResult<()> {
         runtime.process.restart(app);
     }
     Ok(())
+}
+
+pub fn discord_link(app: &AppHandle) -> DiscordLink {
+    runtime(app)
+        .map(|runtime| runtime.process.discord_link())
+        .unwrap_or_default()
 }
 
 pub fn new_conversation(app: &AppHandle) -> AppResult<()> {

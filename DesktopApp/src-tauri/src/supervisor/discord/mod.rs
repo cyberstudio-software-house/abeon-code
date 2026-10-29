@@ -3,6 +3,7 @@ pub mod files;
 pub mod poll;
 pub mod preflight;
 pub mod replies;
+pub mod status;
 
 pub const PLUGIN_ID: &str = "discord@claude-plugins-official";
 pub const CHANNEL_ARG: &str = "plugin:discord@claude-plugins-official";
