@@ -151,11 +151,11 @@ impl Effects for FakeEffects {
         self.sessions.lock().get(session_id).cloned()
     }
 
-    fn bind_session(&self, session_id: &str, pty_id: &str) -> SessionClaim {
+    fn bind_session(&self, session_id: &str, pty_id: &str, submitted: bool) -> SessionClaim {
         if !self.live_ptys.lock().contains(pty_id) {
             return SessionClaim::Refused;
         }
-        let claim = self.registry.claim(session_id, pty_id);
+        let claim = self.registry.claim(session_id, pty_id, submitted);
         let SessionClaim::Rebound { displaced } = &claim else {
             return claim;
         };

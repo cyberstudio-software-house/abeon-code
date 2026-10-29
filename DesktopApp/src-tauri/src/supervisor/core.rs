@@ -800,7 +800,9 @@ impl SupervisorCore {
     }
 
     fn track_terminal(&self, session_id: &str, pty_id: &str) {
-        let SessionClaim::Rebound { displaced } = self.effects.bind_session(session_id, pty_id)
+        let submitted = self.effects.submitted_recently(pty_id, SUBMIT_WINDOW);
+        let SessionClaim::Rebound { displaced } =
+            self.effects.bind_session(session_id, pty_id, submitted)
         else {
             return;
         };
@@ -1872,6 +1874,7 @@ mod tests {
         .unwrap();
         core.tick();
         assert!(effects.typed().is_empty());
+        effects.submit("pty-s1");
         core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
             .await;
         assert_eq!(
@@ -1900,8 +1903,10 @@ mod tests {
         effects.submit("pty-s1");
         core.on_session_hook(prompt("s1", "zrób push")).await;
         advance(30 * SECOND).await;
+        effects.submit("pty-s1");
         core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
             .await;
+        advance(SUBMIT_WINDOW + SECOND).await;
         core.on_session_hook(on_terminal(
             prompt("s3", "[agent sterujący] git push"),
             "pty-s1",
@@ -1962,6 +1967,7 @@ mod tests {
         let held = spawn_menu(&core, "s1").await;
         assert_eq!(core.snapshot().cards.len(), 1);
         assert_eq!(core.snapshot().escalations.len(), 1);
+        effects.submit("pty-s1");
         core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
             .await;
         assert_eq!(reply_of(held).await, HookReply::Empty);
@@ -2019,12 +2025,37 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn a_new_session_id_without_an_enter_cannot_take_a_live_terminal() {
+        let (effects, core) = setup();
+        core.set_away(true);
+        let held = spawn_menu(&core, "s2").await;
+        effects.submit("pty-s2");
+        advance(SUBMIT_WINDOW + SECOND).await;
+        effects.submit("pty-s1");
+        core.on_session_hook(on_terminal(hook("y", "SessionStart"), "pty-s2"))
+            .await;
+        assert_eq!(effects.session_info("y"), None);
+        assert_eq!(pty_of(&effects, "s2"), Some("pty-s2".to_string()));
+        assert_eq!(core.snapshot().cards.len(), 1);
+        assert_eq!(core.snapshot().cards[0].session_id, "s2");
+        assert!(!held.is_finished());
+        assert!(effects.rebounds.lock().is_empty());
+        held.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn clear_and_resume_in_the_same_terminal_rebind_it() {
         let (effects, core) = setup();
+        effects.submit("pty-s1");
         core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
             .await;
         assert_eq!(pty_of(&effects, "s3"), Some("pty-s1".to_string()));
         assert_eq!(pty_of(&effects, "s1"), None);
+        advance(SUBMIT_WINDOW + SECOND).await;
+        core.on_session_hook(on_terminal(hook("s1", "SessionStart"), "pty-s1"))
+            .await;
+        assert_eq!(pty_of(&effects, "s1"), None);
+        effects.submit("pty-s1");
         core.on_session_hook(on_terminal(hook("s1", "SessionStart"), "pty-s1"))
             .await;
         assert_eq!(pty_of(&effects, "s1"), Some("pty-s1".to_string()));
@@ -2053,7 +2084,10 @@ mod tests {
             .await;
         core.on_session_hook(on_terminal(prompt("s3", "cześć"), "pty-s1"))
             .await;
+        core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
+            .await;
         assert!(effects.rebounds.lock().is_empty());
+        effects.submit("pty-s1");
         core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
             .await;
         core.on_session_hook(on_terminal(hook("s1", "SessionStart"), "pty-s1"))

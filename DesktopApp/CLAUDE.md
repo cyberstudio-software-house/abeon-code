@@ -247,7 +247,10 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   tokens, provenance). `SessionPtyRegistry::claim` accepts only PTY ids the app issued to hooked
   Claude sessions (never shells) and keeps every session id on the PTY it was first bound to (the
   history goes with the PTY on `pty_kill`), so a forged hook cannot move a session onto another
-  terminal; a session whose `SessionStart` was lost has no PTY, so its prompts are Agent. Each
+  terminal. A claim that would displace a different session from its PTY also needs a real Enter
+  (`\r`) in that PTY within the 10 s submit window (a real `/clear` or `/resume` is always confirmed
+  with Enter there); without it nothing is rebound, displaced or announced. A session whose
+  `SessionStart` was lost has no PTY, so its prompts are Agent. Each
   rebind emits `supervisor:session-rebound` `{ ptyId, sessionId }`; `useSupervisorSnapshot` (both
   window shells) relinks the session tab whose `ptyId` matches via `linkNewSession`, so the question
   card, presence and attention follow the new id. Every agent tab records its `ptyId`

@@ -237,12 +237,12 @@ impl Effects for AppEffects {
         })
     }
 
-    fn bind_session(&self, session_id: &str, pty_id: &str) -> SessionClaim {
+    fn bind_session(&self, session_id: &str, pty_id: &str, submitted: bool) -> SessionClaim {
         if crate::validation::validate_session_id(session_id).is_err() || !self.pty.contains(pty_id)
         {
             return SessionClaim::Refused;
         }
-        self.session_pty.claim(session_id, pty_id)
+        self.session_pty.claim(session_id, pty_id, submitted)
     }
 
     fn session_rebound(&self, rebound: SessionRebound) {
@@ -904,6 +904,7 @@ mod tests {
         #[tokio::test]
         async fn session_hooks_bind_the_reported_terminal() {
             let (effects, core) = setup();
+            effects.submit("pty-s1");
             let request = IpcRequest::Hook {
                 channel: HookChannel::Session,
                 input: json!({

@@ -644,12 +644,12 @@ mod tests {
         let mut env = std::collections::HashMap::new();
         let id = assign_hooked_pty_id(&mut env, true, &registry).expect("pty id");
         assert_eq!(
-            registry.claim("s1", &id),
+            registry.claim("s1", &id, false),
             SessionClaim::Rebound { displaced: Vec::new() }
         );
         let mut shell_env = std::collections::HashMap::new();
         assert_eq!(assign_hooked_pty_id(&mut shell_env, false, &registry), None);
-        assert_eq!(registry.claim("s2", "shell-pty"), SessionClaim::Refused);
+        assert_eq!(registry.claim("s2", "shell-pty", true), SessionClaim::Refused);
     }
 
     #[test]

@@ -29,7 +29,7 @@ pub struct SessionListing {
 pub trait Effects: Send + Sync + 'static {
     fn settings(&self) -> SupervisorSettings;
     fn session_info(&self, session_id: &str) -> Option<SessionInfo>;
-    fn bind_session(&self, session_id: &str, pty_id: &str) -> SessionClaim;
+    fn bind_session(&self, session_id: &str, pty_id: &str, submitted: bool) -> SessionClaim;
     fn session_rebound(&self, rebound: SessionRebound);
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String>;
     fn input_quiet(&self, pty_id: &str, window: Duration) -> bool;

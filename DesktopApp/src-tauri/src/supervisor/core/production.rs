@@ -614,10 +614,15 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn decoy_session_start_does_not_unguard_the_session() {
-        let (_effects, core) = on_main();
+        let (effects, core) = on_main();
         agent_prompted(&core, "s1").await;
+        effects.submit("pty-s1");
         core.on_session_hook(on_terminal(hook("x", "SessionStart"), "pty-s1"))
             .await;
+        assert_eq!(
+            effects.session_info("s1").and_then(|info| info.pty_id),
+            None
+        );
         assert_eq!(
             core.on_session_hook(bash("s1", "git push origin main"))
                 .await,

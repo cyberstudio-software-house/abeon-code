@@ -39,7 +39,7 @@ impl SessionPtyRegistry {
         self.inner.lock().hooked.insert(pty_id.to_string());
     }
 
-    pub fn claim(&self, session_id: &str, pty_id: &str) -> SessionClaim {
+    pub fn claim(&self, session_id: &str, pty_id: &str, submitted: bool) -> SessionClaim {
         let mut inner = self.inner.lock();
         if !inner.hooked.contains(pty_id) {
             return SessionClaim::Refused;
@@ -50,16 +50,19 @@ impl SessionPtyRegistry {
         if inner.current.get(session_id).is_some_and(|current| current == pty_id) {
             return SessionClaim::Kept;
         }
-        inner
-            .homes
-            .entry(session_id.to_string())
-            .or_insert_with(|| pty_id.to_string());
         let displaced: Vec<String> = inner
             .current
             .iter()
             .filter(|(session, pty)| session.as_str() != session_id && pty.as_str() == pty_id)
             .map(|(session, _)| session.clone())
             .collect();
+        if !displaced.is_empty() && !submitted {
+            return SessionClaim::Refused;
+        }
+        inner
+            .homes
+            .entry(session_id.to_string())
+            .or_insert_with(|| pty_id.to_string());
         for session in &displaced {
             inner.current.remove(session);
         }
@@ -125,6 +128,9 @@ mod tests {
         assert_eq!(reg.pty_for("sess-2"), Some("pty-b".to_string()));
     }
 
+    const SUBMITTED: bool = true;
+    const SILENT: bool = false;
+
     fn rebound(displaced: &[&str]) -> SessionClaim {
         SessionClaim::Rebound {
             displaced: displaced.iter().map(|id| id.to_string()).collect(),
@@ -138,12 +144,12 @@ mod tests {
         reg.register_hooked_pty("p2");
         reg.bind("s1", "p1");
         reg.bind("s2", "p2");
-        assert_eq!(reg.claim("s3", "p1"), rebound(&["s1"]));
+        assert_eq!(reg.claim("s3", "p1", SUBMITTED), rebound(&["s1"]));
         assert_eq!(reg.pty_for("s3"), Some("p1".to_string()));
         assert_eq!(reg.pty_for("s1"), None);
         assert_eq!(reg.session_for("p1"), Some("s3".to_string()));
         assert_eq!(reg.pty_for("s2"), Some("p2".to_string()));
-        assert_eq!(reg.claim("s3", "p1"), SessionClaim::Kept);
+        assert_eq!(reg.claim("s3", "p1", SUBMITTED), SessionClaim::Kept);
         assert_eq!(reg.pty_for("s3"), Some("p1".to_string()));
     }
 
@@ -151,8 +157,8 @@ mod tests {
     fn claim_ignores_ptys_the_app_did_not_issue() {
         let reg = SessionPtyRegistry::new();
         reg.bind("s1", "shell");
-        assert_eq!(reg.claim("s2", "shell"), SessionClaim::Refused);
-        assert_eq!(reg.claim("s2", "p9"), SessionClaim::Refused);
+        assert_eq!(reg.claim("s2", "shell", SUBMITTED), SessionClaim::Refused);
+        assert_eq!(reg.claim("s2", "p9", SUBMITTED), SessionClaim::Refused);
         assert_eq!(reg.pty_for("s2"), None);
         assert_eq!(reg.session_for("shell"), Some("s1".to_string()));
     }
@@ -164,12 +170,12 @@ mod tests {
         reg.register_hooked_pty("p2");
         reg.bind("s1", "p1");
         reg.bind("s2", "p2");
-        assert_eq!(reg.claim("s1", "p2"), SessionClaim::Refused);
+        assert_eq!(reg.claim("s1", "p2", SUBMITTED), SessionClaim::Refused);
         assert_eq!(reg.pty_for("s1"), Some("p1".to_string()));
         assert_eq!(reg.session_for("p2"), Some("s2".to_string()));
-        assert_eq!(reg.claim("x", "p1"), rebound(&["s1"]));
-        assert_eq!(reg.claim("x", "p2"), SessionClaim::Refused);
-        assert_eq!(reg.claim("s1", "p2"), SessionClaim::Refused);
+        assert_eq!(reg.claim("x", "p1", SUBMITTED), rebound(&["s1"]));
+        assert_eq!(reg.claim("x", "p2", SUBMITTED), SessionClaim::Refused);
+        assert_eq!(reg.claim("s1", "p2", SUBMITTED), SessionClaim::Refused);
         assert_eq!(reg.pty_for("s1"), None);
         assert_eq!(reg.session_for("p2"), Some("s2".to_string()));
     }
@@ -179,11 +185,11 @@ mod tests {
         let reg = SessionPtyRegistry::new();
         reg.register_hooked_pty("p1");
         reg.bind("a", "p1");
-        assert_eq!(reg.claim("b", "p1"), rebound(&["a"]));
-        assert_eq!(reg.claim("a", "p1"), rebound(&["b"]));
+        assert_eq!(reg.claim("b", "p1", SUBMITTED), rebound(&["a"]));
+        assert_eq!(reg.claim("a", "p1", SUBMITTED), rebound(&["b"]));
         assert_eq!(reg.pty_for("a"), Some("p1".to_string()));
         assert_eq!(reg.pty_for("b"), None);
-        assert_eq!(reg.claim("b", "p1"), rebound(&["a"]));
+        assert_eq!(reg.claim("b", "p1", SUBMITTED), rebound(&["a"]));
     }
 
     #[test]
@@ -193,8 +199,8 @@ mod tests {
         reg.register_hooked_pty("p2");
         reg.bind("a", "p1");
         reg.bind("a", "p2");
-        assert_eq!(reg.claim("a", "p1"), SessionClaim::Refused);
-        assert_eq!(reg.claim("a", "p2"), SessionClaim::Kept);
+        assert_eq!(reg.claim("a", "p1", SUBMITTED), SessionClaim::Refused);
+        assert_eq!(reg.claim("a", "p2", SUBMITTED), SessionClaim::Kept);
     }
 
     #[test]
@@ -203,13 +209,50 @@ mod tests {
         reg.register_hooked_pty("p1");
         reg.register_hooked_pty("p2");
         reg.bind("a", "p1");
-        assert_eq!(reg.claim("b", "p1"), rebound(&["a"]));
+        assert_eq!(reg.claim("b", "p1", SUBMITTED), rebound(&["a"]));
         reg.unbind_pty("p1");
         assert_eq!(reg.pty_for("b"), None);
-        assert_eq!(reg.claim("a", "p1"), SessionClaim::Refused);
-        assert_eq!(reg.claim("a", "p2"), rebound(&[]));
-        assert_eq!(reg.claim("b", "p2"), rebound(&["a"]));
+        assert_eq!(reg.claim("a", "p1", SUBMITTED), SessionClaim::Refused);
+        assert_eq!(reg.claim("a", "p2", SUBMITTED), rebound(&[]));
+        assert_eq!(reg.claim("b", "p2", SUBMITTED), rebound(&["a"]));
         assert_eq!(reg.inner.lock().homes.len(), 2);
+    }
+
+    #[test]
+    fn displacing_a_live_session_needs_a_recent_submit() {
+        let reg = SessionPtyRegistry::new();
+        reg.register_hooked_pty("p1");
+        reg.bind("t", "p1");
+        assert_eq!(reg.claim("y", "p1", SILENT), SessionClaim::Refused);
+        assert_eq!(reg.pty_for("t"), Some("p1".to_string()));
+        assert_eq!(reg.pty_for("y"), None);
+        assert!(!reg.inner.lock().homes.contains_key("y"));
+        assert_eq!(reg.claim("y", "p1", SUBMITTED), rebound(&["t"]));
+        assert_eq!(reg.claim("t", "p1", SILENT), SessionClaim::Refused);
+        assert_eq!(reg.pty_for("y"), Some("p1".to_string()));
+        assert_eq!(reg.claim("t", "p1", SUBMITTED), rebound(&["y"]));
+    }
+
+    #[test]
+    fn a_homeless_session_needs_a_submit_to_take_an_occupied_pty() {
+        let reg = SessionPtyRegistry::new();
+        reg.register_hooked_pty("p1");
+        reg.register_hooked_pty("p2");
+        reg.bind("a", "p1");
+        reg.unbind_pty("p1");
+        reg.bind("t", "p2");
+        assert_eq!(reg.claim("a", "p2", SILENT), SessionClaim::Refused);
+        assert_eq!(reg.session_for("p2"), Some("t".to_string()));
+        assert_eq!(reg.claim("a", "p2", SUBMITTED), rebound(&["t"]));
+    }
+
+    #[test]
+    fn claims_that_displace_nobody_need_no_submit() {
+        let reg = SessionPtyRegistry::new();
+        reg.register_hooked_pty("p1");
+        assert_eq!(reg.claim("a", "p1", SILENT), rebound(&[]));
+        assert_eq!(reg.claim("a", "p1", SILENT), SessionClaim::Kept);
+        assert_eq!(reg.pty_for("a"), Some("p1".to_string()));
     }
 
     #[test]
