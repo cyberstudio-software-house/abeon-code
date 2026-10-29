@@ -64,7 +64,8 @@ Discord, which the user has with them at all times.
 - `skipPermissions = true`: every Claude session runs with `--dangerously-skip-permissions`.
 - `enabledProviders = ["claude","codex","opencode"]`.
 - `remoteBridgeEnabled = true`.
-- Claude Code is 2.1.312. Bun is **not** installed.
+- Claude Code is 2.1.312. Bun 1.3.14 is installed in `~/.bun/bin`, but only `~/.zshrc` puts it on
+  `PATH` (see "Spike 3 results").
 - `~/.claude/settings.json` has:
   - `enabledPlugins["discord@claude-plugins-official"] = true`;
   - `inputNeededNotifEnabled`, `agentPushNotifEnabled` and `remoteControlAtStartup` set to `true`.
@@ -327,12 +328,14 @@ holds even if the model errs or is manipulated by session output.
 **Spawn.** A PTY like other agents:
 ```
 claude [--session-id <id> | --resume <id>] --model <setting>
-       --mcp-config <workdir>/mcp.json --strict-mcp-config
-       [--channels plugin:discord@claude-plugins-official]   # only when Discord is enabled
+       --mcp-config <workdir>/mcp.json
+       --strict-mcp-config                                   # only when Discord is off
+       [--channels plugin:discord@claude-plugins-official]   # only when Discord is on
 ```
 - **Never** `--dangerously-skip-permissions`.
-- Whether `--strict-mcp-config` hides the channel plugin's server needs checking in the spike. If it
-  does, drop the flag.
+- `--strict-mcp-config` hides plugin MCP servers too, so the channel never starts with it (spike 3).
+  With Discord on, the flag is dropped and the user's global MCP servers load as well. Their tools
+  are denied by `dontAsk` (no allow rule), and `mcp__bandzior` gets an explicit deny rule on top.
 
 **Permissions** (supervisor `settings.json`, no `ask` rules at all, see §4):
 - allow `mcp__abeoncode__*`;
@@ -436,13 +439,18 @@ to the supervisor as an event and written into `CLAUDE.md`.
     confirmation, and enables it only in the supervisor workdir's `.claude/settings.json`.
   - Settings shows a warning if the global entry is switched back on.
 - **Setup.** Guided in Settings → Agent sterujący → Discord, with status checks:
-  1. Bun installed.
-  2. Bot created (plugin README steps).
-  3. Token stored: `/discord:configure` in the supervisor tab, or the app writes
-     `~/.claude/channels/discord/.env`.
-  4. Paired: DM the bot, then `/discord:access pair <code>` in the supervisor tab.
-  5. Policy switched to `allowlist`.
-  6. First DM sent, so the supervisor learns `chat_id` and stores it in `preferences.md`.
+  1. Bun installed (resolved as described in "Spike 3 results").
+  2. Bot created (plugin README steps). The status reads `GET /applications/@me`: bot name, the
+     Message Content Intent flag and the guild count.
+  3. Token stored: the app writes `~/.claude/channels/discord/.env` from a password field (mode
+     `600`, never logged, never shown again).
+  4. Paired: the user DMs the bot, the bot replies with a code, and the user types the code in
+     Settings. The app applies it exactly like the plugin's `/discord:access pair` skill does. The
+     supervisor cannot run that skill, because it may not write outside `preferences.md`.
+  5. Policy switched to `allowlist` by the app right after pairing.
+  6. The DM `chat_id` is derived by the app (`POST /users/@me/channels` with `allowFrom[0]`) and put
+     in the supervisor's `CLAUDE.md`. No inbound message is needed before the supervisor writes
+     first.
 - **Message style:**
   - Write only when a decision is needed or the user asked.
   - One message per batch.
@@ -497,6 +505,40 @@ Mockups can be shown at the plan stage if the builder wants a choice.
    - the core reading DM history over REST with the bot token while the plugin's gateway connection
      is live.
 4. **Typed wake-up while the supervisor is mid-turn:** the input is queued, not lost.
+
+## Spike 3 results (2026-10-29)
+
+Run in a scratch workdir with `claude --channels plugin:discord@claude-plugins-official`, Claude Code
+2.1.312, plugin 0.0.4, bot `AbeonCode`.
+- **Project scope works.** With `enabledPlugins` `false` globally and `true` in the workdir's
+  `.claude/settings.json`, the plugin loads, its server connects and channel notifications register.
+- **`--strict-mcp-config` hides the plugin server.** `/mcp` lists only built-ins. Hence the spawn rule
+  in §5. Without the flag, 369 MCP tools load as deferred tools (names only in context), which costs
+  little.
+- **Bun is not on the app's PATH.** Bun 1.3.14 lives in `~/.bun/bin`, and only `~/.zshrc` adds it to
+  `PATH`. The app reads the environment with `<shell> -lc 'env -0'`, a login non-interactive shell
+  that skips `.zshrc`. The plugin then fails with `Executable not found in $PATH: "bun"`. The app
+  resolves Bun itself, trying `PATH`, then `$BUN_INSTALL/bin/bun`, then `~/.bun/bin/bun`. It prepends
+  the found directory to the supervisor's `PATH`, and passes `--channels` only when Bun and the token
+  are present.
+- **A failed start is cached for 15 minutes across all sessions.** Claude Code writes
+  `plugin:discord:discord` into `~/.claude/mcp-needs-auth-cache.json`, and every later session skips
+  the server until it expires. Before spawning the supervisor with Discord, the app removes that one
+  key with an atomic read-modify-write that leaves the other keys untouched.
+- **Writing first works.** In a fresh session with no inbound message, `reply` to the stored DM
+  `chat_id` delivered. The outbound gate resolves the DM recipient from the channel itself.
+- **Inbound works.** A DM from the allowlisted user arrives as a new turn
+  (`← discord · <user>: <text>`).
+- **REST alongside the gateway works.**
+  - `POST /users/@me/channels {recipient_id}` returns the same DM id the pairing recorded.
+  - `GET /channels/<id>/messages` returns the history, including the bot's own messages, while the
+    plugin holds the gateway connection.
+  - The REST client must send a `User-Agent: DiscordBot (<url>, <version>)` header.
+- **The pairing flow** works as documented: the bot replies with a 6-hex code, the `pair` steps
+  update `access.json` and drop `approved/<senderId>`, and the server confirms with "Paired!".
+- **Setup state on this machine:** the bot exists, the token is stored, the user is paired, the policy
+  is `allowlist`, and the global `enabledPlugins` entry is `false`. All of this was set up by hand
+  during the spike, on 2026-10-29.
 
 ## Suggested phasing
 
