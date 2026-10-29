@@ -214,7 +214,7 @@ pub fn write_supervisor_workdir(
 ) -> std::io::Result<()> {
     let settings_dir = dir.join(CLAUDE_SETTINGS_DIR);
     std::fs::create_dir_all(&settings_dir)?;
-    let claude_md = claude_md::render(level, &claude_home.join(CLAUDE_PROJECTS_DIR));
+    let claude_md = claude_md::render(level, &claude_home.join(CLAUDE_PROJECTS_DIR), discord);
     write_atomic(&dir.join(CLAUDE_MD_FILE), claude_md.as_bytes())?;
     create_if_missing(&dir.join(PREFERENCES_FILE), PREFERENCES_TEMPLATE)?;
     write_json(&dir.join(MCP_CONFIG_FILE), &mcp_config(exe))?;
@@ -443,13 +443,34 @@ mod tests {
         let projects = Path::new(MISSING_CLAUDE_HOME).join("projects");
         assert_eq!(
             std::fs::read_to_string(&claude_md).unwrap(),
-            crate::supervisor::claude_md::render(SupervisorLevel::Assistant, &projects)
+            crate::supervisor::claude_md::render(SupervisorLevel::Assistant, &projects, None)
         );
         write_workdir(dir.path(), SupervisorLevel::Autonomous);
         assert_eq!(
             std::fs::read_to_string(&claude_md).unwrap(),
-            crate::supervisor::claude_md::render(SupervisorLevel::Autonomous, &projects)
+            crate::supervisor::claude_md::render(SupervisorLevel::Autonomous, &projects, None)
         );
+    }
+
+    #[test]
+    fn claude_md_carries_the_discord_context() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        let context = DiscordContext {
+            chat_id: Some("1565442299968757861".to_string()),
+        };
+        write_workdir_discord(
+            dir.path(),
+            SupervisorLevel::Assistant,
+            Path::new(MISSING_CLAUDE_HOME),
+            Some(&context),
+        );
+        let text = std::fs::read_to_string(&claude_md).unwrap();
+        assert!(text.contains("## 11. Discord"));
+        assert!(text.contains("1565442299968757861"));
+        write_workdir(dir.path(), SupervisorLevel::Assistant);
+        let text = std::fs::read_to_string(&claude_md).unwrap();
+        assert!(!text.contains("## 11. Discord"));
     }
 
     const DISABLED_FLAGS: [&str; 3] = [
