@@ -75,23 +75,22 @@ pub fn match_replies(
         let Some(posted_ms) = snowflake_ms(&message.id) else {
             continue;
         };
-        let Some((approve, code)) = parse_reply(&message.content) else {
-            continue;
-        };
-        let target = pending.iter().find(|candidate| {
-            candidate.code.eq_ignore_ascii_case(&code)
-                && !matched_ids.contains(candidate.approval_id.as_str())
-                && posted_ms > candidate.created_at_ms
-        });
-        let Some(target) = target else {
-            continue;
-        };
-        matched_ids.insert(target.approval_id.as_str());
-        matches.push(MatchedReply {
-            approval_id: target.approval_id.clone(),
-            approve,
-            message_id: message.id.clone(),
-        });
+        for (approve, code) in message.content.split('\n').filter_map(parse_reply) {
+            let target = pending.iter().find(|candidate| {
+                candidate.code.eq_ignore_ascii_case(&code)
+                    && !matched_ids.contains(candidate.approval_id.as_str())
+                    && posted_ms > candidate.created_at_ms
+            });
+            let Some(target) = target else {
+                continue;
+            };
+            matched_ids.insert(target.approval_id.as_str());
+            matches.push(MatchedReply {
+                approval_id: target.approval_id.clone(),
+                approve,
+                message_id: message.id.clone(),
+            });
+        }
     }
     matches
 }
@@ -229,6 +228,115 @@ mod tests {
         assert!(matches[0].approve);
         assert_eq!(matches[1].approval_id, "a1");
         assert!(!matches[1].approve);
+    }
+
+    fn pending_at(approval_id: &str, code: &str, created_at_ms: i64) -> PendingCode {
+        PendingCode {
+            created_at_ms,
+            ..pending(approval_id, code)
+        }
+    }
+
+    #[test]
+    fn match_needs_a_reply_posted_after_its_own_request() {
+        let messages = vec![message(
+            snowflake_at(T + 1000),
+            OWNER,
+            false,
+            "zatwierdzam MN2P",
+        )];
+        let pending = [
+            pending_at("a1", "K7QX", T),
+            pending_at("a2", "MN2P", T + 5000),
+        ];
+        assert!(match_replies(&messages, &allowed(), &pending).is_empty());
+
+        let messages = vec![message(
+            snowflake_at(T + 1000),
+            OWNER,
+            false,
+            "zatwierdzam K7QX",
+        )];
+        assert_eq!(
+            match_replies(&messages, &allowed(), &pending),
+            vec![MatchedReply {
+                approval_id: "a1".to_string(),
+                approve: true,
+                message_id: snowflake_at(T + 1000),
+            }]
+        );
+    }
+
+    #[test]
+    fn match_accepts_a_reply_on_its_own_line() {
+        let messages = vec![message(
+            snowflake_at(T + 1000),
+            OWNER,
+            false,
+            "A: tak\nzatwierdzam K7QX",
+        )];
+        assert_eq!(
+            match_replies(&messages, &allowed(), &[pending("a1", "K7QX")]),
+            vec![MatchedReply {
+                approval_id: "a1".to_string(),
+                approve: true,
+                message_id: snowflake_at(T + 1000),
+            }]
+        );
+    }
+
+    #[test]
+    fn match_ignores_a_reply_inside_a_line_of_chatter() {
+        let messages = vec![message(
+            snowflake_at(T + 1000),
+            OWNER,
+            false,
+            "A: tak, zatwierdzam K7QX",
+        )];
+        assert!(match_replies(&messages, &allowed(), &[pending("a1", "K7QX")]).is_empty());
+    }
+
+    #[test]
+    fn match_resolves_every_coded_line_of_one_message() {
+        let messages = vec![message(
+            snowflake_at(T + 1000),
+            OWNER,
+            false,
+            "zatwierdzam K7QX\r\n  odrzucam mn2p  ",
+        )];
+        let matches = match_replies(
+            &messages,
+            &allowed(),
+            &[pending("a1", "K7QX"), pending("a2", "MN2P")],
+        );
+        assert_eq!(
+            matches,
+            vec![
+                MatchedReply {
+                    approval_id: "a1".to_string(),
+                    approve: true,
+                    message_id: snowflake_at(T + 1000),
+                },
+                MatchedReply {
+                    approval_id: "a2".to_string(),
+                    approve: false,
+                    message_id: snowflake_at(T + 1000),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn match_takes_the_first_line_per_approval_within_a_message() {
+        let messages = vec![message(
+            snowflake_at(T + 1000),
+            OWNER,
+            false,
+            "odrzucam K7QX\nzatwierdzam K7QX",
+        )];
+        let matches = match_replies(&messages, &allowed(), &[pending("a1", "K7QX")]);
+        assert_eq!(matches.len(), 1);
+        assert!(!matches[0].approve);
     }
 
     #[test]
