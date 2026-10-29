@@ -12,8 +12,10 @@ pub mod ipc;
 pub mod mcp;
 pub mod presence;
 pub mod provenance;
+pub mod runtime;
 pub mod settings;
 #[cfg(test)]
 pub(crate) mod test_support;
 pub mod tools;
 pub mod transcript;
+pub mod workdir;

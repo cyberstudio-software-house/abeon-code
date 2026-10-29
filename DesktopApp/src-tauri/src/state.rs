@@ -8,6 +8,7 @@ use crate::sessions::watcher::SessionWatchers;
 use crate::pty::PtyManager;
 use crate::pty::input_activity::InputActivity;
 use crate::pty::session_registry::SessionPtyRegistry;
+use crate::supervisor::core::SupervisorCore;
 use crate::error::AppResult;
 
 #[derive(Default)]
@@ -123,6 +124,7 @@ pub struct AppState {
     pub claude_options: Mutex<Option<crate::domain::ClaudeOptions>>,
     pub pending_open_paths: Mutex<Vec<crate::cli::request::OpenRequest>>,
     pub cli_frontend_ready: Mutex<bool>,
+    pub supervisor: Mutex<Option<Arc<SupervisorCore>>>,
 }
 
 impl AppState {
@@ -140,6 +142,7 @@ impl AppState {
             claude_options: Mutex::new(None),
             pending_open_paths: Mutex::new(Vec::new()),
             cli_frontend_ready: Mutex::new(false),
+            supervisor: Mutex::new(None),
         }
     }
 }

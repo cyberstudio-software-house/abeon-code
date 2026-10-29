@@ -15,6 +15,18 @@ pub struct SupervisorSettings {
     pub extra_rules: Vec<String>,
 }
 
+impl Default for SupervisorSettings {
+    fn default() -> SupervisorSettings {
+        SupervisorSettings {
+            level: SupervisorLevel::Off,
+            grace: Duration::from_secs(DEFAULT_GRACE_SECONDS),
+            presence: Duration::from_secs(DEFAULT_PRESENCE_MINUTES * 60),
+            model_id: None,
+            extra_rules: Vec::new(),
+        }
+    }
+}
+
 fn read(conn: &Connection, key: &str) -> Option<String> {
     settings_repo::get(conn, key).ok().flatten()
 }

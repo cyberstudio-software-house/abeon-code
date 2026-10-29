@@ -94,7 +94,7 @@ pub fn list_sessions(
     Ok(out)
 }
 
-fn meta_for_file_fast(project_id: i64, path: &Path) -> AppResult<SessionMeta> {
+pub(crate) fn meta_for_file_fast(project_id: i64, path: &Path) -> AppResult<SessionMeta> {
     let id = path.file_stem()
         .and_then(|s| s.to_str())
         .ok_or_else(|| AppError::NotFound(path.display().to_string()))?

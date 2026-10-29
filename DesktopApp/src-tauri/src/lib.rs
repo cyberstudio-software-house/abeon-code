@@ -51,6 +51,7 @@ pub fn run() {
             #[cfg(unix)]
             crate::diagnostics::watch_termination_signals();
             crate::remote::startup::init_remote_bridge(app.handle().clone());
+            crate::supervisor::runtime::start(app.handle().clone());
             if let Ok(dir) = crate::commands::notifications::markers_dir(app.handle()) {
                 let watcher = crate::notifications::marker::AttentionWatcher::new(dir);
                 watcher.start(app.handle().clone());

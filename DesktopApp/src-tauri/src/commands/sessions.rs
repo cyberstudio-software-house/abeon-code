@@ -626,6 +626,29 @@ pub fn history_blocks_for_session(
     Vec::new()
 }
 
+pub struct SessionOwner {
+    pub project: Project,
+    pub title: String,
+}
+
+pub fn locate_session(
+    conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+    session_id: &str,
+) -> Option<SessionOwner> {
+    for project in projects_repo::list(conn).ok()? {
+        let Ok(dir) = session_dir(&project) else { continue };
+        let path = reader::session_file(&dir, session_id).ok()?;
+        if !path.exists() {
+            continue;
+        }
+        let title = session_titles_repo::get(conn, project.id, session_id)
+            .or_else(|| reader::meta_for_file_fast(project.id, &path).ok().map(|meta| meta.title))
+            .unwrap_or_else(|| format!("Sesja {}", session_id.chars().take(8).collect::<String>()));
+        return Some(SessionOwner { project, title });
+    }
+    None
+}
+
 #[cfg(test)]
 mod merge_tests {
     use super::*;

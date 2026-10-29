@@ -1,6 +1,6 @@
 use serde::Serialize;
 use std::collections::HashMap;
-use tauri::State;
+use tauri::{AppHandle, State};
 use ts_rs::TS;
 use crate::db::settings_repo;
 use crate::domain::ShellInfo;
@@ -253,11 +253,14 @@ pub fn get_all_settings(state: State<AppState>) -> AppResult<HashMap<String, Str
 }
 
 #[tauri::command]
-pub fn set_setting(state: State<AppState>, key: String, value: String) -> AppResult<()> {
+pub fn set_setting(app: AppHandle, state: State<AppState>, key: String, value: String) -> AppResult<()> {
     let c = state.db.get()?;
     settings_repo::set(&c, &key, &value)?;
     if key == "shellPath" {
         invalidate_shell_env(&state);
+    }
+    if key.starts_with("supervisor") {
+        crate::supervisor::runtime::settings_changed(&app);
     }
     Ok(())
 }
