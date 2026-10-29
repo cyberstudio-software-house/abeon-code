@@ -341,12 +341,20 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   pending and Discord is enabled, linked and has a token, the app reads the DM over REST (paged from
   the oldest pending request, at most 10 pages) and accepts `zatwierdzam <KOD>` / `odrzucam <KOD>`
   only from non-bot authors in `allowFrom`, posted after the request was created, with the exact
-  4-character code. A match resolves the approval and reacts ✅/❌. The token is never logged.
+  4-character code. Each line of a message is checked on its own and must be exactly that reply, so
+  `A: tak` + newline + `zatwierdzam K7QX` approves while `A: tak, zatwierdzam K7QX` does not. A match
+  resolves the approval and reacts ✅/❌. The token is never logged.
 - **Routing**: present with `supervisorDiscordMuteWhenPresent` on -> app; otherwise Discord when the
   channel is live (`discord_active`); otherwise app. When the user goes from present to away while
-  the channel is live, open app escalations and pending approvals switch to `discord` and reach the
-  supervisor as one `Forwarded` event (one DM); a menu the app escalates itself on timeout while
-  away is forwarded the same way.
+  the channel is live, or the channel goes live while routing already says Discord (relaunch while
+  away, Discord switched on, chat linked later), open app escalations and pending approvals switch
+  to `discord` and reach the supervisor as one `Forwarded` event (one DM); escalations whose session
+  no longer waits for the user (the supervisor already relayed an answer) stay in the app list and
+  are not forwarded. A menu the app escalates itself on timeout while away is forwarded the same way.
+- **Live channel limit (accepted)**: `discord_active` means a supervisor launched with the channel
+  and a linked chat id, not a connected plugin. If the plugin dies at runtime (revoked token,
+  network) routing still says Discord until the next relaunch; the Settings status shows `botError`
+  for a revoked token.
 
 ## Gotchas
 
