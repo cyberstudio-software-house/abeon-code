@@ -83,9 +83,19 @@ fn prepare_socket_path(path: &Path) -> std::io::Result<()> {
 }
 
 pub async fn serve(path: PathBuf, handler: Arc<dyn IpcHandler>) -> std::io::Result<()> {
-    prepare_socket_path(&path)?;
-    let listener = UnixListener::bind(&path)?;
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
+    let listener = bind(&path)?;
+    serve_listener(listener, handler).await;
+    Ok(())
+}
+
+pub fn bind(path: &Path) -> std::io::Result<UnixListener> {
+    prepare_socket_path(path)?;
+    let listener = UnixListener::bind(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
+    Ok(listener)
+}
+
+pub async fn serve_listener(listener: UnixListener, handler: Arc<dyn IpcHandler>) {
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {

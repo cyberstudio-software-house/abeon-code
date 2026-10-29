@@ -13,3 +13,4 @@ pub mod usage;
 pub mod remote;
 pub mod clickup;
 pub mod notes;
+pub mod supervisor;

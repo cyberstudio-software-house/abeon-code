@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use crate::error::{AppError, AppResult};
 use crate::commands::pty::MAX_INITIAL_PROMPT_BYTES;
 
-const CALLER_SESSION_ENV_VARS: &[&str] = &[
+pub(crate) const CALLER_SESSION_ENV_VARS: &[&str] = &[
     "CLAUDECODE",
     "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CODE_CHILD_SESSION",

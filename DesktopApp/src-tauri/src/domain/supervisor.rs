@@ -73,7 +73,7 @@ pub struct ApprovalView {
     pub created_at: i64,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, TS)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, TS)]
 #[ts(export, export_to = "../../src/types/")]
 #[serde(rename_all = "camelCase")]
 pub struct SupervisorSnapshot {

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
@@ -16,13 +16,16 @@ use crate::db::supervisor_decisions_repo::{self, NewDecision};
 use crate::db::DbPool;
 use crate::domain::supervisor::{SupervisorLevel, SupervisorSnapshot};
 use crate::domain::SessionActivity;
+use crate::error::AppResult;
 use crate::pty::input_activity::InputActivity;
 use crate::pty::session_registry::SessionPtyRegistry;
 use crate::pty::PtyManager;
 use crate::sessions::reader::now_ms;
 use crate::state::AppState;
-use crate::supervisor::core::SupervisorCore;
+use crate::supervisor::claude_md::WAKE_TEXT;
+use crate::supervisor::core::{SupervisorCore, QUIET_WINDOW};
 use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
+use crate::supervisor::process::SupervisorProcess;
 use crate::supervisor::settings::SupervisorSettings;
 use crate::supervisor::{transcript, workdir};
 
@@ -46,6 +49,8 @@ const DECISION_RETENTION_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 const SNAPSHOT_EVENT: &str = "supervisor:snapshot";
 const SUBMIT_KEY: &[u8] = b"\r";
 const SHORT_ID_CHARS: usize = 8;
+#[cfg(unix)]
+const SESSION_START_EVENT: &str = "SessionStart";
 const ERROR_NOT_A_DIRECTORY: &str =
     "Ścieżka projektu musi być bezwzględną ścieżką istniejącego katalogu";
 const ERROR_PROMPT_SIZE: &str = "Polecenie musi być niepuste, bez znaku NUL i mieć najwyżej";
@@ -129,6 +134,7 @@ pub struct AppEffects {
     input_activity: Arc<InputActivity>,
     settings: Mutex<SupervisorSettings>,
     owners: Mutex<HashMap<String, CachedOwner>>,
+    process: OnceLock<Weak<SupervisorProcess>>,
 }
 
 impl AppEffects {
@@ -140,8 +146,13 @@ impl AppEffects {
             session_pty: state.session_pty.clone(),
             input_activity: state.input_activity.clone(),
             owners: Mutex::new(HashMap::new()),
+            process: OnceLock::new(),
             app,
         }
+    }
+
+    fn supervisor_process(&self) -> Option<Arc<SupervisorProcess>> {
+        self.process.get().and_then(Weak::upgrade)
     }
 
     fn reload_settings(&self) -> SupervisorSettings {
@@ -238,7 +249,22 @@ impl Effects for AppEffects {
     }
 
     fn wake_supervisor(&self) -> bool {
-        false
+        let Some(pty_id) = self
+            .supervisor_process()
+            .and_then(|process| process.ready_pty())
+        else {
+            return false;
+        };
+        if !self.input_quiet(&pty_id, QUIET_WINDOW) {
+            return false;
+        }
+        match self.type_into_pty(&pty_id, WAKE_TEXT) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("supervisor: wake-up for pty {pty_id} failed: {error}");
+                false
+            }
+        }
     }
 
     fn publish_snapshot(&self, snapshot: SupervisorSnapshot) {
@@ -314,6 +340,7 @@ impl Effects for AppEffects {
 
 pub struct SupervisorRuntime {
     effects: Arc<AppEffects>,
+    process: Arc<SupervisorProcess>,
     active: AtomicBool,
     level: Mutex<SupervisorLevel>,
     session_hooks: Mutex<Option<PathBuf>>,
@@ -337,14 +364,20 @@ impl SupervisorRuntime {
         written.clone()
     }
 
-    fn apply_settings(&self, core: &SupervisorCore) {
-        let level_changed = {
-            let mut last = self.level.lock();
-            let level = self.effects.reload_settings().level;
-            std::mem::replace(&mut *last, level) != level
-        };
-        if level_changed {
-            core.level_changed();
+    fn apply_settings(&self, app: &AppHandle, core: &SupervisorCore) {
+        let mut last = self.level.lock();
+        let level = self.effects.reload_settings().level;
+        let previous = std::mem::replace(&mut *last, level);
+        if previous == level {
+            return;
+        }
+        core.level_changed();
+        if level == SupervisorLevel::Off {
+            self.process.stop(app);
+        } else if previous == SupervisorLevel::Off {
+            self.process.ensure_running(app);
+        } else {
+            self.process.refresh_instructions(app);
         }
     }
 }
@@ -381,9 +414,12 @@ pub fn start(app: AppHandle) {
     let effects = Arc::new(AppEffects::new(app.clone(), &state));
     let core = SupervisorCore::new(effects.clone());
     *state.supervisor.lock() = Some(core.clone());
+    let process = SupervisorProcess::new(core.clone());
+    let _ = effects.process.set(Arc::downgrade(&process));
     let runtime = Arc::new(SupervisorRuntime {
         level: Mutex::new(effects.settings().level),
         effects,
+        process,
         active: AtomicBool::new(cfg!(unix)),
         session_hooks: Mutex::new(None),
     });
@@ -398,7 +434,7 @@ pub fn start(app: AppHandle) {
         hooks_runtime.session_hooks(&hooks_app);
     });
     #[cfg(unix)]
-    spawn_ipc(runtime.clone(), core.clone());
+    spawn_ipc(app, runtime.clone(), core.clone());
     spawn_ticks(runtime, core);
 }
 
@@ -434,20 +470,30 @@ fn spawn_ticks(runtime: Arc<SupervisorRuntime>, core: Arc<SupervisorCore>) {
 }
 
 #[cfg(unix)]
-fn spawn_ipc(runtime: Arc<SupervisorRuntime>, core: Arc<SupervisorCore>) {
-    let handler: Arc<dyn IpcHandler> = Arc::new(IpcRouter { core });
+fn spawn_ipc(app: AppHandle, runtime: Arc<SupervisorRuntime>, core: Arc<SupervisorCore>) {
+    let handler: Arc<dyn IpcHandler> = Arc::new(IpcRouter {
+        core,
+        process: runtime.process.clone(),
+    });
     tauri::async_runtime::spawn(async move {
-        let Err(error) = ipc::serve(ipc::socket_path(), handler).await else {
-            return;
+        let listener = match ipc::bind(&ipc::socket_path()) {
+            Ok(listener) => listener,
+            Err(error) => {
+                runtime.deactivate();
+                if error.kind() == std::io::ErrorKind::AddrInUse {
+                    eprintln!("supervisor: socket in use, supervisor disabled for this instance");
+                } else {
+                    eprintln!(
+                        "supervisor: socket server failed, supervisor disabled for this instance: {error}"
+                    );
+                }
+                return;
+            }
         };
-        runtime.deactivate();
-        if error.kind() == std::io::ErrorKind::AddrInUse {
-            eprintln!("supervisor: socket in use, supervisor disabled for this instance");
-        } else {
-            eprintln!(
-                "supervisor: socket server failed, supervisor disabled for this instance: {error}"
-            );
-        }
+        runtime.process.mark_serving();
+        let process = runtime.process.clone();
+        tauri::async_runtime::spawn_blocking(move || process.ensure_running(&app));
+        ipc::serve_listener(listener, handler).await;
     });
 }
 
@@ -457,8 +503,23 @@ pub fn settings_changed(app: &AppHandle) {
         let (Some(runtime), Some(core)) = (runtime(&app), core(&app)) else {
             return;
         };
-        let _ = tauri::async_runtime::spawn_blocking(move || runtime.apply_settings(&core)).await;
+        let _ =
+            tauri::async_runtime::spawn_blocking(move || runtime.apply_settings(&app, &core)).await;
     });
+}
+
+pub fn restart_supervisor(app: &AppHandle) -> AppResult<()> {
+    if let Some(runtime) = runtime(app) {
+        runtime.process.restart(app);
+    }
+    Ok(())
+}
+
+pub fn new_conversation(app: &AppHandle) -> AppResult<()> {
+    match runtime(app) {
+        Some(runtime) => runtime.process.new_conversation(app),
+        None => Ok(()),
+    }
 }
 
 pub fn session_hooks_path(app: &AppHandle) -> Option<PathBuf> {
@@ -472,17 +533,22 @@ pub fn session_hooks_path(app: &AppHandle) -> Option<PathBuf> {
 #[cfg(unix)]
 struct IpcRouter {
     core: Arc<SupervisorCore>,
+    process: Arc<SupervisorProcess>,
 }
 
 #[cfg(unix)]
 impl IpcHandler for IpcRouter {
     fn handle(&self, req: IpcRequest) -> Pin<Box<dyn Future<Output = IpcResponse> + Send>> {
-        Box::pin(route(self.core.clone(), req))
+        Box::pin(route(self.core.clone(), self.process.clone(), req))
     }
 }
 
 #[cfg(unix)]
-async fn route(core: Arc<SupervisorCore>, req: IpcRequest) -> IpcResponse {
+async fn route(
+    core: Arc<SupervisorCore>,
+    process: Arc<SupervisorProcess>,
+    req: IpcRequest,
+) -> IpcResponse {
     match req {
         IpcRequest::Hook {
             channel: HookChannel::Session,
@@ -496,8 +562,17 @@ async fn route(core: Arc<SupervisorCore>, req: IpcRequest) -> IpcResponse {
         }
         IpcRequest::Hook {
             channel: HookChannel::Supervisor,
-            ..
-        } => IpcResponse::Hook { stdout: None },
+            input,
+        } => {
+            if input
+                .get("hook_event_name")
+                .and_then(serde_json::Value::as_str)
+                == Some(SESSION_START_EVENT)
+            {
+                process.mark_ready();
+            }
+            IpcResponse::Hook { stdout: None }
+        }
         IpcRequest::Tool { name, args } => {
             let outcome = tokio::task::spawn_blocking(move || handle_tool(&core, &name, args))
                 .await
@@ -564,8 +639,20 @@ mod tests {
     #[cfg(unix)]
     mod ipc_router {
         use super::super::*;
+        use crate::supervisor::process::SupervisorSessionArg;
         use crate::supervisor::test_support::{setup, FakeEffects};
         use serde_json::{json, Value};
+
+        async fn route_to(core: &Arc<SupervisorCore>, req: IpcRequest) -> IpcResponse {
+            route(core.clone(), SupervisorProcess::new(core.clone()), req).await
+        }
+
+        fn supervisor_hook(event: &str) -> IpcRequest {
+            IpcRequest::Hook {
+                channel: HookChannel::Supervisor,
+                input: json!({ "hook_event_name": event, "session_id": "sup" }),
+            }
+        }
 
         fn hook(input: Value) -> IpcRequest {
             IpcRequest::Hook {
@@ -587,7 +674,7 @@ mod tests {
         }
 
         async fn hook_stdout(core: &Arc<SupervisorCore>, input: Value) -> Option<String> {
-            match route(core.clone(), hook(input)).await {
+            match route_to(core, hook(input)).await {
                 IpcResponse::Hook { stdout } => stdout,
                 other => panic!("expected a hook response, got {other:?}"),
             }
@@ -612,24 +699,46 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn supervisor_channel_replies_empty() {
+        async fn supervisor_session_start_marks_ready_and_replies_empty() {
             let (_effects, core) = setup();
+            core.set_supervisor_state(false, false, None);
+            let process = SupervisorProcess::new(core.clone());
             let response = route(
-                core,
-                IpcRequest::Hook {
-                    channel: HookChannel::Supervisor,
-                    input: json!({ "hook_event_name": "SessionStart" }),
-                },
+                core.clone(),
+                process.clone(),
+                supervisor_hook("SessionStart"),
             )
             .await;
             assert_eq!(response, IpcResponse::Hook { stdout: None });
+            assert!(!core.snapshot().ready);
+
+            process.attach(
+                "pty-supervisor".into(),
+                SupervisorSessionArg::Fresh("sup".into()),
+            );
+            let response = route(core.clone(), process.clone(), supervisor_hook("Stop")).await;
+            assert_eq!(response, IpcResponse::Hook { stdout: None });
+            assert!(!process.is_ready());
+            assert!(!core.snapshot().ready);
+
+            let response = route(
+                core.clone(),
+                process.clone(),
+                supervisor_hook("SessionStart"),
+            )
+            .await;
+            assert_eq!(response, IpcResponse::Hook { stdout: None });
+            assert!(process.is_ready());
+            let snapshot = core.snapshot();
+            assert!(snapshot.running && snapshot.ready);
+            assert_eq!(snapshot.pty_id.as_deref(), Some("pty-supervisor"));
         }
 
         #[tokio::test]
         async fn tools_run_and_report_errors_as_text() {
             let (_effects, core) = setup();
-            let listed = route(
-                core.clone(),
+            let listed = route_to(
+                &core,
                 IpcRequest::Tool {
                     name: "list_sessions".into(),
                     args: json!({}),
@@ -643,8 +752,8 @@ mod tests {
                     result: json!({ "sessions": [] })
                 }
             );
-            let unknown = route(
-                core,
+            let unknown = route_to(
+                &core,
                 IpcRequest::Tool {
                     name: "drop_tables".into(),
                     args: json!({}),

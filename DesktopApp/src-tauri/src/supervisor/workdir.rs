@@ -4,12 +4,43 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::commands::pty::shell_single_quote;
+use crate::domain::supervisor::SupervisorLevel;
 use crate::error::{AppError, AppResult};
+use crate::supervisor::claude_md;
 
 const SUPERVISOR_DIR: &str = "supervisor";
 const SESSION_HOOKS_FILE: &str = "session-hooks.json";
-const SESSION_HOOKS_TEMP_FILE: &str = "session-hooks.json.tmp";
+const TEMP_SUFFIX: &str = ".tmp";
 const SESSION_CHANNEL: &str = "session";
+const SUPERVISOR_CHANNEL: &str = "supervisor";
+const CLAUDE_MD_FILE: &str = "CLAUDE.md";
+const PREFERENCES_FILE: &str = "preferences.md";
+pub const MCP_CONFIG_FILE: &str = "mcp.json";
+const CLAUDE_SETTINGS_DIR: &str = ".claude";
+const CLAUDE_SETTINGS_FILE: &str = "settings.json";
+const MCP_SERVER_NAME: &str = "abeoncode";
+const MCP_SUBCOMMAND: &str = "mcp";
+const ALLOWED_TOOLS: [&str; 1] = ["mcp__abeoncode__*"];
+const ALLOWED_AFTER_READ: [&str; 4] = [
+    "Glob",
+    "Grep",
+    "Edit(./preferences.md)",
+    "Write(./preferences.md)",
+];
+const DENIED_TOOLS: [&str; 6] = [
+    "Bash",
+    "WebFetch",
+    "WebSearch",
+    "NotebookEdit",
+    "Task",
+    "Agent",
+];
+const PREFERENCES_TEMPLATE: &str = "# Preferencje użytkownika
+
+Trwałe preferencje użytkownika, które przydają się przy kolejnych decyzjach. Jedna preferencja
+w punkcie, z projektem, którego dotyczy (albo „wszystkie projekty”). Bez sekretów i bez treści
+sesji.
+";
 const QUICK_HOOK_TIMEOUT: u64 = 15;
 const MENU_HOOK_TIMEOUT: u64 = 600;
 const MENU_MATCHER: &str = "AskUserQuestion";
@@ -54,13 +85,91 @@ fn session_hooks(exe: &Path) -> Value {
     })
 }
 
+fn read_rule(root: &Path) -> Option<String> {
+    if !root.is_absolute() {
+        return None;
+    }
+    let text = root.to_string_lossy();
+    let trimmed = text.trim_end_matches('/');
+    Some(format!("Read(/{trimmed}/**)"))
+}
+
+fn supervisor_settings(exe: &Path, read_roots: &[PathBuf]) -> Value {
+    let allow: Vec<String> = ALLOWED_TOOLS
+        .iter()
+        .map(|rule| rule.to_string())
+        .chain(read_roots.iter().filter_map(|root| read_rule(root)))
+        .chain(ALLOWED_AFTER_READ.iter().map(|rule| rule.to_string()))
+        .collect();
+    let command = hook_command(exe, SUPERVISOR_CHANNEL);
+    json!({
+        "permissions": { "allow": allow, "deny": DENIED_TOOLS },
+        "hooks": {
+            "SessionStart": [hook_group(None, &command, QUICK_HOOK_TIMEOUT)],
+        }
+    })
+}
+
+fn mcp_config(exe: &Path) -> Value {
+    json!({
+        "mcpServers": {
+            MCP_SERVER_NAME: {
+                "command": exe.to_string_lossy(),
+                "args": [MCP_SUBCOMMAND],
+            }
+        }
+    })
+}
+
+fn write_atomic(path: &Path, body: &[u8]) -> std::io::Result<()> {
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(TEMP_SUFFIX);
+    std::fs::write(&temp, body)?;
+    std::fs::rename(&temp, path)
+}
+
+fn write_json(path: &Path, value: &Value) -> std::io::Result<()> {
+    let body = serde_json::to_vec_pretty(value).map_err(std::io::Error::other)?;
+    write_atomic(path, &body)
+}
+
+fn create_if_missing(path: &Path, body: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut file) => file.write_all(body.as_bytes()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+pub fn write_supervisor_workdir(
+    dir: &Path,
+    exe: &Path,
+    level: SupervisorLevel,
+    read_roots: &[PathBuf],
+) -> std::io::Result<()> {
+    let settings_dir = dir.join(CLAUDE_SETTINGS_DIR);
+    std::fs::create_dir_all(&settings_dir)?;
+    write_atomic(
+        &dir.join(CLAUDE_MD_FILE),
+        claude_md::render(level).as_bytes(),
+    )?;
+    create_if_missing(&dir.join(PREFERENCES_FILE), PREFERENCES_TEMPLATE)?;
+    write_json(&dir.join(MCP_CONFIG_FILE), &mcp_config(exe))?;
+    write_json(
+        &settings_dir.join(CLAUDE_SETTINGS_FILE),
+        &supervisor_settings(exe, read_roots),
+    )
+}
+
 pub fn write_session_hooks(dir: &Path, exe: &Path) -> std::io::Result<PathBuf> {
     std::fs::create_dir_all(dir)?;
-    let body = serde_json::to_vec_pretty(&session_hooks(exe)).map_err(std::io::Error::other)?;
-    let temp = dir.join(SESSION_HOOKS_TEMP_FILE);
     let path = dir.join(SESSION_HOOKS_FILE);
-    std::fs::write(&temp, body)?;
-    std::fs::rename(&temp, &path)?;
+    write_json(&path, &session_hooks(exe))?;
     Ok(path)
 }
 
@@ -142,6 +251,155 @@ mod tests {
             String::from_utf8(output.stdout).unwrap(),
             "/opt/Abeon Code/it's $(id)/abeoncode\nhook\nsession\n"
         );
+    }
+
+    const EXE: &str = "/opt/Abeon Code/it's/abeoncode";
+
+    fn read_json(path: &Path) -> Value {
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+    }
+
+    fn strings(value: &Value) -> Vec<&str> {
+        value
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item.as_str().unwrap())
+            .collect()
+    }
+
+    fn write_workdir(dir: &Path, level: SupervisorLevel) {
+        let roots = [
+            PathBuf::from("/home/u/projects/app"),
+            PathBuf::from("/home/u/.claude/projects"),
+        ];
+        write_supervisor_workdir(dir, Path::new(EXE), level, &roots).unwrap();
+    }
+
+    #[test]
+    fn supervisor_settings_has_no_ask_and_denies_bash() {
+        let dir = tempfile::tempdir().unwrap();
+        write_workdir(dir.path(), SupervisorLevel::Assistant);
+        let settings = read_json(&dir.path().join(".claude").join("settings.json"));
+        let permissions = settings["permissions"].as_object().unwrap();
+        assert!(!permissions.contains_key("ask"));
+        assert_eq!(permissions.len(), 2);
+        assert_eq!(
+            strings(&settings["permissions"]["allow"]),
+            vec![
+                "mcp__abeoncode__*",
+                "Read(//home/u/projects/app/**)",
+                "Read(//home/u/.claude/projects/**)",
+                "Glob",
+                "Grep",
+                "Edit(./preferences.md)",
+                "Write(./preferences.md)",
+            ]
+        );
+        assert_eq!(
+            strings(&settings["permissions"]["deny"]),
+            vec![
+                "Bash",
+                "WebFetch",
+                "WebSearch",
+                "NotebookEdit",
+                "Task",
+                "Agent"
+            ]
+        );
+        let hooks = settings["hooks"].as_object().unwrap();
+        assert_eq!(hooks.len(), 1);
+        let groups = settings["hooks"]["SessionStart"].as_array().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert!(groups[0].get("matcher").is_none());
+        let commands = groups[0]["hooks"].as_array().unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0]["type"], "command");
+        assert_eq!(
+            commands[0]["command"],
+            r"'/opt/Abeon Code/it'\''s/abeoncode' hook supervisor"
+        );
+        assert_eq!(commands[0]["timeout"], 15);
+        assert!(!serde_json::to_string(&settings)
+            .unwrap()
+            .contains("\"ask\""));
+    }
+
+    #[test]
+    fn preferences_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        write_workdir(dir.path(), SupervisorLevel::Assistant);
+        let preferences = dir.path().join("preferences.md");
+        assert!(std::fs::read_to_string(&preferences)
+            .unwrap()
+            .starts_with("# Preferencje użytkownika"));
+        std::fs::write(&preferences, "- AbeonCode: zawsze wariant B\n").unwrap();
+        write_workdir(dir.path(), SupervisorLevel::Relay);
+        assert_eq!(
+            std::fs::read_to_string(&preferences).unwrap(),
+            "- AbeonCode: zawsze wariant B\n"
+        );
+    }
+
+    #[test]
+    fn claude_md_follows_the_level() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md = dir.path().join("CLAUDE.md");
+        std::fs::write(&claude_md, "stara treść").unwrap();
+        write_workdir(dir.path(), SupervisorLevel::Assistant);
+        assert_eq!(
+            std::fs::read_to_string(&claude_md).unwrap(),
+            crate::supervisor::claude_md::render(SupervisorLevel::Assistant)
+        );
+        write_workdir(dir.path(), SupervisorLevel::Autonomous);
+        assert_eq!(
+            std::fs::read_to_string(&claude_md).unwrap(),
+            crate::supervisor::claude_md::render(SupervisorLevel::Autonomous)
+        );
+    }
+
+    #[test]
+    fn mcp_json_points_to_exe() {
+        let dir = tempfile::tempdir().unwrap();
+        write_workdir(dir.path(), SupervisorLevel::Assistant);
+        let mcp = read_json(&dir.path().join("mcp.json"));
+        assert_eq!(
+            mcp,
+            serde_json::json!({
+                "mcpServers": { "abeoncode": { "command": EXE, "args": ["mcp"] } }
+            })
+        );
+    }
+
+    #[test]
+    fn supervisor_workdir_holds_exactly_the_generated_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let workdir = dir.path().join("supervisor");
+        write_workdir(&workdir, SupervisorLevel::Assistant);
+        let mut entries: Vec<String> = std::fs::read_dir(&workdir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        entries.sort();
+        assert_eq!(
+            entries,
+            vec![".claude", "CLAUDE.md", "mcp.json", "preferences.md"]
+        );
+        let claude_dir: Vec<String> = std::fs::read_dir(workdir.join(".claude"))
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(claude_dir, vec!["settings.json"]);
+    }
+
+    #[test]
+    fn read_rules_use_absolute_anchors() {
+        assert_eq!(
+            read_rule(Path::new("/home/u/my app/")),
+            Some("Read(//home/u/my app/**)".to_string())
+        );
+        assert_eq!(read_rule(Path::new("relative/dir")), None);
+        assert_eq!(read_rule(Path::new("")), None);
     }
 
     #[test]

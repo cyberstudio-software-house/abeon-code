@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot } from '../types';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
 import type { ClickUpSpace } from '../types/ClickUpSpace';
@@ -200,4 +200,7 @@ export const tauri = {
     invoke<TimeEstimate>('clickup_estimate_time', { projectId, sessionId, provider }),
   clickupLogTime: (projectId: number, taskId: string, durationMs: number, description?: string) =>
     invoke<void>('clickup_log_time', { projectId, taskId, durationMs, description }),
+  supervisorSnapshot: () => invoke<SupervisorSnapshot>('supervisor_snapshot'),
+  supervisorNewConversation: () => invoke<void>('supervisor_new_conversation'),
+  supervisorRestart: () => invoke<void>('supervisor_restart'),
 };

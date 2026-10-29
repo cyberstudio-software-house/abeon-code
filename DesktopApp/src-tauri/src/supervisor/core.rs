@@ -1587,6 +1587,36 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn no_wake_before_ready() {
+        let effects = FakeEffects::new();
+        let core = SupervisorCore::new(effects.clone());
+        core.set_supervisor_state(true, false, Some("pty-supervisor".into()));
+        core.set_away(true);
+        core.on_session_hook(stop("s1", "Kontynuować z kolejnym zadaniem?"))
+            .await;
+        let held = spawn_menu(&core, "s2").await;
+        for _ in 0..6 {
+            advance(WAKE_DEBOUNCE).await;
+            core.tick();
+        }
+        assert_eq!(effects.wakes(), 0);
+        assert!(effects.typed().is_empty());
+        assert!(!core.snapshot().ready);
+        assert!(!held.is_finished());
+
+        core.set_supervisor_state(true, true, Some("pty-supervisor".into()));
+        core.tick();
+        assert_eq!(effects.wakes(), 1);
+        let events = core.take_events();
+        assert_eq!(events.len(), 2);
+        assert!(events.iter().all(|event| matches!(
+            event,
+            SupervisorEvent::Question { session_id, .. } if session_id == "s1" || session_id == "s2"
+        )));
+        held.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn level_change_is_queued_once_and_off_releases_menus() {
         let (effects, core) = setup();
         core.report_activity(None);

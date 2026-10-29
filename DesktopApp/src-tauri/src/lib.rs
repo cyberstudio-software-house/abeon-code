@@ -160,6 +160,9 @@ pub fn run() {
             commands::notifications::uninstall_attention_hook,
             commands::notifications::attention_hook_status,
             commands::notifications::show_attention_notification,
+            commands::supervisor::supervisor_snapshot,
+            commands::supervisor::supervisor_new_conversation,
+            commands::supervisor::supervisor_restart,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

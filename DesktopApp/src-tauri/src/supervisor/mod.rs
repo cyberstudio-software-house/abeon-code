@@ -1,4 +1,5 @@
 pub mod approvals;
+pub mod claude_md;
 pub mod core;
 pub mod effects;
 #[cfg(unix)]
@@ -11,6 +12,7 @@ pub mod ipc;
 #[cfg(unix)]
 pub mod mcp;
 pub mod presence;
+pub mod process;
 pub mod provenance;
 pub mod runtime;
 pub mod settings;
