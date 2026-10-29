@@ -668,10 +668,20 @@ pub fn new_conversation(app: &AppHandle) -> AppResult<()> {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 struct ChatLinkRequest {
     token: String,
     recipient: String,
+}
+
+impl std::fmt::Debug for ChatLinkRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ChatLinkRequest")
+            .field("token", &"***")
+            .field("recipient", &self.recipient)
+            .finish()
+    }
 }
 
 fn chat_link_request(
@@ -1099,6 +1109,18 @@ mod tests {
 
         std::fs::write(dir.join("access.json"), r#"{"allowFrom":[]}"#).unwrap();
         assert_eq!(chat_link_request(&ready, &files), None);
+    }
+
+    #[test]
+    fn chat_link_request_debug_hides_the_token() {
+        let request = ChatLinkRequest {
+            token: "secret-bot-token".to_string(),
+            recipient: "user-1".to_string(),
+        };
+        let printed = format!("{request:?}");
+        assert!(!printed.contains("secret-bot-token"), "{printed}");
+        assert!(printed.contains("***"), "{printed}");
+        assert!(printed.contains("user-1"), "{printed}");
     }
 
     #[test]
