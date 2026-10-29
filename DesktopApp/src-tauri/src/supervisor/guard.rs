@@ -130,6 +130,7 @@ const WRAPPERS: &[Wrapper] = &[
     },
     Wrapper {
         relocating_options: &["-C", "--chdir"],
+        script_options: &["-S", "--split-string"],
         ..wrapper("env", &["-u", "--unset", "-C", "--chdir"])
     },
     Wrapper {
@@ -231,6 +232,46 @@ const WRAPPERS: &[Wrapper] = &[
     },
 ];
 
+struct Interpreter {
+    name: &'static str,
+    script_letters: &'static str,
+    script_options: &'static [&'static str],
+    attached_script: bool,
+}
+
+const INTERPRETERS: &[Interpreter] = &[
+    Interpreter {
+        name: "python",
+        script_letters: "c",
+        script_options: &[],
+        attached_script: true,
+    },
+    Interpreter {
+        name: "node",
+        script_letters: "ep",
+        script_options: &["--eval", "--print"],
+        attached_script: false,
+    },
+    Interpreter {
+        name: "nodejs",
+        script_letters: "ep",
+        script_options: &["--eval", "--print"],
+        attached_script: false,
+    },
+    Interpreter {
+        name: "perl",
+        script_letters: "eE",
+        script_options: &[],
+        attached_script: true,
+    },
+    Interpreter {
+        name: "ruby",
+        script_letters: "e",
+        script_options: &[],
+        attached_script: true,
+    },
+];
+
 #[derive(Default)]
 struct Classified {
     labels: Vec<String>,
@@ -255,13 +296,13 @@ struct CommandPrefix {
     start: usize,
     relocated: bool,
     appends_arguments: bool,
-    script: Option<usize>,
+    script: Option<String>,
 }
 
 impl CommandPrefix {
-    fn with_script(mut self, index: usize, length: usize) -> CommandPrefix {
+    fn with_script(mut self, script: Option<&str>, length: usize) -> CommandPrefix {
         self.start = length;
-        self.script = (index < length).then_some(index);
+        self.script = script.map(str::to_string);
         self
     }
 }
@@ -500,11 +541,120 @@ fn program_name(token: &str) -> &str {
     token.rsplit('/').next().unwrap_or(token)
 }
 
+fn is_segment_separator(character: char) -> bool {
+    matches!(character, ';' | '|' | '&' | '\n' | '\r' | '(' | ')')
+}
+
 fn split_segments(command: &str) -> Vec<&str> {
     command
-        .split(|c| matches!(c, ';' | '|' | '&' | '\n' | '\r' | '(' | ')'))
+        .split(is_segment_separator)
         .map(str::trim)
         .filter(|segment| !segment.is_empty())
+        .collect()
+}
+
+fn quoted_segments(command: &str) -> Vec<&str> {
+    let mut segments = Vec::new();
+    let mut start = 0;
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for (index, character) in command.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match (quote, character) {
+            (Some('\''), '\'') => quote = None,
+            (Some('\''), _) => {}
+            (_, '\\') => escaped = true,
+            (Some(open), close) if open == close => quote = None,
+            (Some(_), _) => {}
+            (None, '\'' | '"') => quote = Some(character),
+            (None, separator) if is_segment_separator(separator) => {
+                segments.push(command[start..index].trim());
+                start = index + separator.len_utf8();
+            }
+            (None, _) => {}
+        }
+    }
+    segments.push(command[start..].trim());
+    segments.retain(|segment| !segment.is_empty());
+    segments
+}
+
+fn attached_value<'a>(option: &'a str, names: &[&str]) -> Option<&'a str> {
+    if let Some((name, value)) = option.split_once('=') {
+        if name.starts_with("--") && names.contains(&name) {
+            return Some(value);
+        }
+    }
+    if option.starts_with("--") || option.len() <= 2 {
+        return None;
+    }
+    option
+        .get(..2)
+        .filter(|short| names.contains(short))
+        .and_then(|_| option.get(2..))
+}
+
+fn is_version_of(program: &str, name: &str) -> bool {
+    program.strip_prefix(name).is_some_and(|version| {
+        version
+            .chars()
+            .all(|character| character.is_ascii_digit() || character == '.')
+    })
+}
+
+fn interpreter(program: &str) -> Option<&'static Interpreter> {
+    INTERPRETERS
+        .iter()
+        .find(|interpreter| is_version_of(program, interpreter.name))
+}
+
+fn short_script<'a>(argument: &'a str, interpreter: &Interpreter) -> Option<&'a str> {
+    let cluster = argument
+        .strip_prefix('-')
+        .filter(|cluster| !cluster.starts_with('-'))?;
+    let position = cluster.find(|letter| interpreter.script_letters.contains(letter))?;
+    cluster.get(position + 1..)
+}
+
+fn interpreter_scripts(command: &[&str]) -> Option<Vec<String>> {
+    let interpreter = interpreter(program_name(command.first()?))?;
+    let mut scripts = Vec::new();
+    let mut arguments = command[1..].iter().copied();
+    while let Some(argument) = arguments.next() {
+        if let Some(script) = attached_value(argument, interpreter.script_options) {
+            scripts.push(script.to_string());
+            continue;
+        }
+        let attached = if interpreter.script_options.contains(&argument) {
+            ""
+        } else {
+            match short_script(argument, interpreter) {
+                Some(attached) => attached,
+                None => continue,
+            }
+        };
+        if interpreter.attached_script && !attached.is_empty() {
+            scripts.push(attached.to_string());
+        } else if let Some(script) = arguments.next() {
+            scripts.push(script.to_string());
+        }
+    }
+    Some(scripts)
+}
+
+fn neutralize_quotes(script: &str) -> String {
+    script
+        .chars()
+        .map(|character| {
+            if matches!(character, '\'' | '"' | '`' | '\\') {
+                ' '
+            } else {
+                character
+            }
+        })
         .collect()
 }
 
@@ -545,7 +695,10 @@ fn command_prefix(tokens: &[&str]) -> CommandPrefix {
         prefix.appends_arguments |= wrapper.appends_arguments;
         while let Some(&option) = tokens.get(index).filter(|option| option.starts_with('-')) {
             if wrapper.script_options.contains(&option) {
-                return prefix.with_script(index + 1, tokens.len());
+                return prefix.with_script(tokens.get(index + 1).copied(), tokens.len());
+            }
+            if let Some(script) = attached_value(option, wrapper.script_options) {
+                return prefix.with_script(Some(script), tokens.len());
             }
             index += 1;
             if option == "--" {
@@ -561,7 +714,7 @@ fn command_prefix(tokens: &[&str]) -> CommandPrefix {
             .get(index)
             .is_some_and(|token| wrapper.script_options.contains(token))
         {
-            return prefix.with_script(index + 1, tokens.len());
+            return prefix.with_script(tokens.get(index + 1).copied(), tokens.len());
         }
     }
     prefix.start = index.min(tokens.len());
@@ -589,10 +742,10 @@ fn relocates_directly(tokens: &[&str], prefix: &CommandPrefix) -> bool {
 }
 
 fn reads_script_from_stdin(command: &[&str]) -> bool {
-    if !command
-        .first()
-        .is_some_and(|first| SHELL_WORDS.contains(&program_name(first)))
-    {
+    if !command.first().is_some_and(|first| {
+        let program = program_name(first);
+        SHELL_WORDS.contains(&program) || interpreter(program).is_some()
+    }) {
         return false;
     }
     let mut index = 1;
@@ -902,6 +1055,16 @@ impl ProductionRules {
             }
             push_distinct(&mut labels, found);
         }
+        let unsplit_branch = if relocated { None } else { current_branch };
+        for segment in quoted_segments(&command)
+            .into_iter()
+            .filter(|segment| segment.contains(is_segment_separator))
+        {
+            push_distinct(
+                &mut labels,
+                self.classify_segment(segment, unsplit_branch, depth).labels,
+            );
+        }
         let pushes = labels.iter().any(|label| label.starts_with(GIT_PUSH_LABEL));
         if feeds_shell && !pushes && mentions_git_push(&command) {
             labels.push(production_label(UNRESOLVED_TARGET));
@@ -917,6 +1080,22 @@ impl ProductionRules {
             .iter()
             .find(|regex| regex.is_match(text))
             .map(|regex| format!("{RULE_LABEL}: {}", regex.as_str()))
+    }
+
+    fn inline_script_labels(
+        &self,
+        script: &str,
+        current_branch: Option<&str>,
+        depth: usize,
+    ) -> Vec<String> {
+        let mut labels = self
+            .command_labels(&neutralize_quotes(script), current_branch, depth + 1)
+            .labels;
+        let pushes = labels.iter().any(|label| label.starts_with(GIT_PUSH_LABEL));
+        if !pushes && mentions_git_push(script) {
+            labels.push(production_label(UNRESOLVED_TARGET));
+        }
+        labels
     }
 
     fn classify_segment(
@@ -952,8 +1131,8 @@ impl ProductionRules {
         } else {
             current_branch
         };
-        if let Some(script) = prefix.script {
-            return self.command_labels(tokens[script], branch, depth + 1);
+        if let Some(script) = &prefix.script {
+            return self.command_labels(script, branch, depth + 1);
         }
         let rest = &tokens[prefix.start..];
         let Some(&first) = rest.first() else {
@@ -974,6 +1153,16 @@ impl ProductionRules {
                 Some(script) => self.command_labels(&script, branch, depth + 1),
                 None => Classified::default(),
             };
+        }
+        if let Some(scripts) = interpreter_scripts(rest) {
+            let mut labels = Vec::new();
+            for script in scripts {
+                push_distinct(
+                    &mut labels,
+                    self.inline_script_labels(&script, branch, depth),
+                );
+            }
+            return Classified::labels(labels);
         }
         if program == TASK_PROGRAM && runs_task_release(arguments) {
             return Classified::label(TASK_RELEASE_LABEL.to_string());
@@ -1198,6 +1387,33 @@ mod tests {
             ("Bash", Some("gh pr merge 12 --squash"), Some("feature/x"), some("merge PR")),
             ("Bash", Some("bkt pr merge 5"), None, some("merge PR")),
             ("Bash", Some("cd x && gh pr merge --auto 3"), None, some("merge PR")),
+            ("Bash", Some("python3 -c \"import os; os.system('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("python -c \"import os; os.system('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("node -e \"require('child_process').execSync('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("node --eval \"require('child_process').execSync('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("node -p \"require('child_process').execSync('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("perl -e 'system(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("perl -E 'system(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("ruby -e 'system(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("env -S 'git push origin main'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("env --split-string='git push origin main'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("python3 -c \"print(1)\""), Some("main"), None),
+            ("Bash", Some("node -e \"console.log(1)\""), Some("main"), None),
+            ("Bash", Some("perl -le 'print 1'"), Some("main"), None),
+            ("Bash", Some("env -S'git push origin main'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("env --split-string 'cd x; git push'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("node --eval='require(\"child_process\").execSync(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("node -pe \"require('child_process').execSync('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("perl -le 'system(\"git push origin main\")'"), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("python3 -Bc \"import os; os.system('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("/usr/bin/python3.12 -c \"import os; os.system('git push origin main')\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("sudo -u deploy python3 -c \"import os; os.system('task release:patch')\""), Some("feature/x"), some("task release")),
+            ("Bash", Some("python3 -c 'import subprocess; subprocess.run([\"git\", \"push\"])'"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("python3 -c \"import os; os.system('git push origin feature')\""), Some("main"), some("git push → ?")),
+            ("Bash", Some("bash -c \"python3 -c 'import os; os.system(\\\"git push origin main\\\")'\""), Some("feature/x"), some("git push → main")),
+            ("Bash", Some("python3 - <<'EOF'\nimport os\nos.system(\"git push origin main\")\nEOF"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("echo 'import os; os.system(\"git push origin main\")' | python3"), Some("feature/x"), some("git push → ?")),
+            ("Bash", Some("python3 manage.py test"), Some("main"), None),
             ("Bash", Some("gh pr view 12"), None, None),
             ("Bash", Some("gh pr create --fill"), None, None),
             ("Bash", Some("bkt pr list"), None, None),
