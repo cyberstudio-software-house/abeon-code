@@ -8,7 +8,7 @@ use crate::domain::supervisor::SupervisorSnapshot;
 use crate::domain::DecisionEntry;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
-use crate::supervisor::core::SupervisorCore;
+use crate::supervisor::core::{ApprovalSource, SupervisorCore};
 use crate::supervisor::runtime;
 
 const ERROR_SUPERVISOR_NOT_RUNNING: &str = "supervisor is not running";
@@ -81,7 +81,7 @@ pub fn supervisor_resolve_approval(
     approve: bool,
 ) -> AppResult<()> {
     require_core(&state)?
-        .resolve_approval(&approval_id, approve)
+        .resolve_approval(&approval_id, approve, ApprovalSource::App)
         .map_err(AppError::InvalidInput)
 }
 

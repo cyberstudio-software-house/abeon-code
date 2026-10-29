@@ -27,8 +27,11 @@ use crate::sessions::reader::now_ms;
 use crate::state::AppState;
 use crate::supervisor::claude_md::WAKE_TEXT;
 use crate::supervisor::core::{cap_bytes, SupervisorCore, QUIET_WINDOW};
+use crate::supervisor::discord::client::DiscordClient;
+use crate::supervisor::discord::files::DiscordFiles;
+use crate::supervisor::discord::poll::{poll_approvals, POLL_INTERVAL};
 use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
-use crate::supervisor::process::SupervisorProcess;
+use crate::supervisor::process::{claude_home, SupervisorProcess};
 use crate::supervisor::settings::SupervisorSettings;
 use crate::supervisor::{transcript, workdir};
 
@@ -492,7 +495,8 @@ pub fn start(app: AppHandle) {
     });
     #[cfg(unix)]
     spawn_ipc(app, runtime.clone(), core.clone());
-    spawn_ticks(runtime, core);
+    spawn_ticks(runtime.clone(), core.clone());
+    spawn_discord_approvals(runtime, core);
 }
 
 fn spawn_prune(db: DbPool) {
@@ -522,6 +526,44 @@ fn spawn_ticks(runtime: Arc<SupervisorRuntime>, core: Arc<SupervisorCore>) {
             }
             let core = core.clone();
             let _ = tauri::async_runtime::spawn_blocking(move || core.tick()).await;
+        }
+    });
+}
+
+fn spawn_discord_approvals(runtime: Arc<SupervisorRuntime>, core: Arc<SupervisorCore>) {
+    tauri::async_runtime::spawn(async move {
+        let mut interval = tokio::time::interval(POLL_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            if !runtime.is_active() {
+                break;
+            }
+            if core.pending_approval_codes().is_empty() {
+                continue;
+            }
+            let settings = runtime.effects.reload_settings();
+            let Some(chat_id) = settings
+                .discord_chat_id
+                .filter(|_| settings.discord_enabled)
+            else {
+                continue;
+            };
+            let Some(claude_home) = claude_home() else {
+                continue;
+            };
+            let files = DiscordFiles::for_claude_home(&claude_home);
+            let Some(token) = files.token() else {
+                continue;
+            };
+            let allow_from = files.access().allow_from;
+            if allow_from.is_empty() {
+                continue;
+            }
+            let client = DiscordClient::new(token);
+            if let Err(error) = poll_approvals(&client, &chat_id, &allow_from, &core).await {
+                eprintln!("supervisor: discord poll failed: {error}");
+            }
         }
     });
 }

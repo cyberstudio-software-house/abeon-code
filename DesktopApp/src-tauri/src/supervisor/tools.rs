@@ -243,7 +243,7 @@ pub fn tool_definitions() -> Value {
 mod tests {
     use super::*;
     use crate::domain::supervisor::{EscalationChannel, SupervisorLevel};
-    use crate::supervisor::core::{decision_kind, ESCALATED_REASON, WAKE_DEBOUNCE};
+    use crate::supervisor::core::{decision_kind, ApprovalSource, ESCALATED_REASON, WAKE_DEBOUNCE};
     use crate::supervisor::effects::SessionListing;
     use crate::supervisor::events::SupervisorEvent;
     use crate::supervisor::hook_io::HookReply;
@@ -665,7 +665,8 @@ mod tests {
                 "detail": "git push origin main"
             })
         );
-        core.resolve_approval(&approval.id, true).unwrap();
+        core.resolve_approval(&approval.id, true, ApprovalSource::App)
+            .unwrap();
         assert_eq!(
             handle_tool(&core, "get_approval", args).unwrap()["status"],
             "approved"

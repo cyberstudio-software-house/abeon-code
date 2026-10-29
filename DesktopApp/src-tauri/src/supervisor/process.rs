@@ -156,7 +156,7 @@ fn supervisor_env(mut env: HashMap<String, String>) -> HashMap<String, String> {
     env
 }
 
-fn claude_home() -> Option<PathBuf> {
+pub(crate) fn claude_home() -> Option<PathBuf> {
     dirs::home_dir().map(|home| home.join(CLAUDE_DIR))
 }
 

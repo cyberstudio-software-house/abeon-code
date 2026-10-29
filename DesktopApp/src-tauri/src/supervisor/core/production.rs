@@ -12,6 +12,7 @@ use crate::db::supervisor_decisions_repo::NewDecision;
 use crate::domain::supervisor::{ApprovalView, EscalationChannel};
 use crate::sessions::reader::now_ms;
 use crate::supervisor::approvals::Approval;
+use crate::supervisor::discord::replies::PendingCode;
 use crate::supervisor::events::ForwardedApproval;
 use crate::supervisor::guard::{ProductionAction, ProductionRules};
 
@@ -26,6 +27,13 @@ const DECISION_REJECTED: &str = "Użytkownik odrzucił";
 const RATIONALE_SUPERVISOR_ORIGIN: &str = "Ostatni prompt sesji pochodził od agenta sterującego";
 const RATIONALE_AGENT_ORIGIN: &str = "Sesja wystartowała z promptem od agenta";
 const RATIONALE_USER_DECISION: &str = "Decyzja użytkownika";
+const RATIONALE_DISCORD_DECISION: &str = "Decyzja użytkownika na Discordzie";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApprovalSource {
+    App,
+    Discord,
+}
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -254,7 +262,27 @@ impl SupervisorCore {
         }
     }
 
-    pub fn resolve_approval(&self, approval_id: &str, approve: bool) -> Result<(), String> {
+    pub fn pending_approval_codes(&self) -> Vec<PendingCode> {
+        let now = now();
+        self.state
+            .lock()
+            .approvals
+            .pending(now)
+            .into_iter()
+            .map(|approval| PendingCode {
+                approval_id: approval.id,
+                code: approval.code,
+                created_at_ms: approval.created_at_ms,
+            })
+            .collect()
+    }
+
+    pub fn resolve_approval(
+        &self,
+        approval_id: &str,
+        approve: bool,
+        source: ApprovalSource,
+    ) -> Result<(), String> {
         let now = now();
         let entry = {
             let mut state = self.state.lock();
@@ -291,7 +319,11 @@ impl SupervisorCore {
                 kind,
                 question: describe_action(&approval.action),
                 decision: format!("{decision} (kod {})", approval.code),
-                rationale: RATIONALE_USER_DECISION.to_string(),
+                rationale: match source {
+                    ApprovalSource::App => RATIONALE_USER_DECISION,
+                    ApprovalSource::Discord => RATIONALE_DISCORD_DECISION,
+                }
+                .to_string(),
             }
         };
         self.effects.log_decision(entry);
@@ -412,7 +444,8 @@ mod tests {
 
     fn approve_only(core: &SupervisorCore) {
         let approval = only_approval(core);
-        core.resolve_approval(&approval.id, true).unwrap();
+        core.resolve_approval(&approval.id, true, ApprovalSource::App)
+            .unwrap();
     }
 
     #[test]
@@ -690,7 +723,8 @@ mod tests {
             .await;
         let typed_before = effects.typed().len();
         effects.quiet.store(false, Ordering::SeqCst);
-        core.resolve_approval(&approval.id, true).unwrap();
+        core.resolve_approval(&approval.id, true, ApprovalSource::App)
+            .unwrap();
         assert!(core.snapshot().approvals.is_empty());
         assert!(effects.last_snapshot().unwrap().approvals.is_empty());
         core.tick();
@@ -726,7 +760,72 @@ mod tests {
             guard_denial()
         );
         assert_ne!(only_approval(&core).id, approval.id);
-        assert!(core.resolve_approval(&approval.id, true).is_err());
+        assert!(core
+            .resolve_approval(&approval.id, true, ApprovalSource::App)
+            .is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn discord_resolution_logs_its_source() {
+        let (effects, core) = on_main();
+        answered_by_supervisor(&effects, &core).await;
+        core.on_session_hook(bash("s1", "git push")).await;
+        let approval = only_approval(&core);
+        core.on_session_hook(stop("s1", "Potrzebuję zgody na push."))
+            .await;
+        effects.quiet.store(false, Ordering::SeqCst);
+        core.resolve_approval(&approval.id, true, ApprovalSource::Discord)
+            .unwrap();
+        core.tick();
+        advance(5 * SECOND).await;
+        effects.quiet.store(true, Ordering::SeqCst);
+        core.tick();
+        assert_eq!(
+            effects.typed().last(),
+            Some(&("pty-s1".to_string(), format!("{APPROVED_TEXT}\r")))
+        );
+        assert_eq!(
+            resolutions(&core.take_events()),
+            vec![(approval.id.clone(), true)]
+        );
+        let decisions = effects.decisions.lock();
+        let last = decisions.last().unwrap();
+        assert_eq!(last.kind, decision_kind::APPROVED);
+        assert_eq!(last.rationale, "Decyzja użytkownika na Discordzie");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn app_resolution_keeps_the_plain_rationale() {
+        let (effects, core) = on_main();
+        agent_prompted(&core, "s1").await;
+        core.on_session_hook(bash("s1", "git push")).await;
+        let approval = only_approval(&core);
+        core.resolve_approval(&approval.id, false, ApprovalSource::App)
+            .unwrap();
+        assert_eq!(
+            effects.decisions.lock().last().unwrap().rationale,
+            "Decyzja użytkownika"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pending_codes_list_only_open_approvals() {
+        let (_effects, core) = on_main();
+        agent_prompted(&core, "s1").await;
+        agent_prompted(&core, "s2").await;
+        core.on_session_hook(bash("s1", "git push")).await;
+        core.on_session_hook(bash("s2", "git push")).await;
+        let mut approvals = core.snapshot().approvals;
+        approvals.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+        let (first, second) = (approvals[0].clone(), approvals[1].clone());
+        assert_eq!(core.pending_approval_codes().len(), 2);
+        core.resolve_approval(&first.id, true, ApprovalSource::App)
+            .unwrap();
+        let codes = core.pending_approval_codes();
+        assert_eq!(codes.len(), 1);
+        assert_eq!(codes[0].approval_id, second.id);
+        assert_eq!(codes[0].code, second.code);
+        assert_eq!(codes[0].created_at_ms, second.created_at);
     }
 
     #[tokio::test(start_paused = true)]
@@ -737,7 +836,8 @@ mod tests {
         let approval = only_approval(&core);
         core.on_session_hook(stop("s1", "Potrzebuję zgody na push."))
             .await;
-        core.resolve_approval(&approval.id, false).unwrap();
+        core.resolve_approval(&approval.id, false, ApprovalSource::App)
+            .unwrap();
         core.tick();
         assert_eq!(
             effects.typed().last(),
@@ -758,7 +858,9 @@ mod tests {
         );
         let renewed = only_approval(&core);
         assert_ne!(renewed.id, approval.id);
-        assert!(core.resolve_approval(&approval.id, false).is_err());
+        assert!(core
+            .resolve_approval(&approval.id, false, ApprovalSource::App)
+            .is_err());
     }
 
     #[tokio::test(start_paused = true)]
@@ -780,7 +882,8 @@ mod tests {
                 detail: "git push".into(),
             }
         );
-        core.resolve_approval(&first.id, true).unwrap();
+        core.resolve_approval(&first.id, true, ApprovalSource::App)
+            .unwrap();
         assert_eq!(
             core.approval_status(&first.id).unwrap().status,
             ApprovalState::Approved
@@ -793,7 +896,8 @@ mod tests {
             core.approval_status(&first.id).unwrap().status,
             ApprovalState::Approved
         );
-        core.resolve_approval(&second.id, false).unwrap();
+        core.resolve_approval(&second.id, false, ApprovalSource::App)
+            .unwrap();
         assert_eq!(
             core.approval_status(&second.id).unwrap(),
             ApprovalStatus {
@@ -811,7 +915,9 @@ mod tests {
             ApprovalState::Expired
         );
         assert!(core.snapshot().approvals.is_empty());
-        assert!(core.resolve_approval(&pending.id, true).is_err());
+        assert!(core
+            .resolve_approval(&pending.id, true, ApprovalSource::App)
+            .is_err());
         assert!(core.approval_status("missing").is_err());
     }
 
@@ -1044,7 +1150,8 @@ mod tests {
             other => panic!("unexpected events {other:?}"),
         }
         core.on_session_hook(stop("s1", "Potrzebuję zgody.")).await;
-        core.resolve_approval(&approval.id, true).unwrap();
+        core.resolve_approval(&approval.id, true, ApprovalSource::App)
+            .unwrap();
         core.tick();
         let typed = effects.typed();
         assert_eq!(typed.len(), 1);

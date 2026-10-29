@@ -27,7 +27,7 @@ mod operations;
 mod production;
 
 pub use operations::EscalateOutcome;
-pub use production::{ApprovalState, ApprovalStatus};
+pub use production::{ApprovalSource, ApprovalState, ApprovalStatus};
 
 pub const ESCALATED_REASON: &str =
     "Pytanie przekazane użytkownikowi — poczekaj na jego odpowiedź w kolejnej wiadomości.";
@@ -2464,7 +2464,7 @@ mod tests {
             .find(|approval| approval.session_id == "s2")
             .unwrap()
             .clone();
-        core.resolve_approval(&resolved.id, true).unwrap();
+        core.resolve_approval(&resolved.id, true, ApprovalSource::App).unwrap();
         core.take_events();
         core.set_away(true);
         assert_eq!(
