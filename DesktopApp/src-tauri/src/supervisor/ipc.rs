@@ -132,7 +132,18 @@ async fn handle_connection(
     let Ok(request) = serde_json::from_str::<IpcRequest>(line.trim()) else {
         return Ok(());
     };
-    let response = handler.handle(request).await;
+    let handling = handler.handle(request);
+    tokio::pin!(handling);
+    let mut probe = [0u8; 64];
+    let response = loop {
+        tokio::select! {
+            response = &mut handling => break response,
+            read = reader.read(&mut probe) => match read {
+                Ok(0) | Err(_) => return Ok(()),
+                Ok(_) => {}
+            },
+        }
+    };
     let mut payload = serde_json::to_vec(&response).map_err(std::io::Error::other)?;
     payload.push(b'\n');
     write_half.write_all(&payload).await?;
@@ -172,6 +183,7 @@ pub fn request_blocking(
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Instant;
 
     struct StubHandler;
@@ -190,6 +202,40 @@ mod tests {
                 }
             })
         }
+    }
+
+    struct DropFlag(Arc<AtomicBool>);
+
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    struct NeverReplies {
+        started: Arc<AtomicBool>,
+        dropped: Arc<AtomicBool>,
+    }
+
+    impl IpcHandler for NeverReplies {
+        fn handle(&self, _req: IpcRequest) -> Pin<Box<dyn Future<Output = IpcResponse> + Send>> {
+            self.started.store(true, Ordering::SeqCst);
+            let guard = DropFlag(self.dropped.clone());
+            Box::pin(async move {
+                let _guard = guard;
+                std::future::pending::<IpcResponse>().await
+            })
+        }
+    }
+
+    async fn wait_for(flag: &AtomicBool) -> bool {
+        for _ in 0..300 {
+            if flag.load(Ordering::SeqCst) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        false
     }
 
     async fn wait_until_serving(path: &Path) {
@@ -322,6 +368,34 @@ mod tests {
         let server = tokio::spawn(serve(path.clone(), Arc::new(StubHandler)));
         wait_until_serving(&path).await;
         assert!(call(&path, hook_request()).await.is_some());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn closing_the_client_drops_the_pending_request() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("supervisor.sock");
+        let started = Arc::new(AtomicBool::new(false));
+        let dropped = Arc::new(AtomicBool::new(false));
+        let handler = Arc::new(NeverReplies {
+            started: started.clone(),
+            dropped: dropped.clone(),
+        });
+        let server = tokio::spawn(serve(path.clone(), handler));
+        wait_until_serving(&path).await;
+
+        let mut client = StdUnixStream::connect(&path).unwrap();
+        let mut payload = serde_json::to_vec(&hook_request()).unwrap();
+        payload.push(b'\n');
+        client.write_all(&payload).unwrap();
+        assert!(wait_for(&started).await, "the handler never started");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!dropped.load(Ordering::SeqCst));
+        drop(client);
+        assert!(
+            wait_for(&dropped).await,
+            "the handler kept running after the client left"
+        );
         server.abort();
     }
 

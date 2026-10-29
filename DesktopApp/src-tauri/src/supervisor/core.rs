@@ -57,6 +57,7 @@ const DECISION_ESCALATED: &str = "Przekazane użytkownikowi";
 const DECISION_RELEASED: &str = "Pytanie oddane użytkownikowi";
 const RATIONALE_DECISION_TIMEOUT: &str = "Agent nie podjął decyzji w ciągu 2 minut";
 const RATIONALE_HOLD_CAP: &str = "Upłynął limit wstrzymania menu";
+const RATIONALE_UNSEEN: &str = "Agent nie odebrał pytania w ciągu 2 minut";
 const RATIONALE_CARD_RELEASE: &str = "Użytkownik wybrał odpowiedź w terminalu";
 const RATIONALE_HUMAN_PROMPT: &str = "Użytkownik odpowiedział w sesji";
 const RATIONALE_SESSION_REPLACED: &str = "W terminalu sesji działa teraz inna rozmowa";
@@ -487,7 +488,16 @@ impl CoreState {
                     }
                 }
                 Step::Escalate => {
-                    if let Some(question) = self.take_question(&question_id) {
+                    if let Some(mut question) = self.take_question(&question_id) {
+                        if self.discard_queued_question(&question.id) {
+                            question.reply(HookReply::Empty);
+                            outbox.decisions.push(question.decision(
+                                decision_kind::RELEASED_TO_USER,
+                                DECISION_RELEASED.to_string(),
+                                RATIONALE_UNSEEN,
+                            ));
+                            continue;
+                        }
                         self.withdraw_from_supervisor(&question);
                         let summary = question.summary();
                         self.escalate_question(
@@ -1342,6 +1352,7 @@ mod tests {
         advance(60 * SECOND).await;
         core.tick();
         assert_eq!(only_card(&core).phase, CardPhase::WithSupervisor);
+        assert_eq!(core.take_events().len(), 1);
         advance(119 * SECOND).await;
         core.tick();
         settle().await;
@@ -1367,7 +1378,40 @@ mod tests {
         assert_eq!(notifications[0].0, "s1");
         assert!(notifications[0].2.contains("projekt · s1"));
         assert_eq!(effects.kinds(), vec![decision_kind::ESCALATED]);
+        assert!(matches!(
+            core.take_events().as_slice(),
+            [SupervisorEvent::QuestionResolved {
+                by: ResolvedBy::User,
+                ..
+            }]
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn undrained_menu_is_released_when_the_decision_window_expires() {
+        let (effects, core) = setup();
+        core.report_activity(None);
+        let handle = spawn_menu(&core, "s1").await;
+        advance(60 * SECOND).await;
+        core.tick();
+        assert_eq!(only_card(&core).phase, CardPhase::WithSupervisor);
+        advance(119 * SECOND).await;
+        core.tick();
+        settle().await;
+        assert!(!handle.is_finished());
+        advance(SECOND).await;
+        core.tick();
+        assert_eq!(reply_of(handle).await, HookReply::Empty);
+        let snapshot = core.snapshot();
+        assert!(snapshot.cards.is_empty());
+        assert!(snapshot.escalations.is_empty());
+        assert!(effects.notifications().is_empty());
+        assert_eq!(effects.kinds(), vec![decision_kind::RELEASED_TO_USER]);
         assert!(core.take_events().is_empty());
+        core.on_session_hook(stop("s1", "Który kolor?")).await;
+        advance(60 * SECOND).await;
+        core.tick();
+        assert_eq!(core.take_events().len(), 1);
     }
 
     #[tokio::test(start_paused = true)]
