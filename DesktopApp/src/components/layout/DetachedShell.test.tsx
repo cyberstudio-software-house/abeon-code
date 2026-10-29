@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, waitFor } from '@testing-library/react';
 
 const { onCloseRequested, destroy } = vi.hoisted(() => ({
   onCloseRequested: vi.fn(),
@@ -24,6 +24,7 @@ Element.prototype.scrollIntoView = vi.fn();
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import type { AttentionEvent } from '../../lib/tauri';
+import type { SessionRebound } from '../../types';
 import { createLeaf, findLeaf, leaves } from '../../lib/paneTree';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
 import { DetachedShell } from './DetachedShell';
@@ -102,6 +103,20 @@ describe('DetachedShell', () => {
     const event = { preventDefault: vi.fn() };
     handler(event);
     expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('links a terminal\'s new session id to the tab that owns it', async () => {
+    let rebound: ((event: SessionRebound) => void) | null = null;
+    vi.spyOn(tauri, 'onSupervisorSessionRebound').mockImplementation(async (cb) => {
+      rebound = cb;
+      return () => {};
+    });
+    useStore.setState({ tabs: [{ ...sessionTab('session:s1', 's1'), ptyId: 'pty-1' }] });
+    render(<DetachedShell mode={groupMode} />);
+    await waitFor(() => expect(rebound).not.toBeNull());
+    act(() => { rebound!({ ptyId: 'pty-1', sessionId: 's9' }); });
+    const tab = useStore.getState().tabs.find(t => t.id === 'session:s1');
+    expect(tab?.kind === 'session' && tab.linkedSessionId).toBe('s9');
   });
 
   it('reports readiness so the source window can release its actions', async () => {

@@ -3,7 +3,8 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { useStore } from '../store';
 import { tauri } from './tauri';
 import { useSupervisorSnapshot } from './useSupervisorSnapshot';
-import type { SupervisorSnapshot } from '../types';
+import type { SessionRebound, SupervisorSnapshot } from '../types';
+import type { Tab } from '../store/tabsSlice';
 
 const snapshot = (overrides: Partial<SupervisorSnapshot> = {}): SupervisorSnapshot => ({
   level: 'assistant',
@@ -29,6 +30,7 @@ describe('useSupervisorSnapshot', () => {
       emit = cb;
       return unlisten;
     });
+    vi.spyOn(tauri, 'onSupervisorSessionRebound').mockResolvedValue(() => {});
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -104,5 +106,67 @@ describe('useSupervisorSnapshot', () => {
     vi.spyOn(tauri, 'supervisorSnapshot').mockResolvedValue(snapshot());
     renderHook(() => useSupervisorSnapshot());
     await waitFor(() => expect(logged).toHaveBeenCalled());
+  });
+});
+
+describe('useSupervisorSnapshot and session id changes in a terminal', () => {
+  let rebound: (event: SessionRebound) => void = () => {};
+  const unlistenRebound = vi.fn();
+  const sessionTab = (id: string, sessionId: string, extra: Partial<Extract<Tab, { kind: 'session' }>> = {}): Tab => ({
+    kind: 'session',
+    id,
+    projectId: 1,
+    sessionId,
+    title: sessionId,
+    mode: 'terminal',
+    ...extra,
+  });
+  const tabs: Tab[] = [
+    sessionTab('session:a', 'a', { ptyId: 'pty-1' }),
+    sessionTab('session:c', 'c', { ptyId: 'pty-2' }),
+    { kind: 'terminal', id: 'terminal:t', projectId: 1, title: 'Terminal' },
+    sessionTab('session:new-d', 'new-d', { linkedSessionId: 'd', ptyId: 'pty-3' }),
+  ];
+
+  beforeEach(() => {
+    unlistenRebound.mockClear();
+    useStore.setState({ supervisor: null, tabs });
+    vi.spyOn(tauri, 'onSupervisorSnapshot').mockResolvedValue(() => {});
+    vi.spyOn(tauri, 'supervisorSnapshot').mockResolvedValue(snapshot({ ptyId: 'pty-sup' }));
+    vi.spyOn(tauri, 'onSupervisorSessionRebound').mockImplementation(async (cb) => {
+      rebound = cb;
+      return unlistenRebound;
+    });
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('links the new session id only to the tab that owns the terminal', async () => {
+    renderHook(() => useSupervisorSnapshot());
+    await waitFor(() => expect(tauri.onSupervisorSessionRebound).toHaveBeenCalled());
+    act(() => { rebound({ ptyId: 'pty-1', sessionId: 'b' }); });
+    const after = useStore.getState().tabs;
+    expect(after[0]).toEqual({ ...tabs[0], linkedSessionId: 'b' });
+    after.slice(1).forEach((tab, index) => expect(tab).toBe(tabs[index + 1]));
+    act(() => { rebound({ ptyId: 'pty-3', sessionId: 'e' }); });
+    expect(useStore.getState().tabs[3]).toEqual({ ...tabs[3], linkedSessionId: 'e' });
+  });
+
+  it('leaves every tab alone for the supervisor terminal, an unknown terminal or an unchanged id', async () => {
+    renderHook(() => useSupervisorSnapshot());
+    await waitFor(() => expect(tauri.onSupervisorSessionRebound).toHaveBeenCalled());
+    act(() => { rebound({ ptyId: 'pty-sup', sessionId: 'x' }); });
+    act(() => { rebound({ ptyId: 'pty-9', sessionId: 'x' }); });
+    act(() => { rebound({ ptyId: 'pty-1', sessionId: 'a' }); });
+    act(() => { rebound({ ptyId: 'pty-3', sessionId: 'd' }); });
+    expect(useStore.getState().tabs).toBe(tabs);
+  });
+
+  it('stops following session id changes on unmount', async () => {
+    const { unmount } = renderHook(() => useSupervisorSnapshot());
+    await waitFor(() => expect(tauri.onSupervisorSessionRebound).toHaveBeenCalled());
+    await act(async () => {});
+    unmount();
+    expect(unlistenRebound).toHaveBeenCalledTimes(1);
   });
 });

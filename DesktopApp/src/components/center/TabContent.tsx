@@ -6,6 +6,7 @@ import { ProviderPicker } from './ProviderPicker';
 import { QuestionCard } from '../supervisor/QuestionCard';
 import { useStore } from '../../store';
 import type { Tab } from '../../store/tabsSlice';
+import type { Provider } from '../../types';
 
 type SessionTab = Extract<Tab, { kind: 'session' }>;
 
@@ -39,12 +40,16 @@ function SessionBody({ tab, visible, focused = true, takeFocus, focusToken }: { 
       </div>
     );
   }
-  const resumeId = tab.linkedSessionId ?? (tab.sessionId.startsWith('new-') ? undefined : tab.sessionId);
   return (
     <div className={layer(visible)}>
-      <TerminalView projectId={tab.projectId} kind="agent" provider={provider} tabId={tab.id} sessionId={resumeId} visible={visible} focused={focused} takeFocus={takeFocus} focusToken={focusToken} />
+      <ResumedTerminal tab={tab} provider={provider} visible={visible} focused={focused} takeFocus={takeFocus} focusToken={focusToken} />
     </div>
   );
+}
+
+function ResumedTerminal({ tab, provider, visible, focused, takeFocus, focusToken }: { tab: SessionTab; provider: Provider; visible: boolean; focused: boolean; takeFocus?: boolean; focusToken?: number }) {
+  const [resumeId] = useState(() => tab.linkedSessionId ?? (tab.sessionId.startsWith('new-') ? undefined : tab.sessionId));
+  return <TerminalView projectId={tab.projectId} kind="agent" provider={provider} tabId={tab.id} sessionId={resumeId} visible={visible} focused={focused} takeFocus={takeFocus} focusToken={focusToken} />;
 }
 
 function SessionQuestionCard({ tab, visible, onDone }: { tab: SessionTab; visible: boolean; onDone: () => void }) {

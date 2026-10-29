@@ -16,6 +16,7 @@ vi.mock('../../lib/updater', () => ({ checkForUpdate: async () => null }));
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import type { AttentionEvent } from '../../lib/tauri';
+import type { SessionRebound } from '../../types';
 import { createLeaf } from '../../lib/paneTree';
 import { AppShell } from './AppShell';
 
@@ -64,6 +65,21 @@ describe('AppShell attention across panes', () => {
     render(<AppShell />);
     await waitFor(() => expect(captured).not.toBeNull());
     handler = captured!;
+  });
+
+  it('links a terminal\'s new session id to the tab that owns it', async () => {
+    let rebound: ((event: SessionRebound) => void) | null = null;
+    vi.spyOn(tauri, 'onSupervisorSessionRebound').mockImplementation(async (cb) => {
+      rebound = cb;
+      return () => {};
+    });
+    act(() => {
+      useStore.setState({ tabs: [{ ...sessionTab('session:s1', 's1'), ptyId: 'pty-1' }, sessionTab('session:s2', 's2')] });
+    });
+    render(<AppShell />);
+    await waitFor(() => expect(rebound).not.toBeNull());
+    act(() => { rebound!({ ptyId: 'pty-1', sessionId: 's9' }); });
+    expect(useStore.getState().tabs.map(t => t.kind === 'session' ? t.linkedSessionId : null)).toEqual(['s9', undefined]);
   });
 
   it('leaves a session shown in another pane alone but flags a hidden one', () => {

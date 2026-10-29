@@ -247,7 +247,12 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   tokens, provenance). `SessionPtyRegistry::claim` accepts only PTY ids the app issued to hooked
   Claude sessions (never shells) and keeps every session id on the PTY it was first bound to (the
   history goes with the PTY on `pty_kill`), so a forged hook cannot move a session onto another
-  terminal; a session whose `SessionStart` was lost has no PTY, so its prompts are Agent.
+  terminal; a session whose `SessionStart` was lost has no PTY, so its prompts are Agent. Each
+  rebind emits `supervisor:session-rebound` `{ ptyId, sessionId }`; `useSupervisorSnapshot` (both
+  window shells) relinks the session tab whose `ptyId` matches via `linkNewSession`, so the question
+  card, presence and attention follow the new id. Every agent tab records its `ptyId`
+  (`markSessionPtyStarted`), and `ResumedTerminal` (`TabContent.tsx`) freezes the `--resume` id at
+  mount, so relinking a live tab never remounts `TerminalView` or respawns its PTY.
 - **Known residual**: hook payloads cannot be authenticated against the session's own tools (same env and uid), so a forged `UserPromptSubmit` within 10 s of a real Enter in the same terminal still counts as Human.
 - **Supervisor workdir** (`<app_data>/supervisor`): `CLAUDE.md` (regenerated), `preferences.md`
   (created once, the supervisor may edit it), `mcp.json`, `.claude/settings.json`. The process runs

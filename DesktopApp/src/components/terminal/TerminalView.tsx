@@ -214,9 +214,7 @@ export function TerminalView({ projectId, kind, ptyId, provider, sessionId, fres
       ptyRef.current = id;
       if (initialPrompt && tabId) consumeInitialPrompt(tabId);
       if (kind === 'agent') setAgentPtyId(id);
-      if (kind === 'agent' && agentProvider === 'opencode' && fresh && tabId) {
-        markSessionPtyStarted(tabId, id);
-      }
+      if (kind === 'agent' && tabId) markSessionPtyStarted(tabId, id);
       const offOut = await tauri.onPtyOutput(id, (bytes) => {
         if (cancelled) return;
         if (visibleRef.current) {
