@@ -357,11 +357,25 @@ impl CoreState {
         }
     }
 
+    fn activate_discord(&mut self, active: bool, settings: &SupervisorSettings, now: Instant) {
+        let activated = active && !self.discord_active;
+        self.discord_active = active;
+        if activated && self.channel(settings, now) == EscalationChannel::Discord {
+            self.forward_to_discord(now);
+        }
+    }
+
     fn forward_to_discord(&mut self, now: Instant) {
+        let sessions = &self.sessions;
         let escalations: Vec<ForwardedEscalation> = self
             .escalations
             .iter_mut()
-            .filter(|escalation| escalation.channel == EscalationChannel::App)
+            .filter(|escalation| {
+                escalation.channel == EscalationChannel::App
+                    && sessions
+                        .get(&escalation.session_id)
+                        .is_some_and(|session| session.awaiting_user)
+            })
             .map(|escalation| {
                 escalation.channel = EscalationChannel::Discord;
                 forwarded_escalation(escalation)
@@ -1181,8 +1195,10 @@ impl SupervisorCore {
     }
 
     pub fn set_discord_active(&self, active: bool) {
-        self.state.lock().discord_active = active;
-        self.publish();
+        let settings = self.effects.settings();
+        let now = now();
+        self.state.lock().activate_discord(active, &settings, now);
+        self.publish_with(&settings);
     }
 
     pub fn answer_card(
@@ -2498,8 +2514,80 @@ mod tests {
         let snapshot = core.snapshot();
         assert_eq!(snapshot.escalations[0].channel, EscalationChannel::App);
         assert_eq!(snapshot.approvals[0].channel, EscalationChannel::App);
-        core.set_discord_active(true);
         core.set_away(false);
+        core.set_discord_active(true);
+        assert!(core.take_events().is_empty());
+        assert_eq!(escalation_channels(&core), vec![EscalationChannel::App]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn activating_discord_while_away_forwards_open_app_items_once() {
+        let (effects, core) = setup();
+        *effects.branch.lock() = Some("main".into());
+        core.set_away(true);
+        assert_eq!(escalated_channel(&core, "s1").await, EscalationChannel::App);
+        core.on_session_hook(bash("s2", "git push")).await;
+        let approval = core.snapshot().approvals[0].clone();
+        assert_eq!(approval.channel, EscalationChannel::App);
+        core.take_events();
+        core.set_discord_active(true);
+        core.set_discord_active(true);
+        assert_eq!(
+            core.take_events(),
+            vec![SupervisorEvent::Forwarded {
+                escalations: vec![forwarded_escalation("s1")],
+                approvals: vec![ForwardedApproval {
+                    approval_id: approval.id.clone(),
+                    label: "projekt · s2".into(),
+                    action: "git push → main".into(),
+                    code: approval.code.clone(),
+                }],
+            }]
+        );
+        let published = effects.last_snapshot().unwrap();
+        assert_eq!(published.escalations[0].channel, EscalationChannel::Discord);
+        assert_eq!(published.approvals[0].channel, EscalationChannel::Discord);
+        core.set_discord_active(false);
+        core.set_discord_active(true);
+        assert!(core.take_events().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn activating_discord_while_present_and_muted_forwards_nothing() {
+        let (effects, core) = setup();
+        *effects.branch.lock() = Some("main".into());
+        core.report_activity(None);
+        assert_eq!(escalated_channel(&core, "s1").await, EscalationChannel::App);
+        core.on_session_hook(bash("s2", "git push")).await;
+        core.take_events();
+        core.set_discord_active(true);
+        assert!(core.take_events().is_empty());
+        let snapshot = core.snapshot();
+        assert_eq!(snapshot.escalations[0].channel, EscalationChannel::App);
+        assert_eq!(snapshot.approvals[0].channel, EscalationChannel::App);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn escalations_answered_by_relay_are_not_forwarded() {
+        let (effects, core) = setup();
+        core.set_discord_active(true);
+        core.report_activity(None);
+        assert_eq!(escalated_channel(&core, "s1").await, EscalationChannel::App);
+        core.send_to_session("s1", "Użytkownik wybrał wariant A")
+            .unwrap();
+        core.tick();
+        assert_eq!(effects.typed().len(), 1);
+        core.on_session_hook(prompt(
+            "s1",
+            "[agent sterujący] Użytkownik wybrał wariant A",
+        ))
+        .await;
+        assert_eq!(escalation_channels(&core), vec![EscalationChannel::App]);
+        core.take_events();
+        core.set_away(true);
+        assert!(core.take_events().is_empty());
+        core.set_discord_active(false);
+        core.set_discord_active(true);
         assert!(core.take_events().is_empty());
         assert_eq!(escalation_channels(&core), vec![EscalationChannel::App]);
     }
