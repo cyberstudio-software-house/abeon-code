@@ -7,7 +7,7 @@ use crate::domain::Provider;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::db::{projects_repo, actions_repo};
-use crate::pty::session_registry::{session_to_bind, PTY_ID_ENV};
+use crate::pty::session_registry::{session_to_bind, SessionPtyRegistry, PTY_ID_ENV};
 use crate::validation::validate_session_id;
 
 const OPENCODE_DISCOVERY_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(15);
@@ -217,12 +217,14 @@ pub(crate) fn spawn_claude_resume(
 fn assign_hooked_pty_id(
     env: &mut std::collections::HashMap<String, String>,
     session_hooks: bool,
+    registry: &SessionPtyRegistry,
 ) -> Option<String> {
     if !session_hooks {
         return None;
     }
     let id = Uuid::new_v4().to_string();
     env.insert(PTY_ID_ENV.to_string(), id.clone());
+    registry.register_hooked_pty(&id);
     Some(id)
 }
 
@@ -328,7 +330,7 @@ pub fn spawn_pty(
             env.insert("PATH".into(), format!("{}:{current}", parent.display()));
         }
     }
-    let hooked_pty_id = assign_hooked_pty_id(&mut env, session_hooks);
+    let hooked_pty_id = assign_hooked_pty_id(&mut env, session_hooks, &state.session_pty);
     let is_fresh_opencode = matches!(
         &kind,
         PtyKind::Agent { provider: Provider::Opencode, fresh: true, .. }
@@ -358,7 +360,11 @@ pub fn spawn_pty(
             })),
         )
     } else if let Some(id) = hooked_pty_id {
-        state.pty.spawn_as(id, app, &program, &args_ref, &cwd, cols, rows, &env, None)
+        let spawned = state.pty.spawn_as(id.clone(), app, &program, &args_ref, &cwd, cols, rows, &env, None);
+        if spawned.is_err() {
+            state.session_pty.unbind_pty(&id);
+        }
+        spawned
     } else {
         state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows, &env)
     };
@@ -620,14 +626,30 @@ mod tests {
 
     #[test]
     fn hooked_sessions_learn_their_pty_id_from_the_environment() {
+        let registry = SessionPtyRegistry::new();
         let mut env = std::collections::HashMap::from([("PATH".to_string(), "/bin".to_string())]);
-        let id = assign_hooked_pty_id(&mut env, true).expect("pty id");
+        let id = assign_hooked_pty_id(&mut env, true, &registry).expect("pty id");
         assert_eq!(env.get("ABEONCODE_PTY_ID"), Some(&id));
         assert!(Uuid::parse_str(&id).is_ok());
-        assert_ne!(assign_hooked_pty_id(&mut env.clone(), true), Some(id));
+        assert_ne!(assign_hooked_pty_id(&mut env.clone(), true, &registry), Some(id));
         let mut plain = std::collections::HashMap::new();
-        assert_eq!(assign_hooked_pty_id(&mut plain, false), None);
+        assert_eq!(assign_hooked_pty_id(&mut plain, false, &registry), None);
         assert!(plain.is_empty());
+    }
+
+    #[test]
+    fn only_hooked_session_ptys_accept_session_claims() {
+        use crate::pty::session_registry::SessionClaim;
+        let registry = SessionPtyRegistry::new();
+        let mut env = std::collections::HashMap::new();
+        let id = assign_hooked_pty_id(&mut env, true, &registry).expect("pty id");
+        assert_eq!(
+            registry.claim("s1", &id),
+            SessionClaim::Rebound { displaced: Vec::new() }
+        );
+        let mut shell_env = std::collections::HashMap::new();
+        assert_eq!(assign_hooked_pty_id(&mut shell_env, false, &registry), None);
+        assert_eq!(registry.claim("s2", "shell-pty"), SessionClaim::Refused);
     }
 
     #[test]

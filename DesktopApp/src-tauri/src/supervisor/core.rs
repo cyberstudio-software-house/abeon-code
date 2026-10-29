@@ -12,6 +12,7 @@ use crate::db::supervisor_decisions_repo::NewDecision;
 use crate::domain::supervisor::{
     CardPhase, EscalationView, MenuQuestion, QuestionCardView, SupervisorLevel, SupervisorSnapshot,
 };
+use crate::pty::session_registry::SessionClaim;
 use crate::sessions::reader::now_ms;
 use crate::supervisor::approvals::ApprovalBook;
 use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
@@ -51,6 +52,7 @@ pub mod decision_kind {
 }
 
 const ASK_USER_QUESTION: &str = "AskUserQuestion";
+const SESSION_START: &str = "SessionStart";
 const ELLIPSIS: char = '…';
 const SUMMARY_CHARS: usize = 500;
 const NOTIFICATION_CHARS: usize = 160;
@@ -774,7 +776,9 @@ impl SupervisorCore {
     }
 
     pub async fn on_session_hook(self: &Arc<Self>, input: HookInput) -> HookReply {
-        if let Some(pty_id) = input.pty_id.as_deref() {
+        if let (SESSION_START, Some(pty_id)) =
+            (input.hook_event_name.as_str(), input.pty_id.as_deref())
+        {
             self.track_terminal(&input.session_id, pty_id);
         }
         match input.hook_event_name.as_str() {
@@ -795,7 +799,10 @@ impl SupervisorCore {
     }
 
     fn track_terminal(&self, session_id: &str, pty_id: &str) {
-        let displaced = self.effects.bind_session(session_id, pty_id);
+        let SessionClaim::Rebound { displaced } = self.effects.bind_session(session_id, pty_id)
+        else {
+            return;
+        };
         if displaced.is_empty() {
             return;
         }
@@ -1891,6 +1898,8 @@ mod tests {
         effects.submit("pty-s1");
         core.on_session_hook(prompt("s1", "zrób push")).await;
         advance(30 * SECOND).await;
+        core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
+            .await;
         core.on_session_hook(on_terminal(
             prompt("s3", "[agent sterujący] git push"),
             "pty-s1",
@@ -1963,6 +1972,74 @@ mod tests {
         core.on_session_hook(on_terminal(stop("s3", "Który kolor?"), "pty-s1"))
             .await;
         assert_eq!(core.take_events().len(), 1);
+    }
+
+    fn pty_of(effects: &FakeEffects, session_id: &str) -> Option<String> {
+        effects
+            .session_info(session_id)
+            .and_then(|info| info.pty_id)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn only_session_start_binds_a_terminal() {
+        let (effects, core) = setup();
+        core.on_session_hook(on_terminal(prompt("s3", "cześć"), "pty-s1"))
+            .await;
+        core.on_session_hook(on_terminal(stop("s3", "Gotowe."), "pty-s1"))
+            .await;
+        core.on_session_hook(on_terminal(bash("s3", "ls"), "pty-s1"))
+            .await;
+        assert_eq!(effects.session_info("s3"), None);
+        assert_eq!(pty_of(&effects, "s1"), Some("pty-s1".to_string()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn forged_session_start_cannot_move_a_session_onto_another_terminal() {
+        let (effects, core) = setup();
+        core.set_away(true);
+        let held = spawn_menu(&core, "s2").await;
+        assert_eq!(core.snapshot().cards.len(), 1);
+        core.on_session_hook(on_terminal(hook("s1", "SessionStart"), "pty-s2"))
+            .await;
+        assert_eq!(pty_of(&effects, "s1"), Some("pty-s1".to_string()));
+        assert_eq!(pty_of(&effects, "s2"), Some("pty-s2".to_string()));
+        assert_eq!(core.snapshot().cards.len(), 1);
+        assert_eq!(core.snapshot().cards[0].session_id, "s2");
+        assert!(!held.is_finished());
+        effects.submit("pty-s2");
+        core.on_session_hook(on_terminal(prompt("s1", "git push origin main"), "pty-s2"))
+            .await;
+        assert_eq!(
+            core.state.lock().provenance.origin("s1"),
+            PromptOrigin::Agent
+        );
+        held.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn clear_and_resume_in_the_same_terminal_rebind_it() {
+        let (effects, core) = setup();
+        core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
+            .await;
+        assert_eq!(pty_of(&effects, "s3"), Some("pty-s1".to_string()));
+        assert_eq!(pty_of(&effects, "s1"), None);
+        core.on_session_hook(on_terminal(hook("s1", "SessionStart"), "pty-s1"))
+            .await;
+        assert_eq!(pty_of(&effects, "s1"), Some("pty-s1".to_string()));
+        assert_eq!(pty_of(&effects, "s3"), None);
+        assert_eq!(pty_of(&effects, "s2"), Some("pty-s2".to_string()));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn session_start_on_a_terminal_the_app_did_not_issue_is_ignored() {
+        let (effects, core) = setup();
+        effects.live_ptys.lock().insert("pty-shell".to_string());
+        core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-shell"))
+            .await;
+        core.on_session_hook(on_terminal(hook("s4", "SessionStart"), "pty-ghost"))
+            .await;
+        assert_eq!(effects.session_info("s3"), None);
+        assert_eq!(effects.session_info("s4"), None);
     }
 
     #[tokio::test(start_paused = true)]

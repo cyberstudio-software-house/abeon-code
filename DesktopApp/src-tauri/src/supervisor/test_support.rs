@@ -10,6 +10,7 @@ use tokio::task::JoinHandle;
 
 use crate::db::supervisor_decisions_repo::NewDecision;
 use crate::domain::supervisor::{SupervisorLevel, SupervisorSnapshot};
+use crate::pty::session_registry::{SessionClaim, SessionPtyRegistry};
 use crate::supervisor::core::SupervisorCore;
 use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
 use crate::supervisor::events::SupervisorEvent;
@@ -23,6 +24,7 @@ pub(crate) struct FakeEffects {
     pub(crate) settings: Mutex<SupervisorSettings>,
     pub(crate) sessions: Mutex<HashMap<String, SessionInfo>>,
     pub(crate) live_ptys: Mutex<HashSet<String>>,
+    pub(crate) registry: SessionPtyRegistry,
     pub(crate) quiet: AtomicBool,
     pub(crate) keystrokes: Mutex<HashMap<String, Instant>>,
     pub(crate) submits: Mutex<HashMap<String, Instant>>,
@@ -58,6 +60,12 @@ impl FakeEffects {
                 (id.to_string(), info)
             })
             .collect();
+        let registry = SessionPtyRegistry::new();
+        for id in ["s1", "s2"] {
+            let pty_id = format!("pty-{id}");
+            registry.register_hooked_pty(&pty_id);
+            registry.bind(id, &pty_id);
+        }
         Arc::new(FakeEffects {
             settings: Mutex::new(SupervisorSettings {
                 level: SupervisorLevel::Assistant,
@@ -68,6 +76,7 @@ impl FakeEffects {
             }),
             sessions: Mutex::new(sessions),
             live_ptys: Mutex::new(HashSet::from(["pty-s1".to_string(), "pty-s2".to_string()])),
+            registry,
             quiet: AtomicBool::new(true),
             keystrokes: Mutex::default(),
             submits: Mutex::default(),
@@ -140,20 +149,17 @@ impl Effects for FakeEffects {
         self.sessions.lock().get(session_id).cloned()
     }
 
-    fn bind_session(&self, session_id: &str, pty_id: &str) -> Vec<String> {
+    fn bind_session(&self, session_id: &str, pty_id: &str) -> SessionClaim {
         if !self.live_ptys.lock().contains(pty_id) {
-            return Vec::new();
+            return SessionClaim::Refused;
         }
+        let claim = self.registry.claim(session_id, pty_id);
+        let SessionClaim::Rebound { displaced } = &claim else {
+            return claim;
+        };
         let mut sessions = self.sessions.lock();
-        let displaced: Vec<String> = sessions
-            .iter()
-            .filter(|(id, info)| {
-                id.as_str() != session_id && info.pty_id.as_deref() == Some(pty_id)
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
         let template = displaced.first().and_then(|id| sessions.get(id).cloned());
-        for id in &displaced {
+        for id in displaced {
             if let Some(info) = sessions.get_mut(id) {
                 info.pty_id = None;
             }
@@ -167,7 +173,7 @@ impl Effects for FakeEffects {
                 project_path: template.and_then(|info| info.project_path),
                 pty_id: Some(pty_id.to_string()),
             });
-        displaced
+        claim
     }
 
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String> {

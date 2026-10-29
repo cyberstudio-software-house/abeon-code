@@ -241,9 +241,14 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   600 s, PreToolUse `Bash|mcp__.*` 15 s. The command embeds `current_exe()`; the file is rewritten on
   every start.
 - **Session id changes**: those sessions get `ABEONCODE_PTY_ID=<pty id>` in their environment and
-  `hook session` forwards it (`IpcRequest::Hook.pty_id`). When `/clear` or an in-TUI `/resume` puts a
-  new session id on the same PTY, the first hook rebinds the registry and the core forgets the old
-  session (queued injections, open questions and held menus, escalations, tokens, provenance).
+  `hook session` forwards it (`IpcRequest::Hook.pty_id`). Only a `SessionStart` hook binds: when
+  `/clear` or an in-TUI `/resume` puts a new session id on the same PTY, it rebinds the registry and
+  the core forgets the old session (queued injections, open questions and held menus, escalations,
+  tokens, provenance). `SessionPtyRegistry::claim` accepts only PTY ids the app issued to hooked
+  Claude sessions (never shells) and keeps every session id on the PTY it was first bound to (the
+  history goes with the PTY on `pty_kill`), so a forged hook cannot move a session onto another
+  terminal; a session whose `SessionStart` was lost has no PTY, so its prompts are Agent.
+- **Known residual**: hook payloads cannot be authenticated against the session's own tools (same env and uid), so a forged `UserPromptSubmit` within 10 s of a real Enter in the same terminal still counts as Human.
 - **Supervisor workdir** (`<app_data>/supervisor`): `CLAUDE.md` (regenerated), `preferences.md`
   (created once, the supervisor may edit it), `mcp.json`, `.claude/settings.json`. The process runs
   with `--permission-mode dontAsk --strict-mcp-config` and never skip-permissions; settings carry no
@@ -265,7 +270,8 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   `input_activity`, which ignores terminal reports (focus, cursor position, device status) so they
   never count as typing.
 - **Guard** (`PreToolUse` on `Bash|mcp__.*`): applies whenever the level is not Off and the origin is
-  not Human; a session with no prompt record (never prompted, or forgotten after a rebind) is Agent. Built-in Bash rules: `git push` to `main`/`master`, `task release`, `gh pr merge` and
+  not Human; a session with no prompt record (never prompted, or forgotten after a rebind) is Agent.
+  Built-in Bash rules: `git push` to `main`/`master`, `task release`, `gh pr merge` and
   `bkt pr merge`; extra `bash:` rules are labelled `reguła: <pattern>` so command text never reaches
   the notification title. The parser (`guard.rs`) is quote-aware, joins `\`-newline continuations,
   strips wrappers (sudo, env, timeout, flock, setsid, doas, ionice, systemd-run, …) and caps

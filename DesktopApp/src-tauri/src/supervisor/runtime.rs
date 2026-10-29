@@ -21,7 +21,7 @@ use crate::error::AppResult;
 use crate::notifications::marker::MarkerFilter;
 use crate::notifications::AttentionEvent;
 use crate::pty::input_activity::InputActivity;
-use crate::pty::session_registry::SessionPtyRegistry;
+use crate::pty::session_registry::{SessionClaim, SessionPtyRegistry};
 use crate::pty::PtyManager;
 use crate::sessions::reader::now_ms;
 use crate::state::AppState;
@@ -236,11 +236,12 @@ impl Effects for AppEffects {
         })
     }
 
-    fn bind_session(&self, session_id: &str, pty_id: &str) -> Vec<String> {
-        if !self.pty.contains(pty_id) {
-            return Vec::new();
+    fn bind_session(&self, session_id: &str, pty_id: &str) -> SessionClaim {
+        if crate::validation::validate_session_id(session_id).is_err() || !self.pty.contains(pty_id)
+        {
+            return SessionClaim::Refused;
         }
-        self.session_pty.rebind(session_id, pty_id)
+        self.session_pty.claim(session_id, pty_id)
     }
 
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String> {
