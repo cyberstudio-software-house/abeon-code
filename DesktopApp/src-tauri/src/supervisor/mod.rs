@@ -1,6 +1,7 @@
 pub mod approvals;
 pub mod claude_md;
 pub mod core;
+pub mod discord;
 pub mod effects;
 #[cfg(unix)]
 pub mod entry;
