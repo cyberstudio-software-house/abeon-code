@@ -594,6 +594,31 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn session_that_never_sent_a_prompt_is_guarded() {
+        let (_effects, core) = on_main();
+        assert_eq!(
+            core.on_session_hook(bash("s1", "git push origin main"))
+                .await,
+            guard_denial()
+        );
+        assert_eq!(only_approval(&core).action, PUSH_ACTION);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn decoy_session_start_does_not_unguard_the_session() {
+        let (_effects, core) = on_main();
+        agent_prompted(&core, "s1").await;
+        core.on_session_hook(on_terminal(hook("x", "SessionStart"), "pty-s1"))
+            .await;
+        assert_eq!(
+            core.on_session_hook(bash("s1", "git push origin main"))
+                .await,
+            guard_denial()
+        );
+        assert_eq!(only_approval(&core).action, PUSH_ACTION);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn guard_fails_safe_without_cwd() {
         let (effects, core) = on_main();
         agent_prompted(&core, "s1").await;

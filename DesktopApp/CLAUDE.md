@@ -265,7 +265,7 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   `input_activity`, which ignores terminal reports (focus, cursor position, device status) so they
   never count as typing.
 - **Guard** (`PreToolUse` on `Bash|mcp__.*`): applies whenever the level is not Off and the origin is
-  not Human. Built-in Bash rules: `git push` to `main`/`master`, `task release`, `gh pr merge` and
+  not Human; a session with no prompt record (never prompted, or forgotten after a rebind) is Agent. Built-in Bash rules: `git push` to `main`/`master`, `task release`, `gh pr merge` and
   `bkt pr merge`; extra `bash:` rules are labelled `reguła: <pattern>` so command text never reaches
   the notification title. The parser (`guard.rs`) is quote-aware, joins `\`-newline continuations,
   strips wrappers (sudo, env, timeout, flock, setsid, doas, ionice, systemd-run, …) and caps

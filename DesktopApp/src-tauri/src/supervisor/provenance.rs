@@ -126,7 +126,7 @@ impl ProvenanceTracker {
         self.sessions
             .get(session_id)
             .and_then(|session| session.origin)
-            .unwrap_or(PromptOrigin::Human)
+            .unwrap_or(PromptOrigin::Agent)
     }
 }
 
@@ -282,7 +282,7 @@ mod tests {
         tracker.mark_supervisor("s1");
         tracker.forget_session("s1");
         assert_eq!(tracker.last_typed_at("s1", now), None);
-        assert_eq!(tracker.origin("s1"), PromptOrigin::Human);
+        assert_eq!(tracker.origin("s1"), PromptOrigin::Agent);
         assert_eq!(
             tracker.on_user_prompt("s1", "answer", TYPED_QUIETLY, now),
             PromptOrigin::Agent
@@ -333,10 +333,21 @@ mod tests {
     #[test]
     fn mark_supervisor_sets_origin() {
         let mut tracker = ProvenanceTracker::default();
-        assert_eq!(tracker.origin("unknown"), PromptOrigin::Human);
         tracker.mark_supervisor("s1");
         assert_eq!(tracker.origin("s1"), PromptOrigin::Supervisor);
-        assert_eq!(tracker.origin("s2"), PromptOrigin::Human);
+    }
+
+    #[test]
+    fn session_without_a_record_is_agent() {
+        let now = Instant::now();
+        let mut tracker = ProvenanceTracker::default();
+        assert_eq!(tracker.origin("unknown"), PromptOrigin::Agent);
+        tracker.on_user_prompt("s1", "zrób push", SUBMIT, now);
+        assert_eq!(tracker.origin("s1"), PromptOrigin::Human);
+        tracker.record_injection("s2", "answer", now);
+        assert_eq!(tracker.origin("s2"), PromptOrigin::Agent);
+        tracker.forget_session("s1");
+        assert_eq!(tracker.origin("s1"), PromptOrigin::Agent);
     }
 
     #[test]

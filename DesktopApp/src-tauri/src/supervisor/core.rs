@@ -1847,13 +1847,6 @@ mod tests {
         assert!(effects.last_snapshot().unwrap().cards.is_empty());
     }
 
-    fn on_terminal(input: HookInput, pty_id: &str) -> HookInput {
-        HookInput {
-            pty_id: Some(pty_id.to_string()),
-            ..input
-        }
-    }
-
     #[tokio::test(start_paused = true)]
     async fn new_session_in_the_same_terminal_drops_the_queued_injection() {
         let (effects, core) = setup();

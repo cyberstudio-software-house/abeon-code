@@ -273,6 +273,13 @@ pub(crate) fn hook(session_id: &str, event: &str) -> HookInput {
     }
 }
 
+pub(crate) fn on_terminal(input: HookInput, pty_id: &str) -> HookInput {
+    HookInput {
+        pty_id: Some(pty_id.to_string()),
+        ..input
+    }
+}
+
 pub(crate) fn stop(session_id: &str, text: &str) -> HookInput {
     HookInput {
         last_assistant_message: Some(text.to_string()),
