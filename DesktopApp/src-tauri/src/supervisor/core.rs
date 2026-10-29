@@ -152,6 +152,14 @@ fn check_menu_answers(
     Ok(())
 }
 
+fn forwarded_escalation(escalation: &EscalationView) -> ForwardedEscalation {
+    ForwardedEscalation {
+        session_id: escalation.session_id.clone(),
+        label: escalation.label.clone(),
+        summary: escalation.summary.clone(),
+    }
+}
+
 fn describe_answers(answers: &HashMap<String, String>) -> String {
     answers
         .iter()
@@ -356,11 +364,7 @@ impl CoreState {
             .filter(|escalation| escalation.channel == EscalationChannel::App)
             .map(|escalation| {
                 escalation.channel = EscalationChannel::Discord;
-                ForwardedEscalation {
-                    session_id: escalation.session_id.clone(),
-                    label: escalation.label.clone(),
-                    summary: escalation.summary.clone(),
-                }
+                forwarded_escalation(escalation)
             })
             .collect();
         let approvals = self.forward_pending_approvals(now);
@@ -575,7 +579,7 @@ impl CoreState {
                         }
                         self.withdraw_from_supervisor(&question);
                         let summary = question.summary();
-                        self.escalate_question(
+                        let escalation = self.escalate_question(
                             question,
                             summary,
                             RATIONALE_DECISION_TIMEOUT,
@@ -583,6 +587,15 @@ impl CoreState {
                             now,
                             outbox,
                         );
+                        if escalation.channel == EscalationChannel::Discord {
+                            self.push_event(
+                                SupervisorEvent::Forwarded {
+                                    escalations: vec![forwarded_escalation(&escalation)],
+                                    approvals: Vec::new(),
+                                },
+                                now,
+                            );
+                        }
                     }
                 }
             }
@@ -607,7 +620,7 @@ impl CoreState {
         settings: &SupervisorSettings,
         now: Instant,
         outbox: &mut Outbox,
-    ) -> EscalationChannel {
+    ) -> EscalationView {
         let channel = self.channel(settings, now);
         question.reply(HookReply::Deny {
             reason: ESCALATED_REASON.to_string(),
@@ -636,7 +649,7 @@ impl CoreState {
             DECISION_ESCALATED.to_string(),
             rationale,
         ));
-        self.escalations.push(EscalationView {
+        let escalation = EscalationView {
             id: Uuid::new_v4().to_string(),
             session_id: question.session_id,
             project_id: question.project_id,
@@ -644,8 +657,9 @@ impl CoreState {
             summary,
             channel,
             created_at: now_ms(),
-        });
-        channel
+        };
+        self.escalations.push(escalation.clone());
+        escalation
     }
 
     fn forget_session(&mut self, session_id: &str, outbox: &mut Outbox) {
@@ -2511,6 +2525,62 @@ mod tests {
         assert_eq!(escalation_channels(&core), vec![EscalationChannel::Discord]);
         core.tick();
         assert!(core.take_events().is_empty());
+    }
+
+    fn forwarded_events(events: &[SupervisorEvent]) -> Vec<SupervisorEvent> {
+        events
+            .iter()
+            .filter(|event| matches!(event, SupervisorEvent::Forwarded { .. }))
+            .cloned()
+            .collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timed_out_menu_is_forwarded_when_away_and_active() {
+        let (effects, core) = setup();
+        core.set_discord_active(true);
+        core.set_away(true);
+        let handle = spawn_menu(&core, "s1").await;
+        only_question_id(core.take_events());
+        advance(DECISION_WINDOW).await;
+        core.tick();
+        assert!(matches!(reply_of(handle).await, HookReply::Deny { .. }));
+        assert_eq!(escalation_channels(&core), vec![EscalationChannel::Discord]);
+        let events = core.take_events();
+        assert_eq!(
+            forwarded_events(&events),
+            vec![SupervisorEvent::Forwarded {
+                escalations: vec![ForwardedEscalation {
+                    session_id: "s1".into(),
+                    label: "projekt · s1".into(),
+                    summary: COLOR_QUESTION.into(),
+                }],
+                approvals: Vec::new(),
+            }]
+        );
+        assert!(effects.notifications().is_empty());
+        assert_eq!(effects.kinds(), vec![decision_kind::ESCALATED]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn timed_out_menu_notifies_in_app_when_present_and_muted() {
+        let (effects, core) = setup();
+        assert!(effects.settings.lock().discord_mute_when_present);
+        core.set_discord_active(true);
+        core.report_activity(None);
+        let handle = spawn_menu(&core, "s1").await;
+        advance(60 * SECOND).await;
+        core.tick();
+        only_question_id(core.take_events());
+        advance(DECISION_WINDOW).await;
+        core.tick();
+        assert!(matches!(reply_of(handle).await, HookReply::Deny { .. }));
+        assert!(core.snapshot().present);
+        assert_eq!(escalation_channels(&core), vec![EscalationChannel::App]);
+        assert!(forwarded_events(&core.take_events()).is_empty());
+        let notifications = effects.notifications();
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].0, "s1");
     }
 
     #[tokio::test(start_paused = true)]

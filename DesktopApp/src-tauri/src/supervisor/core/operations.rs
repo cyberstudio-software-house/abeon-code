@@ -63,14 +63,15 @@ impl SupervisorCore {
                     continue;
                 };
                 state.discard_queued_question(question_id);
-                channel = Some(state.escalate_question(
+                let escalation = state.escalate_question(
                     question,
                     summary.to_string(),
                     summary,
                     &settings,
                     now,
                     &mut outbox,
-                ));
+                );
+                channel = Some(escalation.channel);
             }
         }
         let Some(channel) = channel else {
