@@ -17,6 +17,7 @@ use crate::db::DbPool;
 use crate::domain::supervisor::{SupervisorLevel, SupervisorSnapshot};
 use crate::domain::SessionActivity;
 use crate::error::AppResult;
+use crate::notifications::marker::MarkerFilter;
 use crate::pty::input_activity::InputActivity;
 use crate::pty::session_registry::SessionPtyRegistry;
 use crate::pty::PtyManager;
@@ -371,14 +372,17 @@ impl SupervisorRuntime {
         if previous == level {
             return;
         }
-        core.level_changed();
         if level == SupervisorLevel::Off {
+            core.level_changed();
             self.process.stop(app);
-        } else if previous == SupervisorLevel::Off {
+            return;
+        }
+        if previous == SupervisorLevel::Off {
             self.process.ensure_running(app);
         } else {
             self.process.refresh_instructions(app);
         }
+        core.level_changed();
     }
 }
 
@@ -522,6 +526,39 @@ pub fn new_conversation(app: &AppHandle) -> AppResult<()> {
     }
 }
 
+fn same_directory(left: &Path, right: &Path) -> bool {
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
+}
+
+fn is_supervisor_marker(
+    session_id: &str,
+    cwd: Option<&Path>,
+    workdir: Option<&Path>,
+    supervisor_session: Option<&str>,
+) -> bool {
+    if supervisor_session == Some(session_id) {
+        return true;
+    }
+    matches!((cwd, workdir), (Some(cwd), Some(workdir)) if same_directory(cwd, workdir))
+}
+
+pub fn attention_filter(app: &AppHandle) -> MarkerFilter {
+    let app = app.clone();
+    let workdir = workdir::supervisor_dir(&app).ok();
+    Arc::new(move |session_id: &str, cwd: Option<&Path>| {
+        let supervisor_session = runtime(&app).and_then(|runtime| runtime.process.session_id());
+        is_supervisor_marker(
+            session_id,
+            cwd,
+            workdir.as_deref(),
+            supervisor_session.as_deref(),
+        )
+    })
+}
+
 pub fn session_hooks_path(app: &AppHandle) -> Option<PathBuf> {
     let runtime = runtime(app)?;
     if !runtime.is_active() || runtime.effects.settings().level == SupervisorLevel::Off {
@@ -564,12 +601,11 @@ async fn route(
             channel: HookChannel::Supervisor,
             input,
         } => {
-            if input
-                .get("hook_event_name")
-                .and_then(serde_json::Value::as_str)
-                == Some(SESSION_START_EVENT)
-            {
-                process.mark_ready();
+            let field = |name: &str| input.get(name).and_then(serde_json::Value::as_str);
+            if field("hook_event_name") == Some(SESSION_START_EVENT) {
+                if let Some(session_id) = field("session_id") {
+                    process.mark_ready(session_id);
+                }
             }
             IpcResponse::Hook { stdout: None }
         }
@@ -628,6 +664,73 @@ mod tests {
         assert!(check_open_request(file.to_str().unwrap(), "zrób to").is_err());
         assert!(check_open_request("relative/dir", "zrób to").is_err());
         assert!(check_open_request(&dir.path().join("missing").to_string_lossy(), "x").is_err());
+    }
+
+    #[test]
+    fn supervisor_markers_are_recognised_by_session_or_workdir() {
+        let root = tempfile::tempdir().unwrap();
+        let workdir = root.path().join("supervisor");
+        std::fs::create_dir_all(&workdir).unwrap();
+        let other = root.path().join("project");
+        std::fs::create_dir_all(&other).unwrap();
+        let dotted = root.path().join("project").join("..").join("supervisor");
+
+        assert!(is_supervisor_marker(
+            "sup",
+            None,
+            Some(&workdir),
+            Some("sup")
+        ));
+        assert!(is_supervisor_marker(
+            "cleared",
+            Some(&dotted),
+            Some(&workdir),
+            Some("sup")
+        ));
+        assert!(is_supervisor_marker(
+            "cleared",
+            Some(&workdir),
+            Some(&workdir),
+            None
+        ));
+        assert!(!is_supervisor_marker(
+            "worker",
+            Some(&other),
+            Some(&workdir),
+            Some("sup")
+        ));
+        assert!(!is_supervisor_marker(
+            "worker",
+            None,
+            Some(&workdir),
+            Some("sup")
+        ));
+        assert!(!is_supervisor_marker("worker", Some(&workdir), None, None));
+        assert!(!is_supervisor_marker(
+            "worker",
+            Some(&other),
+            Some(&workdir),
+            None
+        ));
+
+        #[cfg(unix)]
+        {
+            let link = root.path().join("link");
+            std::os::unix::fs::symlink(&workdir, &link).unwrap();
+            assert!(is_supervisor_marker(
+                "worker",
+                Some(&link),
+                Some(&workdir),
+                None
+            ));
+        }
+        let missing = root.path().join("gone");
+        assert!(is_supervisor_marker(
+            "worker",
+            Some(&missing),
+            Some(&missing),
+            None
+        ));
     }
 
     #[test]
@@ -716,6 +819,19 @@ mod tests {
                 "pty-supervisor".into(),
                 SupervisorSessionArg::Fresh("sup".into()),
             );
+            let foreign = IpcRequest::Hook {
+                channel: HookChannel::Supervisor,
+                input: json!({ "hook_event_name": "SessionStart", "session_id": "killed" }),
+            };
+            let response = route(core.clone(), process.clone(), foreign).await;
+            assert_eq!(response, IpcResponse::Hook { stdout: None });
+            assert!(!process.is_ready());
+            let anonymous = IpcRequest::Hook {
+                channel: HookChannel::Supervisor,
+                input: json!({ "hook_event_name": "SessionStart" }),
+            };
+            route(core.clone(), process.clone(), anonymous).await;
+            assert!(!process.is_ready());
             let response = route(core.clone(), process.clone(), supervisor_hook("Stop")).await;
             assert_eq!(response, IpcResponse::Hook { stdout: None });
             assert!(!process.is_ready());

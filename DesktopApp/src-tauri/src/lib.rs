@@ -53,7 +53,10 @@ pub fn run() {
             crate::remote::startup::init_remote_bridge(app.handle().clone());
             crate::supervisor::runtime::start(app.handle().clone());
             if let Ok(dir) = crate::commands::notifications::markers_dir(app.handle()) {
-                let watcher = crate::notifications::marker::AttentionWatcher::new(dir);
+                let watcher = crate::notifications::marker::AttentionWatcher::new(
+                    dir,
+                    Some(crate::supervisor::runtime::attention_filter(app.handle())),
+                );
                 watcher.start(app.handle().clone());
                 app.manage(watcher);
             }

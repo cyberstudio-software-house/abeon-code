@@ -18,6 +18,13 @@ const PREFERENCES_FILE: &str = "preferences.md";
 pub const MCP_CONFIG_FILE: &str = "mcp.json";
 const CLAUDE_SETTINGS_DIR: &str = ".claude";
 const CLAUDE_SETTINGS_FILE: &str = "settings.json";
+const CLAUDE_PROJECTS_DIR: &str = "projects";
+const ENABLED_PLUGINS_KEY: &str = "enabledPlugins";
+const DISABLED_USER_FLAGS: [&str; 3] = [
+    "remoteControlAtStartup",
+    "inputNeededNotifEnabled",
+    "agentPushNotifEnabled",
+];
 const MCP_SERVER_NAME: &str = "abeoncode";
 const MCP_SUBCOMMAND: &str = "mcp";
 const ALLOWED_TOOLS: [&str; 1] = ["mcp__abeoncode__*"];
@@ -27,13 +34,22 @@ const ALLOWED_AFTER_READ: [&str; 4] = [
     "Edit(./preferences.md)",
     "Write(./preferences.md)",
 ];
-const DENIED_TOOLS: [&str; 6] = [
+const DENIED_TOOLS: [&str; 15] = [
     "Bash",
     "WebFetch",
     "WebSearch",
     "NotebookEdit",
     "Task",
     "Agent",
+    "Read(~/.ssh/**)",
+    "Read(~/.aws/**)",
+    "Read(~/.gnupg/**)",
+    "Read(~/.kube/**)",
+    "Read(~/.docker/**)",
+    "Read(~/.netrc)",
+    "Read(~/.git-credentials)",
+    "Read(~/.config/gh/**)",
+    "Read(~/.claude/channels/**)",
 ];
 const PREFERENCES_TEMPLATE: &str = "# Preferencje użytkownika
 
@@ -94,7 +110,27 @@ fn read_rule(root: &Path) -> Option<String> {
     Some(format!("Read(/{trimmed}/**)"))
 }
 
-fn supervisor_settings(exe: &Path, read_roots: &[PathBuf]) -> Value {
+fn user_enabled_plugins(user_settings: &Path) -> Vec<String> {
+    let Ok(raw) = std::fs::read(user_settings) else {
+        return Vec::new();
+    };
+    let Ok(settings) = serde_json::from_slice::<Value>(&raw) else {
+        return Vec::new();
+    };
+    settings
+        .get(ENABLED_PLUGINS_KEY)
+        .and_then(Value::as_object)
+        .map(|plugins| {
+            plugins
+                .iter()
+                .filter(|(_, enabled)| enabled.as_bool() == Some(true))
+                .map(|(key, _)| key.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn supervisor_settings(exe: &Path, read_roots: &[PathBuf], user_plugins: &[String]) -> Value {
     let allow: Vec<String> = ALLOWED_TOOLS
         .iter()
         .map(|rule| rule.to_string())
@@ -102,12 +138,23 @@ fn supervisor_settings(exe: &Path, read_roots: &[PathBuf]) -> Value {
         .chain(ALLOWED_AFTER_READ.iter().map(|rule| rule.to_string()))
         .collect();
     let command = hook_command(exe, SUPERVISOR_CHANNEL);
-    json!({
+    let mut settings = json!({
         "permissions": { "allow": allow, "deny": DENIED_TOOLS },
         "hooks": {
             "SessionStart": [hook_group(None, &command, QUICK_HOOK_TIMEOUT)],
         }
-    })
+    });
+    for flag in DISABLED_USER_FLAGS {
+        settings[flag] = json!(false);
+    }
+    if !user_plugins.is_empty() {
+        let disabled: serde_json::Map<String, Value> = user_plugins
+            .iter()
+            .map(|key| (key.clone(), json!(false)))
+            .collect();
+        settings[ENABLED_PLUGINS_KEY] = Value::Object(disabled);
+    }
+    settings
 }
 
 fn mcp_config(exe: &Path) -> Value {
@@ -151,18 +198,18 @@ pub fn write_supervisor_workdir(
     exe: &Path,
     level: SupervisorLevel,
     read_roots: &[PathBuf],
+    claude_home: &Path,
 ) -> std::io::Result<()> {
     let settings_dir = dir.join(CLAUDE_SETTINGS_DIR);
     std::fs::create_dir_all(&settings_dir)?;
-    write_atomic(
-        &dir.join(CLAUDE_MD_FILE),
-        claude_md::render(level).as_bytes(),
-    )?;
+    let claude_md = claude_md::render(level, &claude_home.join(CLAUDE_PROJECTS_DIR));
+    write_atomic(&dir.join(CLAUDE_MD_FILE), claude_md.as_bytes())?;
     create_if_missing(&dir.join(PREFERENCES_FILE), PREFERENCES_TEMPLATE)?;
     write_json(&dir.join(MCP_CONFIG_FILE), &mcp_config(exe))?;
+    let user_plugins = user_enabled_plugins(&claude_home.join(CLAUDE_SETTINGS_FILE));
     write_json(
         &settings_dir.join(CLAUDE_SETTINGS_FILE),
-        &supervisor_settings(exe, read_roots),
+        &supervisor_settings(exe, read_roots, &user_plugins),
     )
 }
 
@@ -268,19 +315,29 @@ mod tests {
             .collect()
     }
 
-    fn write_workdir(dir: &Path, level: SupervisorLevel) {
+    const MISSING_CLAUDE_HOME: &str = "/nonexistent/abeoncode-test/.claude";
+
+    fn write_workdir_with(dir: &Path, level: SupervisorLevel, claude_home: &Path) {
         let roots = [
             PathBuf::from("/home/u/projects/app"),
             PathBuf::from("/home/u/.claude/projects"),
         ];
-        write_supervisor_workdir(dir, Path::new(EXE), level, &roots).unwrap();
+        write_supervisor_workdir(dir, Path::new(EXE), level, &roots, claude_home).unwrap();
+    }
+
+    fn write_workdir(dir: &Path, level: SupervisorLevel) {
+        write_workdir_with(dir, level, Path::new(MISSING_CLAUDE_HOME));
+    }
+
+    fn workdir_settings(dir: &Path) -> Value {
+        read_json(&dir.join(".claude").join("settings.json"))
     }
 
     #[test]
     fn supervisor_settings_has_no_ask_and_denies_bash() {
         let dir = tempfile::tempdir().unwrap();
         write_workdir(dir.path(), SupervisorLevel::Assistant);
-        let settings = read_json(&dir.path().join(".claude").join("settings.json"));
+        let settings = workdir_settings(dir.path());
         let permissions = settings["permissions"].as_object().unwrap();
         assert!(!permissions.contains_key("ask"));
         assert_eq!(permissions.len(), 2);
@@ -304,7 +361,16 @@ mod tests {
                 "WebSearch",
                 "NotebookEdit",
                 "Task",
-                "Agent"
+                "Agent",
+                "Read(~/.ssh/**)",
+                "Read(~/.aws/**)",
+                "Read(~/.gnupg/**)",
+                "Read(~/.kube/**)",
+                "Read(~/.docker/**)",
+                "Read(~/.netrc)",
+                "Read(~/.git-credentials)",
+                "Read(~/.config/gh/**)",
+                "Read(~/.claude/channels/**)",
             ]
         );
         let hooks = settings["hooks"].as_object().unwrap();
@@ -347,15 +413,89 @@ mod tests {
         let claude_md = dir.path().join("CLAUDE.md");
         std::fs::write(&claude_md, "stara treść").unwrap();
         write_workdir(dir.path(), SupervisorLevel::Assistant);
+        let projects = Path::new(MISSING_CLAUDE_HOME).join("projects");
         assert_eq!(
             std::fs::read_to_string(&claude_md).unwrap(),
-            crate::supervisor::claude_md::render(SupervisorLevel::Assistant)
+            crate::supervisor::claude_md::render(SupervisorLevel::Assistant, &projects)
         );
         write_workdir(dir.path(), SupervisorLevel::Autonomous);
         assert_eq!(
             std::fs::read_to_string(&claude_md).unwrap(),
-            crate::supervisor::claude_md::render(SupervisorLevel::Autonomous)
+            crate::supervisor::claude_md::render(SupervisorLevel::Autonomous, &projects)
         );
+    }
+
+    const DISABLED_FLAGS: [&str; 3] = [
+        "remoteControlAtStartup",
+        "inputNeededNotifEnabled",
+        "agentPushNotifEnabled",
+    ];
+
+    #[test]
+    fn user_plugins_and_phone_notifications_are_switched_off() {
+        let dir = tempfile::tempdir().unwrap();
+        let claude_home = dir.path().join(".claude");
+        std::fs::create_dir_all(&claude_home).unwrap();
+        std::fs::write(
+            claude_home.join("settings.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "enabledPlugins": {
+                    "superpowers@claude-plugins-official": true,
+                    "discord@claude-plugins-official": true,
+                    "explanatory-output-style@claude-plugins-official": true,
+                    "already-off@claude-plugins-official": false,
+                    "odd@claude-plugins-official": "yes"
+                },
+                "remoteControlAtStartup": true
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let workdir = dir.path().join("supervisor");
+        write_workdir_with(&workdir, SupervisorLevel::Assistant, &claude_home);
+        let settings = workdir_settings(&workdir);
+        assert_eq!(
+            settings["enabledPlugins"],
+            serde_json::json!({
+                "superpowers@claude-plugins-official": false,
+                "discord@claude-plugins-official": false,
+                "explanatory-output-style@claude-plugins-official": false
+            })
+        );
+        for flag in DISABLED_FLAGS {
+            assert_eq!(settings[flag], false, "{flag}");
+        }
+    }
+
+    #[test]
+    fn missing_or_invalid_user_settings_add_no_plugin_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing");
+        write_workdir(&missing, SupervisorLevel::Assistant);
+        let settings = workdir_settings(&missing);
+        assert!(settings.get("enabledPlugins").is_none());
+        for flag in DISABLED_FLAGS {
+            assert_eq!(settings[flag], false, "{flag}");
+        }
+
+        for (name, body) in [
+            ("invalid", "{ not json"),
+            ("not-an-object", r#"{"enabledPlugins": ["superpowers"]}"#),
+            (
+                "none-enabled",
+                r#"{"enabledPlugins": {"superpowers": false}}"#,
+            ),
+        ] {
+            let claude_home = dir.path().join(name).join(".claude");
+            std::fs::create_dir_all(&claude_home).unwrap();
+            std::fs::write(claude_home.join("settings.json"), body).unwrap();
+            let workdir = dir.path().join(name).join("supervisor");
+            write_workdir_with(&workdir, SupervisorLevel::Assistant, &claude_home);
+            assert!(
+                workdir_settings(&workdir).get("enabledPlugins").is_none(),
+                "{name}"
+            );
+        }
     }
 
     #[test]

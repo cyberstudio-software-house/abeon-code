@@ -38,6 +38,7 @@ const CONVERSATION_MARKERS: [&str; 2] = ["\"type\":\"user\"", "\"type\":\"assist
 const CLAUDE_DIR: &str = ".claude";
 const CLAUDE_PROJECTS_DIR: &str = "projects";
 const TRANSCRIPT_EXTENSION: &str = "jsonl";
+const ERROR_NO_HOME: &str = "home directory unknown";
 
 fn now() -> Instant {
     tokio::time::Instant::now().into_std()
@@ -47,6 +48,14 @@ fn now() -> Instant {
 pub enum SupervisorSessionArg {
     Fresh(String),
     Resume(String),
+}
+
+impl SupervisorSessionArg {
+    pub fn id(&self) -> &str {
+        match self {
+            SupervisorSessionArg::Fresh(id) | SupervisorSessionArg::Resume(id) => id,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -139,8 +148,12 @@ fn supervisor_env(mut env: HashMap<String, String>) -> HashMap<String, String> {
     env
 }
 
+fn claude_home() -> Option<PathBuf> {
+    dirs::home_dir().map(|home| home.join(CLAUDE_DIR))
+}
+
 fn claude_projects_root() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join(CLAUDE_DIR).join(CLAUDE_PROJECTS_DIR))
+    claude_home().map(|home| home.join(CLAUDE_PROJECTS_DIR))
 }
 
 fn read_roots(conn: &Connection) -> Vec<PathBuf> {
@@ -187,7 +200,8 @@ fn write_workdir(
 ) -> Result<PathBuf, String> {
     let dir = workdir::supervisor_dir(app).map_err(|error| error.to_string())?;
     let exe = std::env::current_exe().map_err(|error| error.to_string())?;
-    workdir::write_supervisor_workdir(&dir, &exe, level, &read_roots(conn))
+    let claude_home = claude_home().ok_or_else(|| ERROR_NO_HOME.to_string())?;
+    workdir::write_supervisor_workdir(&dir, &exe, level, &read_roots(conn), &claude_home)
         .map_err(|error| error.to_string())?;
     Ok(dir)
 }
@@ -207,8 +221,7 @@ fn prepare_launch(app: &AppHandle) -> Result<Option<Launch>, String> {
         return Ok(None);
     }
     let dir = write_workdir(app, &conn, settings.level)?;
-    let projects_root =
-        claude_projects_root().ok_or_else(|| "home directory unknown".to_string())?;
+    let projects_root = claude_projects_root().ok_or_else(|| ERROR_NO_HOME.to_string())?;
     let stored = settings_repo::get(&conn, SESSION_ID_KEY).map_err(|error| error.to_string())?;
     let session = choose_session(stored.as_deref(), &projects_root, &dir);
     if let SupervisorSessionArg::Fresh(id) = &session {
@@ -299,12 +312,21 @@ impl SupervisorProcess {
         state.pty_id.clone().filter(|_| state.ready)
     }
 
-    pub fn mark_ready(&self) {
+    pub fn session_id(&self) -> Option<String> {
+        self.state
+            .lock()
+            .session
+            .as_ref()
+            .map(|session| session.id().to_string())
+    }
+
+    pub fn mark_ready(&self, session_id: &str) {
         let mut state = self.state.lock();
         let Some(pty_id) = state.pty_id.clone() else {
             return;
         };
-        if state.ready {
+        let launched = state.session.as_ref().map(SupervisorSessionArg::id);
+        if state.ready || launched != Some(session_id) {
             return;
         }
         state.ready = true;
@@ -741,7 +763,7 @@ mod tests {
         let (_effects, core) = setup();
         core.set_supervisor_state(false, false, None);
         let process = SupervisorProcess::new(core.clone());
-        process.mark_ready();
+        process.mark_ready(ID);
         assert!(!process.is_ready());
         assert!(!core.snapshot().ready);
 
@@ -754,7 +776,7 @@ mod tests {
         assert!(!process.is_ready());
         assert_eq!(process.ready_pty(), None);
 
-        process.mark_ready();
+        process.mark_ready(ID);
         assert!(process.is_ready());
         assert!(core.snapshot().ready);
         assert_eq!(process.ready_pty().as_deref(), Some("pty-1"));
@@ -766,6 +788,31 @@ mod tests {
         assert_eq!(snapshot.pty_id, None);
         assert!(!process.is_ready());
         assert_eq!(process.pty_id(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn session_start_from_another_session_is_ignored() {
+        let (_effects, core) = setup();
+        let process = SupervisorProcess::new(core.clone());
+        process.attach("pty-old".into(), fresh());
+        assert_eq!(process.session_id().as_deref(), Some(ID));
+        process.halt();
+        assert_eq!(process.session_id(), None);
+
+        const NEW_ID: &str = "99999999-8888-4777-8666-555555555555";
+        process.attach(
+            "pty-new".into(),
+            SupervisorSessionArg::Resume(NEW_ID.to_string()),
+        );
+        process.mark_ready(ID);
+        assert!(!process.is_ready());
+        assert!(!core.snapshot().ready);
+        process.mark_ready("");
+        assert!(!process.is_ready());
+        process.mark_ready(NEW_ID);
+        assert!(process.is_ready());
+        assert!(core.snapshot().ready);
+        assert_eq!(process.session_id().as_deref(), Some(NEW_ID));
     }
 
     fn restart_delay(exit: Exit) -> u64 {
@@ -785,7 +832,7 @@ mod tests {
         for index in 0..4 {
             let pty_id = format!("pty-{index}");
             process.attach(pty_id.clone(), fresh());
-            process.mark_ready();
+            process.mark_ready(ID);
             advance(30 * SECOND).await;
             delays.push(restart_delay(process.detach(&pty_id)));
             assert!(!core.snapshot().running);
@@ -836,7 +883,7 @@ mod tests {
         process.attach("pty-3".into(), resume());
         assert!(!forgets(process.detach("pty-3")));
         process.attach("pty-4".into(), resume());
-        process.mark_ready();
+        process.mark_ready(ID);
         assert!(!forgets(process.detach("pty-4")));
         process.attach("pty-5".into(), resume());
         assert!(!forgets(process.detach("pty-5")));

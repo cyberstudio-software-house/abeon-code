@@ -6,26 +6,49 @@ use tauri::AppHandle;
 use serde_json::Value;
 use crate::notifications::{AttentionEvent, emit_attention};
 
+pub type MarkerFilter = Arc<dyn Fn(&str, Option<&Path>) -> bool + Send + Sync>;
+
+struct ParsedMarker {
+    event: AttentionEvent,
+    cwd: Option<PathBuf>,
+}
+
 /// Extract an AttentionEvent from raw Claude hook JSON. Returns None when the
 /// payload has no usable `session_id`.
-fn parse_marker(raw: &str) -> Option<AttentionEvent> {
+fn parse_marker(raw: &str) -> Option<ParsedMarker> {
     let v: Value = serde_json::from_str(raw).ok()?;
     let session_id = v.get("session_id").and_then(|s| s.as_str())?.to_string();
     if session_id.is_empty() {
         return None;
     }
     let message = v.get("message").and_then(|m| m.as_str()).map(String::from);
-    Some(AttentionEvent { session_id, reason: "hook".to_string(), message })
+    let cwd = v
+        .get("cwd")
+        .and_then(|c| c.as_str())
+        .filter(|c| !c.is_empty())
+        .map(PathBuf::from);
+    Some(ParsedMarker {
+        event: AttentionEvent { session_id, reason: "hook".to_string(), message },
+        cwd,
+    })
+}
+
+fn accept_marker(raw: &str, suppress: Option<&MarkerFilter>) -> Option<AttentionEvent> {
+    let marker = parse_marker(raw)?;
+    let suppressed = suppress
+        .is_some_and(|suppress| suppress(&marker.event.session_id, marker.cwd.as_deref()));
+    (!suppressed).then_some(marker.event)
 }
 
 pub struct AttentionWatcher {
     dir: PathBuf,
     watcher: Mutex<Option<RecommendedWatcher>>,
+    suppress: Option<MarkerFilter>,
 }
 
 impl AttentionWatcher {
-    pub fn new(dir: PathBuf) -> Arc<Self> {
-        Arc::new(Self { dir, watcher: Mutex::new(None) })
+    pub fn new(dir: PathBuf, suppress: Option<MarkerFilter>) -> Arc<Self> {
+        Arc::new(Self { dir, watcher: Mutex::new(None), suppress })
     }
 
     pub fn dir(&self) -> &Path {
@@ -74,7 +97,7 @@ impl AttentionWatcher {
             return;
         }
         let _ = std::fs::remove_file(path);
-        if let Some(event) = parse_marker(&raw) {
+        if let Some(event) = accept_marker(&raw, self.suppress.as_ref()) {
             emit_attention(app, event);
         }
     }
@@ -87,7 +110,7 @@ mod tests {
     #[test]
     fn parses_session_id_and_message() {
         let raw = r#"{"session_id":"abc-123","transcript_path":"/x.jsonl","message":"Claude needs your permission"}"#;
-        let ev = parse_marker(raw).unwrap();
+        let ev = parse_marker(raw).unwrap().event;
         assert_eq!(ev.session_id, "abc-123");
         assert_eq!(ev.reason, "hook");
         assert_eq!(ev.message.as_deref(), Some("Claude needs your permission"));
@@ -108,5 +131,32 @@ mod tests {
     #[test]
     fn invalid_json_returns_none() {
         assert!(parse_marker("not json").is_none());
+    }
+
+    #[test]
+    fn suppressed_markers_emit_nothing() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorded = seen.clone();
+        let suppress: MarkerFilter = Arc::new(move |session_id: &str, cwd: Option<&Path>| {
+            recorded
+                .lock()
+                .push((session_id.to_string(), cwd.map(Path::to_path_buf)));
+            session_id == "supervisor" || cwd == Some(Path::new("/data/supervisor"))
+        });
+        let idle = |session_id: &str, cwd: &str| {
+            format!(r#"{{"session_id":"{session_id}","cwd":"{cwd}","message":"Claude is waiting for your input"}}"#)
+        };
+        assert!(accept_marker(&idle("supervisor", "/elsewhere"), Some(&suppress)).is_none());
+        assert!(accept_marker(&idle("cleared", "/data/supervisor"), Some(&suppress)).is_none());
+        let kept = accept_marker(&idle("worker", "/home/u/app"), Some(&suppress)).unwrap();
+        assert_eq!(kept.session_id, "worker");
+        assert_eq!(
+            seen.lock().last().cloned(),
+            Some(("worker".to_string(), Some(PathBuf::from("/home/u/app"))))
+        );
+        let without_cwd = accept_marker(r#"{"session_id":"worker"}"#, Some(&suppress)).unwrap();
+        assert_eq!(without_cwd.session_id, "worker");
+        assert_eq!(seen.lock().last().cloned(), Some(("worker".to_string(), None)));
+        assert!(accept_marker(&idle("supervisor", "/x"), None).is_some());
     }
 }
