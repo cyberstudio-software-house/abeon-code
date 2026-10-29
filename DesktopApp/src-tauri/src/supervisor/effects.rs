@@ -28,6 +28,7 @@ pub struct SessionListing {
 pub trait Effects: Send + Sync + 'static {
     fn settings(&self) -> SupervisorSettings;
     fn session_info(&self, session_id: &str) -> Option<SessionInfo>;
+    fn bind_session(&self, session_id: &str, pty_id: &str) -> Vec<String>;
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String>;
     fn input_quiet(&self, pty_id: &str, window: Duration) -> bool;
     fn submitted_recently(&self, pty_id: &str, window: Duration) -> bool;

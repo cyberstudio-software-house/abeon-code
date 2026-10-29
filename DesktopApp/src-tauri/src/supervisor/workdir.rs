@@ -91,6 +91,7 @@ fn session_hooks(exe: &Path) -> Value {
     let command = hook_command(exe, SESSION_CHANNEL);
     json!({
         "hooks": {
+            "SessionStart": [hook_group(None, &command, QUICK_HOOK_TIMEOUT)],
             "Stop": [hook_group(None, &command, QUICK_HOOK_TIMEOUT)],
             "UserPromptSubmit": [hook_group(None, &command, QUICK_HOOK_TIMEOUT)],
             "PreToolUse": [
@@ -246,7 +247,8 @@ mod tests {
         let expected_command = r"'/opt/Abeon Code/it'\''s/abeoncode' hook session";
 
         let events = hooks["hooks"].as_object().unwrap();
-        assert_eq!(events.len(), 3);
+        assert_eq!(events.len(), 4);
+        assert_eq!(hooks["hooks"]["SessionStart"].as_array().unwrap().len(), 1);
         assert_eq!(hooks["hooks"]["Stop"].as_array().unwrap().len(), 1);
         assert_eq!(
             hooks["hooks"]["UserPromptSubmit"].as_array().unwrap().len(),
@@ -255,6 +257,7 @@ mod tests {
         assert_eq!(hooks["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
 
         let expected = [
+            ("SessionStart", 0, None, 15),
             ("Stop", 0, None, 15),
             ("UserPromptSubmit", 0, None, 15),
             ("PreToolUse", 0, Some("AskUserQuestion"), 600),

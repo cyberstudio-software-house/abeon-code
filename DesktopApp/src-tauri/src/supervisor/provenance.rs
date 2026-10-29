@@ -102,13 +102,17 @@ impl ProvenanceTracker {
             PromptOrigin::Supervisor
         } else if take_match(&mut session.cli_prompts, prompt, now) {
             PromptOrigin::Agent
-        } else if !evidence.pty_known || evidence.recent_submit {
+        } else if evidence.pty_known && evidence.recent_submit {
             PromptOrigin::Human
         } else {
             PromptOrigin::Agent
         };
         session.origin = Some(origin);
         origin
+    }
+
+    pub fn forget_session(&mut self, session_id: &str) {
+        self.sessions.remove(session_id);
     }
 
     pub fn mark_supervisor(&mut self, session_id: &str) {
@@ -211,7 +215,7 @@ mod tests {
         tracker.record_injection("s1", "[agent sterujący] tak", now);
         assert_eq!(
             tracker.on_user_prompt("s1", "coś innego", NO_PTY, now),
-            PromptOrigin::Human
+            PromptOrigin::Agent
         );
     }
 
@@ -247,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_pty_is_human_unless_a_cli_prompt_matches() {
+    fn unknown_pty_is_never_human() {
         let now = Instant::now();
         let mut tracker = ProvenanceTracker::default();
         tracker.expect_cli_prompt("s1", "przygotuj wydanie", now);
@@ -257,7 +261,31 @@ mod tests {
         );
         assert_eq!(
             tracker.on_user_prompt("s1", "cokolwiek", NO_PTY, now),
-            PromptOrigin::Human
+            PromptOrigin::Agent
+        );
+        let submitted_without_pty = PromptEvidence {
+            pty_known: false,
+            quiet_since_typed: false,
+            recent_submit: true,
+        };
+        assert_eq!(
+            tracker.on_user_prompt("s1", "cokolwiek", submitted_without_pty, now),
+            PromptOrigin::Agent
+        );
+    }
+
+    #[test]
+    fn forgotten_session_starts_from_scratch() {
+        let now = Instant::now();
+        let mut tracker = ProvenanceTracker::default();
+        tracker.record_injection("s1", "answer", now);
+        tracker.mark_supervisor("s1");
+        tracker.forget_session("s1");
+        assert_eq!(tracker.last_typed_at("s1", now), None);
+        assert_eq!(tracker.origin("s1"), PromptOrigin::Human);
+        assert_eq!(
+            tracker.on_user_prompt("s1", "answer", TYPED_QUIETLY, now),
+            PromptOrigin::Agent
         );
     }
 

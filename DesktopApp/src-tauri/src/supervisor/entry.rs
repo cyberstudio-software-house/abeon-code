@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
+use crate::pty::session_registry::PTY_ID_ENV;
 use crate::supervisor::ipc::{request_blocking, socket_path, HookChannel, IpcRequest, IpcResponse};
 use crate::supervisor::mcp;
 
@@ -52,6 +53,18 @@ fn hook_read_timeout(input: &Value) -> Duration {
     }
 }
 
+fn hook_request(channel: HookChannel, input: Value, terminal: Option<String>) -> IpcRequest {
+    let pty_id = terminal
+        .filter(|_| channel == HookChannel::Session)
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty());
+    IpcRequest::Hook {
+        channel,
+        input,
+        pty_id,
+    }
+}
+
 fn run_hook(channel: HookChannel) {
     let mut raw = String::new();
     if std::io::stdin().read_to_string(&mut raw).is_err() {
@@ -61,7 +74,7 @@ fn run_hook(channel: HookChannel) {
         return;
     };
     let timeout = hook_read_timeout(&input);
-    let request = IpcRequest::Hook { channel, input };
+    let request = hook_request(channel, input, std::env::var(PTY_ID_ENV).ok());
     if let Some(IpcResponse::Hook { stdout: Some(text) }) =
         request_blocking(&socket_path(), &request, timeout)
     {
@@ -97,6 +110,28 @@ mod tests {
         assert_eq!(detect(&args(&["x", "hook", "other"])), None);
         assert_eq!(detect(&args(&["x", "hook", "session", "extra"])), None);
         assert!(try_run_subcommand(&args(&["x", "/some/path"])).is_none());
+    }
+
+    #[test]
+    fn session_hooks_carry_the_terminal_id() {
+        let pty_of = |channel, terminal: Option<&str>| match hook_request(
+            channel,
+            json!({ "session_id": "s1" }),
+            terminal.map(str::to_string),
+        ) {
+            IpcRequest::Hook { pty_id, input, .. } => {
+                assert_eq!(input, json!({ "session_id": "s1" }));
+                pty_id
+            }
+            other => panic!("expected a hook request, got {other:?}"),
+        };
+        assert_eq!(
+            pty_of(HookChannel::Session, Some("pty-1")),
+            Some("pty-1".to_string())
+        );
+        assert_eq!(pty_of(HookChannel::Session, None), None);
+        assert_eq!(pty_of(HookChannel::Session, Some("  ")), None);
+        assert_eq!(pty_of(HookChannel::Supervisor, Some("pty-1")), None);
     }
 
     #[test]

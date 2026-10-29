@@ -32,8 +32,16 @@ pub enum HookChannel {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum IpcRequest {
-    Hook { channel: HookChannel, input: Value },
-    Tool { name: String, args: Value },
+    Hook {
+        channel: HookChannel,
+        input: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pty_id: Option<String>,
+    },
+    Tool {
+        name: String,
+        args: Value,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -172,7 +180,7 @@ mod tests {
         fn handle(&self, req: IpcRequest) -> Pin<Box<dyn Future<Output = IpcResponse> + Send>> {
             Box::pin(async move {
                 match req {
-                    IpcRequest::Hook { channel, input } => IpcResponse::Hook {
+                    IpcRequest::Hook { channel, input, .. } => IpcResponse::Hook {
                         stdout: Some(format!("{channel:?}:{}", input["session_id"])),
                     },
                     IpcRequest::Tool { name, args } => IpcResponse::Tool {
@@ -205,6 +213,7 @@ mod tests {
         IpcRequest::Hook {
             channel: HookChannel::Session,
             input: json!({ "session_id": "s1" }),
+            pty_id: None,
         }
     }
 
@@ -340,9 +349,24 @@ mod tests {
             supervisor,
             IpcRequest::Hook {
                 channel: HookChannel::Supervisor,
+                pty_id: None,
                 ..
             }
         ));
+        let from_terminal = IpcRequest::Hook {
+            channel: HookChannel::Session,
+            input: json!({}),
+            pty_id: Some("p1".into()),
+        };
+        let encoded = serde_json::to_value(&from_terminal).unwrap();
+        assert_eq!(
+            encoded,
+            json!({ "type": "hook", "channel": "session", "input": {}, "pty_id": "p1" })
+        );
+        assert_eq!(
+            serde_json::from_value::<IpcRequest>(encoded).unwrap(),
+            from_terminal
+        );
     }
 
     #[test]

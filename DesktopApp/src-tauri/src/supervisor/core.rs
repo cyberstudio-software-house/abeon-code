@@ -59,6 +59,7 @@ const RATIONALE_DECISION_TIMEOUT: &str = "Agent nie podjął decyzji w ciągu 2 
 const RATIONALE_HOLD_CAP: &str = "Upłynął limit wstrzymania menu";
 const RATIONALE_CARD_RELEASE: &str = "Użytkownik wybrał odpowiedź w terminalu";
 const RATIONALE_HUMAN_PROMPT: &str = "Użytkownik odpowiedział w sesji";
+const RATIONALE_SESSION_REPLACED: &str = "W terminalu sesji działa teraz inna rozmowa";
 const ERROR_UNKNOWN_QUESTION: &str = "Nie ma otwartego pytania o tym identyfikatorze";
 const ERROR_IN_GRACE: &str = "Pytanie czeka jeszcze na odpowiedź użytkownika";
 const ERROR_MISSING_ANSWERS: &str = "Odpowiedź na menu wymaga niepustego pola answers";
@@ -546,6 +547,26 @@ impl CoreState {
         });
     }
 
+    fn forget_session(&mut self, session_id: &str, outbox: &mut Outbox) {
+        self.sessions.remove(session_id);
+        self.injections
+            .retain(|injection| injection.session_id != session_id);
+        self.escalations
+            .retain(|escalation| escalation.session_id != session_id);
+        self.approvals.revoke_session(session_id);
+        self.provenance.forget_session(session_id);
+        for mut question in self.take_session_questions(session_id) {
+            question.reply(HookReply::Empty);
+            if self.withdraw_from_supervisor(&question) {
+                outbox.decisions.push(question.decision(
+                    decision_kind::RELEASED_TO_USER,
+                    DECISION_RELEASED.to_string(),
+                    RATIONALE_SESSION_REPLACED,
+                ));
+            }
+        }
+    }
+
     fn drop_all_questions(&mut self) {
         for mut question in std::mem::take(&mut self.questions) {
             question.reply(HookReply::Empty);
@@ -710,6 +731,9 @@ impl SupervisorCore {
     }
 
     pub async fn on_session_hook(self: &Arc<Self>, input: HookInput) -> HookReply {
+        if let Some(pty_id) = input.pty_id.as_deref() {
+            self.track_terminal(&input.session_id, pty_id);
+        }
         match input.hook_event_name.as_str() {
             "Stop" => {
                 self.on_stop(&input);
@@ -725,6 +749,22 @@ impl SupervisorCore {
             "PreToolUse" => self.on_guarded_tool(&input).await,
             _ => HookReply::Empty,
         }
+    }
+
+    fn track_terminal(&self, session_id: &str, pty_id: &str) {
+        let displaced = self.effects.bind_session(session_id, pty_id);
+        if displaced.is_empty() {
+            return;
+        }
+        let mut outbox = Outbox::default();
+        {
+            let mut state = self.state.lock();
+            for previous in &displaced {
+                state.forget_session(previous, &mut outbox);
+            }
+        }
+        self.flush(outbox);
+        self.publish();
     }
 
     fn on_stop(&self, input: &HookInput) {
@@ -1647,6 +1687,147 @@ mod tests {
         settle().await;
         assert!(core.snapshot().cards.is_empty());
         assert!(effects.last_snapshot().unwrap().cards.is_empty());
+    }
+
+    fn on_terminal(input: HookInput, pty_id: &str) -> HookInput {
+        HookInput {
+            pty_id: Some(pty_id.to_string()),
+            ..input
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn new_session_in_the_same_terminal_drops_the_queued_injection() {
+        let (effects, core) = setup();
+        core.set_away(true);
+        core.on_session_hook(stop("s1", "Czy wypchnąć?")).await;
+        let question_id = only_question_id(core.take_events());
+        effects.quiet.store(false, Ordering::SeqCst);
+        core.answer_question(
+            &question_id,
+            Some("tak, git push origin main".into()),
+            None,
+            "x",
+        )
+        .unwrap();
+        core.tick();
+        assert!(effects.typed().is_empty());
+        core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
+            .await;
+        assert_eq!(
+            effects.session_info("s3").and_then(|info| info.pty_id),
+            Some("pty-s1".to_string())
+        );
+        assert_eq!(
+            effects.session_info("s1").and_then(|info| info.pty_id),
+            None
+        );
+        effects.quiet.store(true, Ordering::SeqCst);
+        core.tick();
+        core.tick();
+        assert!(effects.typed().is_empty());
+        core.on_session_hook(on_terminal(stop("s3", "Gotowe."), "pty-s1"))
+            .await;
+        core.tick();
+        assert!(effects.typed().is_empty());
+        assert!(core.send_to_session("s1", "x").is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn new_session_in_the_same_terminal_needs_a_submit_to_count_as_human() {
+        let (effects, core) = setup();
+        *effects.branch.lock() = Some("main".into());
+        effects.submit("pty-s1");
+        core.on_session_hook(prompt("s1", "zrób push")).await;
+        advance(30 * SECOND).await;
+        core.on_session_hook(on_terminal(
+            prompt("s3", "[agent sterujący] git push"),
+            "pty-s1",
+        ))
+        .await;
+        assert_eq!(
+            core.state.lock().provenance.origin("s3"),
+            PromptOrigin::Agent
+        );
+        assert!(matches!(
+            core.on_session_hook(on_terminal(bash("s3", "git push origin main"), "pty-s1"))
+                .await,
+            HookReply::Deny { .. }
+        ));
+        effects.submit("pty-s1");
+        core.on_session_hook(on_terminal(prompt("s3", "wypchnij"), "pty-s1"))
+            .await;
+        assert_eq!(
+            core.state.lock().provenance.origin("s3"),
+            PromptOrigin::Human
+        );
+        assert_eq!(
+            core.on_session_hook(on_terminal(bash("s3", "git push origin main"), "pty-s1"))
+                .await,
+            HookReply::Empty
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn prompt_from_an_unknown_terminal_is_agent_and_guarded() {
+        let (effects, core) = setup();
+        *effects.branch.lock() = Some("main".into());
+        core.on_session_hook(on_terminal(prompt("s9", "git push"), "pty-ghost"))
+            .await;
+        assert_eq!(effects.session_info("s9"), None);
+        assert_eq!(
+            core.state.lock().provenance.origin("s9"),
+            PromptOrigin::Agent
+        );
+        assert!(matches!(
+            core.on_session_hook(bash("s9", "git push origin main"))
+                .await,
+            HookReply::Deny { .. }
+        ));
+        assert_eq!(core.snapshot().approvals.len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn new_session_in_the_same_terminal_releases_the_old_menu_and_escalations() {
+        let (effects, core) = setup();
+        core.set_away(true);
+        let escalated = spawn_menu(&core, "s1").await;
+        let question_id = only_question_id(core.take_events());
+        core.escalate(&[question_id], "Kolor wybiera użytkownik")
+            .unwrap();
+        assert!(matches!(reply_of(escalated).await, HookReply::Deny { .. }));
+        core.take_events();
+        let held = spawn_menu(&core, "s1").await;
+        assert_eq!(core.snapshot().cards.len(), 1);
+        assert_eq!(core.snapshot().escalations.len(), 1);
+        core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
+            .await;
+        assert_eq!(reply_of(held).await, HookReply::Empty);
+        let snapshot = core.snapshot();
+        assert!(snapshot.cards.is_empty());
+        assert!(snapshot.escalations.is_empty());
+        assert!(core.take_events().is_empty());
+        assert!(!core.state.lock().sessions.contains_key("s1"));
+        assert_eq!(effects.kinds(), vec![decision_kind::ESCALATED]);
+        core.on_session_hook(on_terminal(stop("s3", "Który kolor?"), "pty-s1"))
+            .await;
+        assert_eq!(core.take_events().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_same_session_reporting_its_terminal_keeps_its_state() {
+        let (effects, core) = setup();
+        core.set_away(true);
+        core.on_session_hook(on_terminal(stop("s1", "Czy kontynuować?"), "pty-s1"))
+            .await;
+        let question_id = only_question_id(core.take_events());
+        core.answer_question(&question_id, Some("tak".into()), None, "x")
+            .unwrap();
+        core.tick();
+        assert_eq!(
+            effects.typed(),
+            vec![("pty-s1".to_string(), "[agent sterujący] tak\r".to_string())]
+        );
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::domain::Provider;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::db::{projects_repo, actions_repo};
-use crate::pty::session_registry::session_to_bind;
+use crate::pty::session_registry::{session_to_bind, PTY_ID_ENV};
 use crate::validation::validate_session_id;
 
 const OPENCODE_DISCOVERY_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(15);
@@ -214,6 +214,18 @@ pub(crate) fn spawn_claude_resume(
     state.pty.spawn(app.clone(), "bash", &["-c", &cmd], &cwd, 80, 24, &env)
 }
 
+fn assign_hooked_pty_id(
+    env: &mut std::collections::HashMap<String, String>,
+    session_hooks: bool,
+) -> Option<String> {
+    if !session_hooks {
+        return None;
+    }
+    let id = Uuid::new_v4().to_string();
+    env.insert(PTY_ID_ENV.to_string(), id.clone());
+    Some(id)
+}
+
 #[tauri::command(async)]
 pub fn spawn_pty(
     app: AppHandle,
@@ -227,7 +239,7 @@ pub fn spawn_pty(
     let proj = projects_repo::get(&c, project_id)?;
     let mut cwd = std::path::PathBuf::from(&proj.path);
 
-    let (program, args_owned) = match &kind {
+    let (program, args_owned, session_hooks) = match &kind {
         PtyKind::Agent { provider, session_id, model, effort, skip_permissions, fresh, initial_prompt } => {
             // Untrusted in the remote-bridge path (session_id can originate from a
             // mobile `resumeSession`). Validate before it reaches `bash -c` so the
@@ -267,6 +279,7 @@ pub fn spawn_pty(
             (
                 "bash".to_string(),
                 vec!["-c".to_string(), cmd],
+                hooks_settings.is_some(),
             )
         }
         PtyKind::Action { action_id } => {
@@ -284,6 +297,7 @@ pub fn spawn_pty(
                 (
                     "bash".to_string(),
                     vec!["-c".to_string(), action.command.clone()],
+                    false,
                 )
             } else {
                 // pre_command often uses shell functions (nvm/fnm) defined only in the
@@ -292,12 +306,14 @@ pub fn spawn_pty(
                 (
                     crate::commands::settings::resolve_shell(&c),
                     vec!["-ic".to_string(), format!("{} && {}", pre, action.command)],
+                    false,
                 )
             }
         }
         PtyKind::Shell => (
             crate::commands::settings::resolve_shell(&c),
             vec!["-l".to_string()],
+            false,
         ),
     };
 
@@ -312,6 +328,7 @@ pub fn spawn_pty(
             env.insert("PATH".into(), format!("{}:{current}", parent.display()));
         }
     }
+    let hooked_pty_id = assign_hooked_pty_id(&mut env, session_hooks);
     let is_fresh_opencode = matches!(
         &kind,
         PtyKind::Agent { provider: Provider::Opencode, fresh: true, .. }
@@ -340,6 +357,8 @@ pub fn spawn_pty(
                 );
             })),
         )
+    } else if let Some(id) = hooked_pty_id {
+        state.pty.spawn_as(id, app, &program, &args_ref, &cwd, cols, rows, &env, None)
     } else {
         state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows, &env)
     };
@@ -598,6 +617,18 @@ pub fn read_clipboard_text() -> AppResult<Option<String>> {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn hooked_sessions_learn_their_pty_id_from_the_environment() {
+        let mut env = std::collections::HashMap::from([("PATH".to_string(), "/bin".to_string())]);
+        let id = assign_hooked_pty_id(&mut env, true).expect("pty id");
+        assert_eq!(env.get("ABEONCODE_PTY_ID"), Some(&id));
+        assert!(Uuid::parse_str(&id).is_ok());
+        assert_ne!(assign_hooked_pty_id(&mut env.clone(), true), Some(id));
+        let mut plain = std::collections::HashMap::new();
+        assert_eq!(assign_hooked_pty_id(&mut plain, false), None);
+        assert!(plain.is_empty());
+    }
 
     #[test]
     fn codex_command_fresh_plain() {

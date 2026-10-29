@@ -13,6 +13,10 @@ pub struct HookInput {
     pub tool_name: Option<String>,
     pub tool_input: Option<Value>,
     pub source: Option<String>,
+    #[serde(default)]
+    pub stop_hook_active: Option<bool>,
+    #[serde(skip)]
+    pub pty_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

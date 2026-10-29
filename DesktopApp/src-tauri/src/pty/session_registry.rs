@@ -3,6 +3,8 @@ use parking_lot::Mutex;
 use crate::commands::pty::PtyKind;
 use crate::domain::Provider;
 
+pub const PTY_ID_ENV: &str = "ABEONCODE_PTY_ID";
+
 #[derive(Default)]
 pub struct SessionPtyRegistry {
     inner: Mutex<HashMap<String, String>>,
@@ -15,6 +17,20 @@ impl SessionPtyRegistry {
 
     pub fn bind(&self, session_id: &str, pty_id: &str) {
         self.inner.lock().insert(session_id.to_string(), pty_id.to_string());
+    }
+
+    pub fn rebind(&self, session_id: &str, pty_id: &str) -> Vec<String> {
+        let mut inner = self.inner.lock();
+        let displaced: Vec<String> = inner
+            .iter()
+            .filter(|(session, pty)| session.as_str() != session_id && pty.as_str() == pty_id)
+            .map(|(session, _)| session.clone())
+            .collect();
+        for session in &displaced {
+            inner.remove(session);
+        }
+        inner.insert(session_id.to_string(), pty_id.to_string());
+        displaced
     }
 
     pub fn pty_for(&self, session_id: &str) -> Option<String> {
@@ -69,6 +85,22 @@ mod tests {
         reg.unbind_pty("pty-a");
         assert_eq!(reg.pty_for("sess-1"), None);
         assert_eq!(reg.pty_for("sess-2"), Some("pty-b".to_string()));
+    }
+
+    #[test]
+    fn rebind_moves_the_pty_to_the_new_session() {
+        let reg = SessionPtyRegistry::new();
+        reg.bind("s1", "p1");
+        reg.bind("s2", "p2");
+        assert_eq!(reg.rebind("s3", "p1"), vec!["s1".to_string()]);
+        assert_eq!(reg.pty_for("s3"), Some("p1".to_string()));
+        assert_eq!(reg.pty_for("s1"), None);
+        assert_eq!(reg.session_for("p1"), Some("s3".to_string()));
+        assert_eq!(reg.pty_for("s2"), Some("p2".to_string()));
+        assert!(reg.rebind("s3", "p1").is_empty());
+        assert_eq!(reg.pty_for("s3"), Some("p1".to_string()));
+        assert!(reg.rebind("s4", "p9").is_empty());
+        assert_eq!(reg.pty_for("s4"), Some("p9".to_string()));
     }
 
     #[test]

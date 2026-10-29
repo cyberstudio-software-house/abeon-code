@@ -220,6 +220,13 @@ impl Effects for AppEffects {
         })
     }
 
+    fn bind_session(&self, session_id: &str, pty_id: &str) -> Vec<String> {
+        if !self.pty.contains(pty_id) {
+            return Vec::new();
+        }
+        self.session_pty.rebind(session_id, pty_id)
+    }
+
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String> {
         self.pty
             .write(pty_id, neutralize_controls(text).as_bytes())
@@ -590,9 +597,13 @@ async fn route(
         IpcRequest::Hook {
             channel: HookChannel::Session,
             input,
+            pty_id,
         } => {
             let stdout = match serde_json::from_value::<HookInput>(input) {
-                Ok(input) => core.on_session_hook(input).await.to_stdout(),
+                Ok(input) => core
+                    .on_session_hook(HookInput { pty_id, ..input })
+                    .await
+                    .to_stdout(),
                 Err(_) => None,
             };
             IpcResponse::Hook { stdout }
@@ -600,6 +611,7 @@ async fn route(
         IpcRequest::Hook {
             channel: HookChannel::Supervisor,
             input,
+            ..
         } => {
             let field = |name: &str| input.get(name).and_then(serde_json::Value::as_str);
             if field("hook_event_name") == Some(SESSION_START_EVENT) {
@@ -754,6 +766,7 @@ mod tests {
             IpcRequest::Hook {
                 channel: HookChannel::Supervisor,
                 input: json!({ "hook_event_name": event, "session_id": "sup" }),
+                pty_id: None,
             }
         }
 
@@ -761,6 +774,7 @@ mod tests {
             IpcRequest::Hook {
                 channel: HookChannel::Session,
                 input,
+                pty_id: None,
             }
         }
 
@@ -802,6 +816,32 @@ mod tests {
         }
 
         #[tokio::test]
+        async fn session_hooks_bind_the_reported_terminal() {
+            let (effects, core) = setup();
+            let request = IpcRequest::Hook {
+                channel: HookChannel::Session,
+                input: json!({
+                    "session_id": "s3",
+                    "hook_event_name": "SessionStart",
+                    "pty_id": "pty-forged",
+                }),
+                pty_id: Some("pty-s1".into()),
+            };
+            assert_eq!(
+                route_to(&core, request).await,
+                IpcResponse::Hook { stdout: None }
+            );
+            assert_eq!(
+                effects.session_info("s3").and_then(|info| info.pty_id),
+                Some("pty-s1".to_string())
+            );
+            assert_eq!(
+                effects.session_info("s1").and_then(|info| info.pty_id),
+                None
+            );
+        }
+
+        #[tokio::test]
         async fn supervisor_session_start_marks_ready_and_replies_empty() {
             let (_effects, core) = setup();
             core.set_supervisor_state(false, false, None);
@@ -822,6 +862,7 @@ mod tests {
             let foreign = IpcRequest::Hook {
                 channel: HookChannel::Supervisor,
                 input: json!({ "hook_event_name": "SessionStart", "session_id": "killed" }),
+                pty_id: None,
             };
             let response = route(core.clone(), process.clone(), foreign).await;
             assert_eq!(response, IpcResponse::Hook { stdout: None });
@@ -829,6 +870,7 @@ mod tests {
             let anonymous = IpcRequest::Hook {
                 channel: HookChannel::Supervisor,
                 input: json!({ "hook_event_name": "SessionStart" }),
+                pty_id: None,
             };
             route(core.clone(), process.clone(), anonymous).await;
             assert!(!process.is_ready());

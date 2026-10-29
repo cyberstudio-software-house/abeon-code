@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -22,6 +22,7 @@ pub(crate) const COLOR_QUESTION: &str = "Which color do you prefer?";
 pub(crate) struct FakeEffects {
     pub(crate) settings: Mutex<SupervisorSettings>,
     pub(crate) sessions: Mutex<HashMap<String, SessionInfo>>,
+    pub(crate) live_ptys: Mutex<HashSet<String>>,
     pub(crate) quiet: AtomicBool,
     pub(crate) keystrokes: Mutex<HashMap<String, Instant>>,
     pub(crate) submits: Mutex<HashMap<String, Instant>>,
@@ -65,6 +66,7 @@ impl FakeEffects {
                 extra_rules: Vec::new(),
             }),
             sessions: Mutex::new(sessions),
+            live_ptys: Mutex::new(HashSet::from(["pty-s1".to_string(), "pty-s2".to_string()])),
             quiet: AtomicBool::new(true),
             keystrokes: Mutex::default(),
             submits: Mutex::default(),
@@ -130,6 +132,36 @@ impl Effects for FakeEffects {
 
     fn session_info(&self, session_id: &str) -> Option<SessionInfo> {
         self.sessions.lock().get(session_id).cloned()
+    }
+
+    fn bind_session(&self, session_id: &str, pty_id: &str) -> Vec<String> {
+        if !self.live_ptys.lock().contains(pty_id) {
+            return Vec::new();
+        }
+        let mut sessions = self.sessions.lock();
+        let displaced: Vec<String> = sessions
+            .iter()
+            .filter(|(id, info)| {
+                id.as_str() != session_id && info.pty_id.as_deref() == Some(pty_id)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        let template = displaced.first().and_then(|id| sessions.get(id).cloned());
+        for id in &displaced {
+            if let Some(info) = sessions.get_mut(id) {
+                info.pty_id = None;
+            }
+        }
+        sessions
+            .entry(session_id.to_string())
+            .and_modify(|info| info.pty_id = Some(pty_id.to_string()))
+            .or_insert_with(|| SessionInfo {
+                label: format!("projekt · {session_id}"),
+                project_id: template.as_ref().and_then(|info| info.project_id),
+                project_path: template.and_then(|info| info.project_path),
+                pty_id: Some(pty_id.to_string()),
+            });
+        displaced
     }
 
     fn type_into_pty(&self, pty_id: &str, text: &str) -> Result<(), String> {
@@ -224,6 +256,8 @@ pub(crate) fn hook(session_id: &str, event: &str) -> HookInput {
         tool_name: None,
         tool_input: None,
         source: None,
+        stop_hook_active: None,
+        pty_id: None,
     }
 }
 

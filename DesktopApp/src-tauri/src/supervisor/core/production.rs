@@ -904,14 +904,15 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn session_without_pty_counts_as_human_unless_cli_prompted() {
+    async fn session_without_pty_is_agent_and_guarded() {
         let (effects, core) = on_main();
         effects.sessions.lock().get_mut("s1").unwrap().pty_id = None;
+        effects.submit("pty-s1");
         core.on_session_hook(prompt("s1", "zrób push")).await;
-        assert_eq!(origin_of(&core, "s1"), PromptOrigin::Human);
+        assert_eq!(origin_of(&core, "s1"), PromptOrigin::Agent);
         assert_eq!(
             core.on_session_hook(bash("s1", "git push")).await,
-            HookReply::Empty
+            guard_denial()
         );
         core.expect_cli_prompt("s1", "przygotuj wydanie");
         core.on_session_hook(prompt("s1", "przygotuj wydanie"))

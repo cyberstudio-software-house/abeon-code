@@ -232,8 +232,13 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   `run()` before `diagnostics::init()`; with no server a hook prints nothing and exits 0.
 - **Per-session hooks**: `<app_data>/supervisor/session-hooks.json` is passed via `--settings` only to
   AbeonCode-spawned Claude sessions, and only while the level is not Off. It merges with the user's
-  global hooks. Stop 15 s, UserPromptSubmit 15 s, PreToolUse `AskUserQuestion` 600 s, PreToolUse
-  `Bash|mcp__.*` 15 s. The command embeds `current_exe()`; the file is rewritten on every start.
+  global hooks. SessionStart 15 s, Stop 15 s, UserPromptSubmit 15 s, PreToolUse `AskUserQuestion`
+  600 s, PreToolUse `Bash|mcp__.*` 15 s. The command embeds `current_exe()`; the file is rewritten on
+  every start.
+- **Session id changes**: those sessions get `ABEONCODE_PTY_ID=<pty id>` in their environment and
+  `hook session` forwards it (`IpcRequest::Hook.pty_id`). When `/clear` or an in-TUI `/resume` puts a
+  new session id on the same PTY, the first hook rebinds the registry and the core forgets the old
+  session (queued injections, open questions and held menus, escalations, tokens, provenance).
 - **Supervisor workdir** (`<app_data>/supervisor`): `CLAUDE.md` (regenerated), `preferences.md`
   (created once, the supervisor may edit it), `mcp.json`, `.claude/settings.json`. The process runs
   with `--permission-mode dontAsk --strict-mcp-config` and never skip-permissions; settings carry no
@@ -246,9 +251,10 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   in the supervisor PTY. Text and `\r` are two writes ~250 ms apart; the answer prefix for sessions
   is `[agent sterujący] `.
 - **Provenance** (`UserPromptSubmit`): typed injection with no keystroke since (or exact text) ->
-  Supervisor; prompt the app passed on the CLI -> Agent; Enter within 10 s (or unknown PTY) -> Human;
-  otherwise Agent. `pty_write` feeds `input_activity`, which ignores terminal reports (focus, cursor
-  position, device status) so they never count as typing.
+  Supervisor; prompt the app passed on the CLI -> Agent; Enter within 10 s in the session's known
+  PTY -> Human; otherwise, including a session with no known PTY, Agent. `pty_write` feeds
+  `input_activity`, which ignores terminal reports (focus, cursor position, device status) so they
+  never count as typing.
 - **Guard** (`PreToolUse` on `Bash|mcp__.*`): applies whenever the level is not Off and the origin is
   not Human. A blocked action creates an approval (expires after 24 h) shown in the panel's "Do
   decyzji" tab; the user approves in the app only. An approval mints a one-shot token for the exact
