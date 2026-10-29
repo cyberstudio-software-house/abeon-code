@@ -370,7 +370,7 @@ pub fn pty_write(state: State<AppState>, pty_id: String, data: String) -> AppRes
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(data.as_bytes())
         .map_err(|e| AppError::Other(format!("base64: {e}")))?;
-    state.input_activity.record(&pty_id);
+    state.input_activity.observe(&pty_id, &bytes);
     state.pty.write(&pty_id, &bytes)
 }
 
