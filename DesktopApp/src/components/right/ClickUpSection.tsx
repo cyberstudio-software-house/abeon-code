@@ -56,7 +56,7 @@ export function ClickUpSection({ detached = false }: { detached?: boolean }) {
       </div>
 
       {connectionStatus !== 'configured' ? (
-        <div className="flex flex-col items-start gap-2.5 p-3 rounded-[10px] bg-sunken border border-danger/30">
+        <div className="flex flex-col items-start gap-2.5 p-3 rounded-[10px] bg-bg-elev border border-danger/30">
           <div className="flex gap-2.5">
             <svg
               width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -87,7 +87,7 @@ export function ClickUpSection({ detached = false }: { detached?: boolean }) {
           )}
         </div>
       ) : !config ? (
-        <div className="flex flex-col items-start gap-2.5 p-3 rounded-[10px] bg-sunken border border-border">
+        <div className="flex flex-col items-start gap-2.5 p-3 rounded-[10px] bg-bg-elev border border-border">
           <div className="flex gap-2.5">
             <Icon name="sliders" className="shrink-0 mt-0.5 w-[15px] h-[15px] text-icon" />
             <p className="text-[12.5px] leading-[1.5] text-fg-secondary">

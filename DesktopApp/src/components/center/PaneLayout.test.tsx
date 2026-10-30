@@ -303,6 +303,22 @@ describe('PaneLayout', () => {
     expect(getByText('Wybierz sesję z lewej')).toBeTruthy();
   });
 
+  it('draws no pane bar when the main window has no tabs', () => {
+    act(() => {
+      useStore.setState({ tabs: [], activeTabId: null, layout: createLeaf(ROOT_PANE_ID), focusedPaneId: ROOT_PANE_ID });
+    });
+    const { container } = render(<PaneLayout />);
+    expect(container.querySelector('[data-pane-id]')).toBeNull();
+  });
+
+  it('keeps the empty pane bar in a detached project window', () => {
+    act(() => {
+      useStore.setState({ tabs: [], activeTabId: null, layout: createLeaf(ROOT_PANE_ID), focusedPaneId: ROOT_PANE_ID });
+    });
+    const { container } = render(<PaneLayout detachedProjectId={1} />);
+    expect(container.querySelector(`[data-pane-id="${ROOT_PANE_ID}"]`)).not.toBeNull();
+  });
+
   it('focuses a pane when its content area is clicked', () => {
     act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
     const ids = leaves(useStore.getState().layout).map(l => l.id);

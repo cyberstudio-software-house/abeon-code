@@ -67,6 +67,10 @@ export function TabSwitcher() {
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
+      if (useStore.getState().settingsOpen) {
+        if (openRef.current) setOpen(false);
+        return;
+      }
       if (e.key === 'Control' && openRef.current) {
         e.preventDefault();
         e.stopPropagation();

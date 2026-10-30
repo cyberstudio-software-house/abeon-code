@@ -64,6 +64,7 @@ export function TerminalCategory() {
     fontSize: s.terminalFontSize,
     lineHeight: s.terminalLineHeight,
     paletteId: s.terminalPaletteId,
+    hasCustomPalette: s.terminalCustomPalette !== null,
     cursorStyle: s.terminalCursorStyle,
     cursorBlink: s.terminalCursorBlink,
   })));
@@ -84,6 +85,11 @@ export function TerminalCategory() {
   };
 
   const customSelected = appearance.paletteId === 'custom';
+
+  const selectCustom = () => {
+    if (appearance.hasCustomPalette) setPaletteId('custom');
+    setCustomOpen(true);
+  };
 
   return (
     <SettingsPage
@@ -162,8 +168,9 @@ export function TerminalCategory() {
                 ))}
                 <button
                   type="button"
+                  aria-pressed={customSelected}
                   aria-expanded={customOpen}
-                  onClick={() => setCustomOpen(open => !open)}
+                  onClick={selectCustom}
                   className={`${CARD_BASE} flex min-h-24 flex-col justify-center gap-1.5 border-dashed ${
                     customSelected ? 'border-accent' : 'border-rule hover:border-border-focus'
                   }`}

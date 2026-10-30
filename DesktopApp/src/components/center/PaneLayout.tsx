@@ -30,6 +30,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   const rects = useMemo(() => computePaneRects(layout), [layout]);
   const panes = useMemo(() => leaves(layout), [layout]);
   const split = panes.length > 1;
+  const showPaneBars = tabs.length > 0 || detachedProjectId != null;
   const { layers, visibleDrawers, collapsedDrawers } = useMemo(
     () => computePaneLayers({ tabs, layout, focusedPaneId, barHeight: PANE_BAR_HEIGHT, drawers, drawerTerminals, drawerSize }),
     [tabs, layout, focusedPaneId, drawers, drawerTerminals, drawerSize],
@@ -50,7 +51,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
           />
         );
       })}
-      {panes.map(pane => {
+      {showPaneBars && panes.map(pane => {
         const rect = rects.get(pane.id);
         if (!rect) return null;
         return (

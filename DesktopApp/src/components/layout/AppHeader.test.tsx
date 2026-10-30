@@ -43,6 +43,15 @@ describe('AppHeader', () => {
     expect(screen.getByText('2 aktywne sesje')).toBeInTheDocument();
   });
 
+  it('sizes the logo block from the sidebar width so the project row starts above the centre column', () => {
+    useStore.setState({ leftWidth: 320 });
+    render(<AppHeader variant={{ kind: 'main' }} />);
+    const block = screen.getByText('AbeonCode').parentElement as HTMLElement;
+    expect(block.style.width).toBe('292px');
+    act(() => { useStore.setState({ leftWidth: 200 }); });
+    expect(block.style.width).toBe('172px');
+  });
+
   it('counts drawer shells as active sessions', () => {
     seed([liveSession]);
     act(() => {

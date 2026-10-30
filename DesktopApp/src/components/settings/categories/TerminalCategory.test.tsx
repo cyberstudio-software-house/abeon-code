@@ -79,6 +79,24 @@ describe('TerminalCategory', () => {
     expect(card).toHaveAttribute('aria-pressed', 'true');
   });
 
+  it('selects the saved custom palette again from the custom card', () => {
+    render(<TerminalCategory />);
+
+    const card = screen.getByRole('button', { name: /Własna/ });
+    fireEvent.click(card);
+    fireEvent.change(screen.getByLabelText('Czerwony'), { target: { value: '#abc' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Zapisz' }));
+    fireEvent.click(screen.getByRole('button', { name: /Grafit — wysoki kontrast/ }));
+    expect(useStore.getState().terminalPaletteId).toBe('grafitHighContrast');
+    expect(card).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(card);
+
+    expect(useStore.getState().terminalPaletteId).toBe('custom');
+    expect(card).toHaveAttribute('aria-pressed', 'true');
+    expect(card).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('rejects malformed palette JSON without touching the store', () => {
     render(<TerminalCategory />);
 

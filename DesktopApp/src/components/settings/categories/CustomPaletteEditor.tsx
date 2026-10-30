@@ -46,7 +46,7 @@ export function CustomPaletteEditor() {
   };
 
   return (
-    <div className="flex flex-col gap-4 rounded-[10px] border border-border-strong bg-bg-elev p-3.5">
+    <div data-palette-editor className="flex flex-col gap-4 rounded-[10px] border border-border-strong bg-bg-elev p-3.5">
       <div className="grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-x-3 gap-y-2.5">
         {FIELD_LABELS.map((label, index) => {
           const id = `terminal-color-${index}`;

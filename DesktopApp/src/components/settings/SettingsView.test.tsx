@@ -83,6 +83,26 @@ describe('SettingsView', () => {
     expect(useStore.getState().settingsOpen).toBe(false);
   });
 
+  it('keeps typing in the custom palette editor when Esc is pressed inside it', () => {
+    act(() => { useStore.setState({ settingsCategory: 'terminal' }); });
+    render(<SettingsView />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Własna/ }));
+    const json = screen.getByLabelText('Wklej motyw xterm.js (JSON)');
+    fireEvent.change(json, { target: { value: '{"background":"#101820"}' } });
+    fireEvent.keyDown(json, { key: 'Escape' });
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(json).toHaveValue('{"background":"#101820"}');
+
+    const hex = screen.getByLabelText('Czerwony');
+    fireEvent.keyDown(hex, { key: 'Escape' });
+    expect(useStore.getState().settingsOpen).toBe(true);
+
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(useStore.getState().settingsOpen).toBe(false);
+  });
+
   it('ignores an Esc another handler already consumed', () => {
     render(<SettingsView />);
     const search = screen.getByLabelText('Szukaj w ustawieniach');

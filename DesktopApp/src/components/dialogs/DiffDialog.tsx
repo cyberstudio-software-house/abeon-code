@@ -64,7 +64,7 @@ export function DiffDialog({ repoLabel, files, initialFilePath, loadDiff, summar
       <div
         role="dialog"
         aria-modal="true"
-        className="dialog-panel w-[1400px] max-w-[95vw] h-[85vh] flex flex-col"
+        className="dialog-panel w-[1400px] max-w-[95vw] h-[85vh] flex flex-col overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">

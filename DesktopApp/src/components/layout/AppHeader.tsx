@@ -74,16 +74,22 @@ function SettingsBreadcrumb() {
   );
 }
 
+const HEADER_PADDING_LEFT = IS_MAC ? 78 : 16;
+const MAIN_HEADER_GAP = 16;
+const SHELL_BODY_PADDING = 4;
+
 export function AppHeader({ variant }: { variant: AppHeaderVariant }) {
   const showSettingsBreadcrumb = useStore(s => variant.kind === 'main' && s.settingsOpen);
+  const leftWidth = useStore(s => s.leftWidth);
+  const logoBlockWidth = Math.max(0, leftWidth + SHELL_BODY_PADDING - HEADER_PADDING_LEFT - MAIN_HEADER_GAP);
   return (
     <header
       data-tauri-drag-region
       className="h-11 shrink-0 flex items-center select-none"
-      style={{ paddingLeft: IS_MAC ? 78 : 16, paddingRight: 8, gap: variant.kind === 'main' ? 16 : 12 }}
+      style={{ paddingLeft: HEADER_PADDING_LEFT, paddingRight: 8, gap: variant.kind === 'main' ? MAIN_HEADER_GAP : 12 }}
     >
       {variant.kind === 'main' ? (
-        <div data-tauri-drag-region className="w-[224px] shrink-0 flex items-center gap-2.5">
+        <div data-tauri-drag-region style={{ width: logoBlockWidth }} className="shrink-0 flex items-center gap-2.5 overflow-hidden">
           <LogoMark />
           <span className="text-[14px] font-semibold tracking-[-0.01em] text-fg">AbeonCode</span>
         </div>

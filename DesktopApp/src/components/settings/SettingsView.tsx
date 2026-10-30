@@ -52,6 +52,8 @@ export function SettingsView() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       if (document.querySelector('[role="dialog"]')) return;
+      const target = e.target instanceof Element ? e.target : null;
+      if (target?.closest('textarea, [data-palette-editor] input')) return;
       closeSettings();
     };
     document.addEventListener('keydown', onKeyDown);
