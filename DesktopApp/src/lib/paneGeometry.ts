@@ -1,6 +1,6 @@
 import type { PaneNode } from './paneTree';
 
-export const PANE_BAR_HEIGHT = 60;
+export const PANE_BAR_HEIGHT = 48;
 export const MIN_PANE_WIDTH = 240;
 export const MIN_PANE_HEIGHT = 120;
 const EDGE_BAND = 0.25;

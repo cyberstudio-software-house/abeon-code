@@ -25,3 +25,8 @@ export function groupTabsByProject(tabs: Tab[], projects: Project[]): TabGroup[]
   }
   return Array.from(map.values());
 }
+
+export function pickProjectTab(tabs: Tab[], mruOrder: string[], projectId: number): string | undefined {
+  return mruOrder.find(id => tabs.some(t => t.id === id && t.projectId === projectId))
+    ?? tabs.find(t => t.projectId === projectId)?.id;
+}

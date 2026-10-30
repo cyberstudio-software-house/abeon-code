@@ -121,6 +121,35 @@ describe('PaneLayout', () => {
     }
   });
 
+  it('paints one card surface per pane before every content layer', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const { container } = render(<PaneLayout />);
+    const surfaces = Array.from(container.querySelectorAll('[data-pane-surface]')) as HTMLElement[];
+    const layers = Array.from(container.querySelectorAll('[data-tab-layer]'));
+    const bars = Array.from(container.querySelectorAll('[data-pane-id]'));
+    expect(surfaces.map(el => el.getAttribute('data-pane-surface'))).toEqual(leaves(useStore.getState().layout).map(l => l.id));
+    for (const surface of surfaces) {
+      expect(surface.parentElement).toBe(layers[0].parentElement);
+      expect(surface.getAttribute('aria-hidden')).toBe('true');
+      expect(surface.classList.contains('bg-bg-elev')).toBe(true);
+      expect(surface.classList.contains('pointer-events-none')).toBe(true);
+      for (const el of [...layers, ...bars]) {
+        expect(surface.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
+    }
+    const frame = container.querySelector(`[data-pane-frame="${surfaces[0].getAttribute('data-pane-surface')}"]`) as HTMLElement;
+    expect(surfaces[0].style.left).toBe(frame.style.left);
+    expect(surfaces[0].style.top).toBe(frame.style.top);
+    expect(surfaces[0].style.width).toBe(frame.style.width);
+    expect(surfaces[0].style.height).toBe(frame.style.height);
+  });
+
+  it('pulls the pane area up by the frame inset so the cards touch the header', () => {
+    const { container } = render(<PaneLayout />);
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.style.marginTop).toBe(`-${PANE_GAP / 2}px`);
+  });
+
   it('marks only the focused pane frame when the layout is split', () => {
     const { container } = render(<PaneLayout />);
     expect(container.querySelectorAll('[data-pane-frame]')).toHaveLength(1);
@@ -616,13 +645,12 @@ describe('PaneLayout', () => {
         ] as never,
         layout: {
           kind: 'split', id: 'outer', dir: 'row', sizes: [0.5, 0.5],
-          children: [createLeaf('left', ['drag'], 'drag'), createLeaf('right', ['g1', 'solo', 'g2'], 'solo')],
+          children: [createLeaf('left', ['drag'], 'drag'), createLeaf('right', ['g1', 'solo', 'g2'], 'g1')],
         },
         focusedPaneId: 'left',
       });
     });
-    const { container, getByText } = render(<PaneLayout />);
-    fireEvent.click(getByText('Grupa'));
+    const { container } = render(<PaneLayout />);
     expect(container.querySelectorAll('[data-pane-id="right"] [data-tab-id]')).toHaveLength(2);
     stubContainerBox(container);
     stubTabBoxes(container, 'right', 500, 100);
@@ -684,9 +712,10 @@ describe('PaneLayout pane bar', () => {
     });
   });
 
-  it('always renders the two-row bar and reserves its height', () => {
+  it('renders the sessions-only bar and reserves its height', () => {
     const { container } = render(<PaneLayout />);
-    expect(container.querySelector('[data-project-tab-id="1"]')).not.toBeNull();
+    expect(container.querySelector('[data-project-tab-id]')).toBeNull();
+    expect(container.querySelector(`[data-pane-id="${ROOT_PANE_ID}"] [data-tab-id="t1"]`)).not.toBeNull();
     const layer = container.querySelector('[data-tab-layer="t1"]') as HTMLElement;
     expect(layer.style.top).toBe(`calc(0% + ${PANE_GAP / 2 + PANE_BORDER + PANE_BAR_HEIGHT}px)`);
   });
@@ -722,8 +751,8 @@ describe('PaneLayout terminal drawer', () => {
     const [id] = drawerIds();
     const session = container.querySelector('[data-tab-layer="s1"]') as HTMLElement;
     const terminal = container.querySelector(`[data-tab-layer="${id}"]`) as HTMLElement;
-    expect(session.style.height).toBe('calc(65% - 45.5px)');
-    expect(terminal.style.top).toBe('calc(65% + 47.5px)');
+    expect(session.style.height).toBe('calc(65% - 37.7px)');
+    expect(terminal.style.top).toBe('calc(65% + 43.3px)');
     expect(terminal.dataset.drawerOwner).toBe('s1');
   });
 
@@ -763,7 +792,7 @@ describe('PaneLayout terminal drawer', () => {
     const layer = container.querySelector(`[data-tab-layer="${id}"]`) as HTMLElement;
     expect(layer.className).toContain('invisible');
     expect(counters.terminalMounts).toBe(2);
-    expect((container.querySelector('[data-tab-layer="s1"]') as HTMLElement).style.height).toBe('calc(100% - 98px)');
+    expect((container.querySelector('[data-tab-layer="s1"]') as HTMLElement).style.height).toBe('calc(100% - 86px)');
   });
 
   it('leaves a restore bar under the session only while the drawer is hidden', () => {
@@ -1012,7 +1041,7 @@ describe('PaneLayout terminal drawer', () => {
       useStore.getState().toggleTerminalDrawer('s1');
       useStore.getState().hideTerminalDrawer('s1');
     });
-    fireEvent.click(screen.getByText('×'));
+    fireEvent.click(screen.getByTitle('Zamknij tab'));
     expect(screen.getByText('Zamknąć aktywny tab?')).toBeInTheDocument();
     expect(screen.getByText(/terminale z panelu \(1\)/)).toBeInTheDocument();
   });

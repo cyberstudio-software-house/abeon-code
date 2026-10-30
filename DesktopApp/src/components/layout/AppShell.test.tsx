@@ -8,7 +8,6 @@ vi.mock('../sidebar/Sidebar', () => ({ Sidebar: () => <div /> }));
 vi.mock('../center/CenterPanel', () => ({ CenterPanel: () => <div /> }));
 vi.mock('../supervisor/SupervisorPanel', () => ({ SupervisorPanel: () => <div /> }));
 vi.mock('../right/RightPanel', () => ({ RightPanel: () => <div /> }));
-vi.mock('./TitleBar', () => ({ TitleBar: () => <div data-testid="titlebar" /> }));
 vi.mock('../center/TabSwitcher', () => ({ TabSwitcher: () => <div /> }));
 vi.mock('../center/ProjectLauncher', () => ({ ProjectLauncher: () => <div /> }));
 vi.mock('../../lib/updater', () => ({ checkForUpdate: async () => null }));
@@ -130,6 +129,13 @@ describe('AppShell attention across panes', () => {
     expect(attention.has('s3')).toBe(false);
     expect(attention.has('s2')).toBe(false);
     expect(attention.has('s1')).toBe(true);
+  });
+
+  it('mounts the app header with the project row of the focused pane', () => {
+    const header = document.querySelector('header[data-tauri-drag-region]') as HTMLElement;
+    expect(header.textContent).toContain('AbeonCode');
+    expect(header.querySelector('[data-project-tab-id="1"]')).not.toBeNull();
+    expect(header.textContent).toContain('3 aktywne sesje');
   });
 
   it('toggles the drawer of the active session on mod+t', () => {

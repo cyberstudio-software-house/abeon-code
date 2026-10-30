@@ -9,7 +9,6 @@ import { HistoryHeader } from './HistoryHeader';
 import { HistoryStream } from './HistoryStream';
 import { HistorySearchBar } from './HistorySearchBar';
 import { useHistorySearch } from './useHistorySearch';
-import { ReadOnlyPill } from './ReadOnlyPill';
 import { SessionFooter } from './SessionFooter';
 import { mergeHistoryWindow, prependHistoryPage } from '../../lib/historySync';
 
@@ -214,7 +213,6 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
         blocks={filtered}
         onLoadMore={loadMore}
         hasMore={data.hasMoreBefore}
-        header={<div className="px-8 py-5"><ReadOnlyPill /></div>}
         matchedIndices={matchedSet}
         activeBlockIndex={search.activeBlockIndex}
         virtuosoRef={virtuosoRef}

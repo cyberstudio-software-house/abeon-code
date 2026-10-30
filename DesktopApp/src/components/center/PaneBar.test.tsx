@@ -28,9 +28,10 @@ import { processManager } from '../../lib/processManager';
 import { detachProjectGroup, focusExistingGroupWindow } from '../../lib/detachGroup';
 import { detachSessionTab } from '../../lib/detachSession';
 import { useStore } from '../../store';
-import { StackedTabBar } from './StackedTabBar';
+import { PaneBar } from './PaneBar';
 import { createLeaf, insertBeside } from '../../lib/paneTree';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
+import type { Tab } from '../../store/tabsSlice';
 
 const projects = [
   { id: 1, name: 'Alfa', path: '/a' },
@@ -53,70 +54,120 @@ function seed(activeTabId: string, mruOrder: string[]) {
   });
 }
 
-const projectTabIds = (container: HTMLElement) =>
-  [...container.querySelectorAll('[data-project-tab-id]')].map(el => el.getAttribute('data-project-tab-id'));
-
 const sessionTabIds = (container: HTMLElement) =>
   [...container.querySelectorAll('[data-tab-id]')].map(el => el.getAttribute('data-tab-id'));
 
-describe('StackedTabBar rows', () => {
+describe('PaneBar session row', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
-  it('lists every project of the pane on top and only the active project sessions below', () => {
+  it('shows only the session tabs of the selected project with the + and $ buttons', () => {
     seed('session:a1', ['session:a1']);
-    const { container } = render(<StackedTabBar />);
-    expect(projectTabIds(container)).toEqual(['1', '2']);
+    const { container } = render(<PaneBar />);
     expect(sessionTabIds(container)).toEqual(['session:a1', 'session:a2']);
+    expect(screen.getByTitle('Nowa sesja')).toBeInTheDocument();
+    expect(screen.getByTitle('Nowy terminal')).toBeInTheDocument();
   });
 
   it('follows the active tab when it moves to another project', () => {
     seed('session:b1', ['session:b1']);
-    const { container } = render(<StackedTabBar />);
+    const { container } = render(<PaneBar />);
     expect(sessionTabIds(container)).toEqual(['session:b1']);
   });
 
-  it('shows one project and one session when a single session is open', () => {
+  it('renders no project row inside the bar', () => {
+    seed('session:a1', ['session:a1']);
+    const { container } = render(<PaneBar />);
+    expect(container.querySelector('[data-project-tab-id]')).toBeNull();
+    expect(screen.queryByText('Alfa')).toBeNull();
+    expect(screen.queryByText('Beta')).toBeNull();
+  });
+
+  it('lists the tabs in pane order, appending a replaced preview tab at the end', () => {
     useStore.setState({
-      tabs: [{ kind: 'session', id: 'session:a1', projectId: 1, sessionId: 'a1', title: 'A1', mode: 'history' }],
-      activeTabId: 'session:a1',
-      mruOrder: ['session:a1'],
-      navHistory: ['session:a1'],
+      tabs: [
+        { kind: 'session', id: 'session:a', projectId: 1, sessionId: 'a', title: 'A', mode: 'history' },
+        { kind: 'session', id: 'session:p', projectId: 1, sessionId: 'p', title: 'P', mode: 'history', preview: true },
+        { kind: 'session', id: 'session:c', projectId: 1, sessionId: 'c', title: 'C', mode: 'history' },
+      ],
+      activeTabId: 'session:p',
+      mruOrder: ['session:p'],
+      navHistory: ['session:p'],
+      navIndex: 0,
+      runningActions: {},
+      projects: [{ id: 1, name: 'P', path: '/p' }] as never,
+      layout: createLeaf(ROOT_PANE_ID, ['session:a', 'session:p', 'session:c'], 'session:p'),
+      focusedPaneId: ROOT_PANE_ID,
+    });
+    const { container } = render(<PaneBar />);
+    act(() => { useStore.getState().openSessionTab(1, 'n', 'N'); });
+    expect(useStore.getState().tabs.map(t => t.id)).toEqual(['session:a', 'session:n', 'session:c']);
+    expect(sessionTabIds(container)).toEqual(['session:a', 'session:c', 'session:n']);
+  });
+});
+
+describe('PaneBar status', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useStore.setState({ sessionsByProject: {}, attentionSessions: new Set<string>() });
+  });
+
+  const seedSingle = (tab: Tab) => {
+    useStore.setState({
+      tabs: [tab],
+      activeTabId: tab.id,
+      mruOrder: [tab.id],
+      navHistory: [tab.id],
       navIndex: 0,
       runningActions: {},
       projects: projects as never,
+      layout: createLeaf(ROOT_PANE_ID, [tab.id], tab.id),
+      focusedPaneId: ROOT_PANE_ID,
     });
-    const { container } = render(<StackedTabBar />);
-    expect(projectTabIds(container)).toEqual(['1']);
-    expect(sessionTabIds(container)).toEqual(['session:a1']);
+  };
+
+  const runningSession = (sessionId: string) => ({
+    id: sessionId, projectId: 1, title: sessionId, messageCount: 1, lastModified: 0, createdAt: null,
+    gitBranch: null, cwd: null, activity: 'running' as const, provider: 'claude' as const,
+    runningAgents: 0, totalAgents: 0,
+  });
+
+  it('shows Tylko odczyt for a history tab', () => {
+    seedSingle({ kind: 'session', id: 'session:a1', projectId: 1, sessionId: 'a1', title: 'A1', mode: 'history' });
+    const { container } = render(<PaneBar />);
+    expect(screen.getByText('Tylko odczyt').querySelector('svg')).not.toBeNull();
+    const tab = container.querySelector('[data-tab-id="session:a1"]') as HTMLElement;
+    expect(tab.querySelector('svg')).not.toBeNull();
+    expect(tab.querySelector('[title="Bezczynna"]')).toBeNull();
+  });
+
+  it('shows the short activity label for a live session', () => {
+    seedSingle({ kind: 'session', id: 'session:a1', projectId: 1, sessionId: 'a1', title: 'A1', mode: 'terminal' });
+    useStore.setState({ sessionsByProject: { 1: { items: [runningSession('a1')], hasMore: false } } });
+    const { container } = render(<PaneBar />);
+    const label = screen.getByText('Pracuje');
+    expect(label.className).toContain('text-accent');
+    expect(screen.queryByText('Tylko odczyt')).toBeNull();
+    const dot = container.querySelector('[data-tab-id="session:a1"] [title="Aktywna — agent pracuje"]') as HTMLElement;
+    expect(dot.classList.contains('activity-pulse')).toBe(true);
+  });
+
+  it('shows no status for a shell tab', () => {
+    seedSingle({ kind: 'terminal', id: 'terminal:t1', projectId: 1, title: 'Terminal' });
+    render(<PaneBar />);
+    expect(screen.queryByText('Tylko odczyt')).toBeNull();
+    expect(screen.queryByText('Bezczynna')).toBeNull();
+    expect(screen.queryByText('Pracuje')).toBeNull();
   });
 });
 
-describe('StackedTabBar project selection', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
-
-  it('activates the most recently used tab of the clicked project', () => {
-    seed('session:b1', ['session:b1', 'session:a2', 'session:a1']);
-    render(<StackedTabBar />);
-    fireEvent.click(screen.getByText('Alfa'));
-    expect(useStore.getState().activeTabId).toBe('session:a2');
-  });
-
-  it('falls back to the first tab of the project when none was ever active', () => {
-    seed('session:b1', ['session:b1']);
-    render(<StackedTabBar />);
-    fireEvent.click(screen.getByText('Alfa'));
-    expect(useStore.getState().activeTabId).toBe('session:a1');
-  });
-});
-
-describe('StackedTabBar session row actions', () => {
+describe('PaneBar session row actions', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('opens a new session for the project of the active tab', () => {
     seed('session:b1', ['session:b1']);
     const openNewSessionTab = vi.fn();
     useStore.setState({ openNewSessionTab });
-    render(<StackedTabBar />);
+    render(<PaneBar />);
     fireEvent.click(screen.getByTitle('Nowa sesja'));
     expect(openNewSessionTab).toHaveBeenCalledWith(2);
   });
@@ -124,7 +175,7 @@ describe('StackedTabBar session row actions', () => {
   it('toggles the terminal drawer of the active session', () => {
     seed('session:a1', ['session:a1']);
     useStore.setState({ drawers: {}, drawerTerminals: {} });
-    render(<StackedTabBar />);
+    render(<PaneBar />);
     fireEvent.click(screen.getByTitle('Nowy terminal'));
     expect(useStore.getState().drawers['session:a1']?.open).toBe(true);
   });
@@ -137,7 +188,7 @@ describe('StackedTabBar session row actions', () => {
       activeTabId: 'terminal:x',
       openNewTerminalTab,
     });
-    render(<StackedTabBar />);
+    render(<PaneBar />);
     fireEvent.click(screen.getByTitle('Nowy terminal'));
     expect(openNewTerminalTab).toHaveBeenCalledWith(1);
   });
@@ -152,8 +203,8 @@ describe('StackedTabBar session row actions', () => {
       runningActions: {},
       projects: projects as never,
     });
-    render(<StackedTabBar />);
-    fireEvent.click(screen.getByText('×'));
+    render(<PaneBar />);
+    fireEvent.click(screen.getByTitle('Zamknij tab'));
     expect(screen.getByText('Zamknąć aktywny tab?')).toBeInTheDocument();
     expect(useStore.getState().tabs).toHaveLength(1);
   });
@@ -169,13 +220,13 @@ function seedActionTab(status: 'running' | 'exited', exitCode?: number) {
   });
 }
 
-describe('StackedTabBar action close', () => {
+describe('PaneBar action close', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('closes an exited action tab immediately and dismisses the process', () => {
     seedActionTab('exited', 0);
-    render(<StackedTabBar />);
-    fireEvent.click(screen.getByText('×'));
+    render(<PaneBar />);
+    fireEvent.click(screen.getByTitle('Zamknij tab'));
     expect(screen.queryByText('Zamknąć aktywny tab?')).toBeNull();
     expect(processManager.dismiss).toHaveBeenCalledWith(1);
     expect(useStore.getState().tabs).toHaveLength(0);
@@ -183,22 +234,22 @@ describe('StackedTabBar action close', () => {
 
   it('asks for confirmation when the action process is still running', () => {
     seedActionTab('running');
-    render(<StackedTabBar />);
-    fireEvent.click(screen.getByText('×'));
+    render(<PaneBar />);
+    fireEvent.click(screen.getByTitle('Zamknij tab'));
     expect(screen.getByText('Zamknąć aktywny tab?')).toBeInTheDocument();
     expect(processManager.dismiss).not.toHaveBeenCalled();
     expect(useStore.getState().tabs).toHaveLength(1);
   });
 
-  it('colors the action tab icon from runningActions (error exit to danger)', () => {
+  it('colors the action tab status dot from runningActions (error exit to danger)', () => {
     seedActionTab('exited', 2);
-    const { container } = render(<StackedTabBar />);
-    const danger = container.querySelector('.text-danger');
-    expect(danger?.textContent).toBe('▶');
+    const { container } = render(<PaneBar />);
+    const danger = container.querySelector('[data-tab-id="action:1"] .text-danger');
+    expect(danger?.classList.contains('rounded-full')).toBe(true);
   });
 });
 
-describe('StackedTabBar group detach', () => {
+describe('PaneBar group detach', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(focusExistingGroupWindow).mockResolvedValue(false);
@@ -223,26 +274,9 @@ describe('StackedTabBar group detach', () => {
     });
   };
 
-  it('detaches the project group from the project row context menu', async () => {
-    useStore.setState({
-      tabs: [
-        { kind: 'session', id: 'session:s1', projectId: 1, sessionId: 's1', title: 'S1', mode: 'history' },
-        { kind: 'session', id: 'session:s1b', projectId: 1, sessionId: 's1b', title: 'S1b', mode: 'history' },
-        { kind: 'session', id: 'session:s2', projectId: 2, sessionId: 's2', title: 'S2', mode: 'history' },
-      ],
-    });
-    const { container } = render(<StackedTabBar />);
-    fireEvent.contextMenu(container.querySelector('[data-project-tab-id="1"]') as HTMLElement);
-    fireEvent.click(screen.getByText('Wydziel do nowego okna'));
-    await waitFor(() => expect(detachProjectGroup).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: 1, projectName: 'Alfa' }),
-    ));
-    expect(vi.mocked(detachProjectGroup).mock.calls[0][0].tabs.map(t => t.id)).toEqual(['session:s1', 'session:s1b']);
-  });
-
   it('detaches the project group from the tab context menu', async () => {
     useStore.setState({ activeTabId: 'session:s2', mruOrder: ['session:s2'], navHistory: ['session:s2'] });
-    render(<StackedTabBar />);
+    render(<PaneBar />);
     fireEvent.contextMenu(screen.getByText('S2'));
     fireEvent.click(screen.getByText('Wydziel projekt do nowego okna'));
     await waitFor(() => expect(detachProjectGroup).toHaveBeenCalledWith(
@@ -253,7 +287,7 @@ describe('StackedTabBar group detach', () => {
 
   it('asks for confirmation when the group holds a live process', async () => {
     seedLiveTerminal();
-    render(<StackedTabBar />);
+    render(<PaneBar />);
     fireEvent.contextMenu(screen.getByText('Terminal'));
     fireEvent.click(screen.getByText('Wydziel projekt do nowego okna'));
     expect(await screen.findByText('Wydzielić grupę do nowego okna?')).toBeInTheDocument();
@@ -265,7 +299,7 @@ describe('StackedTabBar group detach', () => {
   it('focuses the existing project window instead of asking to detach again', async () => {
     vi.mocked(focusExistingGroupWindow).mockResolvedValue(true);
     seedLiveTerminal();
-    render(<StackedTabBar />);
+    render(<PaneBar />);
     fireEvent.contextMenu(screen.getByText('Terminal'));
     fireEvent.click(screen.getByText('Wydziel projekt do nowego okna'));
     await waitFor(() => expect(focusExistingGroupWindow).toHaveBeenCalledWith(1));
@@ -274,20 +308,20 @@ describe('StackedTabBar group detach', () => {
   });
 
   it('hides the detach items in a detached window', () => {
-    render(<StackedTabBar detachedProjectId={1} />);
+    render(<PaneBar detachedProjectId={1} />);
     fireEvent.contextMenu(screen.getByText('S1'));
     expect(screen.queryByText('Wydziel projekt do nowego okna')).toBeNull();
   });
 
   it('keeps the tab strip alive in a detached window with no tabs', () => {
     useStore.setState({ tabs: [], activeTabId: null });
-    render(<StackedTabBar detachedProjectId={1} />);
+    render(<PaneBar detachedProjectId={1} />);
     expect(screen.getByTitle('Nowa sesja')).toBeInTheDocument();
     expect(screen.getByTitle('Nowy terminal')).toBeInTheDocument();
   });
 });
 
-describe('StackedTabBar per pane', () => {
+describe('PaneBar per pane', () => {
   const seedTwoPanes = () => {
     useStore.setState({
       tabs: [
@@ -303,25 +337,34 @@ describe('StackedTabBar per pane', () => {
 
   beforeEach(() => { vi.clearAllMocks(); });
 
+  it('paints the active tab of the focused pane as the raised chip', () => {
+    seedTwoPanes();
+    const { container } = render(<PaneBar paneId={ROOT_PANE_ID} />);
+    const el = container.querySelector('[data-tab-id="t1"]') as HTMLElement;
+    expect(el.classList.contains('bg-raised-strong')).toBe(true);
+    expect(el.classList.contains('text-fg-strong')).toBe(true);
+  });
+
   it('renders only the tabs of its own pane', () => {
     seedTwoPanes();
-    render(<StackedTabBar paneId="p2" />);
+    render(<PaneBar paneId="p2" />);
     expect(screen.queryByText('Lewy')).toBeNull();
     expect(screen.getByText('Prawy')).toBeTruthy();
   });
 
   it('dims the active tab of a pane that does not hold the focus', () => {
     seedTwoPanes();
-    const { container } = render(<StackedTabBar paneId="p2" />);
+    const { container } = render(<PaneBar paneId="p2" />);
     const el = container.querySelector('[data-tab-id="t2"]') as HTMLElement;
-    expect(el.className).toContain('bg-bg-elev');
-    expect(el.className).toContain('text-muted');
-    expect(el.className).not.toContain('text-fg');
+    expect(el.classList.contains('bg-field')).toBe(true);
+    expect(el.classList.contains('text-fg-secondary')).toBe(true);
+    expect(el.classList.contains('bg-raised-strong')).toBe(false);
+    expect(el.classList.contains('text-fg-strong')).toBe(false);
   });
 
   it('activates a tab through its own pane', () => {
     seedTwoPanes();
-    render(<StackedTabBar paneId="p2" />);
+    render(<PaneBar paneId="p2" />);
     fireEvent.click(screen.getByText('Prawy'));
     expect(useStore.getState().focusedPaneId).toBe('p2');
     expect(useStore.getState().activeTabId).toBe('t2');
@@ -342,7 +385,7 @@ describe('StackedTabBar per pane', () => {
       layout: insertBeside(createLeaf(ROOT_PANE_ID, ['action:1'], 'action:1'), ROOT_PANE_ID, 'row', false, createLeaf('p2', ['t2'], 't2'), 's1'),
       focusedPaneId: ROOT_PANE_ID,
     });
-    render(<><StackedTabBar paneId={ROOT_PANE_ID} /><StackedTabBar paneId="p2" /></>);
+    render(<><PaneBar paneId={ROOT_PANE_ID} /><PaneBar paneId="p2" /></>);
 
     fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
 
@@ -356,7 +399,7 @@ describe('StackedTabBar per pane', () => {
   });
 });
 
-describe('StackedTabBar session detach to a window', () => {
+describe('PaneBar session detach to a window', () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it('hands the drawer shells over as tabs before the session tab closes', () => {
@@ -376,7 +419,7 @@ describe('StackedTabBar session detach to a window', () => {
     act(() => { useStore.getState().toggleTerminalDrawer('session:s1'); });
     const drawerTerminalId = Object.keys(useStore.getState().drawerTerminals)[0];
 
-    render(<StackedTabBar />);
+    render(<PaneBar />);
     fireEvent.contextMenu(screen.getByText('S1'));
     fireEvent.click(screen.getByText('Otwórz w nowym oknie'));
 

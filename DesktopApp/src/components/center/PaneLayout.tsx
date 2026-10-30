@@ -2,12 +2,12 @@ import { useMemo, useRef } from 'react';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { computePaneRects, PANE_BAR_HEIGHT } from '../../lib/paneGeometry';
-import { lenRectStyle, paneBarRect, paneFrameRect } from '../../lib/drawerGeometry';
+import { lenRectStyle, PANE_GAP, paneBarRect, paneFrameRect } from '../../lib/drawerGeometry';
 import { computePaneLayers } from '../../lib/paneLayers';
 import { leaves } from '../../lib/paneTree';
 import { PaneDragOverlay } from './PaneDragOverlay';
 import { PaneResizers } from './PaneResizers';
-import { StackedTabBar } from './StackedTabBar';
+import { PaneBar } from './PaneBar';
 import { TabPanel } from './TabContent';
 import { CollapsedDrawerBar, DrawerCloseDialog, TerminalDrawerChrome } from './TerminalDrawerChrome';
 import { usePaneDrag } from './usePaneDrag';
@@ -36,7 +36,20 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   );
 
   return (
-    <div ref={containerRef} className="flex-1 relative overflow-hidden bg-bg">
+    <div ref={containerRef} className="flex-1 relative overflow-hidden bg-bg" style={{ marginTop: -PANE_GAP / 2 }}>
+      {panes.map(pane => {
+        const rect = rects.get(pane.id);
+        if (!rect) return null;
+        return (
+          <div
+            key={pane.id}
+            data-pane-surface={pane.id}
+            aria-hidden
+            className="absolute bg-bg-elev rounded-[12px] pointer-events-none"
+            style={lenRectStyle(paneFrameRect(rect))}
+          />
+        );
+      })}
       {panes.map(pane => {
         const rect = rects.get(pane.id);
         if (!rect) return null;
@@ -48,7 +61,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
             className="absolute bg-bg-elev rounded-t-[11px] border-b border-border"
             style={lenRectStyle(paneBarRect(rect, PANE_BAR_HEIGHT))}
           >
-            <StackedTabBar paneId={pane.id} detachedProjectId={detachedProjectId} onTabPointerDown={beginDrag} />
+            <PaneBar paneId={pane.id} detachedProjectId={detachedProjectId} onTabPointerDown={beginDrag} />
           </div>
         );
       })}

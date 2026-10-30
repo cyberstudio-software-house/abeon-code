@@ -13,7 +13,6 @@ vi.mock('../terminal/TerminalView', () => ({ TerminalView: () => <div data-testi
 vi.mock('../history/HistoryView', () => ({ HistoryView: () => <div data-testid="history" /> }));
 vi.mock('../history/SubagentView', () => ({ SubagentView: () => <div data-testid="subagent" /> }));
 vi.mock('../right/RightPanel', () => ({ RightPanel: () => <div /> }));
-vi.mock('./TitleBar', () => ({ TitleBar: () => <div data-testid="titlebar" /> }));
 vi.stubGlobal('ResizeObserver', class {
   observe() {}
   unobserve() {}
@@ -84,6 +83,23 @@ describe('DetachedShell', () => {
       layout: createLeaf(ROOT_PANE_ID, ['session:s1', 'terminal:t1'], 'session:s1'),
       focusedPaneId: ROOT_PANE_ID,
     });
+  });
+
+  it('shows the project header in a project window', () => {
+    const { container, getByText } = render(<DetachedShell mode={groupMode} />);
+    const header = container.querySelector('header[data-tauri-drag-region]') as HTMLElement;
+    expect(header).not.toBeNull();
+    expect(getByText('Okno projektu')).toBeTruthy();
+    expect(header.textContent).toContain('Alfa');
+    expect(header.querySelector('[data-project-tab-id]')).toBeNull();
+  });
+
+  it('shows the project row in the header of a session window', () => {
+    seedSessionWindow();
+    const { container, queryByText } = render(<DetachedShell mode={sessionMode} />);
+    const header = container.querySelector('header[data-tauri-drag-region]') as HTMLElement;
+    expect(header.querySelector('[data-project-tab-id="1"]')).not.toBeNull();
+    expect(queryByText('Okno projektu')).toBeNull();
   });
 
   it('blocks the close when a non-active tab still holds a live process', () => {
@@ -231,6 +247,7 @@ describe('DetachedShell', () => {
       runningAgents: 0, totalAgents: 0,
     }]);
     seedSessionWindow();
+    useStore.setState({ tabs: [{ ...sessionTab('session:s1', 's1'), mode: 'terminal' }] });
     const { container } = render(<DetachedShell mode={sessionMode} />);
 
     await waitFor(() => expect(tauri.listSessions).toHaveBeenCalledWith(1, expect.any(Number), 0));

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import { groupTabsByProject } from './tabGrouping';
+import { groupTabsByProject, pickProjectTab } from './tabGrouping';
 import { getProjectColor } from './projectColors';
 import type { Tab } from '../store/tabsSlice';
 
@@ -67,5 +67,21 @@ describe('group color', () => {
   it('still assigns a color for an unknown project', () => {
     const groups = groupTabsByProject([tab('x', 999)], projects);
     expect(groups[0].color).toBe(getProjectColor({ id: 999, color: null }));
+  });
+});
+
+describe('pickProjectTab', () => {
+  const tabs = [tab('a1', 1), tab('b1', 2), tab('a2', 1), tab('a3', 1)];
+
+  it('returns the most recently used tab of the project', () => {
+    expect(pickProjectTab(tabs, ['b1', 'a3', 'a1'], 1)).toBe('a3');
+  });
+
+  it('falls back to the first tab of the project when none is in the MRU order', () => {
+    expect(pickProjectTab(tabs, ['b1'], 1)).toBe('a1');
+  });
+
+  it('returns undefined for a project with no tabs', () => {
+    expect(pickProjectTab(tabs, ['a1', 'b1'], 3)).toBeUndefined();
   });
 });

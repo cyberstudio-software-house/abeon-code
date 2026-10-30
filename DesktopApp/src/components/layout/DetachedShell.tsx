@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { PaneLayout } from '../center/PaneLayout';
 import { RightPanel } from '../right/RightPanel';
+import { AppHeader } from './AppHeader';
 import { DragHandle, clamp } from './DragHandle';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { useStore, adoptedActions } from '../../store';
@@ -14,8 +15,6 @@ import { visibleSessionIds } from '../../lib/visibleTabs';
 import type { WindowMode } from '../../lib/windowMode';
 import { usePresenceReporter } from '../../lib/usePresenceReporter';
 import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
-
-const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 
 const RIGHT_MIN = 220;
 const RIGHT_MAX = 480;
@@ -113,7 +112,7 @@ export function DetachedShell({ mode }: { mode: DetachedWindowMode }) {
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
-      {IS_MAC && <div data-tauri-drag-region className="h-7 bg-bg shrink-0" />}
+      <AppHeader variant={isGroup ? { kind: 'project', projectId } : { kind: 'session' }} />
       <div className="flex flex-1 min-h-0 bg-bg px-1 pb-1">
         <main className="flex-1 h-full min-w-0 flex flex-col">
           <PaneLayout detachedProjectId={projectId} />

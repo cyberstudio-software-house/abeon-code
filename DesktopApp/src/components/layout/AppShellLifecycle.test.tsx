@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 
 const { onCloseRequested, destroy } = vi.hoisted(() => ({
   onCloseRequested: vi.fn(),
@@ -13,7 +13,6 @@ vi.mock('../sidebar/Sidebar', () => ({ Sidebar: () => <div /> }));
 vi.mock('../center/CenterPanel', () => ({ CenterPanel: () => <div /> }));
 vi.mock('../supervisor/SupervisorPanel', () => ({ SupervisorPanel: () => <div /> }));
 vi.mock('../right/RightPanel', () => ({ RightPanel: () => <div /> }));
-vi.mock('./TitleBar', () => ({ TitleBar: () => <div /> }));
 vi.mock('../center/TabSwitcher', () => ({ TabSwitcher: () => <div /> }));
 vi.mock('../center/ProjectLauncher', () => ({ ProjectLauncher: () => <div /> }));
 vi.mock('../../lib/updater', () => ({ checkForUpdate: async () => null }));
@@ -72,7 +71,7 @@ describe('AppShell lifecycle', () => {
 
       expect(screen.getByText('Wznowić sesje sprzed zamknięcia?')).toBeTruthy();
       expect(screen.getByText('Sesja a')).toBeTruthy();
-      expect(screen.getByText('Alfa')).toBeTruthy();
+      expect(within(screen.getByText('Sesja a').closest('li') as HTMLElement).getByText('Alfa')).toBeTruthy();
       expect(screen.queryByText('Sesja b')).toBeNull();
     });
 

@@ -20,14 +20,13 @@ import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
 import { useSupervisorAutoOpen } from '../../lib/useSupervisorAutoOpen';
 import { SupervisorPanel } from '../supervisor/SupervisorPanel';
 import { openProjectPath } from '../../lib/openProject';
+import { AppHeader } from './AppHeader';
 import { DragHandle, clamp } from './DragHandle';
 import { checkForUpdate, type AvailableUpdate } from '../../lib/updater';
 import { UpdateDialog } from '../dialogs/UpdateDialog';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { RestoreSessionsDialog } from '../dialogs/RestoreSessionsDialog';
 import { isTabLiveProcess } from '../../lib/tabProcess';
-
-const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 
 const LEFT_MIN = 200;
 const LEFT_MAX = 420;
@@ -241,7 +240,7 @@ export function AppShell() {
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
-      {IS_MAC && <div data-tauri-drag-region className="h-7 bg-bg shrink-0" />}
+      <AppHeader variant={{ kind: 'main' }} />
       <div className="flex flex-1 min-h-0 bg-bg px-1 pb-1">
         <div style={{ width: leftWidth }} className="h-full flex-shrink-0 p-1">
           <Sidebar />

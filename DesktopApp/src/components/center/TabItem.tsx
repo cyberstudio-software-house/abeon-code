@@ -3,42 +3,56 @@ import { useStore } from '../../store';
 import { selectSessionActivity } from '../../store/sessionsSlice';
 import { ACTIVITY_DOT, ACTIVITY_LABEL, activityPulses } from '../../lib/activity';
 import type { Tab } from '../../store/tabsSlice';
+import type { SessionActivity } from '../../types';
 import { Icon } from '../shared/Icon';
 
-export function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
+function useTabActivity(tabId: string, sessionId: string) {
   const activity = useStore(selectSessionActivity(tabId, sessionId));
   const attention = useStore(s => {
     const tab = s.tabs.find(t => t.id === tabId);
     const realId = (tab?.kind === 'session' && tab.linkedSessionId) || sessionId;
     return s.attentionSessions.has(realId);
   });
-  if (attention) {
-    return (
-      <span className="mr-1.5 inline-flex" title="Czeka na Twoją odpowiedź">
-        <Icon name="bell" className="w-3 h-3 text-info" aria-label="Czeka na Twoją odpowiedź" />
-      </span>
-    );
-  }
+  return { activity, attention };
+}
+
+function AttentionBell({ className }: { className: string }) {
   return (
-    <span
-      className={`mr-1.5 w-[5px] h-[5px] rounded-full ${ACTIVITY_DOT[activity]}${activityPulses(activity) ? ' activity-pulse' : ''}`}
-      title={ACTIVITY_LABEL[activity]}
-    />
+    <span className={`inline-flex ${className}`} title="Czeka na Twoją odpowiedź">
+      <Icon name="bell" className="w-3 h-3 text-info" aria-label="Czeka na Twoją odpowiedź" />
+    </span>
   );
 }
 
-function TabIcon({ tab, actionColor }: { tab: Tab; actionColor?: string }) {
-  if (tab.kind === 'session') return <>{tab.mode === 'terminal' ? '›' : '◇'}</>;
-  if (tab.kind === 'terminal') return <>$</>;
-  if (tab.kind === 'providerPicker') return <>+</>;
-  return <span className={actionColor ?? 'text-muted'}>▶</span>;
+const activityDotClass = (activity: SessionActivity) =>
+  `rounded-full ${ACTIVITY_DOT[activity]}${activityPulses(activity) ? ' activity-pulse' : ''}`;
+
+export function TabActivityDot({ tabId, sessionId }: { tabId: string; sessionId: string }) {
+  const { activity, attention } = useTabActivity(tabId, sessionId);
+  if (attention) return <AttentionBell className="mr-1.5" />;
+  return <span className={`mr-1.5 w-[5px] h-[5px] ${activityDotClass(activity)}`} title={ACTIVITY_LABEL[activity]} />;
+}
+
+const MARKER_ICON = 'w-[13px] h-[13px] shrink-0 text-icon';
+
+function SessionTabMarker({ tab }: { tab: Extract<Tab, { kind: 'session' }> }) {
+  const { activity, attention } = useTabActivity(tab.id, tab.sessionId);
+  if (attention) return <AttentionBell className="shrink-0" />;
+  if (tab.mode === 'history') return <Icon name="history" className={MARKER_ICON} />;
+  return <span className={`w-1.5 h-1.5 shrink-0 ${activityDotClass(activity)}`} title={ACTIVITY_LABEL[activity]} />;
+}
+
+function TabMarker({ tab, actionColor }: { tab: Tab; actionColor?: string }) {
+  if (tab.kind === 'session') return <SessionTabMarker tab={tab} />;
+  if (tab.kind === 'terminal') return <Icon name="terminal" className={MARKER_ICON} />;
+  if (tab.kind === 'providerPicker') return <Icon name="plus" className={MARKER_ICON} />;
+  return <span className={`w-1.5 h-1.5 shrink-0 rounded-full bg-current ${actionColor ?? 'text-muted'}`} />;
 }
 
 export type TabItemProps = {
   tab: Tab;
   active: boolean;
   paneFocused: boolean;
-  color: string;
   actionColor?: string;
   editing: boolean;
   inputRef: RefObject<HTMLInputElement | null>;
@@ -53,13 +67,17 @@ export type TabItemProps = {
 };
 
 export function TabItem({
-  tab, active, paneFocused, color, actionColor, editing, inputRef,
+  tab, active, paneFocused, actionColor, editing, inputRef,
   onActivate, onPointerDown, onMiddleClick, onContextMenu,
   onBeginRename, onCommitRename, onCancelRename, onClose,
 }: TabItemProps) {
+  const chip = active
+    ? `max-w-[340px] ${paneFocused ? 'bg-raised-strong text-fg-strong' : 'bg-field text-fg-secondary'}`
+    : 'max-w-[280px] text-icon hover:text-fg hover:bg-bg-elev-2';
   return (
     <div
       data-tab-id={tab.id}
+      aria-current={active ? 'page' : undefined}
       onClick={onActivate}
       onPointerDown={(e) => {
         if (editing) return;
@@ -73,17 +91,9 @@ export function TabItem({
         }
       }}
       onContextMenu={onContextMenu}
-      style={{ borderLeftWidth: 2, borderLeftStyle: 'solid', borderLeftColor: color }}
-      className={`group relative flex items-center px-3 py-1 text-[11px] border-x border-t cursor-pointer shrink-0 ${
-        active
-          ? (paneFocused ? 'bg-bg-elev border-border text-fg' : 'bg-bg-elev border-border text-muted')
-          : 'bg-bg border-transparent text-muted hover:text-fg'
-      }`}
+      className={`group relative flex items-center gap-2 h-8 shrink-0 pl-2.5 pr-2 rounded-lg text-[12.5px] cursor-pointer select-none ${chip}`}
     >
-      {tab.kind === 'session' && <TabActivityDot tabId={tab.id} sessionId={tab.sessionId} />}
-      <span className="mr-1.5 text-muted">
-        <TabIcon tab={tab} actionColor={actionColor} />
-      </span>
+      <TabMarker tab={tab} actionColor={actionColor} />
       {editing ? (
         <input
           ref={inputRef}
@@ -96,11 +106,11 @@ export function TabItem({
             if (e.key === 'Escape') onCancelRename();
           }}
           onClick={e => e.stopPropagation()}
-          className="bg-transparent border-b border-accent outline-none text-[11px] text-fg w-[120px]"
+          className="bg-transparent border-b border-accent outline-none text-[12.5px] text-fg-strong w-[120px]"
         />
       ) : (
         <span
-          className={`truncate max-w-[160px] inline-block align-middle ${tab.kind === 'session' && tab.preview ? 'italic' : ''}`}
+          className={`truncate min-w-0 ${tab.kind === 'session' && tab.preview ? 'italic' : ''}`}
           onDoubleClick={(e) => {
             e.stopPropagation();
             onBeginRename();
@@ -110,9 +120,14 @@ export function TabItem({
         </span>
       )}
       <span
+        role="button"
+        aria-label="Zamknij tab"
+        title="Zamknij tab"
         onClick={onClose}
-        className="ml-2 text-muted hover:text-danger opacity-0 group-hover:opacity-100"
-      >×</span>
+        className={`shrink-0 grid place-items-center text-icon hover:text-danger ${active ? '' : 'opacity-0 group-hover:opacity-100'}`}
+      >
+        <Icon name="close" className="w-3 h-3" strokeWidth={2.4} />
+      </span>
     </div>
   );
 }

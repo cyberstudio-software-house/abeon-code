@@ -25,7 +25,11 @@ export function actionIconColor(r: RunningAction | undefined): string {
   return ACTION_TONE_TEXT[actionTone(r)];
 }
 
-export function useTabBarActions(tabs: Tab[], detachedProjectId?: number) {
+export function useTabBarActions(
+  tabs: Tab[],
+  detachedProjectId?: number,
+  { closeShortcut = true }: { closeShortcut?: boolean } = {},
+) {
   const active = useStore(s => s.activeTabId);
   const closeTab = useStore(s => s.closeTab);
   const detachTabs = useStore(s => s.detachTabs);
@@ -100,6 +104,7 @@ export function useTabBarActions(tabs: Tab[], detachedProjectId?: number) {
   };
 
   useEffect(() => {
+    if (!closeShortcut) return;
     const onKeyDown = (e: KeyboardEvent) => {
       const overrides = useStore.getState().shortcutOverrides;
       if (!matchesShortcut(e, 'closeTab', overrides)) return;
@@ -118,7 +123,7 @@ export function useTabBarActions(tabs: Tab[], detachedProjectId?: number) {
     };
     document.addEventListener('keydown', onKeyDown, { capture: true });
     return () => document.removeEventListener('keydown', onKeyDown, { capture: true });
-  }, [active, tabs, closeTab]);
+  }, [active, tabs, closeTab, closeShortcut]);
 
   useEffect(() => {
     if (!ctxMenu && !groupMenu) return;
