@@ -77,4 +77,12 @@ describe('ActionRow', () => {
     expect(screen.queryByText('działa')).not.toBeInTheDocument();
     expect(screen.getByText('zakończone')).toBeInTheDocument();
   });
+
+  it('keeps a single danger hover tone on the delete button', () => {
+    seed({});
+    render(<ActionRow action={action} index={0} onChanged={() => {}} />);
+    const remove = screen.getByTitle('Usuń');
+    expect(remove).toHaveClass('hover:text-danger');
+    expect(remove).not.toHaveClass('hover:text-fg-strong');
+  });
 });

@@ -20,7 +20,7 @@ const MAIN_BUTTON_TONE: Record<string, string> = {
   stopped: 'bg-bg-elev-2 border-border-raised text-muted hover:text-fg-strong',
 };
 
-const ICON_BUTTON = 'p-1 rounded-md text-icon hover:bg-bg-elev-2 hover:text-fg-strong transition-colors';
+const ICON_BUTTON = 'p-1 rounded-md text-icon hover:bg-bg-elev-2 transition-colors';
 
 export function ActionRow({ action, index, onChanged }: Props) {
   const tabId = `action:${action.id}`;
@@ -94,17 +94,17 @@ export function ActionRow({ action, index, onChanged }: Props) {
           )}
           {running?.status === 'exited' && (
             <>
-              <button onClick={rerun} title="Uruchom ponownie" className={ICON_BUTTON}>
+              <button onClick={rerun} title="Uruchom ponownie" className={`${ICON_BUTTON} hover:text-fg-strong`}>
                 <Icon name="refresh" className="w-3.5 h-3.5" />
               </button>
-              <button onClick={clear} title="Wyczyść" className={ICON_BUTTON}>
+              <button onClick={clear} title="Wyczyść" className={`${ICON_BUTTON} hover:text-fg-strong`}>
                 <Icon name="close" className="w-3.5 h-3.5" />
               </button>
             </>
           )}
         </div>
         <div className="hidden group-hover:flex items-center gap-0.5">
-          <button onClick={() => setEditing(true)} className={ICON_BUTTON} title="Edytuj">
+          <button onClick={() => setEditing(true)} className={`${ICON_BUTTON} hover:text-fg-strong`} title="Edytuj">
             <Icon name="pencil" className="w-3 h-3" />
           </button>
           <button onClick={() => setConfirming(true)}
