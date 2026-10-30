@@ -5,16 +5,12 @@ import { AppShell } from './components/layout/AppShell';
 import { DetachedShell } from './components/layout/DetachedShell';
 import { NotesShell } from './components/notes/NotesShell';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
-import { SettingsDialog } from './components/dialogs/SettingsDialog';
-import { useStore } from './store';
 import { installMiddleClickPasteGuard } from './lib/middleClickPasteGuard';
 import { parseWindowMode } from './lib/windowMode';
 
 const windowMode = parseWindowMode(window.location.search);
 
 export default function App() {
-  const settingsOpen = useStore(s => s.settingsOpen);
-
   useEffect(() => installMiddleClickPasteGuard(), []);
 
   return (
@@ -26,7 +22,6 @@ export default function App() {
             ? <DetachedShell mode={windowMode} />
             : <AppShell />}
       </ErrorBoundary>
-      {!windowMode && settingsOpen && <SettingsDialog />}
       <ErrorBoundary>
         <Toaster
           richColors

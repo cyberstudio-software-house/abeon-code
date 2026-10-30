@@ -1,11 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('@tauri-apps/api/webviewWindow', () => ({
   getCurrentWebviewWindow: () => ({ onCloseRequested: async () => () => {}, destroy: async () => {}, label: 'main' }),
 }));
 vi.mock('../sidebar/Sidebar', () => ({ Sidebar: () => <div /> }));
-vi.mock('../center/CenterPanel', () => ({ CenterPanel: () => <div /> }));
+vi.mock('../center/CenterPanel', () => ({
+  CenterPanel: () => (
+    <div data-pane-id="left">
+      <div data-tab-layer="session:s1"><button>Terminal s1</button></div>
+    </div>
+  ),
+}));
 vi.mock('../supervisor/SupervisorPanel', () => ({ SupervisorPanel: () => <div /> }));
 vi.mock('../right/RightPanel', () => ({ RightPanel: () => <div /> }));
 vi.mock('../center/TabSwitcher', () => ({ TabSwitcher: () => <div /> }));
@@ -171,5 +177,71 @@ describe('AppShell attention across panes', () => {
 
     expect(useStore.getState().drawers['session:s1']?.open).toBe(false);
     host.remove();
+  });
+});
+
+describe('AppShell settings view', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    vi.spyOn(tauri, 'setWindowTitle').mockResolvedValue(undefined);
+    vi.spyOn(tauri, 'onCliOpenPath').mockResolvedValue(() => {});
+    vi.spyOn(tauri, 'onNotificationActivate').mockResolvedValue(() => {});
+    vi.spyOn(tauri, 'onSessionAttention').mockResolvedValue(() => {});
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([]);
+    vi.spyOn(tauri, 'getGitUser').mockResolvedValue({ name: 'Ada Lovelace', initials: 'AL', email: 'ada@example.com' });
+    vi.spyOn(tauri, 'listAvailableShells').mockResolvedValue([]);
+    vi.spyOn(tauri, 'detectDefaultShell').mockResolvedValue(null);
+    vi.spyOn(tauri, 'listAvailableEditors').mockResolvedValue([]);
+    useStore.setState({
+      tabs: [sessionTab('session:s1', 's1')],
+      activeTabId: 'session:s1',
+      layout: createLeaf('left', ['session:s1'], 'session:s1'),
+      focusedPaneId: 'left',
+      settingsOpen: false,
+      settingsCategory: 'general',
+    });
+  });
+
+  it('keeps the panes mounted under the settings view', async () => {
+    render(<AppShell />);
+    const body = screen.getByRole('separator', { name: 'Resize sidebar' }).parentElement as HTMLElement;
+    const pane = document.querySelector('[data-pane-id]');
+    const layer = document.querySelector('[data-tab-layer]');
+    const header = document.querySelector('header[data-tauri-drag-region]') as HTMLElement;
+    expect(body).not.toHaveAttribute('inert');
+
+    await act(async () => { useStore.getState().openSettings(); });
+
+    expect(document.querySelector('[data-pane-id]')).toBe(pane);
+    expect(document.querySelector('[data-tab-layer]')).toBe(layer);
+    expect(body).toHaveAttribute('inert');
+    expect(layer?.closest('[inert]')).toBe(body);
+    expect(screen.getByRole('navigation', { name: 'Kategorie ustawień' })).toBeInTheDocument();
+    expect(within(header).getByRole('navigation', { name: 'Ścieżka' })).toHaveTextContent(/^Ustawienia\s*\/\s*Ogólne$/);
+    expect(header.querySelector('[data-project-tab-id]')).toBeNull();
+
+    await act(async () => { useStore.getState().closeSettings(); });
+
+    expect(document.querySelector('[data-tab-layer]')).toBe(layer);
+    expect(body).not.toHaveAttribute('inert');
+    expect(screen.queryByRole('navigation', { name: 'Kategorie ustawień' })).toBeNull();
+    expect(header.querySelector('[data-project-tab-id="1"]')).not.toBeNull();
+  });
+
+  it('blocks the shell while open and restores focus on close', async () => {
+    render(<AppShell />);
+    const button = screen.getByRole('button', { name: 'Terminal s1' });
+    button.focus();
+    expect(document.activeElement).toBe(button);
+
+    await act(async () => { useStore.getState().openSettings(); });
+
+    expect(document.activeElement).not.toBe(button);
+
+    await act(async () => { fireEvent.keyDown(document, { key: 'Escape' }); });
+
+    expect(useStore.getState().settingsOpen).toBe(false);
+    expect(document.activeElement).toBe(button);
   });
 });

@@ -22,6 +22,8 @@ function seed(tabs: Tab[]) {
     projects: projects as never,
     layout: createLeaf(ROOT_PANE_ID, tabs.map(t => t.id), tabs[0]?.id ?? null),
     focusedPaneId: ROOT_PANE_ID,
+    settingsOpen: false,
+    settingsCategory: 'general',
   });
 }
 
@@ -73,6 +75,19 @@ describe('AppHeader', () => {
     expect(container.querySelector('[data-project-tab-id="1"]')).not.toBeNull();
     expect(screen.getByText('1 aktywne')).toBeInTheDocument();
     expect(screen.queryByText('Okno projektu')).toBeNull();
+  });
+
+  it('shows the settings breadcrumb instead of the groups row only in the main variant', () => {
+    seed([liveSession]);
+    act(() => { useStore.setState({ settingsOpen: true, settingsCategory: 'models' }); });
+    const main = render(<AppHeader variant={{ kind: 'main' }} />);
+    expect(screen.getByRole('navigation', { name: 'Ścieżka' })).toHaveTextContent(/^Ustawienia\s*\/\s*Modele$/);
+    expect(main.container.querySelector('[data-project-tab-id]')).toBeNull();
+    main.unmount();
+
+    const session = render(<AppHeader variant={{ kind: 'session' }} />);
+    expect(session.container.querySelector('[data-project-tab-id="1"]')).not.toBeNull();
+    expect(screen.queryByText('Ustawienia')).toBeNull();
   });
 
   it('marks the header as the window drag region', () => {

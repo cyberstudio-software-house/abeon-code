@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { Sidebar } from '../sidebar/Sidebar';
@@ -27,6 +27,7 @@ import { UpdateDialog } from '../dialogs/UpdateDialog';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { RestoreSessionsDialog } from '../dialogs/RestoreSessionsDialog';
 import { isTabLiveProcess } from '../../lib/tabProcess';
+import { SettingsView } from '../settings/SettingsView';
 
 const LEFT_MIN = 200;
 const LEFT_MAX = 420;
@@ -42,6 +43,8 @@ export function AppShell() {
   const activeTabId = useStore(s => s.activeTabId);
   const layout = useStore(s => s.layout);
   const supervisorPanelOpen = useStore(s => s.supervisorPanelOpen);
+  const settingsOpen = useStore(s => s.settingsOpen);
+  const focusBeforeSettings = useRef<HTMLElement | null>(null);
   const hasActiveProject = tabs.some(t => t.id === activeTabId);
   const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
   const activeProjectName = useStore(s => {
@@ -74,6 +77,20 @@ export function AppShell() {
   useEffect(() => {
     void tauri.setWindowTitle(formatWindowTitle(activeTabTitle, activeProjectName));
   }, [activeTabTitle, activeProjectName]);
+
+  useEffect(() => useStore.subscribe((state, prev) => {
+    if (!state.settingsOpen || prev.settingsOpen) return;
+    const active = document.activeElement;
+    focusBeforeSettings.current = active instanceof HTMLElement && active !== document.body ? active : null;
+    focusBeforeSettings.current?.blur();
+  }), []);
+
+  useEffect(() => {
+    if (settingsOpen) return;
+    const target = focusBeforeSettings.current;
+    focusBeforeSettings.current = null;
+    if (target?.isConnected) target.focus();
+  }, [settingsOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -239,9 +256,9 @@ export function AppShell() {
   }, [update]);
 
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
+    <div className="relative flex flex-col h-full w-full overflow-hidden bg-bg">
       <AppHeader variant={{ kind: 'main' }} />
-      <div className="flex flex-1 min-h-0 bg-bg px-1 pb-1">
+      <div inert={settingsOpen} className="flex flex-1 min-h-0 bg-bg px-1 pb-1">
         <div style={{ width: leftWidth }} className="h-full flex-shrink-0 p-1">
           <Sidebar />
         </div>
@@ -259,6 +276,7 @@ export function AppShell() {
           </>
         )}
       </div>
+      {settingsOpen && <SettingsView />}
       <TabSwitcher />
       <ProjectLauncher />
       {restorableSessions.length > 0 && (

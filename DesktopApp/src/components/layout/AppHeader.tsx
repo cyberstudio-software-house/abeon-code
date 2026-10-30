@@ -1,5 +1,6 @@
 import { useStore } from '../../store';
 import { getProjectColor } from '../../lib/projectColors';
+import { SETTINGS_CATEGORIES } from '../../lib/settingsCategories';
 import { HeaderProjectRow } from '../center/HeaderProjectRow';
 
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
@@ -58,7 +59,23 @@ function ProjectBreadcrumb({ projectId }: { projectId: number }) {
   );
 }
 
+function SettingsBreadcrumb() {
+  const label = useStore(s => SETTINGS_CATEGORIES[s.settingsCategory].label);
+  return (
+    <nav
+      aria-label="Ścieżka"
+      data-tauri-drag-region
+      className="flex-1 min-w-0 flex items-center gap-2 text-[12.5px] text-icon whitespace-nowrap"
+    >
+      <span>Ustawienia</span>
+      <span aria-hidden className="text-faint">/</span>
+      <span className="truncate text-fg-strong">{label}</span>
+    </nav>
+  );
+}
+
 export function AppHeader({ variant }: { variant: AppHeaderVariant }) {
+  const showSettingsBreadcrumb = useStore(s => variant.kind === 'main' && s.settingsOpen);
   return (
     <header
       data-tauri-drag-region
@@ -73,7 +90,9 @@ export function AppHeader({ variant }: { variant: AppHeaderVariant }) {
       ) : (
         <LogoMark />
       )}
-      {variant.kind === 'project' ? <ProjectBreadcrumb projectId={variant.projectId} /> : <HeaderProjectRow />}
+      {variant.kind === 'project'
+        ? <ProjectBreadcrumb projectId={variant.projectId} />
+        : showSettingsBreadcrumb ? <SettingsBreadcrumb /> : <HeaderProjectRow />}
       <ActiveSessionsCount label={variant.kind === 'main' ? 'aktywne sesje' : 'aktywne'} />
     </header>
   );

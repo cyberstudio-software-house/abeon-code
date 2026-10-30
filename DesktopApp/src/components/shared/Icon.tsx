@@ -44,6 +44,17 @@ const paths: Record<string, ReactNode> = {
   claudeLogo: <g><path d="M12 3v18"/><path d="M3 12h18"/><path d="M5.6 5.6l12.8 12.8"/><path d="M18.4 5.6L5.6 18.4"/></g>,
   openaiLogo: <polygon points="12 2.5 20.2 7.25 20.2 16.75 12 21.5 3.8 16.75 3.8 7.25"/>,
   opencodeLogo: <g><path d="M9.5 5H6a3 3 0 0 0-3 3v8a3 3 0 0 0 3 3h3.5"/><path d="M14.5 5H18a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-3.5"/><path d="m10 9-3 3 3 3"/><path d="m14 9 3 3-3 3"/></g>,
+  sliders:  <g><path d="M3.75 6.75h9M17.25 6.75h3M3.75 17.25h3M11.25 17.25h9"/><circle cx="15" cy="6.75" r="2.25"/><circle cx="9" cy="17.25" r="2.25"/></g>,
+  contrast: <g><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/></g>,
+  keyboard: <g><rect x="2.25" y="6" width="19.5" height="12.75" rx="2.25"/><path d="M6.75 10.5h.01M10.5 10.5h.01M14.25 10.5h.01M18 10.5h.01M7.5 15h9"/></g>,
+  cube:     <g><path d="M12 2.25 21 7.5v9l-9 5.25L3 16.5v-9z"/><path d="M3 7.5l9 5.25L21 7.5M12 12.75v9"/></g>,
+  shield:   <path d="M12 2.25 20.25 6v6c0 4.8-3.6 8.4-8.25 9.75C7.35 20.4 3.75 16.8 3.75 12V6z"/>,
+  crosshair: <g><circle cx="12" cy="12" r="8.25"/><circle cx="12" cy="12" r="3"/><path d="M12 1.5v3.75M12 18.75V22.5M1.5 12h3.75M18.75 12H22.5"/></g>,
+  cloud:    <path d="M6.75 18.75h10.5a4.5 4.5 0 0 0 .6-9 6 6 0 0 0-11.55 1.5 3.75 3.75 0 0 0 .45 7.5z"/>,
+  checkSquare: <g><rect x="3" y="3" width="18" height="18" rx="4.5"/><path d="m7.5 12 3 3 6-6"/></g>,
+  arrowLeft: <path d="M19.5 12h-15M10.5 6 4.5 12l6 6"/>,
+  check:    <path d="m5.25 12.75 4.5 4.5 9-10.5"/>,
+  minus:    <path d="M5.25 12h13.5"/>,
 };
 
 export type IconName = keyof typeof paths;

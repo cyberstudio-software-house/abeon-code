@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
 
-import { useStore } from '../../store';
-import { tauri } from '../../lib/tauri';
-import { SettingsDialog } from './SettingsDialog';
+import { useStore } from '../../../store';
+import { tauri } from '../../../lib/tauri';
+import { ModelsCategory } from './ModelsCategory';
 
 const OPTIONS = {
   models: [
@@ -15,12 +15,11 @@ const OPTIONS = {
 };
 
 async function openModelsTab() {
-  render(<SettingsDialog />);
-  fireEvent.click(screen.getByText('Modele'));
+  render(<ModelsCategory />);
   await screen.findByText('claude-opus-5-5');
 }
 
-describe('SettingsDialog Claude models', () => {
+describe('ModelsCategory Claude models', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(tauri, 'listAvailableShells').mockResolvedValue([]);
@@ -72,8 +71,7 @@ describe('SettingsDialog Claude models', () => {
   it('shows a hint and the custom models when nothing is detected', async () => {
     vi.spyOn(tauri, 'detectClaudeOptions').mockResolvedValue({ models: [], effortLevels: ['low'] });
     useStore.setState({ customModels: [{ modelId: 'us.anthropic.x', label: 'Mine' }] });
-    render(<SettingsDialog />);
-    fireEvent.click(screen.getByText('Modele'));
+    render(<ModelsCategory />);
     expect(await screen.findByText('Nie wykryto modeli — sprawdź instalację Claude Code')).toBeTruthy();
     expect(screen.getByText('Mine')).toBeTruthy();
     expect(screen.getByText('us.anthropic.x')).toBeTruthy();

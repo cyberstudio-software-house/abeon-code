@@ -1,21 +1,21 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ClickUpTab } from './SettingsDialog';
+import { ClickUpCategory } from './ClickUpCategory';
 
-vi.mock('../../lib/tauri', () => ({
+vi.mock('../../../lib/tauri', () => ({
   tauri: {
     clickupConnectionStatus: vi.fn().mockResolvedValue('absent'),
     clickupSetToken: vi.fn().mockResolvedValue(undefined),
     clickupClearToken: vi.fn().mockResolvedValue(undefined),
   },
 }));
-import { tauri } from '../../lib/tauri';
+import { tauri } from '../../../lib/tauri';
 
-describe('ClickUpTab', () => {
+describe('ClickUpCategory', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('saves the token via clickupSetToken', async () => {
-    render(<ClickUpTab />);
+    render(<ClickUpCategory />);
     await waitFor(() => expect(screen.getByText('Brak tokenu')).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText('pk_...'), { target: { value: 'pk_abc' } });
     fireEvent.click(screen.getByText('Zapisz token'));
@@ -23,7 +23,7 @@ describe('ClickUpTab', () => {
   });
 
   it('persists the typed token before checking status on test', async () => {
-    render(<ClickUpTab />);
+    render(<ClickUpCategory />);
     await waitFor(() => expect(screen.getByText('Brak tokenu')).toBeInTheDocument());
     fireEvent.change(screen.getByPlaceholderText('pk_...'), { target: { value: 'pk_new' } });
     fireEvent.click(screen.getByText('Testuj połączenie'));
@@ -33,7 +33,7 @@ describe('ClickUpTab', () => {
 
   it('surfaces a connection error instead of failing silently', async () => {
     (tauri.clickupConnectionStatus as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('offline'));
-    render(<ClickUpTab />);
+    render(<ClickUpCategory />);
     await waitFor(() => expect(screen.getByText(/offline/i)).toBeInTheDocument());
   });
 });

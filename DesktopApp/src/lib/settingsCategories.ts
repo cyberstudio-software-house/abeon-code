@@ -30,7 +30,7 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
   general: {
     label: 'Ogólne',
     description: 'Profil, projekty, sesje i narzędzia systemowe.',
-    icon: 'settings',
+    icon: 'sliders',
     keywords: [
       'Nazwa wyświetlana', 'Ścieżka bazowa projektów', 'Wybierz', 'Sesje po uruchomieniu',
       'Pytaj', 'Wznawiaj automatycznie', 'Nie wznawiaj', 'Domyślny widok historii',
@@ -40,7 +40,7 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
   appearance: {
     label: 'Wygląd',
     description: 'Motyw aplikacji i układ panelu bocznego.',
-    icon: 'eye',
+    icon: 'contrast',
     keywords: [
       'Motyw', 'Ciemny', 'Jasny', 'Systemowy', 'Pokaż aktywne sesje nad projektami',
     ],
@@ -67,7 +67,7 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
   shortcuts: {
     label: 'Skróty klawiszowe',
     description: 'Przypisania klawiszy do poleceń aplikacji.',
-    icon: 'code',
+    icon: 'keyboard',
     keywords: [
       'Skróty', 'Klawisze', 'Przywróć domyślny', 'Przywróć wszystkie', 'Przypisanie',
     ],
@@ -75,7 +75,7 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
   providers: {
     label: 'Dostawcy CLI',
     description: 'Włączone narzędzia CLI, generowanie tytułów oraz integracja z terminalem.',
-    icon: 'claudeLogo',
+    icon: 'layers',
     keywords: [
       'Claude Code', 'Codex', 'OpenCode', 'Dostawcy', 'Generowanie tytułów', 'Haiku',
       'Komenda terminala', 'abeon-code', 'PATH', 'Skill dla Claude Code',
@@ -84,7 +84,7 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
   models: {
     label: 'Modele',
     description: 'Domyślne modele, poziom effort i własne modele dla każdego dostawcy.',
-    icon: 'sparkles',
+    icon: 'cube',
     keywords: [
       'Model domyślny', 'Domyślny model', 'Effort', 'Zaawansowane', 'Własny model',
       'Nazwa', 'ID modelu (CLI)', 'Wykryty', 'Auto', 'Dodaj model', 'Usuń model',
@@ -93,7 +93,7 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
   permissions: {
     label: 'Uprawnienia',
     description: 'Sposób obsługi pytań o uprawnienia zadawanych przez agentów.',
-    icon: 'lock',
+    icon: 'shield',
     keywords: [
       'Pomijaj pytania o uprawnienia', 'bypass', 'skip permissions', 'dangerously',
     ],
@@ -101,7 +101,7 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
   supervisor: {
     label: 'Agent sterujący',
     description: 'Automatyczne odpowiadanie na pytania agentów, rozmowa przez Discord i reguły produkcyjne.',
-    icon: 'msgSquare',
+    icon: 'crosshair',
     keywords: [
       'Poziom', 'Wyłączony', 'Przekaźnik', 'Asystent', 'Autonomiczny', 'Karencja (s)',
       'Próg obecności (min)', 'Model', 'Operacje produkcyjne', 'Dodatkowe reguły',
@@ -112,7 +112,7 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
   cloud: {
     label: 'AbeonCloud',
     description: 'Zdalne sterowanie sesjami z aplikacji mobilnej przez AbeonCloud.',
-    icon: 'layers',
+    icon: 'cloud',
     keywords: [
       'Włącz zdalny most', 'Zezwól na zdalne wznawianie sesji', 'Adres usługi', 'URL usługi',
       'Parowanie', 'Urządzenia', 'Aplikacja mobilna', 'Centrifugo',
@@ -121,7 +121,7 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
   clickup: {
     label: 'ClickUp',
     description: 'Połączenie z ClickUp: token API i test połączenia.',
-    icon: 'chart',
+    icon: 'checkSquare',
     keywords: [
       'Token', 'Token API', 'Zapisz token', 'Testuj połączenie', 'Usuń token', 'Zadania', 'API',
     ],

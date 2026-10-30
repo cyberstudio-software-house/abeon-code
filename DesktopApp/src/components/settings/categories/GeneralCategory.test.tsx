@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
-import { useStore } from '../../store';
-import { tauri } from '../../lib/tauri';
-import { SettingsDialog } from './SettingsDialog';
+import { useStore } from '../../../store';
+import { tauri } from '../../../lib/tauri';
+import { GeneralCategory } from './GeneralCategory';
 
-describe('SettingsDialog session restore mode', () => {
+describe('GeneralCategory session restore mode', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(tauri, 'listAvailableShells').mockResolvedValue([]);
@@ -16,7 +16,7 @@ describe('SettingsDialog session restore mode', () => {
   });
 
   it('switches between asking, resuming automatically and never resuming', () => {
-    render(<SettingsDialog />);
+    render(<GeneralCategory />);
 
     fireEvent.click(screen.getByText('Nie wznawiaj'));
     expect(useStore.getState().sessionRestoreMode).toBe('never');

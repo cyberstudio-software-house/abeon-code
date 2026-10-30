@@ -6,7 +6,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { claudeModelLabel } from '../../lib/models';
 import type { GitUser } from '../../types';
 
-export function SidebarFooter() {
+export function SidebarFooter({ showSettingsButton = true }: { showSettingsButton?: boolean } = {}) {
   const [user, setUser] = useState<GitUser | null>(null);
   useEffect(() => { tauri.getGitUser().then(setUser).catch(() => {}); }, []);
 
@@ -30,13 +30,16 @@ export function SidebarFooter() {
         <div className="text-[12px] font-medium">{name}</div>
         <div className="font-mono text-[10px] text-muted">{modelLabel}</div>
       </div>
-      <button
-        onClick={() => openSettings()}
-        className="ml-auto text-muted hover:text-fg transition-colors"
-        aria-label="Ustawienia"
-      >
-        <Icon name="settings" className="w-3.5 h-3.5" />
-      </button>
+      {showSettingsButton && (
+        <button
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => openSettings()}
+          className="ml-auto text-muted hover:text-fg transition-colors"
+          aria-label="Ustawienia"
+        >
+          <Icon name="settings" className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 }
