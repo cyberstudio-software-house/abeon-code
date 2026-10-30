@@ -45,7 +45,7 @@ export function SessionItem({ session, active, onClick }: Props) {
       >
         {hasAttention ? (
           <span className="shrink-0 inline-flex" title="Czeka na Twoją odpowiedź">
-            <Icon name="bell" className="w-3 h-3 text-accent" aria-label="Czeka na Twoją odpowiedź" />
+            <Icon name="bell" className="w-3 h-3 text-info" aria-label="Czeka na Twoją odpowiedź" />
           </span>
         ) : (
           <span className="shrink-0 inline-flex" title={ACTIVITY_LABEL[session.activity]}>

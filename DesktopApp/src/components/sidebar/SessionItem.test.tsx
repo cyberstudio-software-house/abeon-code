@@ -35,26 +35,39 @@ function agent(over: Partial<SubagentInfo> = {}): SubagentInfo {
 }
 
 describe('SessionItem provider icon', () => {
-  it('renders provider icon tinted by activity (waitingTool → text-warn)', () => {
+  beforeEach(() => {
+    useStore.setState({ attentionSessions: new Set() });
+  });
+
+  it('renders provider icon tinted by activity (waitingTool → text-pink)', () => {
     const session = meta('waitingTool', 'codex');
     const { container } = render(<SessionItem session={session} onClick={() => {}} />);
     const iconSpan = container.querySelector('span[title]');
     expect(iconSpan).toBeTruthy();
     const svg = iconSpan?.querySelector('svg');
     expect(svg).toBeTruthy();
-    expect(svg?.getAttribute('class') ?? '').toContain('text-warn');
+    expect(svg?.getAttribute('class') ?? '').toContain('text-pink');
   });
 
-  it('renders text-success when running', () => {
+  it('renders text-accent when running', () => {
     const { container } = render(<SessionItem session={meta('running')} onClick={() => {}} />);
     const svg = container.querySelector('span[title] svg');
-    expect(svg?.getAttribute('class') ?? '').toContain('text-success');
+    expect(svg?.getAttribute('class') ?? '').toContain('text-accent');
   });
 
-  it('renders text-accent when waitingUser', () => {
+  it('renders text-info when waitingUser', () => {
     const { container } = render(<SessionItem session={meta('waitingUser')} onClick={() => {}} />);
     const svg = container.querySelector('span[title] svg');
-    expect(svg?.getAttribute('class') ?? '').toContain('text-accent');
+    expect(svg?.getAttribute('class') ?? '').toContain('text-info');
+  });
+
+  it('marks a session waiting for the user in info blue', () => {
+    useStore.setState({ attentionSessions: new Set(['abc12345']) });
+    const { container } = render(<SessionItem session={meta('waitingUser')} onClick={() => {}} />);
+    const svg = container.querySelector('span[title] svg');
+    const cls = svg?.getAttribute('class') ?? '';
+    expect(cls).toContain('text-info');
+    expect(cls).not.toContain('text-accent');
   });
 
   it('renders text-muted when idle', () => {

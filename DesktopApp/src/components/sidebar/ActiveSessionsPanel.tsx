@@ -80,7 +80,7 @@ function ActiveSessionRowItem({ row, onClick }: { row: ActiveSessionRow; onClick
       <div
         onClick={onClick}
         className={`pl-2.5 pr-2 py-1.5 cursor-pointer rounded-md border border-l-[3px] bg-bg-elev hover:bg-bg-elev-2 transition-colors ${
-          row.attention ? 'border-accent/50' : 'border-border'
+          row.attention ? 'border-info/50' : 'border-border'
         }`}
         style={{ borderLeftColor: row.color }}
         title={`${row.title}\n${row.projectName} — ${ACTIVITY_LABEL[row.activity]}`}
@@ -91,7 +91,7 @@ function ActiveSessionRowItem({ row, onClick }: { row: ActiveSessionRow; onClick
           </span>
           {row.attention ? (
             <span className="shrink-0 inline-flex mt-0.5" title="Czeka na Twoją odpowiedź">
-              <Icon name="bell" className="w-3 h-3 text-accent" aria-label="Czeka na Twoją odpowiedź" />
+              <Icon name="bell" className="w-3 h-3 text-info" aria-label="Czeka na Twoją odpowiedź" />
             </span>
           ) : (
             <span className="shrink-0 inline-flex mt-0.5" title={ACTIVITY_LABEL[row.activity]}>

@@ -2,9 +2,9 @@ import type { SessionActivity } from '../types';
 import type { IconName } from '../components/shared/Icon';
 
 export const ACTIVITY_DOT: Record<SessionActivity, string> = {
-  running:     'bg-success',
-  waitingUser: 'bg-accent',
-  waitingTool: 'bg-warn',
+  running:     'bg-accent',
+  waitingUser: 'bg-info',
+  waitingTool: 'bg-pink',
   idle:        'bg-muted',
 };
 
@@ -16,9 +16,9 @@ export const ACTIVITY_LABEL: Record<SessionActivity, string> = {
 };
 
 export const ACTIVITY_TEXT: Record<SessionActivity, string> = {
-  running:     'text-success',
-  waitingUser: 'text-accent',
-  waitingTool: 'text-warn',
+  running:     'text-accent',
+  waitingUser: 'text-info',
+  waitingTool: 'text-pink',
   idle:        'text-muted',
 };
 
@@ -28,3 +28,14 @@ export const ACTIVITY_ICON: Record<SessionActivity, IconName> = {
   waitingTool: 'pause',
   idle:        'dot',
 };
+
+export const ACTIVITY_SHORT_LABEL: Record<SessionActivity, string> = {
+  running:     'Pracuje',
+  waitingUser: 'Czeka na Ciebie',
+  waitingTool: 'Czeka na zgodę',
+  idle:        'Bezczynna',
+};
+
+export function activityPulses(activity: SessionActivity): boolean {
+  return activity === 'running';
+}
