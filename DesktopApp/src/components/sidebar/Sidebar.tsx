@@ -67,10 +67,11 @@ export function Sidebar() {
           ref={inputRef}
           value={query}
           onChange={e => setQuery(e.target.value)}
+          aria-label="Szukaj projektu lub sesji"
           placeholder="Szukaj projektu lub sesji…"
           className="bg-transparent outline-none text-[12.5px] text-fg flex-1 min-w-0 placeholder:text-label"
         />
-        <kbd className="shrink-0 font-sans text-[10.5px] text-icon border border-border-strong rounded-[5px] px-[5px] py-px">{searchBinding}</kbd>
+        <kbd aria-hidden="true" className="shrink-0 font-sans text-[10.5px] text-icon border border-border-strong rounded-[5px] px-[5px] py-px">{searchBinding}</kbd>
       </label>
 
       {supervisorEnabled && <SupervisorEntry />}

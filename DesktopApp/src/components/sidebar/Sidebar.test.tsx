@@ -39,3 +39,20 @@ describe('Sidebar search shortcut', () => {
     expect(document.activeElement).toBe(input);
   });
 });
+
+describe('Sidebar search field', () => {
+  beforeEach(() => {
+    useStore.setState({
+      loadProjects: vi.fn(),
+      loadActivity: vi.fn(),
+      refreshActiveSessions: vi.fn(),
+      settingsOpen: false,
+    } as never);
+  });
+
+  it('keeps the search input accessible by its name, not by the shortcut hint', () => {
+    render(<Sidebar />);
+    const input = screen.getByRole('textbox', { name: 'Szukaj projektu lub sesji' });
+    expect(input).toBe(screen.getByPlaceholderText('Szukaj projektu lub sesji…'));
+  });
+});
