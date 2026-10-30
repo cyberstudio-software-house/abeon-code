@@ -15,17 +15,19 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 
 ### Frontend (`src/`)
 - `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `panesSlice`, `actionsSlice`, `gitSlice`, `terminalDrawersSlice`. Composed in `store/index.ts`.
+- `lib/settingsCategories.ts` — settings categories (groups, labels, icons, search keywords), `filterSettingsCategories` and the "Terminal is new" flag; `lib/terminalAppearance.ts` — terminal fonts, palettes and xterm option builders; `lib/toolStatus.ts` — pairs tool-use blocks with their results for the history view; `lib/activity.ts` — session activity labels and colours (amber = running, blue = waiting for you).
 - `lib/tauri.ts` — **single typed wrapper** over `invoke()`/`listen()`. Every IPC call lives here; do not call `invoke` directly from components.
 - `types/` — TS types, several are ts-rs-generated from Rust (`PtyKind.ts`, `GitStatus.ts`, etc.) — do not edit by hand.
 - `components/`
   - `layout/AppShell.tsx` — three-column shell with draggable resizers; persists widths via store.
-  - `layout/TitleBar.tsx` — custom titlebar.
+  - `layout/AppHeader.tsx` — the 44 px app header (logo, project row or breadcrumb, active-session count); see "Header project row and pane bar".
   - `sidebar/` — left column: project list, sessions, sort menu, search.
-  - `center/` — middle column: `CenterPanel` → `PaneLayout` (renders the pane tree: one tab bar per pane, one `TabPanel` content layer per tab, `PaneResizers`, `PaneDragOverlay` + `usePaneDrag` for the tab-drag gesture). **Tabs and panes are managed here.** `TerminalDrawerChrome` + `useTerminalDrawerShortcuts` render the per-session terminal drawer (layers computed by `lib/paneLayers.ts`, geometry in `lib/drawerGeometry.ts`).
+  - `center/` — middle column: `CenterPanel` → `PaneLayout` (renders the pane tree: one `PaneBar` and one card frame per pane, one `TabPanel` content layer per tab, `PaneResizers`, `PaneDragOverlay` + `usePaneDrag` for the tab-drag gesture). `HeaderProjectRow` (project groups of the focused pane, mounted in `AppHeader`) and `useTabBarActions` (close guards, rename, menus, detach) live here too. **Tabs and panes are managed here.** `TerminalDrawerChrome` + `useTerminalDrawerShortcuts` render the per-session terminal drawer (layers computed by `lib/paneLayers.ts`, geometry in `lib/drawerGeometry.ts`).
   - `right/` — right column: Git panel (`GitSection` with tabs: working-tree changes / commit history via `GitHistory` + `CommitDiffDialog`), Actions list, runnable scripts.
-  - `terminal/TerminalView.tsx` — xterm wrapper for any PTY (claude, action, shell).
+  - `terminal/TerminalView.tsx` — xterm wrapper for any PTY (claude, action, shell); `useTerminalAppearance.ts` feeds it the persisted appearance settings.
   - `history/` — session history viewer (markdown blocks).
-  - `dialogs/` — modal dialogs (`ConfirmDialog`, `SettingsDialog`, `AddProjectDialog`, `AddActionDialog`, `RestoreSessionsDialog`).
+  - `settings/` — the full-window settings view: `SettingsView` (search, nav column, page), `SettingsNav`, `controls.tsx` (shared `SettingsPage`/`SettingsSection`/`SettingsRow`, `Segmented`, `Switch`, `Stepper`, `SelectField`) and `categories/*` (one page per category, plus `TerminalPreview` and `CustomPaletteEditor`). See "Settings view".
+  - `dialogs/` — modal dialogs (`ConfirmDialog`, `AddProjectDialog`, `AddActionDialog`, `RestoreSessionsDialog`, ClickUp and diff dialogs).
   - `shared/` — `Icon`, `IconBtn`, `Kbd`.
 
 ### Backend (`src-tauri/src/`)
@@ -75,22 +77,36 @@ the `ConfirmDialog` owned by `useTabBarActions.tsx`. Helpers there: `isActivePro
 `closeWithGuard()`. Close triggers: X button, middle-click on tab, Ctrl/Cmd+W (global capture-phase
 listener).
 
-### Tab bar layout modes
+### Header project row and pane bar
 
-Setting `tabLayoutMode` (`'classic' | 'stacked'`, persisted) picks the renderer `PaneLayout` mounts
-per pane:
+The old tab bar is split in two. The window header (`layout/AppHeader.tsx`, 44 px, variants `main`,
+`project` and `session`) hosts `center/HeaderProjectRow.tsx`: one button per project group of the
+**focused pane** (`usePaneTabs(focusedPaneId)`), so it follows pane focus. It calls
+`useTabBarActions(tabs, undefined, { closeShortcut: false })`; the header needs the menus and
+overlays but must not register a second Ctrl/Cmd+W listener. Each pane gets a `center/PaneBar.tsx`
+below it with the sessions of the pane's selected project, the `+`/`$` buttons and the status of the
+active tab (activity label or "Tylko odczyt" for history mode). While the settings view is open the
+header shows a breadcrumb ("Ustawienia / <category>") instead of the project row, and the main
+window shows "N aktywne sesje" (detached windows: "N aktywne") for live session/shell tabs and drawer
+terminals. `project` windows show the project breadcrumb; `session` windows show the logo only plus
+the pane bar.
 
-- `classic` — `TabBar.tsx`: one 32 px row, projects collapsed into inline groups; `TitleBar` visible.
-- `stacked` — `StackedTabBar.tsx`: 60 px, projects on the top row and the sessions of the active
-  tab's project below (with `+`/`$`); `TitleBar` hidden so the side columns reach the top of the
-  window (on macOS a 28 px `data-tauri-drag-region` strip replaces it, because `titleBarStyle:
-  "Overlay"` floats the traffic lights over the content).
+Both bars share `useTabBarActions.tsx` (close guards, rename, context menus, detach, and the
+Ctrl+W listener, owned by `PaneBar`) and `TabItem.tsx`.
 
-Both renderers share `useTabBarActions.tsx` (close guards, rename, context menus, detach, Ctrl+W)
-and `TabItem.tsx`. The bar's height is **not** a constant: `tabBarHeight(mode)` in
-`lib/paneGeometry.ts` feeds `PaneLayout` (content-layer offsets), `usePaneDrag` (`overTabBar`,
-`canSplit`) and `PaneResizers` (minimum pane height). A new renderer must be added there too, or
-content layers will overlap the bar.
+Pane geometry is in `lib/paneGeometry.ts` and `lib/drawerGeometry.ts`. `PANE_BAR_HEIGHT` (48) is
+the single bar height; it feeds `PaneLayout`, `computePaneLayers`, `usePaneDrag` (`overTabBar`,
+`canSplit`), `PaneResizers` (minimum pane height) and the drawer layout. A pane is a card: the
+frame rect `paneFrameRect` is the pane rect inset by `PANE_GAP / 2` (`PANE_GAP` 8), and
+`paneBarRect` / `paneContentRect` further inset it by `PANE_BORDER` (1) and split it at
+`barHeight`. `PaneLayout` draws, in this order, per-pane surface divs (`data-pane-surface`, rounded
+`bg-bg-elev`, behind everything), the bars, the content layers, drawer chrome, and last the frames
+(`data-pane-frame`, `z-20`, border only). Frames sit **over** the layers on purpose: a
+`box-shadow: 0 0 0 6px var(--color-bg)` in the ground colour trims the square corners of the xterm
+canvases into the card's rounded corners. The frame of the focused pane is `border-focus`, but only
+when there is more than one pane. The container has `margin-top: -PANE_GAP / 2` so the card touches
+the header. Surfaces, bars and frames are siblings of the layers, never wrappers (see the content-layer
+gotchas).
 
 ### Terminal drawer
 
@@ -114,7 +130,7 @@ never see them. Splits reuse `PaneNode`, with every leaf id equal to the termina
   stole DOM focus. The drawer header `preventDefault`s mousedown for the same reason.
 - A hidden drawer (`open: false`) leaves a `CollapsedDrawerBar` under its session, listed by
   `computePaneLayers` as `collapsedDrawers` (active tab of a pane only). The session layer gives up
-  `DRAWER_HEADER_HEIGHT` (`computeCollapsedDrawerLayout`); the hidden terminals keep their open-size
+  `DRAWER_HEADER_HEIGHT` (36 px, shared by the open and the collapsed header; `computeCollapsedDrawerLayout`); the hidden terminals keep their open-size
   rects so their PTYs are not resized. The bar sits outside the content layers, so its click calls
   `focusPane` itself before `showTerminalDrawer`.
 - `HistoryView` leaves `Ctrl/Cmd+F` to the shell while its session's drawer holds the keyboard.
@@ -151,10 +167,10 @@ Two window modes beyond the main shell, both routed by `lib/windowMode.ts` (`?vi
 webview URL) and rendered by `layout/DetachedShell.tsx`:
 
 - `session` — seeded with one session tab (`lib/detachSession.ts`, label `session-<id>`), but the
-  window is a full pane host: its per-pane tab bar carries the `+`/`$` buttons and splits work
-  exactly as in the main window.
+  window is a full pane host: its per-pane `PaneBar` carries the `+`/`$` buttons and splits work
+  exactly as in the main window. Header variant `session`.
 - `group` — every tab of one project (`lib/detachGroup.ts`, label `project-<id>`); the tab list
-  travels as base64 JSON in the query string.
+  travels as base64 JSON in the query string. Header variant `project`.
 
 New window labels **must** be covered by `src-tauri/capabilities/default.json` (`windows` array) —
 an uncovered label gets zero permissions and every `invoke` from it fails at runtime, which no
@@ -206,12 +222,62 @@ dropped the app because its main thread stopped reading events (see the main-thr
 ## Keyboard shortcuts (global)
 
 - `Ctrl/Cmd+K` — focus sidebar search (`Sidebar.tsx`, document listener **with `capture: true`** so it wins over xterm's textarea while a session/terminal is focused).
-- `Ctrl/Cmd+W` — close active tab (`TabBar.tsx`, document listener **with `capture: true`** so it wins over xterm's textarea).
+- `Ctrl/Cmd+W` — close active tab (`useTabBarActions.tsx`, mounted by `PaneBar`; `HeaderProjectRow` passes `closeShortcut: false`; document listener **with `capture: true`** so it wins over xterm's textarea).
 - `Ctrl/Cmd+T` — toggle the session terminal drawer, or open a terminal tab outside a session (`AppShell.tsx`). While the drawer has focus, `Ctrl/Cmd+Shift+O` / `Ctrl/Cmd+Shift+E` split right / down and `Ctrl/Cmd+Alt+arrows` move between splits (`useTerminalDrawerShortcuts.ts`, capture-phase).
 
 Pattern when adding a new global shortcut that may conflict with xterm: register on `document` in `useEffect` with `{ capture: true }`, then `preventDefault()` + `stopPropagation()`.
 
 Every global handler starts with `if (useStore.getState().settingsOpen) return;`: the settings view sits over the still-mounted shell, and capture listeners on `document` would otherwise keep acting on hidden tabs. The shortcut recorder in `ShortcutsCategory` and the Esc handlers of dialogs/`SettingsView` are deliberately not gated.
+
+## Settings view
+
+Settings is not a dialog. `AppShell` renders `SettingsView` (`components/settings/`) as an absolute
+layer (`top-11`, under the header) over the shell, whose columns are wrapped in
+`<div inert={settingsOpen}>`. Nothing is unmounted, so every pane, terminal, PTY and scrollback
+stays alive; `inert` takes the hidden columns out of the tab order and the pointer, and the header
+stays usable (its breadcrumb shows the open category). Store: `settingsOpen`, `settingsCategory`,
+`openSettings(category?)`, `setSettingsCategory`, `closeSettings` (`settingsSlice`).
+
+- **Focus**: when `settingsOpen` flips on, `AppShell` remembers `document.activeElement` (unless it
+  is `body`) in `focusBeforeSettings` and blurs it, so xterm stops swallowing keys; when it flips
+  off it re-focuses that element if it is still connected. `SettingsView` closes on Esc (skipped
+  when `e.defaultPrevented` or a `[role="dialog"]` is open) and via "Wróć do sesji".
+- **Shortcuts are paused** while it is open (see "Keyboard shortcuts"): every global capture
+  handler returns early on `settingsOpen`. New global handlers must do the same.
+- **Pages**: `lib/settingsCategories.ts` defines the groups (Aplikacja, Agenci, Integracje), the
+  categories and their `keywords`. The search box filters the nav through `filterSettingsCategories`
+  (diacritics and case insensitive, `ł` folded) against the label and the keywords, so **a new
+  setting needs its label and description added to its category's `keywords`** or search will not
+  find it. The "Nowe" badge on Terminal is cleared by `markTerminalCategorySeen()`
+  (localStorage `abeoncode.settings.terminalSeen`).
+- **Controls**: pages are built from `controls.tsx` (`SettingsPage`, `SettingsSection`,
+  `SettingsRow`, `Segmented`, `Switch`, `Stepper`, `SelectField`, `FIELD_CLASS`, button classes);
+  reuse them instead of restyling.
+
+## Terminal appearance
+
+The Terminal settings page (`categories/TerminalCategory.tsx`, with a live `TerminalPreview` and a
+`CustomPaletteEditor` that takes an xterm.js theme JSON via `parseXtermTheme`) edits seven persisted
+settings: `terminalFontId` (`geistMono` | `jetbrainsMono` | `ibmPlexMono` | `system`),
+`terminalFontSize` (10–20), `terminalLineHeight` (1.4 | 1.5 | 1.65), `terminalPaletteId`
+(`grafit` | `grafitHighContrast` | `legacy` | `custom`), `terminalCustomPalette`,
+`terminalCursorStyle` (`block` | `bar` | `underline`) and `terminalCursorBlink`. They are in
+`PERSISTED_KEYS` and the serialize/deserialize switches like the rest, with validators in
+`lib/terminalAppearance.ts`; `resetTerminalAppearance` restores `TERMINAL_DEFAULTS`.
+
+- `lib/terminalAppearance.ts` owns fonts, palettes and `terminalOptions(appearance, appTheme,
+  accent)`. In the light theme the palette is always `LIGHT_COLORS`, whatever palette is picked.
+- `terminal/useTerminalAppearance.ts` selects the seven settings (with `useShallow`) for
+  `TerminalView`, which builds `options` from them and the current `data-theme`/accent.
+- **Live update**: changing a setting must not remount a terminal. `TerminalView` assigns
+  `term.options.*` in an effect and refits (only when visible and measurable), so the PTY gets the
+  new size through `onResize`. After the spawn it also syncs the PTY size when `term.cols/rows`
+  moved while spawning.
+- **Fonts**: bundled with `@fontsource/*` (imported in `main.tsx`: Geist Sans for the UI, Geist
+  Mono / JetBrains Mono / IBM Plex Mono for terminals), so nothing depends on the system. xterm
+  measures glyphs once per font, and a webfont loads lazily, so the effect waits for
+  `document.fonts.load(...)` and then toggles `fontFamily` (fallback first, then the real one) to
+  force a re-measure before the last refit. Without it the cells keep the fallback font's width.
 
 ## Supervisor agent
 

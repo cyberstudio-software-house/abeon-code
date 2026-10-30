@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatWindowTitle, formatHeaderTitle } from './windowTitle';
+import { formatWindowTitle } from './windowTitle';
 
 describe('formatWindowTitle', () => {
   it('shows just the app name when no tab is active', () => {
@@ -49,25 +49,5 @@ describe('formatWindowTitle', () => {
 
   it('ignores the project when there is no active tab', () => {
     expect(formatWindowTitle(null, 'Project ABC')).toBe('AbeonCode');
-  });
-});
-
-describe('formatHeaderTitle', () => {
-  it('shows just the app name when no tab is active', () => {
-    expect(formatHeaderTitle(null)).toBe('AbeonCode');
-    expect(formatHeaderTitle('   ')).toBe('AbeonCode');
-  });
-
-  it('shows the bare title when there is no project', () => {
-    expect(formatHeaderTitle('ABC')).toBe('ABC');
-  });
-
-  it('prefixes the project name before the title, without the app-name suffix', () => {
-    expect(formatHeaderTitle('ABC', 'Project ABC')).toBe('Project ABC :: ABC');
-  });
-
-  it('does not truncate the title (the header truncates via CSS)', () => {
-    const long = 'a'.repeat(60);
-    expect(formatHeaderTitle(long, 'Proj')).toBe(`Proj :: ${long}`);
   });
 });

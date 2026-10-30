@@ -20,9 +20,3 @@ export function formatWindowTitle(tabTitle: string | null, projectName?: string 
     : trimmed;
   return `${withProject(projectName, title)} — ${APP_NAME}`;
 }
-
-export function formatHeaderTitle(tabTitle: string | null, projectName?: string | null): string {
-  const trimmed = tabTitle?.trim() ?? '';
-  if (!trimmed) return APP_NAME;
-  return withProject(projectName, trimmed);
-}
