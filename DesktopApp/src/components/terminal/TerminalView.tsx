@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { Terminal, type ILinkProvider, type ILink, type IBufferRange, type ITheme } from '@xterm/xterm';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Terminal, type ILinkProvider, type ILink, type IBufferRange } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { openUrl } from '@tauri-apps/plugin-opener';
@@ -12,6 +12,8 @@ import { getCliModelString } from '../../lib/models';
 import type { Provider } from '../../types';
 import { formatTauriError } from '../../lib/errors';
 import { toast } from 'sonner';
+import { terminalOptions } from '../../lib/terminalAppearance';
+import { useTerminalAppearance } from './useTerminalAppearance';
 
 type Props = {
   projectId?: number;
@@ -35,32 +37,13 @@ function isModClick(e: MouseEvent) {
   return e.ctrlKey || e.metaKey;
 }
 
-function buildXtermTheme(): ITheme {
-  const cs = getComputedStyle(document.documentElement);
-  const v = (name: string) => cs.getPropertyValue(name).trim();
-  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+type AppEnv = { appTheme: 'dark' | 'light'; accent: string };
+
+function readAppEnv(): AppEnv {
+  const root = document.documentElement;
   return {
-    background:  v('--color-bg-elev') || (isDark ? '#1a1917' : '#ffffff'),
-    foreground:  v('--color-fg') || (isDark ? '#e8e6e1' : '#1a1a1a'),
-    cursor:      v('--color-accent') || '#b78640',
-    cursorAccent: v('--color-bg-elev') || '#ffffff',
-    selectionBackground: isDark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
-    black:   isDark ? '#1a1917' : '#1a1a1a',
-    red:     '#c14a3d',
-    green:   '#61c454',
-    yellow:  '#f4be4f',
-    blue:    '#5b9bd5',
-    magenta: '#b78640',
-    cyan:    '#4db8a4',
-    white:   isDark ? '#e8e6e1' : '#52504a',
-    brightBlack:   isDark ? '#6b6860' : '#94918a',
-    brightRed:     '#ec6a5e',
-    brightGreen:   '#7dd56f',
-    brightYellow:  '#f5cf6e',
-    brightBlue:    '#7db8e8',
-    brightMagenta: '#d4a04e',
-    brightCyan:    '#6dd4bf',
-    brightWhite:   isDark ? '#faf8f5' : '#1a1a1a',
+    appTheme: root.getAttribute('data-theme') === 'light' ? 'light' : 'dark',
+    accent: getComputedStyle(root).getPropertyValue('--color-accent').trim() || '#F0B44C',
   };
 }
 
@@ -129,16 +112,20 @@ export function TerminalView({ projectId, kind, ptyId, provider, sessionId, fres
   claimsKeyboardRef.current = claimsKeyboard;
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
+  const appearance = useTerminalAppearance();
+  const [appEnv, setAppEnv] = useState(readAppEnv);
+  const options = useMemo(
+    () => terminalOptions(appearance, appEnv.appTheme, appEnv.accent),
+    [appearance, appEnv],
+  );
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
 
   useEffect(() => {
     if (!containerRef.current) return;
     const container = containerRef.current;
     const term = new Terminal({
-      fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
-      fontSize: 13,
-      lineHeight: 1.4,
-      theme: buildXtermTheme(),
-      cursorBlink: true,
+      ...optionsRef.current,
       convertEol: true,
     });
     const fit = new FitAddon();
@@ -300,11 +287,38 @@ export function TerminalView({ projectId, kind, ptyId, provider, sessionId, fres
   useEffect(() => {
     const root = document.documentElement;
     const observer = new MutationObserver(() => {
-      if (termRef.current) termRef.current.options.theme = buildXtermTheme();
+      const next = readAppEnv();
+      setAppEnv(prev => (prev.appTheme === next.appTheme && prev.accent === next.accent ? prev : next));
     });
     observer.observe(root, { attributes: true, attributeFilter: ['data-theme'] });
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const fit = fitRef.current;
+    const container = containerRef.current;
+    const refit = () => {
+      if (fit && visibleRef.current && container && container.offsetWidth > 0 && container.offsetHeight > 0) {
+        fit.fit();
+      }
+    };
+    term.options.fontFamily = options.fontFamily;
+    term.options.fontSize = options.fontSize;
+    term.options.lineHeight = options.lineHeight;
+    term.options.cursorStyle = options.cursorStyle;
+    term.options.cursorBlink = options.cursorBlink;
+    term.options.theme = options.theme;
+    refit();
+    let stale = false;
+    document.fonts?.load(`${options.fontSize}px ${options.fontFamily}`).then(() => {
+      if (stale || termRef.current !== term) return;
+      term.options.fontFamily = options.fontFamily;
+      refit();
+    }).catch(() => {});
+    return () => { stale = true; };
+  }, [options]);
 
   const actionPtyId = useStore(s =>
     kind === 'action' && actionId != null ? s.runningActions[actionId]?.ptyId : undefined
@@ -402,7 +416,7 @@ export function TerminalView({ projectId, kind, ptyId, provider, sessionId, fres
   }, []);
 
   return (
-    <div className="h-full w-full bg-bg-elev p-4 pb-6">
+    <div className="h-full w-full p-4 pb-6" style={{ backgroundColor: options.theme.background }}>
       <div ref={containerRef} className="h-full w-full" />
     </div>
   );

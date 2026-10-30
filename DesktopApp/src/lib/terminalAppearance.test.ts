@@ -1,8 +1,35 @@
 import { describe, it, expect } from 'vitest';
 import {
-  buildTerminalTheme, parseXtermTheme, isTerminalColors, TERMINAL_PALETTES,
+  buildTerminalTheme, parseXtermTheme, isTerminalColors, terminalOptions, TERMINAL_FONTS, TERMINAL_PALETTES,
   type TerminalColors,
 } from './terminalAppearance';
+
+describe('terminalOptions', () => {
+  const appearance = {
+    fontId: 'ibmPlexMono' as const,
+    fontSize: 15,
+    lineHeight: 1.5 as const,
+    paletteId: 'legacy' as const,
+    customPalette: null,
+    cursorStyle: 'underline' as const,
+    cursorBlink: false,
+  };
+
+  it('maps the font id to its css family and passes the rest through', () => {
+    const options = terminalOptions(appearance, 'dark', '#F0B44C');
+    expect(options.fontFamily).toBe(TERMINAL_FONTS.find(f => f.id === 'ibmPlexMono')!.css);
+    expect(options.fontSize).toBe(15);
+    expect(options.lineHeight).toBe(1.5);
+    expect(options.cursorStyle).toBe('underline');
+    expect(options.cursorBlink).toBe(false);
+  });
+
+  it('builds the theme from the palette, app theme and accent', () => {
+    expect(terminalOptions(appearance, 'dark', '#F0B44C').theme).toEqual(
+      buildTerminalTheme('legacy', null, 'dark', '#F0B44C'),
+    );
+  });
+});
 
 describe('buildTerminalTheme', () => {
   it('builds the Grafit theme by default', () => {

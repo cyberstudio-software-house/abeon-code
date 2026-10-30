@@ -11,13 +11,16 @@ const probe = vi.hoisted(() => ({
   selectionCbs: [] as Array<() => void>,
   keyHandlers: [] as Array<(e: KeyboardEvent) => boolean>,
   openedContainers: [] as HTMLElement[],
+  terminals: [] as Array<{ options: Record<string, any> }>,
+  fit: vi.fn(),
 }));
 
 vi.mock('@xterm/xterm', () => ({
   Terminal: class {
     cols = 80;
     rows = 24;
-    options: Record<string, unknown> = {};
+    options: Record<string, any>;
+    constructor(options: Record<string, unknown> = {}) { this.options = { ...options }; probe.terminals.push(this); }
     buffer = { active: { getLine: () => null } };
     loadAddon() {}
     open(container: HTMLElement) { probe.openedContainers.push(container); }
@@ -32,7 +35,7 @@ vi.mock('@xterm/xterm', () => ({
     onResize() { return { dispose() {} }; }
   },
 }));
-vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {} } }));
+vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() { probe.fit(); } } }));
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class {} }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
@@ -222,6 +225,71 @@ describe('TerminalView focus', () => {
     expect(probe.spawned).toBe(1);
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledWith(0);
+  });
+});
+
+describe('TerminalView appearance', () => {
+  beforeEach(() => {
+    probe.terminals = [];
+    probe.openedContainers = [];
+    probe.fit.mockClear();
+    probe.spawned = 0;
+    useStore.getState().resetTerminalAppearance();
+    useStore.setState({ projects: [{ id: 1, name: 'P', path: '/p' }] as never });
+  });
+
+  it('uses the Grafit palette and the default font by default', async () => {
+    await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+
+    const options = probe.terminals[0].options;
+    expect(options.theme.background).toBe('#0F1012');
+    expect(options.fontSize).toBe(13);
+    expect(options.lineHeight).toBe(1.65);
+    expect(options.cursorStyle).toBe('block');
+  });
+
+  it('applies appearance changes to an open terminal and refits', async () => {
+    await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+    const options = probe.terminals[0].options;
+
+    const fitsBefore = probe.fit.mock.calls.length;
+    act(() => { useStore.getState().setTerminalFontSize(16); });
+    expect(options.fontSize).toBe(16);
+    expect(probe.fit.mock.calls.length).toBeGreaterThan(fitsBefore);
+
+    act(() => { useStore.getState().setTerminalCursorStyle('bar'); });
+    expect(options.cursorStyle).toBe('bar');
+
+    act(() => { useStore.getState().setTerminalPaletteId('legacy'); });
+    expect(options.theme.background).toBe('#1a1917');
+    expect(probe.spawned).toBe(1);
+  });
+
+  it('opens and spawns before the font loads, then refits once it resolves', async () => {
+    let resolveLoad!: () => void;
+    const load = vi.fn(() => new Promise<void>(resolve => { resolveLoad = resolve; }));
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    try {
+      await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+      expect(probe.openedContainers).toHaveLength(1);
+      expect(probe.spawned).toBe(1);
+      expect(load).toHaveBeenCalledWith("13px 'Geist Mono', ui-monospace, monospace");
+
+      const fitsBefore = probe.fit.mock.calls.length;
+      await act(async () => { resolveLoad(); });
+      expect(probe.fit.mock.calls.length).toBeGreaterThan(fitsBefore);
+    } finally {
+      Reflect.deleteProperty(document, 'fonts');
+    }
+  });
+
+  it('paints the padding with the terminal background', async () => {
+    await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+
+    const wrapper = probe.openedContainers[0].parentElement!;
+    expect(wrapper.style.backgroundColor).toBe('rgb(15, 16, 18)');
+    act(() => { useStore.getState().setTerminalPaletteId('legacy'); });
+    expect(wrapper.style.backgroundColor).toBe('rgb(26, 25, 23)');
   });
 });
 

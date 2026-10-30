@@ -911,12 +911,14 @@ describe('PaneLayout terminal drawer', () => {
     expect(screen.getByRole('button', { name: 'Terminal' }).getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('paints the live session on the console surface and the drawer shell on the sunken one', () => {
+  it('leaves the terminal surface to the terminal for both the live session and the drawer shell', () => {
     const { container } = render(<PaneLayout />);
     act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
     const [id] = drawerIds();
-    expect(container.querySelector('[data-tab-layer="s1"] > div')!.className).toContain('bg-console');
-    expect(container.querySelector(`[data-tab-layer="${id}"] > div`)!.className).toContain('bg-sunken');
+    for (const layerId of ['s1', id]) {
+      const className = container.querySelector(`[data-tab-layer="${layerId}"] > div`)!.className;
+      expect(className).not.toMatch(/\bbg-(console|sunken)\b/);
+    }
   });
 
   it('rounds the focus ring corners that meet the card bottom', () => {

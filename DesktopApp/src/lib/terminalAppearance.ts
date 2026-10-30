@@ -150,6 +150,39 @@ export function buildTerminalTheme(
   };
 }
 
+export type TerminalAppearance = {
+  fontId: TerminalFontId;
+  fontSize: number;
+  lineHeight: TerminalLineHeight;
+  paletteId: TerminalPaletteId;
+  customPalette: TerminalColors | null;
+  cursorStyle: TerminalCursorStyle;
+  cursorBlink: boolean;
+};
+
+export function terminalOptions(
+  appearance: TerminalAppearance,
+  appTheme: 'dark' | 'light',
+  accent: string,
+): {
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
+  cursorStyle: TerminalCursorStyle;
+  cursorBlink: boolean;
+  theme: ITheme;
+} {
+  const font = TERMINAL_FONTS.find(f => f.id === appearance.fontId) ?? TERMINAL_FONTS[0];
+  return {
+    fontFamily: font.css,
+    fontSize: appearance.fontSize,
+    lineHeight: appearance.lineHeight,
+    cursorStyle: appearance.cursorStyle,
+    cursorBlink: appearance.cursorBlink,
+    theme: buildTerminalTheme(appearance.paletteId, appearance.customPalette, appTheme, accent),
+  };
+}
+
 export function parseXtermTheme(
   raw: string,
 ): { ok: true; colors: TerminalColors } | { ok: false; error: string } {
