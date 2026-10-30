@@ -29,4 +29,11 @@ describe('SidebarFooter', () => {
     expect(screen.getByText('Ada Lovelace')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Ustawienia' })).toBeNull();
   });
+
+  it('shows two initials for the display name', async () => {
+    useStore.setState({ displayName: 'Piotr Szweda' });
+    render(<SidebarFooter />);
+    await act(async () => {});
+    expect(screen.getByText('PS')).toBeInTheDocument();
+  });
 });

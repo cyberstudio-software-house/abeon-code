@@ -9,7 +9,6 @@ import { SortMenu } from './SortMenu';
 import { ActiveSessionsPanel } from './ActiveSessionsPanel';
 import { SupervisorEntry } from '../supervisor/SupervisorEntry';
 import { Icon } from '../shared/Icon';
-import { Kbd } from '../shared/Kbd';
 import { AddProjectDialog } from '../dialogs/AddProjectDialog';
 import { matchesShortcut, getBinding, formatBinding } from '../../lib/shortcuts';
 
@@ -61,44 +60,41 @@ export function Sidebar() {
     : projects;
 
   return (
-    <aside className="h-full bg-transparent px-2.5 pt-[18px] pb-2.5 text-[13px] flex flex-col">
-      <div className="flex items-center justify-between">
-        <div className="text-[10px] tracking-[0.14em] uppercase text-muted font-medium">
-          Projekty
-        </div>
-        <div className="flex items-center gap-1">
-          <SortMenu />
-          <button
-            onClick={() => setAddOpen(true)}
-            className="text-muted hover:text-fg transition-colors p-0.5"
-            aria-label="Dodaj projekt"
-          >
-            <Icon name="plus" className="w-3.5 h-3.5" strokeWidth={2} />
-          </button>
-        </div>
-      </div>
-      {addOpen && <AddProjectDialog onClose={() => setAddOpen(false)} />}
-
-      <div className="mt-2.5 flex items-center gap-2 px-2.5 py-[7px] bg-bg-elev border border-border rounded-md">
-        <Icon name="search" className="w-[13px] h-[13px] text-muted" />
+    <aside aria-label="Projekty i sesje" className="h-full bg-transparent p-1 pb-0 text-[13px] flex flex-col gap-3.5">
+      <label className="h-[34px] shrink-0 flex items-center gap-2 pl-2.5 pr-2 rounded-[9px] bg-field border border-border text-label focus-within:border-border-strong">
+        <Icon name="search" className="w-3.5 h-3.5 shrink-0" strokeWidth={1.5} />
         <input
           ref={inputRef}
           value={query}
           onChange={e => setQuery(e.target.value)}
           placeholder="Szukaj projektu lub sesji…"
-          className="bg-transparent outline-none text-[12px] text-fg flex-1 placeholder:text-muted"
+          className="bg-transparent outline-none text-[12.5px] text-fg flex-1 min-w-0 placeholder:text-label"
         />
-        <Kbd>{searchBinding}</Kbd>
-      </div>
+        <kbd className="shrink-0 font-sans text-[10.5px] text-icon border border-border-strong rounded-[5px] px-[5px] py-px">{searchBinding}</kbd>
+      </label>
 
       {supervisorEnabled && <SupervisorEntry />}
 
       <ActiveSessionsPanel />
 
-      <ul className="mt-3 space-y-0.5 overflow-y-auto scroll-thin flex-1 pb-3">
-        {filtered.length === 0 && <li className="text-muted text-[12px] px-2.5">— pusto —</li>}
-        {filtered.map(p => <ProjectItem key={p.id} project={p} />)}
-      </ul>
+      <section aria-labelledby="sidebar-projects" className="flex flex-col gap-1 min-h-0 flex-1">
+        <div className="h-7 shrink-0 flex items-center gap-0.5 pl-1.5 pr-0.5">
+          <h2 id="sidebar-projects" className="flex-1 m-0 text-[11px] font-medium tracking-[0.06em] uppercase text-label">Projekty</h2>
+          <SortMenu />
+          <button
+            onClick={() => setAddOpen(true)}
+            className="w-[26px] h-[26px] shrink-0 rounded-md grid place-items-center text-icon hover:bg-bg-elev-2 hover:text-fg transition-colors"
+            aria-label="Dodaj projekt"
+          >
+            <Icon name="plus" className="w-3.5 h-3.5" strokeWidth={1.5} />
+          </button>
+        </div>
+        {addOpen && <AddProjectDialog onClose={() => setAddOpen(false)} />}
+        <ul className="flex flex-col gap-px overflow-y-auto scroll-thin flex-1 pb-3">
+          {filtered.length === 0 && <li className="text-muted text-[12px] px-2.5">— pusto —</li>}
+          {filtered.map(p => <ProjectItem key={p.id} project={p} />)}
+        </ul>
+      </section>
 
       <SidebarFooter />
     </aside>

@@ -34,34 +34,31 @@ function agent(over: Partial<SubagentInfo> = {}): SubagentInfo {
   };
 }
 
-describe('SessionItem provider icon', () => {
+describe('SessionItem activity marker', () => {
   beforeEach(() => {
     useStore.setState({ attentionSessions: new Set() });
   });
 
-  it('renders provider icon tinted by activity (waitingTool → text-pink)', () => {
-    const session = meta('waitingTool', 'codex');
-    const { container } = render(<SessionItem session={session} onClick={() => {}} />);
-    const iconSpan = container.querySelector('span[title]');
-    expect(iconSpan).toBeTruthy();
-    const svg = iconSpan?.querySelector('svg');
-    expect(svg).toBeTruthy();
-    expect(svg?.getAttribute('class') ?? '').toContain('text-pink');
+  it('draws a pink dot when waiting for a tool', () => {
+    const { container } = render(<SessionItem session={meta('waitingTool', 'codex')} onClick={() => {}} />);
+    const dot = container.querySelector('span[title]');
+    expect(dot?.getAttribute('class') ?? '').toContain('bg-pink');
+    expect(dot?.getAttribute('class') ?? '').not.toContain('activity-pulse');
   });
 
-  it('renders text-accent when running', () => {
+  it('draws a pulsing accent dot when running', () => {
     const { container } = render(<SessionItem session={meta('running')} onClick={() => {}} />);
-    const svg = container.querySelector('span[title] svg');
-    expect(svg?.getAttribute('class') ?? '').toContain('text-accent');
+    const cls = container.querySelector('span[title]')?.getAttribute('class') ?? '';
+    expect(cls).toContain('bg-accent');
+    expect(cls).toContain('activity-pulse');
   });
 
-  it('renders text-info when waitingUser', () => {
+  it('draws an info dot when waiting for the user', () => {
     const { container } = render(<SessionItem session={meta('waitingUser')} onClick={() => {}} />);
-    const svg = container.querySelector('span[title] svg');
-    expect(svg?.getAttribute('class') ?? '').toContain('text-info');
+    expect(container.querySelector('span[title]')?.getAttribute('class') ?? '').toContain('bg-info');
   });
 
-  it('marks a session waiting for the user in info blue', () => {
+  it('replaces the dot with an info bell when the session needs attention', () => {
     useStore.setState({ attentionSessions: new Set(['abc12345']) });
     const { container } = render(<SessionItem session={meta('waitingUser')} onClick={() => {}} />);
     const svg = container.querySelector('span[title] svg');
@@ -70,17 +67,17 @@ describe('SessionItem provider icon', () => {
     expect(cls).not.toContain('text-accent');
   });
 
-  it('renders text-muted when idle', () => {
+  it('draws a muted dot when idle', () => {
     const { container } = render(<SessionItem session={meta('idle')} onClick={() => {}} />);
-    const svg = container.querySelector('span[title] svg');
-    expect(svg?.getAttribute('class') ?? '').toContain('text-muted');
+    expect(container.querySelector('span[title]')?.getAttribute('class') ?? '').toContain('bg-muted');
   });
 
-  it('claude and codex sessions render different svgs (different polygon vs path content)', () => {
+  it('claude and codex sessions render different provider svgs', () => {
     const { container: claudeContainer } = render(<SessionItem session={meta('idle', 'claude')} onClick={() => {}} />);
     const { container: codexContainer } = render(<SessionItem session={meta('idle', 'codex')} onClick={() => {}} />);
-    const claudeSvgInner = claudeContainer.querySelector('span[title] svg')?.innerHTML;
-    const codexSvgInner = codexContainer.querySelector('span[title] svg')?.innerHTML;
+    const claudeSvgInner = claudeContainer.querySelector('li > svg')?.innerHTML;
+    const codexSvgInner = codexContainer.querySelector('li > svg')?.innerHTML;
+    expect(claudeSvgInner).toBeTruthy();
     expect(claudeSvgInner).not.toEqual(codexSvgInner);
   });
 });

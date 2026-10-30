@@ -54,40 +54,32 @@ export function ProjectItem({ project }: Props) {
   }, [manageOpen]);
 
   return (
-    <li className="py-0.5">
+    <li>
       <div className="relative group/proj" ref={manageRef}>
         <button
           onClick={() => toggle(project.id)}
           onContextMenu={(e) => { e.preventDefault(); setMenuOpen(false); setManageOpen(true); }}
-          className={`group w-full flex items-center gap-2 px-2.5 py-[7px] rounded-md text-left transition-colors ${
-            expanded ? 'bg-bg-elev border border-border' : 'border border-transparent hover:bg-bg-elev'
+          aria-expanded={expanded}
+          className={`group w-full h-7 flex items-center gap-2 px-2 rounded-[7px] text-left text-[13px] transition-colors ${
+            expanded ? 'bg-bg-elev-2 text-fg-strong' : 'text-fg-secondary hover:bg-bg-elev-2 hover:text-fg-strong'
           }`}
         >
-          <Icon
-            name="chevR"
-            className={`w-2.5 h-2.5 text-fg-secondary transition-transform ${expanded ? 'rotate-90' : ''}`}
-            strokeWidth={2.5}
-          />
-          <div className="min-w-0 flex-1 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: getProjectColor(project) }} />
-            <div className={`text-[12.5px] truncate ${expanded ? 'font-semibold text-fg' : 'font-medium text-fg'}`}>
-              {project.name}
-            </div>
-          </div>
+          <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: getProjectColor(project) }} />
+          <span className="flex-1 min-w-0 truncate">{project.name}</span>
           {count !== null && (
-            <span className={`font-mono text-[10px] text-muted tabular-nums transition-opacity ${manageOpen ? 'opacity-0' : 'group-hover/proj:opacity-0'}`}>{count}</span>
+            <span className={`font-mono text-[11px] text-label tabular-nums transition-opacity ${manageOpen ? 'opacity-0' : 'group-hover/proj:opacity-0'}`}>{count}</span>
           )}
         </button>
         <button
           onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setManageOpen(o => !o); }}
-          className={`absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded text-muted hover:text-fg transition-opacity ${manageOpen ? 'opacity-100' : 'opacity-0 group-hover/proj:opacity-100'}`}
+          className={`absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 grid place-items-center rounded-[5px] text-icon hover:bg-track hover:text-fg-strong transition-opacity ${manageOpen ? 'opacity-100' : 'opacity-0 group-hover/proj:opacity-100'}`}
           title="Zarządzaj projektem"
           aria-label="Zarządzaj projektem"
         >
           <Icon name="more" className="w-3 h-3" strokeWidth={2} />
         </button>
         {manageOpen && (
-          <div className="absolute right-1 top-full z-30 mt-0.5 w-44 rounded-md border border-border bg-bg shadow-lg">
+          <div className="absolute right-1 top-full z-30 mt-0.5 w-44 rounded-lg border border-border-raised bg-bg-elev-2 shadow-lg">
             <ProjectManageMenu
               onSummary={() => setSummaryOpen(true)}
               onEdit={() => setEditing(true)}
@@ -98,18 +90,18 @@ export function ProjectItem({ project }: Props) {
         )}
       </div>
       {expanded && (
-        <div className="mt-1 mb-2.5 ml-4 pl-3.5 border-l border-border">
+        <div className="mt-0.5 mb-2 ml-3 pl-2.5 border-l border-border-subtle">
           <div className="flex items-center gap-1">
             <button
               onClick={(e) => { e.stopPropagation(); openNew(project.id); }}
-              className="flex-1 flex items-center gap-1.5 pr-2 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors"
+              className="flex-1 flex items-center gap-1.5 pr-2 py-1.5 text-[11.5px] text-label hover:text-fg-strong transition-colors"
             >
               <Icon name="plus" className="w-3 h-3" strokeWidth={2} />
               <span>New session</span>
             </button>
             <button
               onClick={(e) => { e.stopPropagation(); openTerminal(project.id, { toggle: false }); }}
-              className="flex items-center gap-1 px-1.5 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors rounded"
+              className="flex items-center gap-1 px-1.5 py-1.5 text-[11.5px] text-label hover:text-fg-strong hover:bg-bg-elev-2 transition-colors rounded-md"
               title="New terminal"
             >
               <Icon name="terminal" className="w-3 h-3" strokeWidth={2} />
@@ -121,7 +113,7 @@ export function ProjectItem({ project }: Props) {
                   console.warn('[editor] open failed:', err)
                 );
               }}
-              className="flex items-center gap-1 px-1.5 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors rounded"
+              className="flex items-center gap-1 px-1.5 py-1.5 text-[11.5px] text-label hover:text-fg-strong hover:bg-bg-elev-2 transition-colors rounded-md"
               title="Open in editor"
             >
               <Icon name="code" className="w-3 h-3" strokeWidth={2} />
@@ -129,7 +121,7 @@ export function ProjectItem({ project }: Props) {
             <div className="relative" ref={menuRef}>
               <button
                 onClick={(e) => { e.stopPropagation(); setManageOpen(false); setMenuOpen(o => !o); }}
-                className="relative flex items-center gap-1 px-1.5 py-1.5 text-[11.5px] text-muted hover:text-fg transition-colors rounded"
+                className="relative flex items-center gap-1 px-1.5 py-1.5 text-[11.5px] text-label hover:text-fg-strong hover:bg-bg-elev-2 transition-colors rounded-md"
                 title="Akcje"
               >
                 <Icon name="layers" className="w-3 h-3" strokeWidth={2} />
@@ -138,7 +130,7 @@ export function ProjectItem({ project }: Props) {
                 )}
               </button>
               {menuOpen && (
-                <div className="absolute right-0 z-20 mt-1 w-56 max-h-72 overflow-y-auto rounded-md border border-border bg-bg shadow-lg">
+                <div className="absolute right-0 z-20 mt-1 w-56 max-h-72 overflow-y-auto rounded-lg border border-border-raised bg-bg-elev-2 shadow-lg">
                   <ProjectActionsMenu projectId={project.id} onClose={() => setMenuOpen(false)} />
                 </div>
               )}

@@ -32,17 +32,17 @@ export function SortMenu() {
     <div ref={containerRef} className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="text-muted hover:text-fg transition-colors p-0.5"
+        className="w-[26px] h-[26px] shrink-0 rounded-md grid place-items-center text-icon hover:bg-bg-elev-2 hover:text-fg transition-colors"
         aria-label="Sortuj projekty"
         aria-haspopup="menu"
         aria-expanded={open}
       >
-        <Icon name="sort" className="w-3.5 h-3.5" strokeWidth={2} />
+        <Icon name="sort" className="w-3.5 h-3.5" strokeWidth={1.5} />
       </button>
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full mt-1 z-10 bg-bg-elev border border-border rounded-md shadow-lg py-1 min-w-[180px]"
+          className="absolute right-0 top-full mt-1 z-10 bg-bg-elev-2 border border-border-raised rounded-lg shadow-lg py-1 min-w-[180px]"
         >
           {OPTIONS.map(opt => (
             <button
@@ -51,7 +51,7 @@ export function SortMenu() {
               aria-checked={sortMode === opt.mode}
               onClick={() => { setSortMode(opt.mode); setOpen(false); }}
               className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-[12px] text-left transition-colors ${
-                sortMode === opt.mode ? 'text-fg' : 'text-muted hover:text-fg'
+                sortMode === opt.mode ? 'text-fg-strong' : 'text-fg-secondary hover:text-fg-strong hover:bg-track'
               }`}
             >
               <span>{opt.label}</span>

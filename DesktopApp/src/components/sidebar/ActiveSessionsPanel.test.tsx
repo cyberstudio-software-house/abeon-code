@@ -83,6 +83,24 @@ describe('ActiveSessionsPanel tile', () => {
     )).toBeTruthy();
   });
 
+  it('marks a running session with a pulsing accent dot instead of a spinner', () => {
+    useStore.setState({ activeSessions: [active('a')] });
+    const { container } = render(<ActiveSessionsPanel />);
+    const cls = container.querySelector('span[title="Aktywna — agent pracuje"]')?.getAttribute('class') ?? '';
+    expect(cls).toContain('bg-accent');
+    expect(cls).toContain('activity-pulse');
+    expect(container.querySelector('.animate-spin')).toBeNull();
+  });
+
+  it('shows the message count of the session when it is loaded', () => {
+    useStore.setState({
+      activeSessions: [active('a')],
+      sessionsByProject: { 1: { items: [meta('a', { messageCount: 45 })], hasMore: false } },
+    });
+    const { getByText } = render(<ActiveSessionsPanel />);
+    expect(getByText('45 wiad.')).toBeTruthy();
+  });
+
   it('opens the session tab and clears the attention mark on click', () => {
     useStore.setState({ activeSessions: [active('a', { activity: 'waitingUser' })], attentionSessions: new Set(['a']) });
     const { getByText } = render(<ActiveSessionsPanel />);

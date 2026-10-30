@@ -4,6 +4,7 @@ import { tauri } from '../../lib/tauri';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { claudeModelLabel } from '../../lib/models';
+import { initialsOf } from '../../lib/initials';
 import type { GitUser } from '../../types';
 
 export function SidebarFooter({ showSettingsButton = true }: { showSettingsButton?: boolean } = {}) {
@@ -15,29 +16,27 @@ export function SidebarFooter({ showSettingsButton = true }: { showSettingsButto
   const customModels = useStore(useShallow(s => s.customModels));
   const openSettings = useStore(s => s.openSettings);
 
-  const initials = displayName
-    ? displayName.slice(0, 1).toUpperCase()
-    : (user?.initials ?? 'D');
+  const initials = initialsOf(displayName) || user?.initials || 'D';
   const name = displayName || (user?.name ?? 'Developer');
   const modelLabel = claudeModelLabel(defaultModelId, customModels);
 
   return (
-    <div className="border-t border-border px-1 py-2.5 flex items-center gap-2.5">
-      <div className="w-6 h-6 rounded-full bg-bg-elev-2 text-fg-secondary flex items-center justify-center text-[11px] font-semibold">
+    <div className="mt-auto border-t border-border-subtle px-1.5 py-2.5 flex items-center gap-2.5">
+      <span aria-hidden="true" className="w-7 h-7 shrink-0 rounded-full bg-track text-fg-secondary grid place-items-center text-[11px] font-semibold">
         {initials}
-      </div>
-      <div className="leading-tight">
-        <div className="text-[12px] font-medium">{name}</div>
-        <div className="font-mono text-[10px] text-muted">{modelLabel}</div>
+      </span>
+      <div className="flex-1 min-w-0 flex flex-col leading-tight">
+        <span className="text-[13px] font-medium text-fg truncate">{name}</span>
+        <span className="text-[11.5px] text-muted truncate">{modelLabel}</span>
       </div>
       {showSettingsButton && (
         <button
           onMouseDown={e => e.preventDefault()}
           onClick={() => openSettings()}
-          className="ml-auto text-muted hover:text-fg transition-colors"
+          className="w-[30px] h-[30px] shrink-0 rounded-[7px] grid place-items-center text-icon hover:bg-bg-elev-2 hover:text-fg transition-colors"
           aria-label="Ustawienia"
         >
-          <Icon name="settings" className="w-3.5 h-3.5" />
+          <Icon name="settings" className="w-[15px] h-[15px]" />
         </button>
       )}
     </div>

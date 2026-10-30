@@ -19,7 +19,7 @@ export function SubagentBadge({ running, total, expanded, onToggle }: Props) {
       aria-label={label}
       aria-expanded={expanded}
       onClick={e => { e.stopPropagation(); onToggle(); }}
-      className={`shrink-0 font-mono text-[10px] px-1 rounded hover:bg-bg-elev ${tone}`}
+      className={`shrink-0 font-mono text-[10px] px-1 rounded hover:bg-track ${tone}`}
     >
       🤖 {running > 0 ? running : total}
     </button>
