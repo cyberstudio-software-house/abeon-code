@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
 
 const probe = vi.hoisted(() => ({
@@ -328,6 +328,60 @@ describe('TerminalView appearance', () => {
     } finally {
       Reflect.deleteProperty(document, 'fonts');
     }
+  });
+
+  describe('PTY size sync after spawn', () => {
+    const stubFonts = () => {
+      let resolveLoad!: () => void;
+      const load = vi.fn(() => new Promise<void>(resolve => { resolveLoad = resolve; }));
+      Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+      return () => resolveLoad();
+    };
+    const deferSpawn = () => {
+      let resolveSpawn!: (id: string) => void;
+      vi.mocked(tauri.spawnPty).mockImplementationOnce(() => new Promise<string>(resolve => { resolveSpawn = resolve; }));
+      return (id: string) => resolveSpawn(id);
+    };
+
+    beforeEach(() => {
+      vi.mocked(tauri.ptyResize).mockClear();
+      probe.fit.mockReset();
+    });
+
+    afterEach(() => { probe.fit.mockReset(); });
+
+    it('sends the new size when the font refit changed it before the PTY listened', async () => {
+      const resolveLoad = stubFonts();
+      const resolveSpawn = deferSpawn();
+      try {
+        await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+        const term = probe.terminals[0] as unknown as { cols: number; rows: number };
+        probe.fit.mockImplementation(() => { term.cols = 100; term.rows = 30; });
+
+        await act(async () => { resolveLoad(); });
+        expect(term.cols).toBe(100);
+        await act(async () => { resolveSpawn('pty-late'); });
+
+        expect(tauri.spawnPty).toHaveBeenCalledWith(1, expect.anything(), 80, 24);
+        expect(tauri.ptyResize).toHaveBeenCalledWith('pty-late', 100, 30);
+      } finally {
+        Reflect.deleteProperty(document, 'fonts');
+      }
+    });
+
+    it('sends no extra resize when the size did not change', async () => {
+      const resolveLoad = stubFonts();
+      const resolveSpawn = deferSpawn();
+      try {
+        await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+        await act(async () => { resolveLoad(); });
+        await act(async () => { resolveSpawn('pty-same'); });
+
+        expect(tauri.ptyResize).not.toHaveBeenCalled();
+      } finally {
+        Reflect.deleteProperty(document, 'fonts');
+      }
+    });
   });
 
   it('paints the padding with the terminal background', async () => {

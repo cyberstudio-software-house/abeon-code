@@ -228,6 +228,7 @@ export function TerminalView({ projectId, kind, ptyId, provider, sessionId, fres
         if (cancelled) return;
         tauri.ptyResize(id, cols, rows).catch(() => {});
       });
+      if (term.cols !== cols || term.rows !== rows) tauri.ptyResize(id, term.cols, term.rows).catch(() => {});
 
       if (kind === 'agent') {
         const onKeyDown = async (e: KeyboardEvent) => {
