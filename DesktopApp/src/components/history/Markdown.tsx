@@ -25,7 +25,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   }, [code, lang, theme]);
   return (
     <div
-      className="text-[12px] overflow-x-auto rounded-md my-3 [&_pre]:p-3.5 [&_pre]:rounded-md"
+      className="my-3 overflow-x-auto rounded-[8px] text-[12px] [&_pre]:rounded-[8px] [&_pre]:p-3.5"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
@@ -43,7 +43,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
           if (!isBlock) {
             return (
               <code
-                className="bg-bg-elev-2 px-1.5 py-0.5 rounded text-[0.9em] font-mono"
+                className="rounded bg-raised-strong px-1.5 py-0.5 font-mono text-[12.5px]"
                 {...props}
               >
                 {children}
@@ -63,7 +63,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
           </a>
         ),
         p: ({ children }) => (
-          <p className="my-2.5 leading-relaxed">{children}</p>
+          <p className="my-2.5 first:mt-0 last:mb-0">{children}</p>
         ),
         ul: ({ children }) => (
           <ul className="my-2.5 ml-5 list-disc space-y-1 marker:text-muted">{children}</ul>
@@ -72,7 +72,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
           <ol className="my-2.5 ml-5 list-decimal space-y-1 marker:text-muted">{children}</ol>
         ),
         li: ({ children }) => (
-          <li className="leading-relaxed pl-1">{children}</li>
+          <li className="pl-1">{children}</li>
         ),
         blockquote: ({ children }) => (
           <blockquote className="my-3 border-l-[3px] border-accent/50 pl-4 text-fg-secondary italic">
@@ -85,7 +85,7 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
           </div>
         ),
         thead: ({ children }) => (
-          <thead className="bg-bg-elev-2 text-[11px] uppercase tracking-wider text-muted">
+          <thead className="bg-raised-strong text-[11px] uppercase tracking-wider text-muted">
             {children}
           </thead>
         ),

@@ -100,14 +100,14 @@ export function SubagentView({ projectId, sessionId, agentId, tabId }: Props) {
   }, [projectId, sessionId, agentId]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full flex-col bg-bg-elev">
       <SubagentHeader
         agentType={info?.agentType ?? 'Agent'}
         description={info?.description ?? ''}
         onBack={() => viewSubagent(tabId, null)}
       />
-      {error && <div className="p-3 text-[12px] text-danger">Błąd: {error}</div>}
-      {!error && !data && <div className="p-3 text-[12px] text-muted">Wczytywanie transkryptu…</div>}
+      {error && <div className="px-7 py-3 text-[12px] text-danger">Błąd: {error}</div>}
+      {!error && !data && <div className="px-7 py-3 text-[12px] text-muted">Wczytywanie transkryptu…</div>}
       {data && (
         <HistoryStream
           blocks={data.blocks}

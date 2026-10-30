@@ -26,7 +26,7 @@ describe('HistorySearchBar', () => {
 
   it('shows the active position out of total', () => {
     setup({ query: 'beta', count: 3, activeIndex: 1 });
-    expect(screen.getByText('2/3')).toBeTruthy();
+    expect(screen.getByText('2 z 3')).toBeTruthy();
   });
 
   it('calls onQueryChange when typing', () => {

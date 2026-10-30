@@ -8,22 +8,22 @@ export function ToolResultBlock({ content, isError }: Props) {
   const shown = expanded ? content : content.slice(0, PREVIEW) + '…';
   return (
     <div
-      className={`my-2 ml-16 rounded-md border p-3.5 text-[12px] font-mono ${
+      className={`my-0.5 rounded-[8px] border px-3 py-2.5 font-mono text-[11.5px] ${
         isError
-          ? 'bg-danger/8 border-danger/20 text-danger'
-          : 'bg-bg-elev border-border/30 text-fg-secondary'
+          ? 'border-danger/30 bg-danger/10 text-danger'
+          : 'border-border bg-console text-fg-secondary'
       }`}
     >
-      <div className="text-[10px] text-muted mb-1.5 uppercase tracking-wider font-sans">
+      <div className="mb-1.5 font-sans text-[11px] font-medium text-muted">
         {isError ? 'Błąd' : 'Wynik'}
       </div>
-      <pre className="whitespace-pre-wrap break-words leading-relaxed max-h-[500px] overflow-y-auto scroll-thin">
+      <pre className="m-0 max-h-[500px] overflow-y-auto whitespace-pre-wrap break-words leading-[1.65] scroll-thin">
         {shown}
       </pre>
       {content.length > PREVIEW && (
         <button
           onClick={() => setExpanded(e => !e)}
-          className="mt-2 text-accent text-[11px] hover:underline"
+          className="mt-2 font-sans text-[11.5px] text-accent hover:underline"
         >
           {expanded ? 'Zwiń' : `Rozwiń (${content.length} znaków)`}
         </button>

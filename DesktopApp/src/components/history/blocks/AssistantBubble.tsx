@@ -1,16 +1,19 @@
 import { Markdown } from '../Markdown';
+import { formatClock } from '../../../lib/formatClock';
 
-export function AssistantBubble({ text }: { text: string }) {
+type Props = { text: string; timestamp: number; providerLabel: string };
+
+export function AssistantBubble({ text, timestamp, providerLabel }: Props) {
   return (
-    <div className="flex gap-5 my-5">
-      <div className="w-11 shrink-0 pt-0.5">
-        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-fg/10 text-[8px] font-bold text-fg-secondary tracking-wider">
-          AI
-        </span>
+    <article className="flex flex-col gap-2 py-2.5">
+      <div className="flex items-center gap-2 text-[11.5px] text-muted">
+        <span aria-hidden="true" className="text-accent">✻</span>
+        <span className="font-medium text-fg-secondary">{providerLabel}</span>
+        <span className="font-mono">{formatClock(timestamp)}</span>
       </div>
-      <div className="flex-1 min-w-0 text-[14px] text-fg-secondary leading-relaxed">
+      <div className="min-w-0 text-[13.5px] leading-[1.65] text-fg">
         <Markdown text={text} />
       </div>
-    </div>
+    </article>
   );
 }

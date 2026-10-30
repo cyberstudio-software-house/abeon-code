@@ -24,32 +24,31 @@ export function HistorySearchBar({
     ? ''
     : count === 0
       ? '0 wyników'
-      : `${activeIndex + 1}/${count}`;
+      : `${activeIndex + 1} z ${count}`;
 
   return (
-    <div className="shrink-0 border-b border-border bg-bg-elev px-8 py-2 flex flex-col gap-1">
+    <div className="flex shrink-0 flex-col gap-1 border-b border-border bg-console py-2 pl-7 pr-4">
       <div className="flex items-center gap-2">
-        <div className="flex items-center gap-2 flex-1 bg-bg border border-border rounded-md px-2.5 py-[6px]">
-          <Icon name="search" className="w-[13px] h-[13px] text-muted" />
-          <input
-            ref={inputRef}
-            value={query}
-            onChange={e => onQueryChange(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? onPrev() : onNext(); }
-              if (e.key === 'Escape') { e.preventDefault(); onClose(); }
-            }}
-            placeholder="Szukaj w sesji…"
-            className="bg-transparent outline-none text-[12px] text-fg flex-1 placeholder:text-muted"
-          />
-          <span className="text-[11px] text-muted font-mono tabular-nums min-w-[3ch] text-right">{counter}</span>
-        </div>
+        <Icon name="search" className="h-3.5 w-3.5 shrink-0 text-muted" />
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={e => onQueryChange(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? onPrev() : onNext(); }
+            if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+          }}
+          placeholder="Szukaj w sesji…"
+          aria-label="Szukaj w sesji"
+          className="h-[30px] min-w-0 flex-1 rounded-[7px] border border-border-strong bg-field px-2 text-[12.5px] text-fg outline-none placeholder:text-muted focus:border-border-focus"
+        />
+        <span className="min-w-[3ch] text-right font-mono text-[11.5px] tabular-nums text-muted">{counter}</span>
         <IconBtn icon="chevU" label="Poprzednie" tone="ghost" size="sm" onClick={onPrev} />
         <IconBtn icon="chevron" label="Następne" tone="ghost" size="sm" onClick={onNext} />
         <IconBtn icon="close" label="Zamknij" tone="ghost" size="sm" onClick={onClose} />
       </div>
       {hasOlderUnloaded && (
-        <div className="text-[10px] text-muted font-mono">
+        <div className="font-mono text-[10px] text-muted">
           Uwaga: starsze wiadomości nie są wczytane i nie są przeszukiwane.
         </div>
       )}

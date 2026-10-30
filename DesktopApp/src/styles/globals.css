@@ -88,6 +88,9 @@
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
   }
+  :root[data-theme="dark"] .shiki {
+    background-color: var(--color-console) !important;
+  }
 }
 
 @layer utilities {

@@ -1,16 +1,16 @@
 import { Markdown } from '../Markdown';
+import { formatClock } from '../../../lib/formatClock';
 
-export function UserBubble({ text }: { text: string }) {
+export function UserBubble({ text, timestamp }: { text: string; timestamp: number }) {
   return (
-    <div className="flex gap-5 my-5 pt-5 border-t border-border/40">
-      <div className="w-11 shrink-0 pt-0.5">
-        <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-accent/15 text-[10px] font-bold text-accent tracking-wide">
-          TY
-        </span>
+    <article className="flex flex-col gap-1.5 py-2.5">
+      <div className="flex items-center gap-2 text-[11.5px] text-muted">
+        <span className="font-medium text-fg-secondary">Ty</span>
+        <span className="font-mono">{formatClock(timestamp)}</span>
       </div>
-      <div className="flex-1 min-w-0 text-[14px] text-fg leading-relaxed">
+      <div className="rounded-[10px] border border-border-raised bg-bg-elev-2 px-3.5 py-3 text-[13.5px] leading-[1.6] text-fg-strong">
         <Markdown text={text} />
       </div>
-    </div>
+    </article>
   );
 }

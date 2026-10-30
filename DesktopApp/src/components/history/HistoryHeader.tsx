@@ -4,9 +4,9 @@ import type { HistoryViewMode } from '../../store/settingsSlice';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import { getCliModelString } from '../../lib/models';
-import { IconBtn } from '../shared/IconBtn';
-import { ACTIVITY_DOT, ACTIVITY_LABEL, ACTIVITY_ICON } from '../../lib/activity';
-import { Icon } from '../shared/Icon';
+import { ACTIVITY_DOT, ACTIVITY_LABEL, ACTIVITY_SHORT_LABEL, activityPulses } from '../../lib/activity';
+import { PROVIDER_LABEL } from '../../lib/providers';
+import { Icon, type IconName } from '../shared/Icon';
 
 type Props = {
   meta: SessionMeta;
@@ -14,9 +14,41 @@ type Props = {
   onViewModeChange: (mode: HistoryViewMode) => void;
   provider?: Provider;
   onToggleSearch: () => void;
+  searchOpen?: boolean;
 };
 
-export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'claude', onToggleSearch }: Props) {
+type HeaderButtonProps = {
+  icon: IconName;
+  label: string;
+  onClick: () => void;
+  loading?: boolean;
+  active?: boolean;
+};
+
+function HeaderButton({ icon, label, onClick, loading = false, active = false }: HeaderButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={loading ? undefined : onClick}
+      aria-label={label}
+      aria-busy={loading || undefined}
+      title={label}
+      disabled={loading}
+      className={`grid h-[30px] w-[30px] place-items-center rounded-[7px] transition-colors ${
+        active ? 'bg-track text-fg-strong' : 'text-icon hover:bg-raised-strong hover:text-fg-strong'
+      } ${loading ? 'cursor-wait opacity-70' : ''}`}
+    >
+      <Icon
+        name={loading ? 'spinner' : icon}
+        className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`}
+      />
+    </button>
+  );
+}
+
+const SEGMENT_BASE = 'inline-flex h-[26px] items-center gap-1.5 rounded-[6px] px-2.5 text-[12px] transition-colors';
+
+export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'claude', onToggleSearch, searchOpen = false }: Props) {
   const [editing, setEditing] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
@@ -78,12 +110,16 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'cl
     return () => clearTimeout(t);
   }, [copied]);
 
+  const dateLabel = new Date(meta.lastModified).toLocaleString('pl-PL', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+
   return (
-    <header className="px-8 pt-5 pb-4 border-b border-border bg-bg shrink-0">
-      <div className="font-mono text-[10px] text-muted tracking-wide">
-        sesja {meta.id.slice(0, 8)} · {new Date(meta.lastModified).toLocaleString('pl-PL')}
-      </div>
-      <div className="mt-2 flex items-baseline gap-3.5">
+    <header className="flex shrink-0 flex-col gap-2.5 border-b border-border px-7 pb-3.5 pt-[18px]">
+      <span className="font-mono text-[11px] text-label">
+        sesja {meta.id.slice(0, 8)} · {dateLabel}
+      </span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         {editing ? (
           <input
             ref={inputRef}
@@ -95,11 +131,11 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'cl
               if (e.key === 'Enter') commitRename();
               if (e.key === 'Escape') setEditing(false);
             }}
-            className="m-0 text-[20px] font-medium tracking-[-0.3px] bg-transparent border-b-2 border-accent outline-none text-fg flex-1 min-w-0"
+            className="m-0 min-w-0 flex-1 border-b-2 border-accent bg-transparent text-[18px] font-semibold tracking-[-0.01em] text-fg-strong outline-none"
           />
         ) : (
           <h1
-            className="m-0 text-[20px] font-medium tracking-[-0.3px] cursor-pointer hover:text-accent transition-colors"
+            className="m-0 min-w-0 cursor-pointer text-[18px] font-semibold tracking-[-0.01em] text-fg-strong transition-colors hover:text-accent"
             onClick={() => setEditing(true)}
             title="Kliknij, aby zmienić nazwę"
           >
@@ -107,85 +143,81 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'cl
           </h1>
         )}
         <span
-          className={`inline-flex items-center gap-1.5 text-[10px] font-mono ${ACTIVITY_DOT[meta.activity]} text-bg px-[7px] py-0.5 rounded-full`}
           title={ACTIVITY_LABEL[meta.activity]}
+          className="inline-flex h-[22px] items-center gap-1.5 rounded-full border border-border-raised bg-field px-[9px] text-[11.5px] text-icon"
         >
-          <Icon
-            name={ACTIVITY_ICON[meta.activity]}
-            className={`w-3 h-3 ${meta.activity === 'running' ? 'animate-spin' : ''}`}
+          <span
+            aria-hidden="true"
+            className={`h-1.5 w-1.5 rounded-full ${ACTIVITY_DOT[meta.activity]} ${activityPulses(meta.activity) ? 'activity-pulse' : ''}`}
           />
-          {ACTIVITY_LABEL[meta.activity]}
+          {ACTIVITY_SHORT_LABEL[meta.activity]}
         </span>
-        <div className="ml-auto flex items-center gap-2.5">
-          {generating ? (
-            <span className="text-[11px] text-fg-secondary font-mono">
-              Generuję tytuł…
-            </span>
-          ) : copied ? (
-            <span className="text-[11px] text-fg-secondary font-mono">
-              Skopiowano ID sesji do schowka
-            </span>
-          ) : null}
-          <div className="flex gap-1.5">
-            <IconBtn
-              icon="search"
-              label="Szukaj w sesji"
-              onClick={onToggleSearch}
-            />
-            <IconBtn
-              icon="sparkles"
-              label={generating ? 'Generuję tytuł…' : 'Generuj tytuł sesji'}
-              onClick={handleGenerateTitle}
-              loading={generating}
-            />
-            <IconBtn
-              icon="copy"
-              label={copied ? 'Skopiowano' : 'Kopiuj ID sesji'}
-              onClick={handleCopyId}
-            />
-            <IconBtn
-              icon="terminal"
-              label="Otwórz terminal"
-              onClick={() => openTerminal(meta.projectId, { toggle: false })}
-            />
-          </div>
+        <span className="flex-1" />
+        {generating ? (
+          <span className="font-mono text-[11px] text-fg-secondary">
+            Generuję tytuł…
+          </span>
+        ) : copied ? (
+          <span className="font-mono text-[11px] text-fg-secondary">
+            Skopiowano ID sesji do schowka
+          </span>
+        ) : null}
+        <div className="flex items-center gap-0.5">
+          <HeaderButton icon="search" label="Szukaj w sesji" onClick={onToggleSearch} active={searchOpen} />
+          <HeaderButton
+            icon="sparkles"
+            label={generating ? 'Generuję tytuł…' : 'Generuj tytuł sesji'}
+            onClick={handleGenerateTitle}
+            loading={generating}
+          />
+          <HeaderButton
+            icon="copy"
+            label={copied ? 'Skopiowano' : 'Kopiuj ID sesji'}
+            onClick={handleCopyId}
+          />
+          <HeaderButton
+            icon="terminal"
+            label="Otwórz terminal"
+            onClick={() => openTerminal(meta.projectId, { toggle: false })}
+          />
         </div>
       </div>
-      <div className="mt-3 flex items-center gap-4">
-        <div className="flex gap-[18px] text-[11px] text-fg-secondary font-mono">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="flex flex-wrap items-center gap-2 font-mono text-[11.5px] text-muted">
           <span>{meta.messageCount} tur</span>
-          <span className="text-muted">·</span>
-          <span>{meta.gitBranch ?? 'no branch'}</span>
-        </div>
-        <div className="ml-auto flex rounded-md border border-border overflow-hidden">
+          <span aria-hidden="true" className="text-faint">·</span>
+          <span className={meta.gitBranch ? 'text-success' : undefined}>{meta.gitBranch ?? 'no branch'}</span>
+          <span aria-hidden="true" className="text-faint">·</span>
+          <span>{PROVIDER_LABEL[provider]}</span>
+        </span>
+        <span className="flex-1" />
+        <div
+          role="group"
+          aria-label="Widok historii"
+          className="inline-flex gap-0.5 rounded-[9px] border border-border-raised bg-field p-[3px]"
+        >
           <button
+            type="button"
+            aria-pressed={viewMode === 'communication'}
             onClick={() => onViewModeChange('communication')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium transition-colors ${
-              viewMode === 'communication'
-                ? 'bg-fg text-bg'
-                : 'bg-bg-elev text-muted hover:text-fg-secondary'
-            }`}
+            className={`${SEGMENT_BASE} ${viewMode === 'communication' ? 'bg-pressed text-fg-strong' : 'text-icon hover:text-fg'}`}
             title="Tylko komunikacja (wiadomości użytkownika i asystenta)"
           >
-            <Icon name="msgSquare" className="w-3 h-3" />
             Komunikacja
           </button>
           <button
+            type="button"
+            aria-pressed={viewMode === 'full'}
             onClick={() => onViewModeChange('full')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium transition-colors border-l border-border ${
-              viewMode === 'full'
-                ? 'bg-fg text-bg'
-                : 'bg-bg-elev text-muted hover:text-fg-secondary'
-            }`}
+            className={`${SEGMENT_BASE} ${viewMode === 'full' ? 'bg-pressed text-fg-strong' : 'text-icon hover:text-fg'}`}
             title="Pełny widok (komunikacja + narzędzia + system)"
           >
-            <Icon name="layers" className="w-3 h-3" />
             Pełny
           </button>
         </div>
       </div>
       {genError && (
-        <div className="mt-2 text-[11px] text-danger font-mono">
+        <div className="font-mono text-[11px] text-danger">
           Nie udało się wygenerować tytułu: {genError}
         </div>
       )}

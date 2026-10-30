@@ -189,13 +189,14 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
   if (error) return <div className="p-6 text-danger text-[13px]">Błąd: {error}</div>;
   if (!data || !meta) return <div className="p-6 text-muted text-[13px]">Wczytywanie historii…</div>;
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full flex-col bg-bg-elev">
       <HistoryHeader
         meta={meta}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         provider={provider}
         onToggleSearch={toggleSearch}
+        searchOpen={searchOpen}
       />
       {searchOpen && (
         <HistorySearchBar
@@ -217,6 +218,7 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
         matchedIndices={matchedSet}
         activeBlockIndex={search.activeBlockIndex}
         virtuosoRef={virtuosoRef}
+        provider={provider}
       />
       <SessionFooter sessionId={sessionId} tabId={tabId} />
     </div>
