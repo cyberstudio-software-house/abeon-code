@@ -35,6 +35,7 @@ Element.prototype.scrollIntoView = vi.fn();
 import { useStore } from '../../store';
 import { PaneLayout } from './PaneLayout';
 import { MIN_PANE_HEIGHT, MIN_PANE_WIDTH, PANE_BAR_HEIGHT } from '../../lib/paneGeometry';
+import { PANE_BORDER, PANE_GAP } from '../../lib/drawerGeometry';
 import { createLeaf, findLeaf, leaves, type PaneNode, type PaneSplit } from '../../lib/paneTree';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
 import type { Tab } from '../../store/tabsSlice';
@@ -74,8 +75,8 @@ describe('PaneLayout', () => {
   it('positions a single pane over the whole area', () => {
     const { container } = render(<PaneLayout />);
     const region = container.querySelector(`[data-pane-id="${ROOT_PANE_ID}"]`) as HTMLElement;
-    expect(region.style.left).toBe('0%');
-    expect(region.style.width).toBe('100%');
+    expect(region.style.left).toBe('calc(0% + 5px)');
+    expect(region.style.width).toBe('calc(100% - 10px)');
   });
 
   it('positions two panes side by side after a split', () => {
@@ -83,8 +84,8 @@ describe('PaneLayout', () => {
     const { container } = render(<PaneLayout />);
     const ids = leaves(useStore.getState().layout).map(l => l.id);
     const right = container.querySelector(`[data-pane-id="${ids[1]}"]`) as HTMLElement;
-    expect(right.style.left).toBe('50%');
-    expect(right.style.width).toBe('50%');
+    expect(right.style.left).toBe('calc(50% + 5px)');
+    expect(right.style.width).toBe('calc(50% - 10px)');
   });
 
   it('shows the active tab of every pane at once', () => {
@@ -103,6 +104,33 @@ describe('PaneLayout', () => {
 
     expect(counters.terminalMounts).toBe(2);
     expect(container.querySelector('[data-tab-layer="t2"]')).toBe(before);
+  });
+
+  it('draws one frame per pane after every content layer', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const { container } = render(<PaneLayout />);
+    const frames = Array.from(container.querySelectorAll('[data-pane-frame]'));
+    const layers = Array.from(container.querySelectorAll('[data-tab-layer]'));
+    expect(frames.map(f => f.getAttribute('data-pane-frame'))).toEqual(leaves(useStore.getState().layout).map(l => l.id));
+    expect(layers).toHaveLength(2);
+    for (const frame of frames) {
+      expect(frame.parentElement).toBe(layers[0].parentElement);
+      for (const layer of layers) {
+        expect(layer.compareDocumentPosition(frame) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
+    }
+  });
+
+  it('marks only the focused pane frame when the layout is split', () => {
+    const { container } = render(<PaneLayout />);
+    expect(container.querySelectorAll('[data-pane-frame]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-pane-frame][data-focused="true"]')).toHaveLength(0);
+
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+
+    const focused = container.querySelectorAll('[data-pane-frame][data-focused="true"]');
+    expect(focused).toHaveLength(1);
+    expect(focused[0].getAttribute('data-pane-frame')).toBe(useStore.getState().focusedPaneId);
   });
 
   it('renders a resizer for each split boundary', () => {
@@ -625,7 +653,7 @@ describe('PaneLayout pane bar', () => {
     const { container } = render(<PaneLayout />);
     expect(container.querySelector('[data-project-tab-id="1"]')).not.toBeNull();
     const layer = container.querySelector('[data-tab-layer="t1"]') as HTMLElement;
-    expect(layer.style.top).toBe(`calc(0% + ${PANE_BAR_HEIGHT}px)`);
+    expect(layer.style.top).toBe(`calc(0% + ${PANE_GAP / 2 + PANE_BORDER + PANE_BAR_HEIGHT}px)`);
   });
 });
 
@@ -659,8 +687,8 @@ describe('PaneLayout terminal drawer', () => {
     const [id] = drawerIds();
     const session = container.querySelector('[data-tab-layer="s1"]') as HTMLElement;
     const terminal = container.querySelector(`[data-tab-layer="${id}"]`) as HTMLElement;
-    expect(session.style.height).toBe('calc(65% - 39px)');
-    expect(terminal.style.top).toBe('calc(65% + 49px)');
+    expect(session.style.height).toBe('calc(65% - 45.5px)');
+    expect(terminal.style.top).toBe('calc(65% + 47.5px)');
     expect(terminal.dataset.drawerOwner).toBe('s1');
   });
 
@@ -700,7 +728,7 @@ describe('PaneLayout terminal drawer', () => {
     const layer = container.querySelector(`[data-tab-layer="${id}"]`) as HTMLElement;
     expect(layer.className).toContain('invisible');
     expect(counters.terminalMounts).toBe(2);
-    expect((container.querySelector('[data-tab-layer="s1"]') as HTMLElement).style.height).toBe('calc(100% - 88px)');
+    expect((container.querySelector('[data-tab-layer="s1"]') as HTMLElement).style.height).toBe('calc(100% - 98px)');
   });
 
   it('leaves a restore bar under the session only while the drawer is hidden', () => {
@@ -712,7 +740,7 @@ describe('PaneLayout terminal drawer', () => {
     act(() => { useStore.getState().hideTerminalDrawer('s1'); });
 
     const bar = container.querySelector('[data-drawer-collapsed="s1"]') as HTMLElement;
-    expect(bar.style.top).toBe('calc(100% - 28px)');
+    expect(bar.style.top).toBe('calc(100% - 33px)');
     expect(bar.style.height).toBe('calc(0% + 28px)');
     expect(bar.textContent).toBe('Terminal');
   });
@@ -827,13 +855,15 @@ describe('PaneLayout terminal drawer', () => {
     stubBox(container.firstElementChild as HTMLElement, 1000, 800);
     const divider = container.querySelector('[data-drawer-divider]') as HTMLElement;
 
+    const contentPx = 800 - PANE_GAP - 2 * PANE_BORDER - PANE_BAR_HEIGHT;
+
     fireEvent.mouseDown(divider, { clientX: 500, clientY: 500 });
     fireEvent.mouseMove(window, { clientX: 500, clientY: 400 });
-    expect(useStore.getState().drawerDragSize).toBeCloseTo(0.35 + 100 / 768);
+    expect(useStore.getState().drawerDragSize).toBeCloseTo(0.35 + 100 / contentPx);
     expect(useStore.getState().terminalDrawerSize).toBe(0.35);
 
     fireEvent.mouseUp(window);
-    expect(useStore.getState().terminalDrawerSize).toBeCloseTo(0.35 + 100 / 768);
+    expect(useStore.getState().terminalDrawerSize).toBeCloseTo(0.35 + 100 / contentPx);
     expect(useStore.getState().drawerDragSize).toBeNull();
   });
 

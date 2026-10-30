@@ -47,7 +47,7 @@ export function DragHandle({ onDrag, ariaLabel }: DragHandleProps) {
       aria-orientation="vertical"
       aria-label={ariaLabel}
       onMouseDown={onMouseDown}
-      className="w-px cursor-col-resize bg-border hover:bg-accent transition-colors flex-shrink-0"
+      className="relative z-10 -mx-1 w-2 flex-shrink-0 cursor-col-resize"
     />
   );
 }

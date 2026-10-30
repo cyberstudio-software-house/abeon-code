@@ -114,12 +114,12 @@ export function DetachedShell({ mode }: { mode: DetachedWindowMode }) {
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
       {IS_MAC && <div data-tauri-drag-region className="h-7 bg-bg shrink-0" />}
-      <div className="flex flex-1 min-h-0">
-        <main className="flex-1 h-full min-w-0 bg-bg flex flex-col">
+      <div className="flex flex-1 min-h-0 bg-bg px-1 pb-1">
+        <main className="flex-1 h-full min-w-0 flex flex-col">
           <PaneLayout detachedProjectId={projectId} />
         </main>
         <DragHandle onDrag={onRightDrag} ariaLabel="Resize right panel" />
-        <div style={{ width: rightWidth }} className="h-full flex-shrink-0">
+        <div style={{ width: rightWidth }} className="h-full flex-shrink-0 p-1">
           <RightPanel />
         </div>
       </div>

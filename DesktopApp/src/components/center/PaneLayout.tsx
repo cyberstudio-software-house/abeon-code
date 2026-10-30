@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
 import { computePaneRects, PANE_BAR_HEIGHT } from '../../lib/paneGeometry';
-import { lenRectStyle } from '../../lib/drawerGeometry';
+import { lenRectStyle, paneBarRect, paneFrameRect } from '../../lib/drawerGeometry';
 import { computePaneLayers } from '../../lib/paneLayers';
 import { leaves } from '../../lib/paneTree';
 import { PaneDragOverlay } from './PaneDragOverlay';
@@ -25,18 +25,18 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   const focusDrawerTerminal = useStore(s => s.focusDrawerTerminal);
   const focusDrawerSession = useStore(s => s.focusDrawerSession);
   const closeDrawerTerminal = useStore(s => s.closeDrawerTerminal);
-  const barHeight = PANE_BAR_HEIGHT;
   const { drag, beginDrag } = usePaneDrag(containerRef);
   useTerminalDrawerShortcuts();
   const rects = useMemo(() => computePaneRects(layout), [layout]);
   const panes = useMemo(() => leaves(layout), [layout]);
+  const split = panes.length > 1;
   const { layers, visibleDrawers, collapsedDrawers } = useMemo(
-    () => computePaneLayers({ tabs, layout, focusedPaneId, barHeight, drawers, drawerTerminals, drawerSize }),
-    [tabs, layout, focusedPaneId, barHeight, drawers, drawerTerminals, drawerSize],
+    () => computePaneLayers({ tabs, layout, focusedPaneId, barHeight: PANE_BAR_HEIGHT, drawers, drawerTerminals, drawerSize }),
+    [tabs, layout, focusedPaneId, drawers, drawerTerminals, drawerSize],
   );
 
   return (
-    <div ref={containerRef} className="flex-1 relative overflow-hidden">
+    <div ref={containerRef} className="flex-1 relative overflow-hidden bg-bg">
       {panes.map(pane => {
         const rect = rects.get(pane.id);
         if (!rect) return null;
@@ -45,13 +45,8 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
             key={pane.id}
             data-pane-id={pane.id}
             onMouseDownCapture={() => focusPane(pane.id)}
-            className="absolute"
-            style={{
-              left: `${rect.left}%`,
-              top: `${rect.top}%`,
-              width: `${rect.width}%`,
-              height: `${barHeight}px`,
-            }}
+            className="absolute bg-bg-elev rounded-t-[11px] border-b border-border"
+            style={lenRectStyle(paneBarRect(rect, PANE_BAR_HEIGHT))}
           >
             <StackedTabBar paneId={pane.id} detachedProjectId={detachedProjectId} onTabPointerDown={beginDrag} />
           </div>
@@ -83,13 +78,28 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
           />
         </div>
       ))}
-      <PaneResizers layout={layout} containerRef={containerRef} />
       {visibleDrawers.map(entry => (
         <TerminalDrawerChrome key={entry.ownerTabId} entry={entry} containerRef={containerRef} />
       ))}
       {collapsedDrawers.map(entry => (
         <CollapsedDrawerBar key={entry.ownerTabId} entry={entry} />
       ))}
+      {panes.map(pane => {
+        const rect = rects.get(pane.id);
+        if (!rect) return null;
+        const focused = split && pane.id === focusedPaneId;
+        return (
+          <div
+            key={pane.id}
+            data-pane-frame={pane.id}
+            data-focused={focused ? 'true' : undefined}
+            aria-hidden
+            className={`absolute z-20 pointer-events-none rounded-[12px] border ${focused ? 'border-border-focus' : 'border-border'}`}
+            style={{ ...lenRectStyle(paneFrameRect(rect)), boxShadow: '0 0 0 6px var(--color-bg)' }}
+          />
+        );
+      })}
+      <PaneResizers layout={layout} containerRef={containerRef} />
       <DrawerCloseDialog />
       {tabs.length === 0 && (
         <div className="absolute inset-0 grid place-items-center text-muted text-[13px]">

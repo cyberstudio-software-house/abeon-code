@@ -9,6 +9,8 @@ export const DRAWER_MIN_SESSION_HEIGHT = 120;
 export const DRAWER_MIN_BODY_HEIGHT = 120;
 export const DRAWER_MIN_SPLIT_WIDTH = 160;
 export const DRAWER_MIN_SPLIT_HEIGHT = 90;
+export const PANE_GAP = 8;
+export const PANE_BORDER = 1;
 
 export type Len = { pct: number; px: number };
 export type LenRect = { left: Len; top: Len; width: Len; height: Len };
@@ -32,12 +34,34 @@ export function lenRectStyle(r: LenRect) {
   return { left: cssLen(r.left), top: cssLen(r.top), width: cssLen(r.width), height: cssLen(r.height) };
 }
 
-export function paneContentRect(pane: PaneRect, barHeight: number): LenRect {
+function insetRect(r: LenRect, px: number): LenRect {
   return {
-    left: len(pane.left),
-    top: len(pane.top, barHeight),
-    width: len(pane.width),
-    height: len(pane.height, -barHeight),
+    left: addLen(r.left, len(0, px)),
+    top: addLen(r.top, len(0, px)),
+    width: addLen(r.width, len(0, -2 * px)),
+    height: addLen(r.height, len(0, -2 * px)),
+  };
+}
+
+export function paneFrameRect(pane: PaneRect): LenRect {
+  const full: LenRect = { left: len(pane.left), top: len(pane.top), width: len(pane.width), height: len(pane.height) };
+  return insetRect(full, PANE_GAP / 2);
+}
+
+function paneInnerRect(pane: PaneRect): LenRect {
+  return insetRect(paneFrameRect(pane), PANE_BORDER);
+}
+
+export function paneBarRect(pane: PaneRect, barHeight: number): LenRect {
+  return { ...paneInnerRect(pane), height: len(0, barHeight) };
+}
+
+export function paneContentRect(pane: PaneRect, barHeight: number): LenRect {
+  const inner = paneInnerRect(pane);
+  return {
+    ...inner,
+    top: addLen(inner.top, len(0, barHeight)),
+    height: addLen(inner.height, len(0, -barHeight)),
   };
 }
 

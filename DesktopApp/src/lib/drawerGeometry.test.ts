@@ -12,7 +12,9 @@ import {
   len,
   lenRectStyle,
   neighborInDirection,
+  paneBarRect,
   paneContentRect,
+  paneFrameRect,
   resolveLen,
   scaleLen,
 } from './drawerGeometry';
@@ -55,37 +57,51 @@ describe('Len arithmetic', () => {
   });
 });
 
+describe('pane card geometry', () => {
+  it('insets the frame by half the gap and keeps the bar and content inside its border', () => {
+    expect(paneFrameRect(FULL)).toEqual({ left: len(0, 4), top: len(0, 4), width: len(100, -8), height: len(100, -8) });
+    expect(paneBarRect(FULL, 48)).toEqual({ left: len(0, 5), top: len(0, 5), width: len(100, -10), height: len(0, 48) });
+    expect(paneContentRect(FULL, 48)).toEqual({ left: len(0, 5), top: len(0, 53), width: len(100, -10), height: len(100, -58) });
+  });
+
+  it('insets the frame of a right half pane from its own edges', () => {
+    expect(paneFrameRect({ left: 50, top: 0, width: 50, height: 100 })).toEqual({
+      left: len(50, 4), top: len(0, 4), width: len(50, -8), height: len(100, -8),
+    });
+  });
+});
+
 describe('computeDrawerLayout', () => {
   it('keeps the plain content rect format of a pane without a drawer', () => {
     const c = paneContentRect(FULL, 32);
     expect(lenRectStyle(c)).toEqual({
-      left: '0%', top: 'calc(0% + 32px)', width: '100%', height: 'calc(100% - 32px)',
+      left: 'calc(0% + 5px)', top: 'calc(0% + 37px)', width: 'calc(100% - 10px)', height: 'calc(100% - 42px)',
     });
   });
 
   it('splits the content into session, header and body', () => {
     const r = computeDrawerLayout(FULL, 32, 0.35, single);
-    expect(cssLen(r.session.height)).toBe('calc(65% - 20.8px)');
-    expect(cssLen(r.header.top)).toBe('calc(65% + 11.2px)');
+    expect(cssLen(r.session.height)).toBe('calc(65% - 27.3px)');
+    expect(cssLen(r.header.top)).toBe('calc(65% + 9.7px)');
     expect(cssLen(r.header.height)).toBe(`calc(0% + ${DRAWER_HEADER_HEIGHT}px)`);
-    expect(cssLen(r.body.top)).toBe('calc(65% + 39.2px)');
-    expect(cssLen(r.body.height)).toBe('calc(35% - 39.2px)');
+    expect(cssLen(r.body.top)).toBe('calc(65% + 37.7px)');
+    expect(cssLen(r.body.height)).toBe('calc(35% - 42.7px)');
     expect(lenRectStyle(r.terminals.get('a')!)).toEqual(lenRectStyle(r.body));
     expect(lenRectStyle(r.content)).toEqual(lenRectStyle(paneContentRect(FULL, 32)));
   });
 
   it('lays terminals out inside the body of an offset pane', () => {
     const r = computeDrawerLayout({ left: 50, top: 0, width: 50, height: 100 }, 32, 0.5, row);
-    expect(cssLen(r.header.left)).toBe('50%');
-    expect(cssLen(r.header.width)).toBe('50%');
+    expect(cssLen(r.header.left)).toBe('calc(50% + 5px)');
+    expect(cssLen(r.header.width)).toBe('calc(50% - 10px)');
     expect(cssLen(r.terminals.get('b')!.left)).toBe('75%');
-    expect(cssLen(r.terminals.get('b')!.width)).toBe('25%');
+    expect(cssLen(r.terminals.get('b')!.width)).toBe('calc(25% - 5px)');
   });
 
   it('stacks a column split vertically inside the body', () => {
     const r = computeDrawerLayout(FULL, 32, 0.5, mixed);
-    expect(cssLen(r.terminals.get('c')!.top)).toBe('calc(75% + 22px)');
-    expect(cssLen(r.terminals.get('c')!.height)).toBe('calc(25% - 22px)');
+    expect(cssLen(r.terminals.get('c')!.top)).toBe('calc(75% + 19.5px)');
+    expect(cssLen(r.terminals.get('c')!.height)).toBe('calc(25% - 24.5px)');
   });
 });
 
@@ -93,19 +109,19 @@ describe('computeCollapsedDrawerLayout', () => {
   it('reserves a bar at the bottom of the content and gives the session the rest', () => {
     const r = computeCollapsedDrawerLayout(paneContentRect(FULL, 32));
     expect(lenRectStyle(r.session)).toEqual({
-      left: '0%', top: 'calc(0% + 32px)', width: '100%', height: 'calc(100% - 60px)',
+      left: 'calc(0% + 5px)', top: 'calc(0% + 37px)', width: 'calc(100% - 10px)', height: 'calc(100% - 70px)',
     });
     expect(lenRectStyle(r.bar)).toEqual({
-      left: '0%', top: 'calc(100% - 28px)', width: '100%', height: 'calc(0% + 28px)',
+      left: 'calc(0% + 5px)', top: 'calc(100% - 33px)', width: 'calc(100% - 10px)', height: 'calc(0% + 28px)',
     });
   });
 
   it('keeps the bar inside an offset pane', () => {
     const r = computeCollapsedDrawerLayout(paneContentRect({ left: 50, top: 50, width: 50, height: 50 }, 32));
     expect(lenRectStyle(r.bar)).toEqual({
-      left: '50%', top: 'calc(100% - 28px)', width: '50%', height: 'calc(0% + 28px)',
+      left: 'calc(50% + 5px)', top: 'calc(100% - 33px)', width: 'calc(50% - 10px)', height: 'calc(0% + 28px)',
     });
-    expect(cssLen(r.session.height)).toBe('calc(50% - 60px)');
+    expect(cssLen(r.session.height)).toBe('calc(50% - 70px)');
   });
 });
 

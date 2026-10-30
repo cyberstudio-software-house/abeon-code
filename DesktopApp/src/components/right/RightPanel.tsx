@@ -5,7 +5,7 @@ import { ProjectToolbar } from './ProjectToolbar';
 import { UsageSection } from './UsageSection';
 export function RightPanel() {
   return (
-    <aside className="h-full bg-bg p-4 text-[13px] flex flex-col gap-4">
+    <aside className="h-full bg-transparent p-4 text-[13px] flex flex-col gap-4">
       <ProjectToolbar />
       <div className="border-t border-border" />
       <ActionsSection />

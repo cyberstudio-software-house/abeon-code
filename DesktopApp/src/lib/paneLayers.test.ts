@@ -41,7 +41,7 @@ describe('computePaneLayers', () => {
     expect(session).toMatchObject({ visible: true, focused: true, takeFocus: false });
     expect(terminal).toMatchObject({ visible: true, focused: true, takeFocus: true, drawerOwnerId: 'session:s1' });
     expect(terminal.tab).toEqual({ kind: 'terminal', id: 'terminal:d1', projectId: 1, title: 'Terminal' });
-    expect(lenRectStyle(session.rect).height).toBe('calc(65% - 20.8px)');
+    expect(lenRectStyle(session.rect).height).toBe('calc(65% - 27.3px)');
     expect(visibleDrawers).toHaveLength(1);
   });
 
@@ -64,7 +64,7 @@ describe('computePaneLayers', () => {
     const session = layers.find(l => l.tab.id === 'session:s1')!;
     const terminal = layers.find(l => l.tab.id === 'terminal:d1')!;
     expect(lenRectStyle(session.rect)).toEqual({
-      left: '0%', top: 'calc(0% + 32px)', width: '100%', height: 'calc(100% - 60px)',
+      left: 'calc(0% + 5px)', top: 'calc(0% + 37px)', width: 'calc(100% - 10px)', height: 'calc(100% - 70px)',
     });
     expect(session.takeFocus).toBe(true);
     expect(terminal.visible).toBe(false);
@@ -72,13 +72,13 @@ describe('computePaneLayers', () => {
     expect(collapsedDrawers).toHaveLength(1);
     expect(collapsedDrawers[0]).toMatchObject({ ownerTabId: 'session:s1', paneId: 'root', terminalCount: 1 });
     expect(lenRectStyle(collapsedDrawers[0].rect)).toEqual({
-      left: '0%', top: 'calc(100% - 28px)', width: '100%', height: 'calc(0% + 28px)',
+      left: 'calc(0% + 5px)', top: 'calc(100% - 33px)', width: 'calc(100% - 10px)', height: 'calc(0% + 28px)',
     });
   });
 
   it('keeps the hidden terminals at their open size', () => {
     const { layers } = run({ drawer: { open: false, hasFocus: false } });
-    expect(lenRectStyle(layers.find(l => l.tab.id === 'terminal:d1')!.rect).height).toBe('calc(35% - 39.2px)');
+    expect(lenRectStyle(layers.find(l => l.tab.id === 'terminal:d1')!.rect).height).toBe('calc(35% - 42.7px)');
   });
 
   it('counts every shell of a hidden split drawer', () => {

@@ -60,7 +60,7 @@ export function Sidebar() {
     : projects;
 
   return (
-    <aside className="h-full bg-bg px-2.5 pt-[18px] pb-2.5 text-[13px] flex flex-col">
+    <aside className="h-full bg-transparent px-2.5 pt-[18px] pb-2.5 text-[13px] flex flex-col">
       <div className="flex items-center justify-between">
         <div className="text-[10px] tracking-[0.14em] uppercase text-muted font-medium">
           Projekty
