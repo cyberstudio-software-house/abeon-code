@@ -5,6 +5,10 @@ import { DEFAULT_MODEL_ID, DEFAULT_TITLE_GEN_MODEL_ID } from '../lib/models';
 import type { NotificationTrigger } from '../lib/attention';
 import type { Provider, SupervisorLevel } from '../types';
 import { DRAWER_DEFAULT_SIZE } from '../lib/drawerGeometry';
+import {
+  TERMINAL_DEFAULTS, clampTerminalFontSize,
+  type TerminalColors, type TerminalCursorStyle, type TerminalFontId, type TerminalLineHeight, type TerminalPaletteId,
+} from '../lib/terminalAppearance';
 
 export type SortMode = 'manual' | 'alpha' | 'activity';
 export type HistoryViewMode = 'communication' | 'full';
@@ -47,6 +51,13 @@ export type SettingsSlice = {
   historyViewMode: HistoryViewMode;
   sessionRestoreMode: SessionRestoreMode;
   terminalDrawerSize: number;
+  terminalFontId: TerminalFontId;
+  terminalFontSize: number;
+  terminalLineHeight: TerminalLineHeight;
+  terminalPaletteId: TerminalPaletteId;
+  terminalCustomPalette: TerminalColors | null;
+  terminalCursorStyle: TerminalCursorStyle;
+  terminalCursorBlink: boolean;
   notificationsEnabled: boolean;
   notificationTrigger: NotificationTrigger;
   showActiveSessions: boolean;
@@ -89,6 +100,14 @@ export type SettingsSlice = {
   setHistoryViewMode: (mode: HistoryViewMode) => void;
   setSessionRestoreMode: (mode: SessionRestoreMode) => void;
   setTerminalDrawerSize: (size: number) => void;
+  setTerminalFontId: (id: TerminalFontId) => void;
+  setTerminalFontSize: (size: number) => void;
+  setTerminalLineHeight: (lineHeight: TerminalLineHeight) => void;
+  setTerminalPaletteId: (id: TerminalPaletteId) => void;
+  setTerminalCustomPalette: (colors: TerminalColors) => void;
+  setTerminalCursorStyle: (style: TerminalCursorStyle) => void;
+  setTerminalCursorBlink: (blink: boolean) => void;
+  resetTerminalAppearance: () => void;
   setNotificationsEnabled: (v: boolean) => void;
   setNotificationTrigger: (t: NotificationTrigger) => void;
   setShowActiveSessions: (v: boolean) => void;
@@ -132,6 +151,13 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   historyViewMode: 'full',
   sessionRestoreMode: 'ask',
   terminalDrawerSize: DRAWER_DEFAULT_SIZE,
+  terminalFontId: TERMINAL_DEFAULTS.fontId,
+  terminalFontSize: TERMINAL_DEFAULTS.fontSize,
+  terminalLineHeight: TERMINAL_DEFAULTS.lineHeight,
+  terminalPaletteId: TERMINAL_DEFAULTS.paletteId,
+  terminalCustomPalette: TERMINAL_DEFAULTS.customPalette,
+  terminalCursorStyle: TERMINAL_DEFAULTS.cursorStyle,
+  terminalCursorBlink: TERMINAL_DEFAULTS.cursorBlink,
   notificationsEnabled: true,
   notificationTrigger: 'both',
   showActiveSessions: true,
@@ -187,6 +213,26 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   setHistoryViewMode: (historyViewMode) => set({ historyViewMode }),
   setSessionRestoreMode: (sessionRestoreMode) => set({ sessionRestoreMode }),
   setTerminalDrawerSize: (terminalDrawerSize) => set({ terminalDrawerSize }),
+  setTerminalFontId: (terminalFontId) => set({ terminalFontId }),
+  setTerminalFontSize: (size) => {
+    if (!Number.isFinite(size)) return;
+    set({ terminalFontSize: clampTerminalFontSize(size) });
+  },
+  setTerminalLineHeight: (terminalLineHeight) => set({ terminalLineHeight }),
+  setTerminalPaletteId: (terminalPaletteId) => set({ terminalPaletteId }),
+  setTerminalCustomPalette: (terminalCustomPalette) =>
+    set({ terminalCustomPalette, terminalPaletteId: 'custom' }),
+  setTerminalCursorStyle: (terminalCursorStyle) => set({ terminalCursorStyle }),
+  setTerminalCursorBlink: (terminalCursorBlink) => set({ terminalCursorBlink }),
+  resetTerminalAppearance: () => set({
+    terminalFontId: TERMINAL_DEFAULTS.fontId,
+    terminalFontSize: TERMINAL_DEFAULTS.fontSize,
+    terminalLineHeight: TERMINAL_DEFAULTS.lineHeight,
+    terminalPaletteId: TERMINAL_DEFAULTS.paletteId,
+    terminalCustomPalette: TERMINAL_DEFAULTS.customPalette,
+    terminalCursorStyle: TERMINAL_DEFAULTS.cursorStyle,
+    terminalCursorBlink: TERMINAL_DEFAULTS.cursorBlink,
+  }),
   setNotificationsEnabled: (notificationsEnabled) => set({ notificationsEnabled }),
   setNotificationTrigger: (notificationTrigger) => set({ notificationTrigger }),
   setShowActiveSessions: (showActiveSessions) => set({ showActiveSessions }),

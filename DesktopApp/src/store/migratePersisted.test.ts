@@ -107,6 +107,43 @@ describe('store boot with legacy Claude model settings', () => {
     expect(setSetting).not.toHaveBeenCalledWith('tabLayoutMode', expect.anything());
   });
 
+  it('drops invalid stored terminal values', async () => {
+    localStorage.setItem('abeoncode.settings', JSON.stringify({
+      terminalFontSize: 99,
+      terminalLineHeight: 2,
+      terminalPaletteId: 'neon',
+      terminalCustomPalette: 'x',
+    }));
+    const { useStore } = await import('./index');
+    const s = useStore.getState();
+    expect(s.terminalFontSize).toBe(20);
+    expect(s.terminalLineHeight).toBe(1.65);
+    expect(s.terminalPaletteId).toBe('grafit');
+    expect(s.terminalCustomPalette).toBeNull();
+  });
+
+  it('hydrates terminal appearance from SQLite and drops invalid values', async () => {
+    getAllSettings.mockResolvedValue({
+      migrated_v2: '1',
+      terminalFontId: 'ibmPlexMono',
+      terminalFontSize: '15',
+      terminalLineHeight: '1.4',
+      terminalPaletteId: 'neon',
+      terminalCursorStyle: 'bar',
+      terminalCursorBlink: 'false',
+      terminalCustomPalette: '{bad',
+    });
+    const { useStore } = await import('./index');
+    await vi.waitFor(() => expect(useStore.getState().terminalFontId).toBe('ibmPlexMono'));
+    const s = useStore.getState();
+    expect(s.terminalFontSize).toBe(15);
+    expect(s.terminalLineHeight).toBe(1.4);
+    expect(s.terminalCursorStyle).toBe('bar');
+    expect(s.terminalCursorBlink).toBe(false);
+    expect(s.terminalPaletteId).toBe('grafit');
+    expect(s.terminalCustomPalette).toBeNull();
+  });
+
   it('restores Auto as the title generation model from localStorage', async () => {
     localStorage.setItem('abeoncode.settings', JSON.stringify({ titleGenModelId: '' }));
     const { useStore } = await import('./index');

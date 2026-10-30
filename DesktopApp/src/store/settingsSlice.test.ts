@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from './index';
+import { TERMINAL_DEFAULTS, TERMINAL_PALETTES } from '../lib/terminalAppearance';
 
 describe('settingsSlice enabledProviders', () => {
   beforeEach(() => { useStore.setState({ enabledProviders: ['claude'] }); });
@@ -125,5 +126,71 @@ describe('settingsSlice claude models', () => {
     expect(s.defaultModelId).toBe('');
     expect(s.titleGenModelId).toBe('haiku');
     expect(s.modelEfforts).toEqual({});
+  });
+});
+
+describe('settingsSlice terminal appearance', () => {
+  beforeEach(() => { useStore.getState().resetTerminalAppearance(); });
+
+  it('clamps the font size', () => {
+    const { setTerminalFontSize } = useStore.getState();
+    setTerminalFontSize(42);
+    expect(useStore.getState().terminalFontSize).toBe(20);
+    setTerminalFontSize(3);
+    expect(useStore.getState().terminalFontSize).toBe(10);
+    setTerminalFontSize(13.6);
+    expect(useStore.getState().terminalFontSize).toBe(14);
+    setTerminalFontSize(NaN);
+    expect(useStore.getState().terminalFontSize).toBe(14);
+  });
+
+  it('setTerminalCustomPalette switches to the custom palette', () => {
+    const colors = { ...TERMINAL_PALETTES.legacy.colors, background: '#101010' };
+    useStore.getState().setTerminalCustomPalette(colors);
+    const s = useStore.getState();
+    expect(s.terminalCustomPalette).toEqual(colors);
+    expect(s.terminalPaletteId).toBe('custom');
+  });
+
+  it('resetTerminalAppearance restores TERMINAL_DEFAULTS', () => {
+    const s = useStore.getState();
+    s.setTerminalFontId('system');
+    s.setTerminalFontSize(18);
+    s.setTerminalLineHeight(1.4);
+    s.setTerminalCursorStyle('bar');
+    s.setTerminalCursorBlink(false);
+    s.setTerminalCustomPalette(TERMINAL_PALETTES.legacy.colors);
+    useStore.getState().resetTerminalAppearance();
+    const r = useStore.getState();
+    expect({
+      fontId: r.terminalFontId,
+      fontSize: r.terminalFontSize,
+      lineHeight: r.terminalLineHeight,
+      paletteId: r.terminalPaletteId,
+      customPalette: r.terminalCustomPalette,
+      cursorStyle: r.terminalCursorStyle,
+      cursorBlink: r.terminalCursorBlink,
+    }).toEqual(TERMINAL_DEFAULTS);
+  });
+
+  it('persists the terminal appearance', () => {
+    const s = useStore.getState();
+    s.setTerminalFontId('jetbrainsMono');
+    s.setTerminalFontSize(16);
+    s.setTerminalLineHeight(1.5);
+    s.setTerminalPaletteId('grafitHighContrast');
+    s.setTerminalCursorStyle('underline');
+    s.setTerminalCursorBlink(false);
+    s.setTerminalCustomPalette(TERMINAL_PALETTES.legacy.colors);
+    const persisted = JSON.parse(localStorage.getItem('abeoncode.settings') ?? '{}');
+    expect(persisted).toMatchObject({
+      terminalFontId: 'jetbrainsMono',
+      terminalFontSize: 16,
+      terminalLineHeight: 1.5,
+      terminalPaletteId: 'custom',
+      terminalCursorStyle: 'underline',
+      terminalCursorBlink: false,
+      terminalCustomPalette: TERMINAL_PALETTES.legacy.colors,
+    });
   });
 });

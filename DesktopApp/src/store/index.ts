@@ -12,6 +12,11 @@ import { createGitSlice, type GitSlice } from './gitSlice';
 import { createClickUpSlice, type ClickUpSlice } from './clickupSlice';
 import { createPanesSlice, ROOT_PANE_ID, type PanesSlice } from './panesSlice';
 import { createTerminalDrawersSlice, type TerminalDrawersSlice } from './terminalDrawersSlice';
+import {
+  clampTerminalFontSize, isTerminalColors, isTerminalCursorStyle, isTerminalFontId, isTerminalLineHeight,
+  isTerminalPaletteId, type TerminalColors, type TerminalCursorStyle, type TerminalFontId,
+  type TerminalLineHeight, type TerminalPaletteId,
+} from '../lib/terminalAppearance';
 import { DRAWER_MAX_SIZE, DRAWER_MIN_SIZE } from '../lib/drawerGeometry';
 import { collapseEmpty, createLeaf, leaves, mapLeaves, reconcilePanes, type PaneNode } from '../lib/paneTree';
 import { tauri } from '../lib/tauri';
@@ -68,6 +73,13 @@ type Persisted = {
   historyViewMode?: 'communication' | 'full';
   sessionRestoreMode?: SessionRestoreMode;
   terminalDrawerSize?: number;
+  terminalFontId?: TerminalFontId;
+  terminalFontSize?: number;
+  terminalLineHeight?: TerminalLineHeight;
+  terminalPaletteId?: TerminalPaletteId;
+  terminalCustomPalette?: TerminalColors;
+  terminalCursorStyle?: TerminalCursorStyle;
+  terminalCursorBlink?: boolean;
   notificationsEnabled?: boolean;
   notificationTrigger?: 'turnEnd' | 'questionsOnly' | 'both';
   showActiveSessions?: boolean;
@@ -99,6 +111,13 @@ const PERSISTED_KEYS = [
   'historyViewMode',
   'sessionRestoreMode',
   'terminalDrawerSize',
+  'terminalFontId',
+  'terminalFontSize',
+  'terminalLineHeight',
+  'terminalPaletteId',
+  'terminalCustomPalette',
+  'terminalCursorStyle',
+  'terminalCursorBlink',
   'notificationsEnabled',
   'notificationTrigger',
   'showActiveSessions',
@@ -144,6 +163,13 @@ function pickPersistedFields(state: AppState): Persisted {
     historyViewMode: state.historyViewMode,
     sessionRestoreMode: state.sessionRestoreMode,
     terminalDrawerSize: state.terminalDrawerSize,
+    terminalFontId: state.terminalFontId,
+    terminalFontSize: state.terminalFontSize,
+    terminalLineHeight: state.terminalLineHeight,
+    terminalPaletteId: state.terminalPaletteId,
+    terminalCustomPalette: state.terminalCustomPalette ?? undefined,
+    terminalCursorStyle: state.terminalCursorStyle,
+    terminalCursorBlink: state.terminalCursorBlink,
     notificationsEnabled: state.notificationsEnabled,
     notificationTrigger: state.notificationTrigger,
     showActiveSessions: state.showActiveSessions,
@@ -170,6 +196,8 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'leftWidth':
     case 'rightWidth':
     case 'terminalDrawerSize':
+    case 'terminalFontSize':
+    case 'terminalLineHeight':
     case 'supervisorGraceSeconds':
     case 'supervisorPresenceMinutes':
       return String(value as number);
@@ -180,6 +208,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'showActiveSessions':
     case 'supervisorDiscordEnabled':
     case 'supervisorDiscordMuteWhenPresent':
+    case 'terminalCursorBlink':
       return value ? 'true' : 'false';
     case 'modelEfforts':
     case 'customModels':
@@ -188,6 +217,7 @@ function serializeValue(key: PersistedKey, value: unknown): string {
     case 'codexCustomModels':
     case 'opencodeCustomModels':
     case 'supervisorExtraRules':
+    case 'terminalCustomPalette':
       return JSON.stringify(value);
     default:
       return String(value);
@@ -204,6 +234,26 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
       return clamp(Number(raw), 220, 480);
     case 'terminalDrawerSize':
       return clamp(Number(raw), DRAWER_MIN_SIZE, DRAWER_MAX_SIZE);
+    case 'terminalFontSize': {
+      const size = Number(raw);
+      return Number.isFinite(size) ? clampTerminalFontSize(size) : undefined;
+    }
+    case 'terminalLineHeight': {
+      const lineHeight = Number(raw);
+      return isTerminalLineHeight(lineHeight) ? lineHeight : undefined;
+    }
+    case 'terminalFontId':
+      return isTerminalFontId(raw) ? raw : undefined;
+    case 'terminalPaletteId':
+      return isTerminalPaletteId(raw) ? raw : undefined;
+    case 'terminalCursorStyle':
+      return isTerminalCursorStyle(raw) ? raw : undefined;
+    case 'terminalCustomPalette': {
+      try {
+        const colors: unknown = JSON.parse(raw);
+        return isTerminalColors(colors) ? colors : undefined;
+      } catch { return undefined; }
+    }
     case 'supervisorGraceSeconds': {
       const grace = Number(raw);
       return Number.isFinite(grace) ? clampSupervisorGrace(grace) : undefined;
@@ -219,6 +269,7 @@ function deserializeValue(key: PersistedKey, raw: string): unknown {
     case 'showActiveSessions':
     case 'supervisorDiscordEnabled':
     case 'supervisorDiscordMuteWhenPresent':
+    case 'terminalCursorBlink':
       return raw === 'true';
     case 'modelEfforts':
     case 'customModels':
@@ -274,6 +325,15 @@ function applyPersistedToState(p: Persisted) {
   if (typeof p.terminalDrawerSize === 'number' && Number.isFinite(p.terminalDrawerSize)) {
     patch.terminalDrawerSize = clamp(p.terminalDrawerSize, DRAWER_MIN_SIZE, DRAWER_MAX_SIZE);
   }
+  if (isTerminalFontId(p.terminalFontId)) patch.terminalFontId = p.terminalFontId;
+  if (typeof p.terminalFontSize === 'number' && Number.isFinite(p.terminalFontSize)) {
+    patch.terminalFontSize = clampTerminalFontSize(p.terminalFontSize);
+  }
+  if (isTerminalLineHeight(p.terminalLineHeight)) patch.terminalLineHeight = p.terminalLineHeight;
+  if (isTerminalPaletteId(p.terminalPaletteId)) patch.terminalPaletteId = p.terminalPaletteId;
+  if (isTerminalColors(p.terminalCustomPalette)) patch.terminalCustomPalette = p.terminalCustomPalette;
+  if (isTerminalCursorStyle(p.terminalCursorStyle)) patch.terminalCursorStyle = p.terminalCursorStyle;
+  if (typeof p.terminalCursorBlink === 'boolean') patch.terminalCursorBlink = p.terminalCursorBlink;
   if (p.notificationsEnabled !== undefined) patch.notificationsEnabled = p.notificationsEnabled;
   if (p.showActiveSessions !== undefined) patch.showActiveSessions = p.showActiveSessions;
   if (p.notificationTrigger === 'turnEnd' || p.notificationTrigger === 'questionsOnly' || p.notificationTrigger === 'both') {
