@@ -1,7 +1,7 @@
 export function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <span className="font-mono text-[10px] leading-none text-muted px-1.5 py-0.5 border border-border rounded-sm">
+    <kbd className="shrink-0 font-sans text-[10.5px] leading-none text-icon px-[5px] py-px border border-border-strong rounded-[5px]">
       {children}
-    </span>
+    </kbd>
   );
 }

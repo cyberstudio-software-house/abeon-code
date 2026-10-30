@@ -13,8 +13,6 @@ import type { GitFile } from '../../types';
 type DiffTarget = { repoLabel: string; filePath: string; files: GitFile[] };
 type GitTab = 'changes' | 'history';
 
-const TAB_CLASS = 'px-1.5 py-0.5 text-[10px] uppercase tracking-wider';
-
 export function GitSection() {
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
@@ -58,42 +56,43 @@ export function GitSection() {
   };
 
   return (
-    <section className="flex-1 min-h-0 overflow-auto flex flex-col">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-1.5" role="tablist">
-          <TabButton active={tab === 'changes'} onClick={() => setTab('changes')} className={TAB_CLASS}>Zmiany</TabButton>
-          <TabButton active={tab === 'history'} onClick={() => setTab('history')} className={TAB_CLASS}>Historia</TabButton>
-          {status && status.isRepo && (
-            <IconBtn
-              icon="refresh"
-              label="Odśwież"
-              tone="ghost"
-              size="sm"
-              loading={refreshing}
-              onClick={onRefresh}
-            />
-          )}
+    <section className="flex-1 min-h-0 overflow-auto flex flex-col gap-2.5">
+      <div className="flex items-center gap-0.5 px-0.5">
+        <div className="flex items-center gap-0.5" role="tablist">
+          <TabButton active={tab === 'changes'} onClick={() => setTab('changes')}>Zmiany</TabButton>
+          <TabButton active={tab === 'history'} onClick={() => setTab('history')}>Historia</TabButton>
         </div>
+        <span className="flex-1" />
         {tab === 'changes' && status && status.isRepo && (
-          <span className="text-[10px] text-muted">{totalFiles} plików</span>
+          <span className="text-[11.5px] text-muted">{totalFiles} plików</span>
+        )}
+        {status && status.isRepo && (
+          <IconBtn
+            icon="refresh"
+            label="Odśwież"
+            tone="ghost"
+            size="md"
+            loading={refreshing}
+            onClick={onRefresh}
+          />
         )}
       </div>
 
-      {!status && <div className="text-[12px] text-muted">Wczytywanie…</div>}
-      {status && !status.isRepo && <div className="text-[12px] text-muted">Nie jest repozytorium git</div>}
+      {!status && <div className="px-1 text-[12px] text-muted">Wczytywanie…</div>}
+      {status && !status.isRepo && <div className="px-1 text-[12px] text-muted">Nie jest repozytorium git</div>}
 
       {tab === 'history' && status && status.isRepo && (
         <GitHistory key={projectId} projectId={projectId} repos={repos} reloadToken={historyReloadToken} />
       )}
 
       {tab === 'changes' && repos.length === 1 && (
-        <>
+        <div className="flex flex-col gap-0.5 p-2 bg-bg-elev border border-border rounded-[10px]">
           {repos[0].branch && (
-            <div className="flex items-center gap-2 bg-bg-elev px-3 py-1.5 mb-3 text-[11px]">
-              <Icon name="branch" className="w-3.5 h-3.5 text-fg-secondary shrink-0" />
-              <span className="text-fg font-medium">{repos[0].branch}</span>
+            <div className="flex items-center gap-2 px-1 pt-1 pb-2 text-fg-secondary">
+              <Icon name="branch" className="w-3.5 h-3.5 shrink-0" />
+              <span className="font-mono text-[12.5px] text-fg">{repos[0].branch}</span>
               {(repos[0].ahead > 0 || repos[0].behind > 0) && (
-                <span className="text-muted ml-auto">↑{repos[0].ahead} ↓{repos[0].behind}</span>
+                <span className="ml-auto font-mono text-[11.5px] text-icon">↑{repos[0].ahead} ↓{repos[0].behind}</span>
               )}
             </div>
           )}
@@ -101,7 +100,7 @@ export function GitSection() {
             files={repos[0].files}
             onSelect={fp => setDiffTarget({ repoLabel: repos[0].label, filePath: fp, files: repos[0].files })}
           />
-        </>
+        </div>
       )}
 
       {tab === 'changes' && repos.length >= 2 && repos.map(repo => (

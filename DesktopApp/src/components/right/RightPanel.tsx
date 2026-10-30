@@ -3,17 +3,14 @@ import { ClickUpSection } from './ClickUpSection';
 import { GitSection } from './GitSection';
 import { ProjectToolbar } from './ProjectToolbar';
 import { UsageSection } from './UsageSection';
-export function RightPanel() {
+
+export function RightPanel({ detached = false }: { detached?: boolean }) {
   return (
-    <aside className="h-full bg-transparent p-4 text-[13px] flex flex-col gap-4">
+    <aside className="h-full bg-transparent pl-1.5 pr-1 text-[13px] flex flex-col gap-5">
       <ProjectToolbar />
-      <div className="border-t border-border" />
       <ActionsSection />
-      <div className="border-t border-border" />
-      <ClickUpSection />
-      <div className="border-t border-border" />
+      <ClickUpSection detached={detached} />
       <GitSection />
-      <div className="border-t border-border" />
       <UsageSection />
     </aside>
   );

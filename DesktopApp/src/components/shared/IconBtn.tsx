@@ -26,7 +26,7 @@ export function IconBtn({ icon, label, onClick, tone = 'default', size = 'md', l
       aria-busy={loading || undefined}
       title={label}
       disabled={loading}
-      className={`inline-flex items-center justify-center border transition-colors ${sizes[size]} ${tones[tone]} ${loading ? 'cursor-wait opacity-70' : ''}`}
+      className={`inline-flex items-center justify-center rounded-md border transition-colors ${sizes[size]} ${tones[tone]} ${loading ? 'cursor-wait opacity-70' : ''}`}
     >
       <Icon
         name={loading ? 'spinner' : icon}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../../store';
+import { Icon } from '../shared/Icon';
 import { ActionList } from './ActionList';
 import { AddActionDialog } from '../dialogs/AddActionDialog';
 
@@ -17,17 +18,18 @@ export function ActionsSection() {
 
   if (!project) return <div className="text-[12px] text-muted">— brak projektu —</div>;
   return (
-    <section className="shrink-0">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[10px] text-muted font-medium uppercase tracking-wider">Akcje</span>
-        <span className="text-[10px] text-muted">wykrywanie automatyczne</span>
+    <section className="shrink-0 flex flex-col gap-0.5">
+      <div className="flex items-baseline justify-between px-1 pb-1.5">
+        <h2 className="text-[11px] text-label font-medium uppercase tracking-[0.06em]">Akcje</h2>
+        <span className="text-[11px] text-label">wykrywane automatycznie</span>
       </div>
       <ActionList projectId={project.id} onChanged={() => load(project.id)} />
       <button
         onClick={() => setDialogOpen(true)}
-        className="mt-3 text-[11.5px] text-muted hover:text-fg"
+        className="self-start mt-1 h-7 flex items-center gap-1.5 pl-1.5 pr-2 rounded-[7px] text-[12.5px] text-icon hover:bg-bg-elev-2 hover:text-fg-strong transition-colors"
       >
-        + dodaj akcję
+        <Icon name="plus" className="w-[13px] h-[13px]" />
+        Dodaj akcję
       </button>
       {dialogOpen && (
         <AddActionDialog

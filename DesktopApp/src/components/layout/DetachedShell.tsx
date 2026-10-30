@@ -119,7 +119,7 @@ export function DetachedShell({ mode }: { mode: DetachedWindowMode }) {
         </main>
         <DragHandle onDrag={onRightDrag} ariaLabel="Resize right panel" />
         <div style={{ width: rightWidth }} className="h-full flex-shrink-0 p-1">
-          <RightPanel />
+          <RightPanel detached />
         </div>
       </div>
       {confirming && (

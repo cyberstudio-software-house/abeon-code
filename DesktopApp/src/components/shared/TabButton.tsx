@@ -7,17 +7,17 @@ type Props = {
   className?: string;
 };
 
-export function TabButton({ active, onClick, children, className = 'px-3 py-2 text-[12px]' }: Props) {
+export function TabButton({ active, onClick, children, className = 'h-[26px] px-[9px] text-[12px]' }: Props) {
   return (
     <button
       type="button"
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`${className} font-medium border-b-2 transition-colors -mb-px ${
+      className={`${className} rounded-md transition-colors ${
         active
-          ? 'border-accent text-fg'
-          : 'border-transparent text-muted hover:text-fg-secondary'
+          ? 'bg-bg-elev-2 text-fg-strong'
+          : 'text-icon hover:text-fg-strong'
       }`}
     >
       {children}

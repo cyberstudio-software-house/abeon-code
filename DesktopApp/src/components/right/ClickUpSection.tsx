@@ -5,7 +5,7 @@ import { ClickUpTaskDialog } from '../dialogs/ClickUpTaskDialog';
 import { ClickUpScopeDialog } from './ClickUpScopeDialog';
 import { Icon } from '../shared/Icon';
 
-export function ClickUpSection() {
+export function ClickUpSection(_props: { detached?: boolean }) {
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
   const connectionStatus = useStore(s => s.connectionStatus);

@@ -7,8 +7,6 @@ import type { ProviderLimits, RateLimitWindow, UsageSummary } from '../../types'
 
 type UsageTab = 'usage' | 'limits';
 
-const TAB_CLASS = 'px-1.5 py-0.5 text-[10px] uppercase tracking-wider';
-
 function totalTokens(u: UsageSummary): number {
   return u.tokens.input + u.tokens.output + u.tokens.cacheWrite + u.tokens.cacheRead;
 }
@@ -16,7 +14,7 @@ function totalTokens(u: UsageSummary): number {
 function UsageLine({ label, usage }: { label: string; usage: UsageSummary | null }) {
   if (!usage) {
     return (
-      <div className="flex items-center justify-between text-[12px]">
+      <div className="flex items-center justify-between text-[12.5px]">
         <span className="text-muted">{label}</span>
         <span className="text-muted">—</span>
       </div>
@@ -28,7 +26,7 @@ function UsageLine({ label, usage }: { label: string; usage: UsageSummary | null
     .join('\n')
     + (unknown ? `\n(brak ceny: ${usage.unknownModels.join(', ')})` : '');
   return (
-    <div className="flex items-center justify-between text-[12px]" title={tooltip}>
+    <div className="flex items-center justify-between text-[12.5px]" title={tooltip}>
       <span className="text-muted">{label}</span>
       <span className="flex items-center gap-2">
         <span className="text-fg-secondary tabular-nums">{formatTokens(totalTokens(usage))} tok</span>
@@ -41,7 +39,7 @@ function UsageLine({ label, usage }: { label: string; usage: UsageSummary | null
 
 function DurationLine({ label, ms }: { label: string; ms: number | null | undefined }) {
   return (
-    <div className="flex items-center justify-between text-[12px]">
+    <div className="flex items-center justify-between text-[12.5px]">
       <span className="text-muted">{label}</span>
       <span className={ms != null ? 'text-fg-secondary tabular-nums' : 'text-muted'}>
         {ms != null ? formatDuration(ms) : '—'}
@@ -75,12 +73,12 @@ function limitTone(usedPercent: number): string {
 function LimitLine({ label, limit }: { label: string; limit: RateLimitWindow | null }) {
   if (!limit) {
     return (
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between text-[12px]">
+      <div className="flex flex-col gap-1.5 px-1">
+        <div className="flex items-center justify-between text-[12.5px]">
           <span className="text-muted">{label}</span>
           <span className="text-muted">—</span>
         </div>
-        <div className="h-1 bg-bg-elev-2" />
+        <div className="h-1 rounded-sm bg-track" />
       </div>
     );
   }
@@ -88,13 +86,13 @@ function LimitLine({ label, limit }: { label: string; limit: RateLimitWindow | n
   const percent = Math.round(limit.usedPercent);
   const width = Math.min(100, Math.max(0, limit.usedPercent));
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between text-[12px]">
+    <div className="flex flex-col gap-1.5 px-1">
+      <div className="flex items-center justify-between text-[12.5px]">
         <span className="text-fg-secondary">{label}</span>
-        <span className="text-fg font-medium tabular-nums">{percent}%</span>
+        <span className="font-mono text-fg tabular-nums">{percent}%</span>
       </div>
       <div
-        className="h-1 bg-bg-elev-2 overflow-hidden"
+        className="h-1 rounded-sm bg-track overflow-hidden"
         role="progressbar"
         aria-label={label}
         aria-valuemin={0}
@@ -103,7 +101,7 @@ function LimitLine({ label, limit }: { label: string; limit: RateLimitWindow | n
       >
         <div className={`h-full ${limitTone(limit.usedPercent)}`} style={{ width: `${width}%` }} />
       </div>
-      <span className="text-[10px] text-muted tabular-nums">{formatReset(limit.resetsAt)}</span>
+      <span className="text-[11.5px] text-muted tabular-nums">{formatReset(limit.resetsAt)}</span>
     </div>
   );
 }
@@ -160,28 +158,28 @@ export function UsageSection() {
   const hasLimits = limits?.shortWindow != null || limits?.weekly != null;
 
   return (
-    <section className="shrink-0">
-      <div className="flex items-center gap-1.5 mb-3" role="tablist">
-        <TabButton active={tab === 'usage'} onClick={() => setTab('usage')} className={TAB_CLASS}>Zużycie</TabButton>
-        <TabButton active={tab === 'limits'} onClick={() => setTab('limits')} className={TAB_CLASS}>Limity</TabButton>
+    <section className="shrink-0 flex flex-col gap-3.5 pb-2.5">
+      <div className="flex items-center gap-0.5 px-0.5" role="tablist">
+        <TabButton active={tab === 'usage'} onClick={() => setTab('usage')}>Zużycie</TabButton>
+        <TabButton active={tab === 'limits'} onClick={() => setTab('limits')}>Limity</TabButton>
       </div>
 
       {tab === 'usage' ? (
         supportsUsage ? (
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1.5 px-1">
             <UsageLine label="Sesja" usage={sessionUsage} />
             <DurationLine label="Czas sesji" ms={sessionUsage?.durationMs} />
             <DurationLine label="Czas aktywny" ms={sessionUsage?.activeMs} />
           </div>
         ) : (
-          <div className="text-[12px] text-muted">Brak danych o zużyciu dla OpenCode</div>
+          <div className="px-1 text-[12.5px] text-muted">Brak danych o zużyciu dla OpenCode</div>
         )
       ) : !supportsUsage ? (
-        <div className="text-[12px] text-muted">Brak danych o limitach dla OpenCode</div>
+        <div className="px-1 text-[12.5px] text-muted">Brak danych o limitach dla OpenCode</div>
       ) : limits === undefined ? (
-        <div className="text-[12px] text-muted">Wczytywanie…</div>
+        <div className="px-1 text-[12.5px] text-muted">Wczytywanie…</div>
       ) : hasLimits ? (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-3.5">
           <LimitLine
             label={limits.shortWindow ? formatWindowLabel(limits.shortWindow.windowMinutes) : 'Krótkie okno'}
             limit={limits.shortWindow}
@@ -189,7 +187,7 @@ export function UsageSection() {
           <LimitLine label="Tydzień" limit={limits.weekly} />
         </div>
       ) : (
-        <div className="text-[12px] text-muted">Brak danych o limitach</div>
+        <div className="px-1 text-[12.5px] text-muted">Brak danych o limitach</div>
       )}
     </section>
   );

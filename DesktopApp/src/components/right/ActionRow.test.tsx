@@ -64,4 +64,17 @@ describe('ActionRow', () => {
     expect(h.dismiss).toHaveBeenCalledWith(1);
     expect(h.closeTab).toHaveBeenCalledWith('action:1');
   });
+
+  it('shows działa while the action runs', () => {
+    seed({ 1: { actionId: 1, ptyId: 'p', status: 'running' } });
+    render(<ActionRow action={action} index={0} onChanged={() => {}} />);
+    expect(screen.getByText('działa')).toHaveClass('text-success');
+  });
+
+  it('shows the exit text instead of działa once the action exited', () => {
+    seed({ 1: { actionId: 1, ptyId: 'p', status: 'exited', exitCode: 0 } });
+    render(<ActionRow action={action} index={0} onChanged={() => {}} />);
+    expect(screen.queryByText('działa')).not.toBeInTheDocument();
+    expect(screen.getByText('zakończone')).toBeInTheDocument();
+  });
 });

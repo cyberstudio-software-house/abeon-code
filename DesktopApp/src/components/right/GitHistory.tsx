@@ -7,7 +7,7 @@ import type { GitBranch, GitCommit, GitRepo } from '../../types';
 
 const PAGE_SIZE = 50;
 const SELECT_CLASS =
-  'bg-bg-elev-2 border border-border rounded text-fg text-[11px] px-1.5 py-0.5 min-w-0 flex-1 cursor-pointer focus:outline-none focus:border-accent';
+  'bg-bg-elev-2 border border-border-raised rounded-md text-fg text-[12px] h-7 px-2 min-w-0 flex-1 cursor-pointer focus:outline-none focus:border-accent';
 
 type Props = {
   projectId: number;
@@ -81,8 +81,8 @@ export function GitHistory({ projectId, repos, reloadToken }: Props) {
   const remote = branches.filter(b => b.isRemote);
 
   return (
-    <div className="flex flex-col min-h-0">
-      <div className="flex items-center gap-1.5 mb-3">
+    <div className="flex flex-col gap-2.5 min-h-0">
+      <div className="flex items-center gap-1.5">
         {repos.length >= 2 && (
           <select
             aria-label="Repozytorium"
@@ -113,22 +113,22 @@ export function GitHistory({ projectId, repos, reloadToken }: Props) {
         </select>
       </div>
 
-      {error && <div className="text-[12px] text-danger px-2">Błąd: {error}</div>}
-      {!error && loading && <div className="text-[12px] text-muted px-2">Wczytywanie…</div>}
-      {!error && !loading && commits.length === 0 && <div className="text-[12px] text-muted px-2">Brak commitów</div>}
+      {error && <div className="text-[12px] text-danger px-1">Błąd: {error}</div>}
+      {!error && loading && <div className="text-[12px] text-muted px-1">Wczytywanie…</div>}
+      {!error && !loading && commits.length === 0 && <div className="text-[12px] text-muted px-1">Brak commitów</div>}
 
       {!error && !loading && commits.length > 0 && (
-        <div className="min-h-0 overflow-auto">
+        <div className="min-h-0 overflow-auto flex flex-col gap-0.5 p-2 bg-bg-elev border border-border rounded-[10px]">
           {commits.map(c => (
             <button
               key={c.hash}
               type="button"
               onClick={() => setOpenHash(c.hash)}
-              className="w-full flex flex-col gap-0.5 px-2 py-[5px] border-b border-border/50 hover:bg-bg-elev transition-colors text-left"
+              className="w-full flex flex-col gap-0.5 px-1.5 py-1.5 rounded-md hover:bg-bg-elev-2 transition-colors text-left"
             >
-              <span className="w-full text-[11.5px] text-fg truncate">{c.subject}</span>
-              <span className="w-full flex items-center gap-2 text-[10px] text-muted">
-                <span className="font-mono text-fg-secondary shrink-0">{c.shortHash}</span>
+              <span className="w-full text-[12.5px] text-fg truncate">{c.subject}</span>
+              <span className="w-full flex items-center gap-2 text-[11px] text-muted">
+                <span className="font-mono text-icon shrink-0">{c.shortHash}</span>
                 <span className="truncate">{c.author}</span>
                 <span className="ml-auto shrink-0">{formatRelative(c.timestamp * 1000)}</span>
               </span>

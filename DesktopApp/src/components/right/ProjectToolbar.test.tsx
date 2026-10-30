@@ -45,12 +45,19 @@ describe('ProjectToolbar', () => {
 
   it('routes all actions to the active project', async () => {
     render(<ProjectToolbar />);
-    fireEvent.click(screen.getByRole('button', { name: 'Otwórz terminal' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Otwórz w edytorze' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Otwórz notatki' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Terminal' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edytor' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Notatki' }));
     expect(openTerminal).toHaveBeenCalledWith(4, { toggle: false });
     expect(openProjectInEditor).toHaveBeenCalledWith('/demo');
     expect(openNotesWindow).toHaveBeenCalledWith(4, 'Demo');
+  });
+
+  it('renders the three actions without a pressed state', () => {
+    render(<ProjectToolbar />);
+    for (const name of ['Terminal', 'Edytor', 'Notatki']) {
+      expect(screen.getByRole('button', { name })).not.toHaveAttribute('aria-pressed');
+    }
   });
 
   it('renders nothing without an active project', () => {
@@ -61,14 +68,14 @@ describe('ProjectToolbar', () => {
   it('shows an editor launch failure', async () => {
     openProjectInEditor.mockRejectedValueOnce(new Error('failed'));
     render(<ProjectToolbar />);
-    fireEvent.click(screen.getByRole('button', { name: 'Otwórz w edytorze' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edytor' }));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith('Nie udało się otworzyć projektu w edytorze'));
   });
 
   it('shows a notes launch failure', async () => {
     openNotesWindow.mockRejectedValueOnce(new Error('failed'));
     render(<ProjectToolbar />);
-    fireEvent.click(screen.getByRole('button', { name: 'Otwórz notatki' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Notatki' }));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith('Nie udało się otworzyć okna notatek'));
   });
 });
