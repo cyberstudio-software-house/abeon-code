@@ -166,8 +166,10 @@ Bundle the fonts with the app instead of loading Google Fonts from `index.html` 
 xterm must measure a loaded font): Geist (400/500/600), Geist Mono (400/500), JetBrains Mono
 (400/500), IBM Plex Mono (400/500), as local `woff2` (package choice is the builder's, e.g.
 `@fontsource/*` or `geist`). Drop the unused Instrument Sans / Instrument Serif and their
-`tailwind.config.ts` families. `TerminalView` waits for `document.fonts.load()` of the configured
-family before opening xterm, and refits after a family change.
+`tailwind.config.ts` families. `TerminalView` opens xterm immediately and does not wait for the
+font: it starts `document.fonts.load()` for the configured family, and once the font is loaded it
+re-assigns the family (through the fallback stack, so xterm drops its cached glyph measurements) and
+refits. A family change takes the same path, and the PTY size is synced after spawn.
 
 ## Shell
 
