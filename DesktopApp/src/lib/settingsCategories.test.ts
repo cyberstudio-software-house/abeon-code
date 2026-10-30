@@ -142,8 +142,6 @@ const PAGES: Record<SettingsCategoryId, ComponentType> = {
   clickup: ClickUpCategory,
 };
 
-const ROWLESS: SettingsCategoryId[] = ['terminal'];
-
 describe('category keywords stay in sync with the rendered rows', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -184,7 +182,7 @@ describe('category keywords stay in sync with the rendered rows', () => {
     const labels = collect(container, 'data-settings-row-label');
     const descriptions = collect(container, 'data-settings-row-description');
 
-    if (!ROWLESS.includes(id)) expect(labels.length).toBeGreaterThan(0);
+    expect(labels.length).toBeGreaterThan(0);
     for (const text of [...labels, ...descriptions]) {
       expect(filterSettingsCategories(text), text).toContain(id);
     }

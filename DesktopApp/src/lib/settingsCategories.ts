@@ -66,6 +66,10 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
       'Krój', 'Czcionka', 'Geist Mono', 'JetBrains Mono', 'IBM Plex Mono', 'Systemowa monospace',
       'Rozmiar', 'Interlinia', 'Paleta ANSI', 'Grafit', 'Wysoki kontrast', 'Obecna', 'Własna',
       'Kształt kursora', 'Blok', 'Belka', 'Podkreślenie', 'Miganie', 'Podgląd', 'Przywróć domyślne',
+      'Czcionka monospace dla wszystkich terminali.', 'W pikselach, od 10 do 20.',
+      'Większa poprawia czytelność długich odpowiedzi agenta.', 'Kształt',
+      '16 kolorów terminala. Zmienia też kolory paska statusu Claude Code, jeśli Twój skrypt statusline używa kolorów ANSI.',
+      'xterm.js', 'JSON',
     ],
   },
   notifications: {

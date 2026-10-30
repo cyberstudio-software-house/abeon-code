@@ -110,4 +110,12 @@
     50% { opacity: 0.35; }
   }
   .activity-pulse { animation: activity-pulse 1.6s ease-in-out infinite; }
+
+  @keyframes terminal-preview-blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .terminal-preview-blink { animation: terminal-preview-blink 1.1s infinite; }
+  }
 }

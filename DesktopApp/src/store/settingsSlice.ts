@@ -7,7 +7,7 @@ import type { Provider, SupervisorLevel } from '../types';
 import { DRAWER_DEFAULT_SIZE } from '../lib/drawerGeometry';
 import type { SettingsCategoryId } from '../lib/settingsCategories';
 import {
-  TERMINAL_DEFAULTS, clampTerminalFontSize,
+  TERMINAL_DEFAULTS, clampTerminalFontSize, isTerminalColors,
   type TerminalColors, type TerminalCursorStyle, type TerminalFontId, type TerminalLineHeight, type TerminalPaletteId,
 } from '../lib/terminalAppearance';
 
@@ -224,8 +224,10 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   },
   setTerminalLineHeight: (terminalLineHeight) => set({ terminalLineHeight }),
   setTerminalPaletteId: (terminalPaletteId) => set({ terminalPaletteId }),
-  setTerminalCustomPalette: (terminalCustomPalette) =>
-    set({ terminalCustomPalette, terminalPaletteId: 'custom' }),
+  setTerminalCustomPalette: (terminalCustomPalette) => {
+    if (!isTerminalColors(terminalCustomPalette)) return;
+    set({ terminalCustomPalette, terminalPaletteId: 'custom' });
+  },
   setTerminalCursorStyle: (terminalCursorStyle) => set({ terminalCursorStyle }),
   setTerminalCursorBlink: (terminalCursorBlink) => set({ terminalCursorBlink }),
   resetTerminalAppearance: () => set({

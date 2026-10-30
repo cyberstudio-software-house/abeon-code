@@ -152,6 +152,14 @@ describe('settingsSlice terminal appearance', () => {
     expect(s.terminalPaletteId).toBe('custom');
   });
 
+  it('setTerminalCustomPalette ignores a palette with a malformed color', () => {
+    const bad = { ...TERMINAL_PALETTES.legacy.colors, background: 'blue' };
+    useStore.getState().setTerminalCustomPalette(bad);
+    const s = useStore.getState();
+    expect(s.terminalCustomPalette).toBeNull();
+    expect(s.terminalPaletteId).toBe(TERMINAL_DEFAULTS.paletteId);
+  });
+
   it('resetTerminalAppearance restores TERMINAL_DEFAULTS', () => {
     const s = useStore.getState();
     s.setTerminalFontId('system');
