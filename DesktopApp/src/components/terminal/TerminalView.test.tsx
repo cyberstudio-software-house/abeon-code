@@ -13,6 +13,7 @@ const probe = vi.hoisted(() => ({
   openedContainers: [] as HTMLElement[],
   terminals: [] as Array<{ options: Record<string, any> }>,
   fit: vi.fn(),
+  fontFamilies: [] as string[],
 }));
 
 vi.mock('@xterm/xterm', () => ({
@@ -20,7 +21,17 @@ vi.mock('@xterm/xterm', () => ({
     cols = 80;
     rows = 24;
     options: Record<string, any>;
-    constructor(options: Record<string, unknown> = {}) { this.options = { ...options }; probe.terminals.push(this); }
+    constructor(options: Record<string, unknown> = {}) {
+      const store = { ...options };
+      this.options = store;
+      Object.defineProperty(store, 'fontFamily', {
+        enumerable: true,
+        get: () => store.__fontFamily,
+        set: (value: string) => { store.__fontFamily = value; probe.fontFamilies.push(value); },
+      });
+      Object.defineProperty(store, '__fontFamily', { value: options.fontFamily, writable: true, enumerable: false });
+      probe.terminals.push(this);
+    }
     buffer = { active: { getLine: () => null } };
     loadAddon() {}
     open(container: HTMLElement) { probe.openedContainers.push(container); }
@@ -233,6 +244,7 @@ describe('TerminalView appearance', () => {
     probe.terminals = [];
     probe.openedContainers = [];
     probe.fit.mockClear();
+    probe.fontFamilies = [];
     probe.spawned = 0;
     useStore.getState().resetTerminalAppearance();
     useStore.setState({ projects: [{ id: 1, name: 'P', path: '/p' }] as never });
@@ -278,6 +290,41 @@ describe('TerminalView appearance', () => {
       const fitsBefore = probe.fit.mock.calls.length;
       await act(async () => { resolveLoad(); });
       expect(probe.fit.mock.calls.length).toBeGreaterThan(fitsBefore);
+    } finally {
+      Reflect.deleteProperty(document, 'fonts');
+    }
+  });
+
+  it('forces a re-measure by toggling through the fallback stack once the font loads', async () => {
+    let resolveLoad!: () => void;
+    const load = vi.fn(() => new Promise<void>(resolve => { resolveLoad = resolve; }));
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    try {
+      await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+      probe.fontFamilies = [];
+      const fitsBefore = probe.fit.mock.calls.length;
+
+      await act(async () => { resolveLoad(); });
+
+      expect(probe.fontFamilies).toEqual(['ui-monospace, monospace', "'Geist Mono', ui-monospace, monospace"]);
+      expect(probe.fit.mock.calls.length).toBeGreaterThan(fitsBefore);
+    } finally {
+      Reflect.deleteProperty(document, 'fonts');
+    }
+  });
+
+  it('skips the toggle when the system font is configured', async () => {
+    let resolveLoad!: () => void;
+    const load = vi.fn(() => new Promise<void>(resolve => { resolveLoad = resolve; }));
+    Object.defineProperty(document, 'fonts', { configurable: true, value: { load } });
+    try {
+      useStore.getState().setTerminalFontId('system');
+      await act(async () => { render(<TerminalView projectId={1} kind="shell" visible focused />); });
+      probe.fontFamilies = [];
+
+      await act(async () => { resolveLoad(); });
+
+      expect(probe.fontFamilies).toEqual(['ui-monospace, monospace']);
     } finally {
       Reflect.deleteProperty(document, 'fonts');
     }

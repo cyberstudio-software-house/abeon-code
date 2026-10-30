@@ -37,6 +37,8 @@ function isModClick(e: MouseEvent) {
   return e.ctrlKey || e.metaKey;
 }
 
+const FALLBACK_FONT_FAMILY = 'ui-monospace, monospace';
+
 type AppEnv = { appTheme: 'dark' | 'light'; accent: string };
 
 function readAppEnv(): AppEnv {
@@ -314,6 +316,7 @@ export function TerminalView({ projectId, kind, ptyId, provider, sessionId, fres
     let stale = false;
     document.fonts?.load(`${options.fontSize}px ${options.fontFamily}`).then(() => {
       if (stale || termRef.current !== term) return;
+      if (options.fontFamily !== FALLBACK_FONT_FAMILY) term.options.fontFamily = FALLBACK_FONT_FAMILY;
       term.options.fontFamily = options.fontFamily;
       refit();
     }).catch(() => {});
