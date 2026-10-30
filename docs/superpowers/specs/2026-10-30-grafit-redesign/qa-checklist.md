@@ -31,7 +31,7 @@ Uruchom `npm run tauri dev` w `DesktopApp/` (COSMIC / Wayland). Sprawdź każdy 
 - [ ] Podziel panele (prawo i dół), kliknij każdy: wiersz projektów w nagłówku i ramka fokusu podążają za aktywnym panelem.
 - [ ] Przeciągnij kartę sesji między panelami i na krawędź (nowy podział); zmień rozmiar uchwytami między panelami: uchwyty łapią się w całej szczelinie, nic nie miga.
 - [ ] Rogi kart nad żywym terminalem są zaokrąglone (bez kwadratowych rogów płótna xterm wystających poza kartę), także przy otwartej szufladzie.
-- [ ] Ramka fokusu (bursztynowa) pojawia się tylko, gdy paneli jest więcej niż jeden, i nie ma ramki fokusu przy jednym panelu.
+- [ ] Ramka fokusu to nieco jaśniejsza szara obwódka (#2E3136, zwykła ramka ma #1D1F23); jest widoczna tylko przy dwóch lub więcej panelach, a przy jednym panelu jej nie ma.
 - [ ] Przy jednym panelu karta styka się z nagłówkiem (ujemny margines −4 px nie zakrywa przycisków nagłówka ani nie zostawia przerwy).
 - [ ] Okno ok. 1024x640 oraz ok. 900 px szerokości: nagłówek, wiersz projektów (przewijany kółkiem), pasek panelu i prawy panel są używalne, nic się nie nakłada.
 - [ ] Motyw jasny: nagłówek, pasek panelu, ramki i prawy panel są używalne.
@@ -53,8 +53,8 @@ Uruchom `npm run tauri dev` w `DesktopApp/` (COSMIC / Wayland). Sprawdź każdy 
 ## Okna wydzielone
 
 - [ ] Wydziel grupę projektu do okna: nagłówek pokazuje logo i breadcrumb „<projekt> / Okno projektu", licznik „N aktywne", a układ zgadza się z `OknoWydzielone.dc.html`.
-- [ ] Wydziel pojedynczą sesję do okna: nagłówek ma samo logo, pasek panelu ma `+` i `$`, podziały działają jak w głównym oknie.
-- [ ] W oknie wydzielonym karta ClickUp z nieprawidłowym tokenem pokazuje właściwy komunikat (stany jak w `ClickUpStany.dc.html`).
+- [ ] Wydziel pojedynczą sesję do okna: nagłówek ma logo, wiersz projektów i licznik „N aktywne", pasek panelu ma `+` i `$`, podziały działają jak w głównym oknie.
+- [ ] W oknie wydzielonym karta ClickUp z nieprawidłowym tokenem pokazuje komunikat o nieprawidłowym tokenie i podpowiedź „Popraw token w ustawieniach głównego okna.", bez przycisku ustawień (stany jak w `ClickUpStany.dc.html`).
 
 ## Skróty globalne
 
@@ -68,7 +68,8 @@ Uruchom `npm run tauri dev` w `DesktopApp/` (COSMIC / Wayland). Sprawdź każdy 
 - [ ] Wiersze sesji: stany hover i rozwinięty wyglądają poprawnie; animacja pulsu dla „Pracuje" działa i nie zacina.
 - [ ] Kolory aktywności: bursztynowy = pracuje, niebieski = czeka na Ciebie.
 - [ ] Prawy panel (pastylki, karty Git/Akcje/ClickUp) w motywie jasnym jest czytelny.
-- [ ] Karta ClickUp: po kliknięciu „Ustawienia" ustawienia otwierają się na kategorii ClickUp, a po zamknięciu fokus wraca do terminalu.
+- [ ] Karta ClickUp w głównym oknie, w stanie nieprawidłowego tokenu (przycisk „Otwórz ustawienia ClickUp" pojawia się tylko tam): po kliknięciu ustawienia otwierają się na kategorii ClickUp, a po ich zamknięciu fokus wraca do terminalu.
+- [ ] Przy fokusie w terminalu kliknij myszą ikonę ustawień w stopce sidebara, potem Esc: klawiatura wraca do terminalu.
 - [ ] Przerywane i „niebezpieczne" karty ClickUp wyglądają poprawnie w motywie jasnym.
 
 ## Menu, dialogi i powiadomienia

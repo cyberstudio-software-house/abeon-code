@@ -88,11 +88,12 @@ below it with the sessions of the pane's selected project, the `+`/`$` buttons a
 active tab (activity label or "Tylko odczyt" for history mode). While the settings view is open the
 header shows a breadcrumb ("Ustawienia / <category>") instead of the project row, and the main
 window shows "N aktywne sesje" (detached windows: "N aktywne") for live session/shell tabs and drawer
-terminals. `project` windows show the project breadcrumb; `session` windows show the logo only plus
-the pane bar.
+terminals. `project` windows show the project breadcrumb; `session` windows show the logo, the
+project row of the focused pane and the "N aktywne" count; both window kinds also have the pane bar.
 
 Both bars share `useTabBarActions.tsx` (close guards, rename, context menus, detach, and the
-Ctrl+W listener, owned by `PaneBar`) and `TabItem.tsx`.
+Ctrl+W listener, owned by `PaneBar`). Only `PaneBar` renders `TabItem.tsx`; the header row draws its
+own project chips.
 
 Pane geometry is in `lib/paneGeometry.ts` and `lib/drawerGeometry.ts`. `PANE_BAR_HEIGHT` (48) is
 the single bar height; it feeds `PaneLayout`, `computePaneLayers`, `usePaneDrag` (`overTabBar`,
