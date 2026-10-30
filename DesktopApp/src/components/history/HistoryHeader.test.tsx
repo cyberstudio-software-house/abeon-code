@@ -55,6 +55,6 @@ describe('HistoryHeader', () => {
     setup();
     expect(screen.getByText('128 tur')).toBeTruthy();
     expect(screen.getByText('main')).toBeTruthy();
-    expect(screen.getByText('Claude Code')).toBeTruthy();
+    expect(screen.getByText('Claude')).toBeTruthy();
   });
 });

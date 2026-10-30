@@ -15,4 +15,10 @@ describe('AssistantBubble', () => {
     expect(screen.getByText('18:42')).toBeTruthy();
     expect(screen.getByText('Gotowe.')).toBeTruthy();
   });
+
+  it('omits the time when the block has no timestamp', () => {
+    render(<AssistantBubble text="Gotowe." timestamp={0} providerLabel="Codex" />);
+    expect(screen.getByText('Codex')).toBeTruthy();
+    expect(screen.queryByText(/^\d{2}:\d{2}$/)).toBeNull();
+  });
 });

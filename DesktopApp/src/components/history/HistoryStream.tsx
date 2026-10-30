@@ -1,7 +1,8 @@
 import { useMemo, type ReactNode, type RefObject } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 import type { HistoryBlock, Provider } from '../../types';
-import { PROVIDER_LABEL } from '../../lib/providers';
+import { PROVIDER_SHORT_LABEL } from '../../lib/providers';
+import { pairToolStatuses, type ToolStatus } from '../../lib/toolStatus';
 import { UserBubble } from './blocks/UserBubble';
 import { AssistantBubble } from './blocks/AssistantBubble';
 import { ThinkingBlock } from './blocks/ThinkingBlock';
@@ -21,12 +22,12 @@ type Props = {
   provider?: Provider;
 };
 
-function render(b: HistoryBlock, providerLabel: string, done: boolean) {
+function render(b: HistoryBlock, providerLabel: string, status: ToolStatus) {
   switch (b.kind) {
     case 'userText':          return <UserBubble text={b.text} timestamp={b.timestamp} />;
     case 'assistantText':     return <AssistantBubble text={b.text} timestamp={b.timestamp} providerLabel={providerLabel} />;
     case 'assistantThinking': return <ThinkingBlock text={b.text} />;
-    case 'toolUse':           return <ToolUseBlock name={b.name} inputSummary={b.input_summary} rawInput={b.raw_input} done={done} />;
+    case 'toolUse':           return <ToolUseBlock name={b.name} inputSummary={b.input_summary} rawInput={b.raw_input} status={status} />;
     case 'toolResult':        return <ToolResultBlock content={b.content} isError={b.is_error} />;
     case 'attachment':        return <AttachmentBlock kind={b.attachmentKind} name={b.name} />;
     case 'system':            return <SystemBlock subtype={b.subtype} message={b.message} />;
@@ -36,7 +37,8 @@ function render(b: HistoryBlock, providerLabel: string, done: boolean) {
 export function HistoryStream({
   blocks, onLoadMore, hasMore, header, matchedIndices, activeBlockIndex = -1, virtuosoRef, provider = 'claude',
 }: Props) {
-  const providerLabel = PROVIDER_LABEL[provider];
+  const providerLabel = PROVIDER_SHORT_LABEL[provider];
+  const toolStatuses = useMemo(() => pairToolStatuses(blocks), [blocks]);
   const components = useMemo(() => ({
     Header: () => <div className="pt-6">{header}</div>,
     Footer: () => <div className="h-7" />,
@@ -57,7 +59,7 @@ export function HistoryStream({
         return (
           <div className="px-7">
             <div className={`mx-auto max-w-[780px] ${highlight}`}>
-              {render(b, providerLabel, index < blocks.length - 1)}
+              {render(b, providerLabel, toolStatuses.get(index) ?? 'pending')}
             </div>
           </div>
         );

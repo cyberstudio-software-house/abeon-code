@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Icon, type IconName } from '../../shared/Icon';
+import type { ToolStatus } from '../../../lib/toolStatus';
 
-type Props = { name: string; inputSummary: string; rawInput: unknown; done?: boolean };
+type Props = { name: string; inputSummary: string; rawInput: unknown; status?: ToolStatus };
 
 const TOOL_ICONS: Record<string, IconName> = {
   Read: 'file',
@@ -11,7 +12,7 @@ const TOOL_ICONS: Record<string, IconName> = {
   Agent: 'sparkles',
 };
 
-export function ToolUseBlock({ name, inputSummary, rawInput, done = false }: Props) {
+export function ToolUseBlock({ name, inputSummary, rawInput, status = 'pending' }: Props) {
   const [open, setOpen] = useState(false);
   const iconName = TOOL_ICONS[name] ?? 'tool';
   return (
@@ -25,7 +26,18 @@ export function ToolUseBlock({ name, inputSummary, rawInput, done = false }: Pro
         <Icon name={iconName} className="h-[13px] w-[13px] shrink-0 text-icon" />
         <span className="font-medium text-fg">{name}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted">{inputSummary}</span>
-        {done && <Icon name="check" className="h-[13px] w-[13px] shrink-0 text-success" strokeWidth={1.8} />}
+        {status === 'done' && (
+          <>
+            <Icon name="check" className="h-[13px] w-[13px] shrink-0 text-success" strokeWidth={1.8} />
+            <span className="sr-only">zakończone</span>
+          </>
+        )}
+        {status === 'error' && (
+          <>
+            <Icon name="close" className="h-[13px] w-[13px] shrink-0 text-danger" strokeWidth={1.8} />
+            <span className="sr-only">błąd</span>
+          </>
+        )}
         {open && <Icon name="chevU" className="h-[13px] w-[13px] shrink-0 text-icon" />}
       </button>
       {open && (

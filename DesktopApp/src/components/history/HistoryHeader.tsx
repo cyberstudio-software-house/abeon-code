@@ -5,7 +5,7 @@ import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import { getCliModelString } from '../../lib/models';
 import { ACTIVITY_DOT, ACTIVITY_LABEL, ACTIVITY_SHORT_LABEL, activityPulses } from '../../lib/activity';
-import { PROVIDER_LABEL } from '../../lib/providers';
+import { PROVIDER_SHORT_LABEL } from '../../lib/providers';
 import { Icon, type IconName } from '../shared/Icon';
 
 type Props = {
@@ -188,7 +188,7 @@ export function HistoryHeader({ meta, viewMode, onViewModeChange, provider = 'cl
           <span aria-hidden="true" className="text-faint">·</span>
           <span className={meta.gitBranch ? 'text-success' : undefined}>{meta.gitBranch ?? 'no branch'}</span>
           <span aria-hidden="true" className="text-faint">·</span>
-          <span>{PROVIDER_LABEL[provider]}</span>
+          <span>{PROVIDER_SHORT_LABEL[provider]}</span>
         </span>
         <span className="flex-1" />
         <div

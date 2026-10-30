@@ -9,6 +9,12 @@ export const PROVIDER_LABEL: Record<Provider, string> = {
   opencode: 'OpenCode',
 };
 
+export const PROVIDER_SHORT_LABEL: Record<Provider, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+};
+
 export const PROVIDER_ICON: Record<Provider, IconName> = {
   claude: 'claudeLogo',
   codex: 'openaiLogo',
