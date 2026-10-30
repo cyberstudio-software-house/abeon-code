@@ -10,7 +10,7 @@ import type { Provider } from '../../types';
 
 type SessionTab = Extract<Tab, { kind: 'session' }>;
 
-const layer = (visible: boolean) => `absolute inset-0 ${visible ? '' : 'invisible pointer-events-none'}`;
+const layer = (visible: boolean, surface = '') => `absolute inset-0 ${surface} ${visible ? '' : 'invisible pointer-events-none'}`;
 
 function SessionBody({ tab, visible, focused = true, takeFocus, focusToken }: { tab: SessionTab; visible: boolean; focused?: boolean; takeFocus?: boolean; focusToken?: number }) {
   if (tab.mode === 'history') {
@@ -24,7 +24,7 @@ function SessionBody({ tab, visible, focused = true, takeFocus, focusToken }: { 
   const provider = tab.provider ?? 'claude';
   if (tab.fresh) {
     return (
-      <div className={layer(visible)}>
+      <div className={layer(visible, 'bg-console')}>
         <TerminalView
           projectId={tab.projectId}
           kind="agent"
@@ -41,7 +41,7 @@ function SessionBody({ tab, visible, focused = true, takeFocus, focusToken }: { 
     );
   }
   return (
-    <div className={layer(visible)}>
+    <div className={layer(visible, 'bg-console')}>
       <ResumedTerminal tab={tab} provider={provider} visible={visible} focused={focused} takeFocus={takeFocus} focusToken={focusToken} />
     </div>
   );
@@ -100,7 +100,7 @@ export function TabPanel({ tab, visible, focused = true, takeFocus, focusToken, 
   }
   if (tab.kind === 'terminal') {
     return (
-      <div className={layer(visible)}>
+      <div className={layer(visible, onExit ? 'bg-sunken' : '')}>
         <TerminalView projectId={tab.projectId} kind="shell" visible={visible} focused={focused} takeFocus={takeFocus} focusToken={focusToken} onExit={onExit} />
       </div>
     );

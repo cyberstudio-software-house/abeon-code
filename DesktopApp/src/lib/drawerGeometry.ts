@@ -1,7 +1,7 @@
 import { computePaneRects, type PaneRect } from './paneGeometry';
 import type { PaneNode } from './paneTree';
 
-export const DRAWER_HEADER_HEIGHT = 28;
+export const DRAWER_HEADER_HEIGHT = 36;
 export const DRAWER_DEFAULT_SIZE = 0.35;
 export const DRAWER_MIN_SIZE = 0.2;
 export const DRAWER_MAX_SIZE = 0.8;
@@ -11,6 +11,8 @@ export const DRAWER_MIN_SPLIT_WIDTH = 160;
 export const DRAWER_MIN_SPLIT_HEIGHT = 90;
 export const PANE_GAP = 8;
 export const PANE_BORDER = 1;
+
+const EDGE_EPSILON = 1e-6;
 
 export type Len = { pct: number; px: number };
 export type LenRect = { left: Len; top: Len; width: Len; height: Len };
@@ -118,6 +120,14 @@ export function computeCollapsedDrawerLayout(content: LenRect): CollapsedDrawerR
   };
 }
 
+export function drawerCornerContact(rect: PaneRect): { bottomLeft: boolean; bottomRight: boolean } {
+  const touchesBottom = Math.abs(rect.top + rect.height - 100) < EDGE_EPSILON;
+  return {
+    bottomLeft: touchesBottom && Math.abs(rect.left) < EDGE_EPSILON,
+    bottomRight: touchesBottom && Math.abs(rect.left + rect.width - 100) < EDGE_EPSILON,
+  };
+}
+
 export function clampDrawerSize(next: number, contentPx: number): number {
   if (!Number.isFinite(next)) return DRAWER_DEFAULT_SIZE;
   const globalClamp = Math.min(DRAWER_MAX_SIZE, Math.max(DRAWER_MIN_SIZE, next));
@@ -127,8 +137,6 @@ export function clampDrawerSize(next: number, contentPx: number): number {
   if (min > max) return globalClamp;
   return Math.min(max, Math.max(min, next));
 }
-
-const EDGE_EPSILON = 1e-6;
 
 export function neighborInDirection(layout: PaneNode, fromId: string, dir: Direction): string | null {
   const rects = computePaneRects(layout);

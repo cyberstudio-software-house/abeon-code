@@ -3,6 +3,7 @@ import { useStore } from '../../store';
 import {
   clampDrawerSize,
   cssLen,
+  drawerCornerContact,
   DRAWER_MIN_SPLIT_HEIGHT,
   DRAWER_MIN_SPLIT_WIDTH,
   lenRectStyle,
@@ -10,11 +11,15 @@ import {
   type LenRect,
 } from '../../lib/drawerGeometry';
 import type { CollapsedDrawer, VisibleDrawer } from '../../lib/paneLayers';
+import { drawerShellLabel } from '../../lib/drawerShellLabel';
+import { computePaneRects } from '../../lib/paneGeometry';
+import { leaves } from '../../lib/paneTree';
 import { formatBinding, getBinding, type ShortcutId } from '../../lib/shortcuts';
-import { Icon } from '../shared/Icon';
-import { IconBtn } from '../shared/IconBtn';
+import { Icon, type IconName } from '../shared/Icon';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { SplitResizers } from './PaneResizers';
+
+const CARD_INNER_RADIUS = 11;
 
 const drawerMinPx = (dir: 'row' | 'col') => (dir === 'row' ? DRAWER_MIN_SPLIT_WIDTH : DRAWER_MIN_SPLIT_HEIGHT);
 
@@ -67,6 +72,20 @@ function DrawerDivider({ content, header, containerRef }: {
   );
 }
 
+function DrawerAction({ icon, label, onClick }: { icon: IconName; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-icon transition-colors hover:bg-raised-strong hover:text-fg"
+    >
+      <Icon name={icon} className="w-3.5 h-3.5" />
+    </button>
+  );
+}
+
 export function TerminalDrawerChrome({ entry, containerRef }: {
   entry: VisibleDrawer;
   containerRef: RefObject<HTMLDivElement | null>;
@@ -87,6 +106,9 @@ export function TerminalDrawerChrome({ entry, containerRef }: {
   );
   const hint = (id: ShortcutId) => formatBinding(getBinding(id, overrides));
   const focusedRect = rects.terminals.get(drawer.focusedTerminalId);
+  const shellLabel = drawerShellLabel(useStore(s => s.shellPath));
+  const terminalIds = leaves(drawer.layout).map(l => l.id);
+  const corners = drawerCornerContact(computePaneRects(drawer.layout).get(drawer.focusedTerminalId) ?? { left: 0, top: 0, width: 0, height: 0 });
 
   return (
     <>
@@ -98,24 +120,41 @@ export function TerminalDrawerChrome({ entry, containerRef }: {
           focusPane(paneId);
           focusDrawerTerminal(ownerTabId, drawer.focusedTerminalId);
         }}
-        className="absolute z-20 flex items-center justify-between gap-2 border-t border-border bg-bg px-2"
+        className="absolute z-20 flex items-center gap-0.5 border-t border-border bg-sunken pl-2.5 pr-2"
         style={lenRectStyle(rects.header)}
       >
-        <span className="text-[11px] text-muted select-none">Terminal</span>
-        <div className="flex items-center gap-0.5">
-          <IconBtn tone="ghost" size="sm" icon="splitRow" label={`Podziel w prawo (${hint('splitTerminalRight')})`} onClick={() => splitDrawerTerminal(ownerTabId, 'row')} />
-          <IconBtn tone="ghost" size="sm" icon="splitCol" label={`Podziel w dół (${hint('splitTerminalDown')})`} onClick={() => splitDrawerTerminal(ownerTabId, 'col')} />
-          <IconBtn tone="ghost" size="sm" icon="toTab" label="Wydziel do zakładki" onClick={() => detachDrawerTerminal(drawer.focusedTerminalId)} />
-          <IconBtn tone="ghost" size="sm" icon="close" label="Zamknij terminal" onClick={() => requestCloseDrawerTerminal(drawer.focusedTerminalId)} />
-          <IconBtn tone="ghost" size="sm" icon="chevron" label="Schowaj panel" onClick={() => hideTerminalDrawer(ownerTabId)} />
-        </div>
+        {terminalIds.map(id => {
+          const pressed = id === drawer.focusedTerminalId;
+          return (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={pressed}
+              onClick={() => focusDrawerTerminal(ownerTabId, id)}
+              className={`inline-flex h-[26px] items-center gap-1.5 rounded-md px-2.5 text-[12px] transition-colors ${pressed ? 'bg-raised-strong text-fg' : 'text-icon hover:text-fg'}`}
+            >
+              <Icon name="terminal" className="w-[13px] h-[13px]" />
+              {shellLabel}
+            </button>
+          );
+        })}
+        <span className="flex-1" />
+        <DrawerAction icon="splitRow" label={`Podziel w prawo (${hint('splitTerminalRight')})`} onClick={() => splitDrawerTerminal(ownerTabId, 'row')} />
+        <DrawerAction icon="splitCol" label={`Podziel w dół (${hint('splitTerminalDown')})`} onClick={() => splitDrawerTerminal(ownerTabId, 'col')} />
+        <DrawerAction icon="toTab" label="Wydziel do zakładki" onClick={() => detachDrawerTerminal(drawer.focusedTerminalId)} />
+        <DrawerAction icon="close" label="Zamknij terminal" onClick={() => requestCloseDrawerTerminal(drawer.focusedTerminalId)} />
+        <DrawerAction icon="chevron" label="Schowaj panel" onClick={() => hideTerminalDrawer(ownerTabId)} />
       </div>
       <SplitResizers layout={drawer.layout} containerRef={containerRef} frame={rects.body} minPx={drawerMinPx} onResize={onResize} />
       {rects.terminals.size > 1 && drawer.hasFocus && focusedPaneId === paneId && focusedRect && (
         <div
           data-drawer-focus-ring
           className="absolute z-20 pointer-events-none border border-accent"
-          style={lenRectStyle(focusedRect)}
+          style={{
+            ...lenRectStyle(focusedRect),
+            ...(corners.bottomLeft ? { borderBottomLeftRadius: CARD_INNER_RADIUS } : {}),
+            ...(corners.bottomRight ? { borderBottomRightRadius: CARD_INNER_RADIUS } : {}),
+          }}
         />
       )}
     </>
@@ -139,10 +178,13 @@ export function CollapsedDrawerBar({ entry }: { entry: CollapsedDrawer }) {
         focusPane(paneId);
         showTerminalDrawer(ownerTabId);
       }}
-      className="absolute z-20 flex items-center justify-between gap-2 border-t border-border bg-bg px-2 text-muted cursor-pointer hover:text-fg hover:bg-bg-elev-2 transition-colors"
+      className="absolute z-20 flex items-center justify-between gap-2 border-t border-border bg-sunken pl-2.5 pr-2 text-icon cursor-pointer hover:text-fg hover:bg-raised-strong transition-colors"
       style={lenRectStyle(rect)}
     >
-      <span className="text-[11px] select-none">{terminalCount > 1 ? `Terminal · ${terminalCount}` : 'Terminal'}</span>
+      <span className="inline-flex items-center gap-1.5 text-[12px] select-none">
+        <Icon name="terminal" className="w-[13px] h-[13px]" />
+        {terminalCount > 1 ? `Terminal · ${terminalCount}` : 'Terminal'}
+      </span>
       <Icon name="chevU" />
     </button>
   );

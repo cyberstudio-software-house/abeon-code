@@ -752,7 +752,7 @@ describe('PaneLayout terminal drawer', () => {
     const session = container.querySelector('[data-tab-layer="s1"]') as HTMLElement;
     const terminal = container.querySelector(`[data-tab-layer="${id}"]`) as HTMLElement;
     expect(session.style.height).toBe('calc(65% - 37.7px)');
-    expect(terminal.style.top).toBe('calc(65% + 43.3px)');
+    expect(terminal.style.top).toBe('calc(65% + 51.3px)');
     expect(terminal.dataset.drawerOwner).toBe('s1');
   });
 
@@ -792,7 +792,7 @@ describe('PaneLayout terminal drawer', () => {
     const layer = container.querySelector(`[data-tab-layer="${id}"]`) as HTMLElement;
     expect(layer.className).toContain('invisible');
     expect(counters.terminalMounts).toBe(2);
-    expect((container.querySelector('[data-tab-layer="s1"]') as HTMLElement).style.height).toBe('calc(100% - 86px)');
+    expect((container.querySelector('[data-tab-layer="s1"]') as HTMLElement).style.height).toBe('calc(100% - 94px)');
   });
 
   it('leaves a restore bar under the session only while the drawer is hidden', () => {
@@ -804,8 +804,8 @@ describe('PaneLayout terminal drawer', () => {
     act(() => { useStore.getState().hideTerminalDrawer('s1'); });
 
     const bar = container.querySelector('[data-drawer-collapsed="s1"]') as HTMLElement;
-    expect(bar.style.top).toBe('calc(100% - 33px)');
-    expect(bar.style.height).toBe('calc(0% + 28px)');
+    expect(bar.style.top).toBe('calc(100% - 41px)');
+    expect(bar.style.height).toBe('calc(0% + 36px)');
     expect(bar.textContent).toBe('Terminal');
   });
 
@@ -884,6 +884,54 @@ describe('PaneLayout terminal drawer', () => {
     fireEvent.click(screen.getByRole('button', { name: /Podziel w prawo/ }));
     expect(container.querySelectorAll('[data-drawer-owner="s1"]')).toHaveLength(2);
     expect(container.querySelector('[data-drawer-focus-ring]')).not.toBeNull();
+  });
+
+  it('shows one pressed chip per drawer shell named after the configured shell', () => {
+    useStore.setState({ shellPath: '/usr/bin/zsh' });
+    const { container } = render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    expect(screen.getAllByRole('button', { name: 'zsh' }).map(b => b.getAttribute('aria-pressed'))).toEqual(['true']);
+    act(() => { useStore.getState().splitDrawerTerminal('s1', 'row'); });
+    const [first, second] = drawerIds();
+    const chips = screen.getAllByRole('button', { name: 'zsh' });
+    expect(chips.map(b => b.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
+    expect(container.querySelector('[data-drawer-header="s1"]')!.contains(chips[0])).toBe(true);
+
+    fireEvent.click(chips[0]);
+
+    expect(useStore.getState().drawers.s1.focusedTerminalId).toBe(first);
+    expect(second).not.toBe(first);
+    useStore.setState({ shellPath: '' });
+  });
+
+  it('labels the chip Terminal while the shell is on auto', () => {
+    useStore.setState({ shellPath: '' });
+    render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    expect(screen.getByRole('button', { name: 'Terminal' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('paints the live session on the console surface and the drawer shell on the sunken one', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => { useStore.getState().toggleTerminalDrawer('s1'); });
+    const [id] = drawerIds();
+    expect(container.querySelector('[data-tab-layer="s1"] > div')!.className).toContain('bg-console');
+    expect(container.querySelector(`[data-tab-layer="${id}"] > div`)!.className).toContain('bg-sunken');
+  });
+
+  it('rounds the focus ring corners that meet the card bottom', () => {
+    const { container } = render(<PaneLayout />);
+    act(() => {
+      useStore.getState().toggleTerminalDrawer('s1');
+      useStore.getState().splitDrawerTerminal('s1', 'row');
+    });
+    const ring = container.querySelector('[data-drawer-focus-ring]') as HTMLElement;
+    expect(ring.style.borderBottomRightRadius).toBe('11px');
+    expect(ring.style.borderBottomLeftRadius).toBe('');
+    act(() => { useStore.getState().focusDrawerTerminal('s1', drawerIds()[0]); });
+    const left = container.querySelector('[data-drawer-focus-ring]') as HTMLElement;
+    expect(left.style.borderBottomLeftRadius).toBe('11px');
+    expect(left.style.borderBottomRightRadius).toBe('');
   });
 
   it('detaches the focused terminal from the header', () => {
