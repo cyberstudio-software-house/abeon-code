@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<title>AbeonCode — sekcja ClickUp, stany</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0C0E}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+p{margin:0}
+:focus-visible{outline:2px solid #F0B44C;outline-offset:2px}
+a{color:#F0B44C}a:hover{color:#F6CB7D}
+</style>
+</helmet>
+<div style="width: 1312px; height: 440px; box-sizing: border-box; padding: 32px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px; background: #0B0C0E; color: #E6E7E9; font-family: Geist, ui-sans-serif, system-ui, sans-serif; font-size: 13px; line-height: 1.45">
+
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <span style="font-size: 12px; color: #8E939B">Powiązane zadania</span>
+    <section aria-labelledby="s1" style="display: flex; flex-direction: column; gap: 2px">
+      <div style="height: 26px; display: flex; align-items: center; gap: 2px; padding: 0 0 4px 4px">
+        <h2 id="s1" style="flex: 1; margin: 0; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #858A93">Zadania ClickUp</h2>
+        <button aria-label="Zakres ClickUp" style="width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: #9DA1A9"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"></path><circle cx="10" cy="4.5" r="1.5"></circle><circle cx="6" cy="11.5" r="1.5"></circle></svg></button>
+      </div>
+      <sc-for list="{{tasks}}" as="t" hint-placeholder-count="4">
+        <button style="{{t.rowStyle}}">
+          <span style="flex-shrink: 0; font-family: 'Geist Mono', monospace; font-size: 11px; color: #8E939B">{{t.id}}</span>
+          <span style="flex: 1; min-width: 0; font-size: 13px; color: #E6E7E9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{t.name}}</span>
+          <span style="flex-shrink: 0; height: 20px; display: inline-flex; align-items: center; padding: 0 7px; border-radius: 999px; background: #17181B; border: 1px solid #24262A; font-size: 11px; color: #9DA1A9; white-space: nowrap">{{t.status}}</span>
+        </button>
+      </sc-for>
+      <button style="align-self: flex-start; margin-top: 2px; height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 6px; border-radius: 7px; color: #9DA1A9; font-size: 12.5px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>Powiąż zadania</button>
+    </section>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <span style="font-size: 12px; color: #8E939B">Brak powiązań</span>
+    <section aria-labelledby="s2" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="height: 26px; display: flex; align-items: center; gap: 2px; padding: 0 0 4px 4px">
+        <h2 id="s2" style="flex: 1; margin: 0; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #858A93">Zadania ClickUp</h2>
+        <button aria-label="Zakres ClickUp" style="width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: #9DA1A9"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"></path><circle cx="10" cy="4.5" r="1.5"></circle><circle cx="6" cy="11.5" r="1.5"></circle></svg></button>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 14px 12px; border-radius: 10px; border: 1px dashed #2A2C31">
+        <p style="font-size: 12.5px; line-height: 1.5; color: #8E939B">Ten projekt nie ma jeszcze powiązanych zadań.</p>
+        <button style="height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 10px 0 8px; border-radius: 8px; background: #1C1D21; border: 1px solid #2A2C31; font-size: 12.5px; color: #E6E7E9"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>Powiąż zadania</button>
+      </div>
+    </section>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <span style="font-size: 12px; color: #8E939B">Zakres nieustawiony</span>
+    <section aria-labelledby="s3" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="height: 26px; display: flex; align-items: center; gap: 2px; padding: 0 0 4px 4px">
+        <h2 id="s3" style="flex: 1; margin: 0; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #858A93">Zadania ClickUp</h2>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 10px; background: #111215; border: 1px solid #1D1F23">
+        <div style="display: flex; gap: 10px">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#9DA1A9" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" style="flex-shrink: 0; margin-top: 2px"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"></path><circle cx="10" cy="4.5" r="1.5"></circle><circle cx="6" cy="11.5" r="1.5"></circle></svg>
+          <p style="font-size: 12.5px; line-height: 1.5; color: #C4C6CB">Wybierz workspace i space, z których mają pochodzić zadania tego projektu.</p>
+        </div>
+        <button style="height: 30px; padding: 0 12px; border-radius: 8px; background: #1C1D21; border: 1px solid #2A2C31; font-size: 12.5px; color: #E6E7E9">Ustaw zakres</button>
+      </div>
+    </section>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 14px">
+    <span style="font-size: 12px; color: #8E939B">Nieprawidłowy token</span>
+    <section aria-labelledby="s4" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="height: 26px; display: flex; align-items: center; gap: 2px; padding: 0 0 4px 4px">
+        <h2 id="s4" style="flex: 1; margin: 0; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #858A93">Zadania ClickUp</h2>
+      </div>
+      <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 10px; background: #111215; border: 1px solid #3A2326">
+        <div style="display: flex; gap: 10px">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#E5737A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; margin-top: 2px"><path d="M8 1.8 14.5 13.5h-13z"></path><path d="M8 6.5v3M8 11.6v.1"></path></svg>
+          <p style="font-size: 12.5px; line-height: 1.5; color: #C4C6CB">Token ClickUp jest nieprawidłowy albo wygasł. Zadania nie będą się odświeżać.</p>
+        </div>
+        <button style="height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 12px; border-radius: 8px; background: #1C1D21; border: 1px solid #2A2C31; font-size: 12.5px; color: #E6E7E9">Otwórz ustawienia ClickUp<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4"></path></svg></button>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1312,"height":440}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const row = 'height: 32px; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 4px; border-radius: 7px; text-align: left; ';
+    const defs = [
+      { id: 'ABC-142', name: 'Discord: zatwierdzenia z kodem', status: 'w realizacji', hover: false },
+      { id: 'ABC-138', name: 'Agent sterujący — faza 2', status: 'do weryfikacji', hover: true },
+      { id: 'ABC-121', name: 'Redesign: wersja Grafit', status: 'do zrobienia', hover: false },
+      { id: 'ABC-117', name: 'Wydzielone okna: przywracanie', status: 'zamknięte', hover: false }
+    ];
+    const tasks = defs.map((d) => ({ ...d, rowStyle: row + (d.hover ? 'background: #15161A;' : '') }));
+    return { tasks };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<title>AbeonCode — Grafit</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0C0E}
+*{box-sizing:border-box}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+textarea{font:inherit;color:inherit}
+textarea::placeholder{color:#8A8F98}
+kbd{font-family:'Geist Mono',ui-monospace,monospace}
+:focus-visible{outline:2px solid #F0B44C;outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+a{color:#F0B44C}a:hover{color:#F6CB7D}
+</style>
+</helmet>
+<div style="min-height: 100vh; display: flex; flex-direction: column; background: #0B0C0E; color: #E6E7E9; font-family: Geist, ui-sans-serif, system-ui, sans-serif; font-size: 13px; line-height: 1.45">
+
+<header style="height: 44px; flex-shrink: 0; display: flex; align-items: center; gap: 16px; padding: 0 8px 0 16px">
+  <div style="width: 224px; flex-shrink: 0; display: flex; align-items: center; gap: 10px">
+    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="1" y="1" width="18" height="18" rx="5" fill="{{accent}}"></rect><path d="M6.5 7 9.5 10l-3 3M11 13h3" fill="none" stroke="#1B1405" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+    <span style="font-size: 14px; font-weight: 600; letter-spacing: -0.01em">AbeonCode</span>
+  </div>
+  <nav aria-label="Otwarte projekty" style="flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow-x: auto">
+    <button style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 8px; color: #9DA1A9; font-size: 12.5px; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #4FB8A8"></span>therappio<span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #858A93">2</span></button>
+    <button style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 8px; color: #9DA1A9; font-size: 12.5px; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #9D8CF0"></span>BandziorManagement<span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #858A93">3</span></button>
+    <button style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 8px; color: #9DA1A9; font-size: 12.5px; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #A8C95A"></span>zargood<span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #858A93">1</span></button>
+    <button style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 8px; color: #9DA1A9; font-size: 12.5px; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #D9B24C"></span>pccpoland<span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #858A93">1</span></button>
+    <button style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 8px; color: #9DA1A9; font-size: 12.5px; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #6E9CF5"></span>alpla<span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #858A93">1</span></button>
+    <button style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 8px; color: #9DA1A9; font-size: 12.5px; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #E07FAE"></span>Linux Personal Work<span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #858A93">1</span></button>
+    <button aria-current="page" style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 10px; border-radius: 8px; background: #17181B; border: 1px solid #26282C; color: #F2F3F4; font-size: 12.5px; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 50%; background: #6E9CF5"></span>AbeonCode<span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #9DA1A9">1</span><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#9DA1A9" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7"></path></svg></button>
+  </nav>
+  <div style="display: flex; align-items: center; gap: 2px; color: #9DA1A9">
+    <button aria-label="Minimalizuj" style="width: 36px; height: 28px; border-radius: 6px; display: grid; place-items: center"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 8h8"></path></svg></button>
+    <button aria-label="Maksymalizuj" style="width: 36px; height: 28px; border-radius: 6px; display: grid; place-items: center"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5"></rect></svg></button>
+    <button aria-label="Zamknij" style="width: 36px; height: 28px; border-radius: 6px; display: grid; place-items: center"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7"></path></svg></button>
+  </div>
+</header>
+
+<div style="flex: 1; min-height: 0; display: flex; flex-wrap: wrap; gap: 8px; padding: 0 8px 8px">
+
+  <aside aria-label="Projekty i sesje" style="flex: 1 1 232px; min-width: 0; display: flex; flex-direction: column; gap: 14px; padding: 4px 4px 0">
+    <button style="height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 10px; border-radius: 9px; background: #131417; border: 1px solid #202226; color: #8E939B; font-size: 12.5px; text-align: left">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="M10.5 10.5 14 14"></path></svg>
+      <span style="flex: 1">Szukaj projektu lub sesji</span>
+      <kbd style="font-size: 10.5px; color: #9DA1A9; border: 1px solid #2A2C31; border-radius: 5px; padding: 1px 5px">Ctrl K</kbd>
+    </button>
+
+    <section aria-labelledby="a-active" style="display: flex; flex-direction: column; gap: 6px">
+      <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 6px">
+        <h2 id="a-active" style="margin: 0; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #858A93">Aktywne</h2>
+        <span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #858A93">1</span>
+      </div>
+      <button style="display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 10px; background: #15161A; border: 1px solid #26282D; text-align: left">
+        <span style="width: 100%; display: flex; align-items: center; gap: 8px">
+          <span aria-hidden="true" style="width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: {{accent}}; animation: pulse 1.6s ease-in-out infinite"></span>
+          <span style="flex: 1; min-width: 0; font-weight: 500; color: #F2F3F4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Agent sterujący do nadzoru sesji</span>
+        </span>
+        <span style="display: flex; align-items: center; gap: 6px; padding-left: 15px; font-size: 11.5px; color: #8E939B">
+          <span style="color: #9DB8F7">AbeonCode</span><span aria-hidden="true">·</span><span>45 wiad.</span><span aria-hidden="true">·</span><span>teraz</span>
+        </span>
+      </button>
+    </section>
+
+    <section aria-labelledby="a-projects" style="display: flex; flex-direction: column; gap: 4px; min-height: 0">
+      <div style="height: 28px; display: flex; align-items: center; gap: 2px; padding: 0 2px 0 6px">
+        <h2 id="a-projects" style="flex: 1; margin: 0; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #858A93">Projekty</h2>
+        <button aria-label="Sortuj projekty" style="width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: #9DA1A9"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3v10M2.5 5.5 5 3l2.5 2.5M11 13V3M8.5 10.5 11 13l2.5-2.5"></path></svg></button>
+        <button aria-label="Dodaj projekt" style="width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: #9DA1A9"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg></button>
+      </div>
+      <ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px">
+        <sc-for list="{{projects}}" as="p" hint-placeholder-count="18">
+          <li><button style="{{p.rowStyle}}"><span aria-hidden="true" style="width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: {{p.color}}"></span><span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{p.name}}</span><span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #858A93">{{p.count}}</span></button></li>
+        </sc-for>
+      </ul>
+    </section>
+
+    <div style="margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 10px 6px; border-top: 1px solid #1B1D20">
+      <span aria-hidden="true" style="width: 28px; height: 28px; flex-shrink: 0; border-radius: 50%; background: #1E2024; display: grid; place-items: center; font-size: 11px; font-weight: 600; color: #C9CBCF">PS</span>
+      <span style="flex: 1; min-width: 0; display: flex; flex-direction: column">
+        <span style="font-size: 13px; font-weight: 500">Piotr Szweda</span>
+        <span style="font-size: 11.5px; color: #8E939B">Opus 5.5 · 1M</span>
+      </span>
+      <button aria-label="Ustawienia" style="width: 30px; height: 30px; border-radius: 7px; display: grid; place-items: center; color: #9DA1A9"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6"></path><circle cx="10" cy="4.5" r="1.5"></circle><circle cx="6" cy="11.5" r="1.5"></circle></svg></button>
+    </div>
+  </aside>
+
+  <main style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; background: #111215; border: 1px solid #1D1F23; border-radius: 12px; overflow: hidden">
+    <div style="height: 48px; flex-shrink: 0; display: flex; align-items: center; gap: 4px; padding: 0 10px 0 8px; border-bottom: 1px solid #1D1F23">
+      <button aria-current="page" style="max-width: 340px; height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 10px; border-radius: 8px; background: #1A1B1F; color: #F2F3F4; font-size: 12.5px">
+        <span aria-hidden="true" style="width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: {{accent}}; animation: pulse 1.6s ease-in-out infinite"></span>
+        <span style="min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Agent sterujący do nadzoru sesji</span>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#9DA1A9" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7"></path></svg>
+      </button>
+      <button aria-label="Nowa sesja agenta" style="width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: #9DA1A9"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg></button>
+      <button aria-label="Nowy shell" style="width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: #9DA1A9; font-family: 'Geist Mono', monospace; font-size: 13px">$</button>
+      <span style="flex: 1"></span>
+      <span style="display: flex; align-items: center; gap: 8px; padding: 0 8px; font-size: 12px; color: #8E939B"><span style="color: {{accent}}; font-weight: 500">Pracuje</span><span style="font-family: 'Geist Mono', monospace">0:50</span></span>
+      <button aria-label="Więcej opcji sesji" style="width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: #9DA1A9"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.1"></circle><circle cx="8" cy="8" r="1.1"></circle><circle cx="12.5" cy="8" r="1.1"></circle></svg></button>
+    </div>
+
+    <div role="region" aria-label="Konsola sesji (Claude Code)" style="flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; justify-content: flex-end; padding: 20px 28px 16px; background: #0F1012; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.65; color: #D7D9DD">
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <div style="padding-left: 2ch; color: #8E939B">Ran 1 shell command</div>
+        <div style="display: grid; grid-template-columns: 2ch minmax(0, 1fr)"><span>●</span><span>Token wygląda poprawnie (plik <span style="color: #8FB3F9">600</span>, jedna linia). Działa tylko klient Discorda, a serwera wtyczki nie ma. Czytam kod wtyczki, żeby zaplanować test.</span></div>
+        <div style="padding-left: 2ch; color: #8E939B">Ran 4 shell commands</div>
+        <div style="display: grid; grid-template-columns: 2ch minmax(0, 1fr)"><span>●</span><span>Mam już potrzebne informacje z kodu wtyczki. Teraz uruchamiam testową sesję Claude w <span style="color: #8FB3F9">tmux</span>, w osobnym katalogu, z wtyczką włączoną lokalnie i flagą <span style="color: #8FB3F9">--strict-mcp-config</span>, tak jak zrobiłby to agent.</span></div>
+        <div>
+          <div style="display: grid; grid-template-columns: 2ch minmax(0, 1fr)"><span style="color: #8E939B; animation: pulse 1.2s ease-in-out infinite">●</span><span style="color: #F2F3F4">Starting spike claude session with discord channel in tmux</span></div>
+          <div style="display: grid; grid-template-columns: 2ch 3ch minmax(0, 1fr); color: #8E939B"><span></span><span>└</span><span style="word-break: break-all">$ S=/tmp/claude-1000/-home-pszweda-projects-cyberstudio-AbeonCode/1bccf2a7-…/scratchpad/spike-discord; mkdir -p "$S/.claude" &amp;&amp; printf '{\n  "enabledPlugins": { "discord@claude-plugins-official": true }\n}\n' &gt; "$S/.claude/settings.json" &amp;&amp; printf '{ "mcpServers": {} }\n' &gt;…</span></div>
+        </div>
+        <div>
+          <div style="display: grid; grid-template-columns: 2ch minmax(0, 1fr)"><span style="color: {{accent}}">✻</span><span><span style="color: {{accent}}">Hatching…</span> <span style="color: #8E939B">(50s · ↓ 4.1k tokens · thought for 1s)</span></span></div>
+          <div style="display: grid; grid-template-columns: 2ch 3ch minmax(0, 1fr); color: #8E939B"><span></span><span>└</span><span>Tip: Use /permissions to pre-approve and pre-deny bash, edit, and MCP tools</span></div>
+        </div>
+        <div style="margin-top: 6px">
+          <div aria-hidden="true" style="height: 1px; background: #34373C"></div>
+          <div style="display: grid; grid-template-columns: 2ch minmax(0, 1fr); padding: 6px 0"><span>❯</span><span><span aria-hidden="true" style="display: inline-block; width: 1ch; height: 1.25em; vertical-align: -0.25em; background: {{accent}}; animation: blink 1.1s infinite"></span></span></div>
+          <div aria-hidden="true" style="height: 1px; background: #34373C"></div>
+          <div style="display: flex; flex-wrap: wrap; column-gap: 1ch; padding: 6px 0 0 2ch"><span style="color: #8E939B">~/projects/cyberstudio/AbeonCode</span><span aria-hidden="true" style="color: #4A4D53">│</span><span style="color: {{accent}}">AbeonCode</span><span aria-hidden="true" style="color: #4A4D53">│</span><span style="color: #8FB3F9">Opus 5.5 (xhigh)</span><span aria-hidden="true" style="color: #4A4D53">│</span><span style="color: #7FCB9B">(main ✓)</span><span aria-hidden="true" style="color: #4A4D53">│</span><span style="color: #5FD3B4">ctx 14%</span></div>
+          <div style="padding-left: 2ch; color: #E58FB4">▸▸ bypass permissions on <span style="color: #8E939B">(shift+tab to cycle)</span></div>
+        </div>
+      </div>
+    </div>
+
+    <section aria-label="Terminal" style="flex-shrink: 0; display: flex; flex-direction: column; background: #0D0E10; border-top: 1px solid #1D1F23">
+      <div style="height: 36px; display: flex; align-items: center; gap: 2px; padding: 0 8px 0 10px; border-bottom: 1px solid #1A1B1F">
+        <button aria-pressed="true" style="height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 6px; background: #1A1B1F; color: #E6E7E9; font-size: 12px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="2"></rect><path d="m4.5 6 2 2-2 2M8.5 10h3"></path></svg>zsh</button>
+        <button aria-pressed="false" style="height: 26px; padding: 0 10px; border-radius: 6px; color: #9DA1A9; font-size: 12px">Wyjście akcji</button>
+        <span style="flex: 1"></span>
+        <button aria-label="Podziel terminal" style="width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; color: #9DA1A9"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11" rx="1.5"></rect><path d="M8 2.5v11"></path></svg></button>
+        <button aria-label="Powiększ terminal" style="width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; color: #9DA1A9"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 2.5h4v4M6.5 13.5h-4v-4M13.5 2.5 9 7M2.5 13.5 7 9"></path></svg></button>
+        <button aria-label="Zwiń terminal" style="width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; color: #9DA1A9"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4"></path></svg></button>
+      </div>
+      <pre style="margin: 0; height: 132px; overflow: auto; padding: 10px 16px 12px; font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; line-height: 1.7; color: #A9ADB4; white-space: pre-wrap">All done - SSH agent started and key loaded :)
+<span style="color: #7EA6F7">~/projects/cyberstudio/AbeonCode</span> <span style="color: #D9B24C">main ✓</span> → git status
+Your branch is ahead of 'origin/main' by 53 commits.
+nothing to commit, working tree clean
+<span style="color: #7EA6F7">~/projects/cyberstudio/AbeonCode</span> <span style="color: #D9B24C">main ✓</span> → <span aria-hidden="true" style="display: inline-block; width: 7px; height: 14px; vertical-align: -2px; background: #E6E7E9; animation: blink 1.1s infinite"></span></pre>
+    </section>
+  </main>
+
+  <aside aria-label="Panel narzędzi" style="flex: 1 1 288px; min-width: 0; display: flex; flex-direction: column; gap: 22px; padding: 0 4px 0 6px">
+    <div role="group" aria-label="Widok panelu" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; background: #121316; border: 1px solid #1D1F23; border-radius: 10px">
+      <button aria-pressed="true" style="height: 30px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 7px; background: #1E2024; color: #F2F3F4; font-size: 12px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="2"></rect><path d="m4.5 6 2 2-2 2M8.5 10h3"></path></svg>Terminal</button>
+      <button aria-pressed="false" style="height: 30px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 7px; color: #9DA1A9; font-size: 12px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5.5 4.5-3.5 3.5 3.5 3.5M10.5 4.5 14 8l-3.5 3.5"></path></svg>Edytor</button>
+      <button aria-pressed="false" style="height: 30px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 7px; color: #9DA1A9; font-size: 12px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 1.5h5.5l3 3v10H4z"></path><path d="M6.5 8h4M6.5 11h2.5"></path></svg>Notatki</button>
+    </div>
+
+    <section aria-labelledby="a-actions" style="display: flex; flex-direction: column; gap: 2px">
+      <div style="display: flex; align-items: baseline; justify-content: space-between; padding: 0 4px 6px">
+        <h2 id="a-actions" style="margin: 0; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: #858A93">Akcje</h2>
+        <span style="font-size: 11px; color: #858A93">wykrywane automatycznie</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 6px 4px">
+        <button aria-label="Uruchom Preview Desktop" style="width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; background: #17181B; border: 1px solid #24262A; display: grid; place-items: center; color: #E6E7E9"><svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z"></path></svg></button>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 13px">Preview Desktop</span><span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #8E939B">ręczna · DesktopApp/</span></span>
+        <kbd style="font-size: 10.5px; color: #9DA1A9; border: 1px solid #2A2C31; border-radius: 5px; padding: 1px 5px">Ctrl 1</kbd>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 6px 4px">
+        <button aria-label="Uruchom Linux Build" style="width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; background: #17181B; border: 1px solid #24262A; display: grid; place-items: center; color: #E6E7E9"><svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z"></path></svg></button>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 13px">Linux Build</span><span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #8E939B">ręczna · DesktopApp/</span></span>
+        <kbd style="font-size: 10.5px; color: #9DA1A9; border: 1px solid #2A2C31; border-radius: 5px; padding: 1px 5px">Ctrl 2</kbd>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 6px 4px">
+        <button aria-label="Uruchom npm run start" style="width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; background: #17181B; border: 1px solid #24262A; display: grid; place-items: center; color: #E6E7E9"><svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z"></path></svg></button>
+        <span style="flex: 1; min-width: 0; display: flex; flex-direction: column"><span style="font-size: 13px">npm run start</span><span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #8E939B">ręczna · MobileApp/</span></span>
+        <kbd style="font-size: 10.5px; color: #9DA1A9; border: 1px solid #2A2C31; border-radius: 5px; padding: 1px 5px">Ctrl 3</kbd>
+      </div>
+      <button style="align-self: flex-start; margin-top: 4px; height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 8px 0 6px; border-radius: 7px; color: #9DA1A9; font-size: 12.5px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>Dodaj akcję</button>
+    </section>
+
+    <section aria-labelledby="a-git" style="display: flex; flex-direction: column; gap: 10px">
+      <h2 id="a-git" class="sr">Kontrola wersji</h2>
+      <div style="display: flex; align-items: center; gap: 2px; padding: 0 2px">
+        <button aria-pressed="true" style="height: 26px; padding: 0 9px; border-radius: 6px; background: #17181B; color: #F2F3F4; font-size: 12px">Zmiany</button>
+        <button aria-pressed="false" style="height: 26px; padding: 0 9px; border-radius: 6px; color: #9DA1A9; font-size: 12px">Historia</button>
+        <span style="flex: 1"></span>
+        <span style="font-size: 11.5px; color: #8E939B">0 plików</span>
+        <button aria-label="Odśwież zmiany" style="width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center; color: #9DA1A9"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3"></path></svg></button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 10px; padding: 12px; background: #111215; border: 1px solid #1D1F23; border-radius: 10px">
+        <div style="display: flex; align-items: center; gap: 8px; color: #C9CBCF"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true"><circle cx="4.5" cy="3.5" r="1.5"></circle><circle cx="4.5" cy="12.5" r="1.5"></circle><circle cx="11.5" cy="5.5" r="1.5"></circle><path d="M4.5 5v6M11.5 7c0 2.5-2 3-5.5 4"></path></svg><span style="font-family: 'Geist Mono', monospace; font-size: 12.5px; color: #E6E7E9">main</span><span style="flex: 1"></span><span style="font-family: 'Geist Mono', monospace; font-size: 11.5px; color: #9DA1A9">↑53 ↓0</span></div>
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: #8E939B"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7FCB9B" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"></path></svg>Czysto — brak zmian do zatwierdzenia</div>
+      </div>
+    </section>
+
+    <section aria-labelledby="a-limits" style="margin-top: auto; display: flex; flex-direction: column; gap: 14px; padding-bottom: 10px">
+      <div style="display: flex; align-items: center; gap: 2px; padding: 0 2px">
+        <h2 id="a-limits" class="sr">Zużycie i limity</h2>
+        <button aria-pressed="false" style="height: 26px; padding: 0 9px; border-radius: 6px; color: #9DA1A9; font-size: 12px">Zużycie</button>
+        <button aria-pressed="true" style="height: 26px; padding: 0 9px; border-radius: 6px; background: #17181B; color: #F2F3F4; font-size: 12px">Limity</button>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding: 0 4px">
+        <div style="display: flex; justify-content: space-between; font-size: 12.5px"><span>Okno 5 godzin</span><span style="font-family: 'Geist Mono', monospace">4%</span></div>
+        <div aria-hidden="true" style="height: 4px; border-radius: 2px; background: #1E2024; overflow: hidden"><div style="width: 4%; height: 100%; background: {{accent}}"></div></div>
+        <span style="font-size: 11.5px; color: #8E939B">Reset 29 paź, 20:00</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding: 0 4px">
+        <div style="display: flex; justify-content: space-between; font-size: 12.5px"><span>Tydzień</span><span style="font-family: 'Geist Mono', monospace">6%</span></div>
+        <div aria-hidden="true" style="height: 4px; border-radius: 2px; background: #1E2024; overflow: hidden"><div style="width: 6%; height: 100%; background: {{accent}}"></div></div>
+        <span style="font-size: 11.5px; color: #8E939B">Reset 5 lis, 08:00</span>
+      </div>
+    </section>
+  </aside>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#F0B44C","options":["#F0B44C","#7EA6F7","#5FD3B4","#E58FB4"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const base = 'width: 100%; height: 28px; display: flex; align-items: center; gap: 10px; padding: 0 8px; border-radius: 7px; font-size: 13px; text-align: left; ';
+    const list = [
+      ['abeon-qa', 1, '#E07FAE'], ['AbeonCode', 36, '#6E9CF5'], ['BandziorManagement', 38, '#9D8CF0'],
+      ['zargood', 9, '#A8C95A'], ['pccpoland', 2, '#D9B24C'], ['therappio', 34, '#4FB8A8'],
+      ['Linux Personal Work', 27, '#E07FAE'], ['elite-acquisitions', 19, '#6E9CF5'], ['hs-training', 34, '#6E9CF5'],
+      ['abeonpay', 3, '#6E9CF5'], ['alpla', 10, '#6E9CF5'], ['mavika-control', 3, '#A8C95A'],
+      ['psmt', 34, '#8E939B'], ['manngo', 20, '#9D8CF0'], ['k8s-projects', 3, '#6E9CF5'],
+      ['yachtic', 4, '#E07FAE'], ['podyplomowka', 23, '#E07FAE'], ['carimporter', 30, '#E07FAE']
+    ];
+    const projects = list.map(([name, count, color]) => ({
+      name, count, color,
+      rowStyle: base + (name === 'AbeonCode' ? 'background: #17181B; color: #F2F3F4;' : 'color: #C4C6CB;')
+    }));
+    return { accent: this.props.accent ?? '#F0B44C', projects };
+  }
+}
+</script>
+</body>
+</html>
