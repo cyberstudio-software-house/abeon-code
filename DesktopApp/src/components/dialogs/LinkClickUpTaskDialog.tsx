@@ -47,12 +47,14 @@ export function LinkClickUpTaskDialog({ projectId, onClose }: { projectId: numbe
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50" onClick={onClose}>
+    <div className="dialog-backdrop" onClick={onClose}>
       <div
-        className="bg-bg-elev border border-border w-[560px] max-h-[70vh] flex flex-col p-4"
+        role="dialog"
+        aria-modal="true"
+        className="dialog-panel w-[560px] max-h-[70vh] flex flex-col p-4"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center gap-2 px-2.5 py-[7px] bg-bg border border-border rounded-md mb-3">
+        <div className="field flex items-center gap-2 mb-3">
           <Icon name="search" className="w-[13px] h-[13px] text-muted" />
           <input
             autoFocus

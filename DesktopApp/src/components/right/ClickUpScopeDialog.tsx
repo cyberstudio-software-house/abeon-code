@@ -75,11 +75,11 @@ export function ClickUpScopeDialog({ projectId, onClose }: { projectId: number; 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50" onClick={onClose}>
-      <div className="bg-bg-elev border border-border w-[420px] p-4 space-y-3" onClick={e => e.stopPropagation()}>
+    <div className="dialog-backdrop" onClick={onClose}>
+      <div role="dialog" aria-modal="true" className="dialog-panel w-[420px] p-4 space-y-3" onClick={e => e.stopPropagation()}>
         <span className="text-[10px] text-muted font-medium uppercase tracking-wider">ZAKRES CLICKUP</span>
         <select
-          className="w-full bg-bg border border-border px-2 py-1.5 text-[13px] disabled:opacity-50"
+          className="field"
           value={ws}
           disabled={loadingWs}
           onChange={e => { setWs(e.target.value); setSp(''); setLi(''); }}
@@ -88,7 +88,7 @@ export function ClickUpScopeDialog({ projectId, onClose }: { projectId: number; 
           {workspaces.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
         </select>
         <select
-          className="w-full bg-bg border border-border px-2 py-1.5 text-[13px] disabled:opacity-50"
+          className="field"
           value={sp}
           disabled={!ws || loadingSp}
           onChange={e => { setSp(e.target.value); setLi(''); }}
@@ -97,7 +97,7 @@ export function ClickUpScopeDialog({ projectId, onClose }: { projectId: number; 
           {spaces.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <select
-          className="w-full bg-bg border border-border px-2 py-1.5 text-[13px] disabled:opacity-50"
+          className="field"
           value={li}
           disabled={!sp || loadingLi}
           onChange={e => setLi(e.target.value)}
@@ -108,14 +108,14 @@ export function ClickUpScopeDialog({ projectId, onClose }: { projectId: number; 
         {error && <p className="text-[11px] text-danger">{error}</p>}
         <div className="flex justify-end gap-2">
           <button
-            className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg"
+            className="btn-secondary"
             onClick={onClose}
           >
             Anuluj
           </button>
           <button
             disabled={busy || !ws}
-            className="px-3 py-1.5 bg-fg text-bg text-[12px] font-medium disabled:opacity-50"
+            className="btn-primary"
             onClick={save}
           >
             Zapisz

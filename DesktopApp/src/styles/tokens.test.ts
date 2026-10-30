@@ -21,3 +21,9 @@ it('loads no fonts from the network', () => {
 it('defines the 1.6 s activity pulse', () => {
   expect(css).toMatch(/\.activity-pulse\s*\{[^}]*1\.6s/);
 });
+
+it('defines the shared component classes', () => {
+  for (const selector of ['.dialog-backdrop', '.dialog-panel', '.menu-panel', '.menu-item', '.btn-primary', '.btn-secondary', '.btn-danger', '.field', '.kbd']) {
+    expect(css).toContain(selector);
+  }
+});

@@ -4,11 +4,11 @@ type Props = { onSummary: () => void; onEdit: () => void; onDelete: () => void; 
 
 export function ProjectManageMenu({ onSummary, onEdit, onDelete, onClose }: Props) {
   return (
-    <div role="menu" className="py-1">
+    <div role="menu">
       <button
         role="menuitem"
         onClick={() => { onSummary(); onClose(); }}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-[11.5px] text-fg hover:bg-bg-elev"
+        className="menu-item"
       >
         <Icon name="chart" className="w-3 h-3" strokeWidth={2} />
         <span>Podsumowanie</span>
@@ -16,7 +16,7 @@ export function ProjectManageMenu({ onSummary, onEdit, onDelete, onClose }: Prop
       <button
         role="menuitem"
         onClick={() => { onEdit(); onClose(); }}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-[11.5px] text-fg hover:bg-bg-elev"
+        className="menu-item"
       >
         <Icon name="pencil" className="w-3 h-3" strokeWidth={2} />
         <span>Edytuj</span>
@@ -24,7 +24,7 @@ export function ProjectManageMenu({ onSummary, onEdit, onDelete, onClose }: Prop
       <button
         role="menuitem"
         onClick={() => { onDelete(); onClose(); }}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-[11.5px] text-danger hover:bg-danger/10"
+        className="menu-item text-danger hover:bg-danger/10"
       >
         <Icon name="trash" className="w-3 h-3" strokeWidth={2} />
         <span>Usuń</span>

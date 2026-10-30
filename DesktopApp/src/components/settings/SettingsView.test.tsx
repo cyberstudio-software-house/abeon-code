@@ -99,6 +99,17 @@ describe('SettingsView', () => {
     dialog.remove();
   });
 
+  it('keeps settings open on Esc while the pairing dialog is open', () => {
+    act(() => { useStore.setState({ settingsCategory: 'cloud' }); });
+    render(<SettingsView />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sparuj telefon' }));
+    expect(screen.getByRole('dialog')).toHaveAttribute('aria-modal', 'true');
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(useStore.getState().settingsOpen).toBe(true);
+  });
+
   it('shows bypass next to Uprawnienia while permissions are skipped', () => {
     render(<SettingsView />);
     expect(within(navItem(/Uprawnienia/)).queryByText('bypass')).toBeNull();

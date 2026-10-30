@@ -25,7 +25,7 @@ export function NoteEditor({ draft, saving, onChange, onSave, onDelete }: NoteEd
         value={draft.title}
         disabled={saving}
         onChange={event => onChange({ title: event.target.value })}
-        className="w-full border border-border bg-bg px-3 py-2 text-[13px]"
+        className="field"
       />
       <label htmlFor={contentId} className="text-[11px] text-muted">Treść</label>
       <textarea
@@ -33,11 +33,11 @@ export function NoteEditor({ draft, saving, onChange, onSave, onDelete }: NoteEd
         value={draft.content}
         disabled={saving}
         onChange={event => onChange({ content: event.target.value })}
-        className="min-h-0 w-full flex-1 resize-none border border-border bg-bg p-3 text-[13px] leading-relaxed"
+        className="field min-h-0 flex-1 resize-none text-[13px] leading-relaxed"
       />
       <div className="flex items-center justify-end gap-2">
         {draft.id !== null && (
-          <button type="button" onClick={onDelete} disabled={saving} className="mr-auto border border-border px-3 py-1.5 text-[12px] disabled:opacity-50">
+          <button type="button" onClick={onDelete} disabled={saving} className="btn-secondary mr-auto">
             Usuń
           </button>
         )}
@@ -46,7 +46,7 @@ export function NoteEditor({ draft, saving, onChange, onSave, onDelete }: NoteEd
           type="button"
           onClick={onSave}
           disabled={saving || !draft.title.trim()}
-          className="bg-fg px-3 py-1.5 text-[12px] font-medium text-bg disabled:opacity-50"
+          className="btn-primary"
         >
           Zapisz
         </button>

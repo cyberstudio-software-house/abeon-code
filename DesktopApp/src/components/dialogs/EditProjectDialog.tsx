@@ -16,15 +16,15 @@ export function EditProjectDialog({ project, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50">
-      <div className="bg-bg-elev border border-border p-5 w-[400px]">
+    <div className="dialog-backdrop">
+      <div role="dialog" aria-modal="true" className="dialog-panel p-5 w-[400px]">
         <h2 className="text-[14px] font-semibold mb-3">Edytuj projekt</h2>
         <label htmlFor="edit-project-name" className="block text-[10px] text-muted uppercase tracking-wider mb-1">Nazwa</label>
         <input
           id="edit-project-name"
           value={name}
           onChange={e => setName(e.target.value)}
-          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] mb-3"
+          className="field mb-3"
         />
         <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">Kolor</label>
         <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -50,8 +50,8 @@ export function EditProjectDialog({ project, onClose }: Props) {
           ))}
         </div>
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Anuluj</button>
-          <button onClick={submit} disabled={!name.trim()} className="px-3 py-1.5 bg-fg text-bg text-[12px] font-medium disabled:opacity-50">Zapisz</button>
+          <button onClick={onClose} className="btn-secondary">Anuluj</button>
+          <button onClick={submit} disabled={!name.trim()} className="btn-primary">Zapisz</button>
         </div>
       </div>
     </div>

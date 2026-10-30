@@ -6,6 +6,7 @@ import { filterProjects, clampIndex } from '../../lib/projectLauncher';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { getProjectColor } from '../../lib/projectColors';
 import { Icon } from '../shared/Icon';
+import { Kbd } from '../shared/Kbd';
 
 export function ProjectLauncher() {
   const projects = useStore(useShallow(selectSortedProjects));
@@ -58,7 +59,7 @@ export function ProjectLauncher() {
       onMouseDown={close}
     >
       <div
-        className="w-[460px] max-w-[90vw] max-h-[60vh] flex flex-col rounded-md border border-border bg-bg-elev shadow-xl overflow-hidden"
+        className="w-[460px] max-w-[90vw] max-h-[60vh] flex flex-col menu-panel p-0 overflow-hidden"
         onMouseDown={e => e.stopPropagation()}
       >
         <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
@@ -110,7 +111,7 @@ export function ProjectLauncher() {
           })}
         </div>
         <div className="px-3 py-1.5 border-t border-border text-[10px] text-muted">
-          Enter — nowa sesja · Ctrl+Enter — terminal · Esc — zamknij
+          <Kbd>Enter</Kbd> — nowa sesja · <Kbd>Ctrl+Enter</Kbd> — terminal · <Kbd>Esc</Kbd> — zamknij
         </div>
       </div>
     </div>

@@ -39,8 +39,8 @@ export function ClickUpTimeDialog({ projectId, taskId, onClose }: { projectId: n
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50" onClick={onClose}>
-      <div className="bg-bg-elev border border-border w-[480px] p-4 space-y-3" onClick={e => e.stopPropagation()}>
+    <div className="dialog-backdrop" onClick={onClose}>
+      <div role="dialog" aria-modal="true" className="dialog-panel w-[480px] p-4 space-y-3" onClick={e => e.stopPropagation()}>
         <span className="text-[10px] text-muted font-medium uppercase tracking-wider">CZAS PRACY</span>
         {error && <p className="text-[11px] text-danger">{error}</p>}
         {est && (
@@ -52,12 +52,12 @@ export function ClickUpTimeDialog({ projectId, taskId, onClose }: { projectId: n
             <p className="text-[12px] text-fg">Propozycja: <span className="font-medium">{fmt(proposedMs)}</span></p>
             <label className="block text-[11px] text-muted">Nadpisz (minuty, opcjonalnie)</label>
             <input value={overrideMin} onChange={e => setOverrideMin(e.target.value)} placeholder={String(Math.round(proposedMs / 60000))}
-              className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] font-mono" />
+              className="field font-mono" />
           </>
         )}
         <div className="flex justify-end gap-2">
-          <button className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg" onClick={onClose}>Anuluj</button>
-          <button disabled={busy || !est} onClick={save} className="px-3 py-1.5 bg-fg text-bg text-[12px] font-medium disabled:opacity-50">Zapisz czas</button>
+          <button className="btn-secondary" onClick={onClose}>Anuluj</button>
+          <button disabled={busy || !est} onClick={save} className="btn-primary">Zapisz czas</button>
         </div>
       </div>
     </div>

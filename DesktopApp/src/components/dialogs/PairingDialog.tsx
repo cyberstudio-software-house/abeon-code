@@ -37,14 +37,14 @@ export function PairingDialog({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="bg-bg-elev border border-border rounded p-6 w-[360px] flex flex-col items-center gap-4">
+    <div className="dialog-backdrop">
+      <div role="dialog" aria-modal="true" className="dialog-panel p-6 w-[360px] flex flex-col items-center gap-4">
         <h2 className="text-[14px] font-semibold">Sparuj telefon</h2>
         {!pair && (
           <button
             onClick={start}
             disabled={loading}
-            className="px-4 py-2 bg-fg text-bg text-[12px] font-medium disabled:opacity-50"
+            className="btn-primary"
           >
             {loading ? 'Generowanie…' : 'Wygeneruj kod parowania'}
           </button>
@@ -58,7 +58,7 @@ export function PairingDialog({ onClose }: { onClose: () => void }) {
             </p>
           </>
         )}
-        {error && <p className="text-[11px] text-red-500">{error}</p>}
+        {error && <p className="text-[11px] text-danger">{error}</p>}
         <button onClick={onClose} className="text-[12px] text-muted hover:text-fg transition-colors">
           Zamknij
         </button>

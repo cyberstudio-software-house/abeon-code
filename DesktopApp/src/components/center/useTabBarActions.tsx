@@ -142,7 +142,7 @@ export function useTabBarActions(
     <>
       {ctxMenu && (
         <div ref={ctxMenuRef} className="fixed z-50" style={{ left: ctxMenu.x, top: ctxMenu.y }}>
-          <div className="w-48 rounded-md border border-border bg-bg shadow-lg">
+          <div className="menu-panel w-48">
             <TabContextMenu
               canDetach={ctxMenu.tab.kind === 'session' && detachedProjectId == null}
               canDetachGroup={detachedProjectId == null}
@@ -163,7 +163,7 @@ export function useTabBarActions(
       )}
       {groupMenu && (
         <div ref={ctxMenuRef} className="fixed z-50" style={{ left: groupMenu.x, top: groupMenu.y }}>
-          <div className="w-52 rounded-md border border-border bg-bg shadow-lg">
+          <div className="menu-panel w-52">
             <GroupContextMenu
               onDetach={() => { void detachWithGuard(groupMenu.projectId); }}
               onCloseMenu={() => setGroupMenu(null)}

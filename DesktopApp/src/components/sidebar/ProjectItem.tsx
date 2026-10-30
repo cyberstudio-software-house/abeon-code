@@ -79,7 +79,7 @@ export function ProjectItem({ project }: Props) {
           <Icon name="more" className="w-3 h-3" strokeWidth={2} />
         </button>
         {manageOpen && (
-          <div className="absolute right-1 top-full z-30 mt-0.5 w-44 rounded-lg border border-border-raised bg-bg-elev-2 shadow-lg">
+          <div className="absolute right-1 top-full z-30 mt-0.5 menu-panel w-44">
             <ProjectManageMenu
               onSummary={() => setSummaryOpen(true)}
               onEdit={() => setEditing(true)}
@@ -130,7 +130,7 @@ export function ProjectItem({ project }: Props) {
                 )}
               </button>
               {menuOpen && (
-                <div className="absolute right-0 z-20 mt-1 w-56 max-h-72 overflow-y-auto rounded-lg border border-border-raised bg-bg-elev-2 shadow-lg">
+                <div className="absolute right-0 z-20 mt-1 menu-panel w-56 max-h-72 overflow-y-auto">
                   <ProjectActionsMenu projectId={project.id} onClose={() => setMenuOpen(false)} />
                 </div>
               )}

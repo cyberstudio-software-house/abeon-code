@@ -64,8 +64,8 @@ export function ClickUpTaskDialog({ projectId, taskId, onClose }: { projectId: n
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50" onClick={onClose}>
-      <div className="bg-bg-elev border border-border w-[640px] max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
+    <div className="dialog-backdrop" onClick={onClose}>
+      <div role="dialog" aria-modal="true" className="dialog-panel w-[640px] max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">
           <div className="flex items-center gap-2 min-w-0 text-[12.5px]">
             {detail ? (
@@ -109,13 +109,13 @@ export function ClickUpTaskDialog({ projectId, taskId, onClose }: { projectId: n
         </div>
 
         <div className="flex items-center gap-2 px-5 py-3 border-t border-border">
-          <button disabled={busy} onClick={onCopy} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg disabled:opacity-40">Kopiuj uchwyt</button>
-          <button disabled={busy || !activeAgentPtyId} onClick={onInject} title={activeAgentPtyId ? '' : 'Brak aktywnej sesji'} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg disabled:opacity-40">Wstaw do aktywnej sesji</button>
-          <button disabled={busy} onClick={load} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg disabled:opacity-40">Odśwież</button>
+          <button disabled={busy} onClick={onCopy} className="btn-secondary">Kopiuj uchwyt</button>
+          <button disabled={busy || !activeAgentPtyId} onClick={onInject} title={activeAgentPtyId ? '' : 'Brak aktywnej sesji'} className="btn-secondary">Wstaw do aktywnej sesji</button>
+          <button disabled={busy} onClick={load} className="btn-secondary">Odśwież</button>
           <div className="flex-1" />
-          <button disabled={busy} onClick={() => setSummaryOpen(true)} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Generuj podsumowanie</button>
-          <button disabled={busy} onClick={() => setTimeOpen(true)} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Czas pracy</button>
-          <button onClick={onUnlink} className="px-3 py-1.5 border border-border text-[12px] text-danger hover:text-danger">Odepnij</button>
+          <button disabled={busy} onClick={() => setSummaryOpen(true)} className="btn-secondary">Generuj podsumowanie</button>
+          <button disabled={busy} onClick={() => setTimeOpen(true)} className="btn-secondary">Czas pracy</button>
+          <button onClick={onUnlink} className="btn-secondary text-danger">Odepnij</button>
         </div>
       </div>
       {summaryOpen && <ClickUpSummaryDialog projectId={projectId} taskId={taskId} onClose={() => setSummaryOpen(false)} />}

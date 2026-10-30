@@ -97,7 +97,7 @@ export function TabSwitcher() {
       onMouseDown={() => setOpen(false)}
     >
       <div
-        className="min-w-[320px] max-w-[480px] max-h-[70vh] overflow-y-auto rounded-md border border-border bg-bg-elev shadow-xl py-2"
+        className="min-w-[320px] max-w-[480px] max-h-[70vh] overflow-y-auto menu-panel py-2"
         onMouseDown={e => e.stopPropagation()}
       >
         <div className="px-3 pb-1 text-[10px] uppercase tracking-wide text-muted">Przełącz zakładkę</div>

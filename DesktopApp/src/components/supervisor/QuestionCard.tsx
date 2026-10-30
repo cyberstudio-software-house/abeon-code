@@ -16,7 +16,7 @@ const reportFailure = (message: string) => (error: unknown) => {
 };
 
 const buttonClass = 'px-2.5 py-1 border border-border text-[12px] text-fg-secondary hover:text-fg rounded-md disabled:opacity-50 disabled:pointer-events-none';
-const primaryButtonClass = 'px-2.5 py-1 bg-accent text-white text-[12px] rounded-md disabled:opacity-50 disabled:pointer-events-none';
+const primaryButtonClass = 'px-2.5 py-1 bg-accent text-accent-fg text-[12px] rounded-md disabled:opacity-50 disabled:pointer-events-none';
 const optionClass = (selected: boolean) =>
   `px-2.5 py-1 border rounded-md text-[12px] ${selected ? 'border-accent bg-accent/15 text-fg' : 'border-border text-fg-secondary hover:text-fg'}`;
 

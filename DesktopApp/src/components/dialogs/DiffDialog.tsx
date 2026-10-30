@@ -60,9 +60,11 @@ export function DiffDialog({ repoLabel, files, initialFilePath, loadDiff, summar
   }, [files, activeFile, onClose]);
 
   return (
-    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50" onClick={onClose}>
+    <div className="dialog-backdrop" onClick={onClose}>
       <div
-        className="bg-bg-elev border border-border w-[1400px] max-w-[95vw] h-[85vh] flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        className="dialog-panel w-[1400px] max-w-[95vw] h-[85vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-border">

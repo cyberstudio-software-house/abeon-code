@@ -76,7 +76,7 @@ export function NotesShell({ projectId }: { projectId: number }) {
               <>
                 <p role="alert">Nie udało się wczytać projektu dla okna notatek.</p>
                 <button
-                  className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg"
+                  className="btn-secondary"
                   onClick={() => setLoadAttempt(attempt => attempt + 1)}
                 >
                   Spróbuj ponownie

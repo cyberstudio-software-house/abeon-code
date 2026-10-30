@@ -36,7 +36,7 @@ export function SupervisorEntry() {
         {pending > 0 && (
           <span
             data-testid="supervisor-badge"
-            className="shrink-0 min-w-4 px-1 rounded-full bg-accent text-white text-[10px] leading-4 text-center font-mono tabular-nums"
+            className="shrink-0 min-w-4 px-1 rounded-full bg-accent text-accent-fg text-[10px] leading-4 text-center font-mono tabular-nums"
           >
             {pending}
           </span>
@@ -50,7 +50,7 @@ export function SupervisorEntry() {
         }}
         aria-pressed={away}
         className={`shrink-0 px-1.5 py-0.5 rounded border text-[10.5px] transition-colors ${
-          away ? 'bg-accent text-white border-accent' : 'border-border text-muted hover:text-fg'
+          away ? 'bg-accent text-accent-fg border-accent' : 'border-border text-muted hover:text-fg'
         }`}
       >
         Nie ma mnie

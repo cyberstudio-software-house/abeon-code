@@ -46,11 +46,11 @@ export function ProjectActionsMenu({ projectId, onClose }: Props) {
   }
 
   return (
-    <div role="menu" className="py-1">
+    <div role="menu">
       {actions.map(a => {
         const r = running[a.id];
         return (
-          <div key={a.id} className="group flex items-center gap-2 px-3 py-1.5 text-[11.5px] hover:bg-bg-elev">
+          <div key={a.id} className="menu-item group">
             <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${dotClass(r)}`} />
             <button
               onClick={() => (r ? showTab(a) : start(a))}

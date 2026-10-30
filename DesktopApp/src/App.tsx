@@ -24,10 +24,15 @@ export default function App() {
       </ErrorBoundary>
       <ErrorBoundary>
         <Toaster
-          richColors
           position="bottom-right"
           toastOptions={{
-            style: { borderRadius: 0, fontFamily: "'Geist Sans', ui-sans-serif, system-ui, sans-serif" },
+            style: {
+              background: 'var(--color-bg-elev)',
+              color: 'var(--color-fg)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 10,
+              fontFamily: "'Geist Sans', ui-sans-serif, system-ui, sans-serif",
+            },
           }}
         />
       </ErrorBoundary>

@@ -42,7 +42,7 @@ export function SortMenu() {
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full mt-1 z-10 bg-bg-elev-2 border border-border-raised rounded-lg shadow-lg py-1 min-w-[180px]"
+          className="absolute right-0 top-full mt-1 z-10 menu-panel min-w-[180px]"
         >
           {OPTIONS.map(opt => (
             <button
@@ -50,9 +50,7 @@ export function SortMenu() {
               role="menuitemradio"
               aria-checked={sortMode === opt.mode}
               onClick={() => { setSortMode(opt.mode); setOpen(false); }}
-              className={`w-full flex items-center justify-between gap-2 px-3 py-1.5 text-[12px] text-left transition-colors ${
-                sortMode === opt.mode ? 'text-fg-strong' : 'text-fg-secondary hover:text-fg-strong hover:bg-track'
-              }`}
+              className={`menu-item justify-between ${sortMode === opt.mode ? 'text-fg-strong' : ''}`}
             >
               <span>{opt.label}</span>
               {sortMode === opt.mode && (

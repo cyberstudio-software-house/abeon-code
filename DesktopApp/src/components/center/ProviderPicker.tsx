@@ -32,7 +32,7 @@ export function ProviderPicker({ tabId, active = true }: { tabId: string; active
             <button
               key={p}
               onClick={() => choose(tabId, p)}
-              className="relative flex flex-col items-center gap-2 px-6 py-5 border border-border bg-bg-elev hover:border-accent transition-colors"
+              className="relative flex flex-col items-center gap-2 px-6 py-5 rounded-[9px] border border-border-raised bg-bg-elev-2 hover:border-accent transition-colors"
             >
               {i < 9 && (
                 <span className="absolute top-1.5 left-1.5">

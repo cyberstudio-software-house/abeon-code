@@ -23,7 +23,7 @@ export function NoteList({ scope, notes, selectedId, loading, error, onOpen, onD
     return (
       <div role="alert" className="p-4 text-[12px]">
         <p className="mb-3 text-muted">Nie udało się wczytać notatek.</p>
-        <button type="button" onClick={onRetry} className="border border-border px-3 py-1.5 hover:bg-bg-elev">
+        <button type="button" onClick={onRetry} className="btn-secondary">
           Spróbuj ponownie
         </button>
       </div>

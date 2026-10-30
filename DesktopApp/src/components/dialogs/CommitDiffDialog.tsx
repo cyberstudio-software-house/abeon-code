@@ -93,9 +93,11 @@ function Overlay({ onClose, children }: { onClose: () => void; children: ReactNo
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50" onClick={onClose}>
+    <div className="dialog-backdrop" onClick={onClose}>
       <div
-        className="bg-bg-elev border border-border w-[520px] max-w-[95vw] p-5 flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        className="dialog-panel w-[520px] max-w-[95vw] p-5 flex flex-col"
         onClick={e => e.stopPropagation()}
       >
         <div className="flex justify-end mb-2">

@@ -143,7 +143,7 @@ export function NotesWorkspace({ projectId, onDirtyChange }: NotesWorkspaceProps
                 role="tab"
                 aria-selected={scope === tabScope}
                 onClick={() => changeScope(tabScope)}
-                className={`px-3 py-1.5 text-[12px] ${scope === tabScope ? 'bg-bg-elev text-fg' : 'text-muted hover:text-fg'}`}
+                className={`px-3 py-1.5 text-[12px] rounded-md ${scope === tabScope ? 'bg-bg-elev-2 text-fg-strong' : 'text-muted hover:text-fg'}`}
               >
                 {tabScope === 'project' ? 'Projektowe' : 'Globalne'}
               </button>
@@ -153,7 +153,7 @@ export function NotesWorkspace({ projectId, onDirtyChange }: NotesWorkspaceProps
             type="button"
             disabled={loading}
             onClick={() => requestDiscard(() => setWorkspace(current => ({ ...current, draft: emptyNoteDraft() })))}
-            className="border border-border px-3 py-1.5 text-[12px] hover:bg-bg-elev disabled:opacity-50"
+            className="btn-secondary"
           >
             Nowa notatka
           </button>

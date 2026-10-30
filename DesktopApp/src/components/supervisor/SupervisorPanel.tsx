@@ -56,7 +56,7 @@ function DiscordBadge() {
 }
 
 const buttonClass = 'px-2.5 py-1 border border-border text-[12px] text-fg-secondary hover:text-fg rounded-md';
-const primaryButtonClass = 'px-2.5 py-1 bg-accent text-white text-[12px] rounded-md';
+const primaryButtonClass = 'px-2.5 py-1 bg-accent text-accent-fg text-[12px] rounded-md';
 
 export function SupervisorPanel() {
   const snapshot = useStore(s => s.supervisor);
@@ -87,7 +87,7 @@ export function SupervisorPanel() {
             >
               {t.label}
               {t.count ? (
-                <span className="min-w-4 px-1 rounded-full bg-accent text-white text-[10px] leading-4 text-center font-mono tabular-nums">
+                <span className="min-w-4 px-1 rounded-full bg-accent text-accent-fg text-[10px] leading-4 text-center font-mono tabular-nums">
                   {t.count}
                 </span>
               ) : null}

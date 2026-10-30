@@ -57,19 +57,19 @@ export function AddProjectDialog({ onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50">
-      <div className="bg-bg-elev border border-border p-5 w-[520px] max-h-[80vh] overflow-auto">
+    <div className="dialog-backdrop">
+      <div role="dialog" aria-modal="true" className="dialog-panel p-5 w-[520px] max-h-[80vh] overflow-auto">
         <h2 className="text-[14px] font-semibold mb-3">Dodaj projekt</h2>
         <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">Ścieżka</label>
         <div className="flex gap-2 mb-3">
           <input value={path} onChange={e => setPath(e.target.value)}
-            className="flex-1 bg-bg border border-border px-3 py-1.5 text-[13px]" />
+            className="field flex-1" />
           <button onClick={pickFolder}
-            className="px-3 py-1.5 border border-border bg-bg-elev-2 text-[12px] text-fg-secondary hover:text-fg">Wybierz…</button>
+            className="btn-secondary">Wybierz…</button>
         </div>
         <label className="block text-[10px] text-muted uppercase tracking-wider mb-1">Nazwa</label>
         <input value={name} onChange={e => setName(e.target.value)}
-          className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] mb-4" />
+          className="field mb-4" />
 
         {scripts.length > 0 && (
           <>
@@ -88,9 +88,9 @@ export function AddProjectDialog({ onClose }: Props) {
 
         {error && <div className="text-danger text-[13px] mb-3">{error}</div>}
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Anuluj</button>
+          <button onClick={onClose} className="btn-secondary">Anuluj</button>
           <button onClick={submit}
-            className="px-3 py-1.5 bg-fg text-bg text-[12px] font-medium"
+            className="btn-primary"
             disabled={!name.trim() || !path.trim()}>Dodaj</button>
         </div>
       </div>

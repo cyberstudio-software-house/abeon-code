@@ -25,8 +25,8 @@ export function ProjectSummaryDialog({ project, onClose }: Props) {
   }, [project.id]);
 
   return (
-    <div className="fixed inset-0 bg-black/50 grid place-items-center z-50" onClick={onClose}>
-      <div className="bg-bg-elev border border-border p-5 w-[460px]" onClick={e => e.stopPropagation()}>
+    <div className="dialog-backdrop" onClick={onClose}>
+      <div role="dialog" aria-modal="true" className="dialog-panel p-5 w-[460px]" onClick={e => e.stopPropagation()}>
         <h2 className="text-[14px] font-semibold mb-3">Podsumowanie — {project.name}</h2>
         {loading ? (
           <div className="text-[12px] text-muted py-4">Ładowanie…</div>
@@ -63,7 +63,7 @@ export function ProjectSummaryDialog({ project, onClose }: Props) {
           </>
         )}
         <div className="flex justify-end">
-          <button onClick={onClose} className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Zamknij</button>
+          <button onClick={onClose} className="btn-secondary">Zamknij</button>
         </div>
       </div>
     </div>
