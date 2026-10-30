@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { tauri } from '../../../lib/tauri';
 import type { ClickUpConnectionStatus } from '../../../types/ClickUpConnectionStatus';
 import { SETTINGS_CATEGORIES } from '../../../lib/settingsCategories';
-import { SettingsPage } from '../controls';
+import {
+  BUTTON_CLASS, MONO_FIELD_CLASS, PRIMARY_BUTTON_CLASS, SettingsPage, SettingsRow, SettingsSection,
+} from '../controls';
 
 function ClickUpTab() {
   const [token, setToken] = useState('');
@@ -43,30 +45,36 @@ function ClickUpTab() {
     status === 'configured' ? 'Połączono' :
     status === 'invalid' ? 'Token nieprawidłowy' : 'Brak tokenu';
 
+  const statusTone =
+    busy ? 'text-muted' :
+    status === 'configured' ? 'text-success' :
+    status === 'invalid' ? 'text-danger' : 'text-muted';
+
   return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[10px] text-muted font-medium uppercase tracking-wider">CLICKUP</span>
-        <span className="text-[11px] text-fg-secondary">{label}</span>
+    <SettingsSection label="Połączenie" action={<span className={`text-[12px] ${statusTone}`}>{label}</span>}>
+      <SettingsRow
+        label="Token API"
+        htmlFor="settings-clickup-token"
+        description="Token wygenerujesz w ClickUp: Settings → Apps → API Token."
+      >
+        <input
+          id="settings-clickup-token"
+          type="password"
+          value={token}
+          onChange={e => setToken(e.target.value)}
+          placeholder="pk_..."
+          className={`${MONO_FIELD_CLASS} flex-[0_1_280px]`}
+        />
+      </SettingsRow>
+      <div className="flex flex-wrap items-center gap-2 px-[18px] py-3.5">
+        <button type="button" disabled={busy || !token.trim()} onClick={save} className={PRIMARY_BUTTON_CLASS}>
+          Zapisz token
+        </button>
+        <button type="button" disabled={busy} onClick={test} className={BUTTON_CLASS}>Testuj połączenie</button>
+        <button type="button" disabled={busy} onClick={clear} className={BUTTON_CLASS}>Usuń token</button>
+        {error && <p className="basis-full text-[12px] text-danger">{error}</p>}
       </div>
-      <input
-        type="password"
-        value={token}
-        onChange={e => setToken(e.target.value)}
-        placeholder="pk_..."
-        className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] font-mono placeholder:text-muted/60"
-      />
-      <div className="flex gap-2">
-        <button disabled={busy || !token.trim()} onClick={save}
-          className="px-3 py-1.5 bg-fg text-bg text-[12px] font-medium disabled:opacity-50">Zapisz token</button>
-        <button disabled={busy} onClick={test}
-          className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Testuj połączenie</button>
-        <button disabled={busy} onClick={clear}
-          className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg">Usuń token</button>
-      </div>
-      {error && <p className="text-[11px] text-danger">{error}</p>}
-      <p className="text-[11px] text-muted">Token wygenerujesz w ClickUp: Settings → Apps → API Token.</p>
-    </section>
+    </SettingsSection>
   );
 }
 

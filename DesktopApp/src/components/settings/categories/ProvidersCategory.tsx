@@ -4,11 +4,22 @@ import { useStore } from '../../../store';
 import { Icon } from '../../shared/Icon';
 import { buildClaudeModelRows, DEFAULT_TITLE_GEN_MODEL_ID } from '../../../lib/models';
 import { tauri } from '../../../lib/tauri';
-import type { ProviderInfo } from '../../../types';
+import type { Provider, ProviderInfo } from '../../../types';
 import { ALL_PROVIDERS, PROVIDER_LABEL, PROVIDER_ICON } from '../../../lib/providers';
 import { SETTINGS_CATEGORIES } from '../../../lib/settingsCategories';
-import { SettingsPage } from '../controls';
+import {
+  BUTTON_CLASS, SelectField, SettingsPage, SettingsRow, SettingsSection, Switch,
+} from '../controls';
 import { AUTO_MODEL_LABEL, useClaudeOptions } from './shared';
+
+function ProviderLabel({ provider }: { provider: Provider }) {
+  return (
+    <span className="flex items-center gap-2">
+      <Icon name={PROVIDER_ICON[provider]} className="h-3.5 w-3.5 text-icon" />
+      {PROVIDER_LABEL[provider]}
+    </span>
+  );
+}
 
 function ProvidersSection() {
   const enabled = useStore(useShallow(s => s.enabledProviders));
@@ -20,39 +31,27 @@ function ProvidersSection() {
   }, []);
 
   return (
-    <div>
-      <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
-        Dostawcy CLI
-      </label>
-      <div className="space-y-0.5">
-        {ALL_PROVIDERS.map(p => {
-          const info = infos.find(i => i.provider === p);
-          const isOn = enabled.includes(p);
-          const isLastEnabled = isOn && enabled.length === 1;
-          return (
-            <label key={p} className="flex items-start gap-3 cursor-pointer py-1.5 px-2 hover:bg-bg-elev-2">
-              <input
-                type="checkbox"
-                checked={isOn}
-                disabled={isLastEnabled}
-                onChange={() => toggle(p)}
-                className="accent-accent mt-0.5"
-              />
-              <div className="flex items-center gap-2">
-                <Icon name={PROVIDER_ICON[p]} className="w-3.5 h-3.5" />
-                <span className="text-[13px]">{PROVIDER_LABEL[p]}</span>
-                {info && !info.available && (
-                  <span className="text-[11px] text-warn">nie znaleziono w PATH</span>
-                )}
-              </div>
-            </label>
-          );
-        })}
-      </div>
-      <p className="text-[11px] text-muted mt-2">
-        Gdy włączony jest więcej niż jeden dostawca, „New session" najpierw pyta, w którym CLI uruchomić sesję.
-      </p>
-    </div>
+    <SettingsSection
+      label="Dostawcy CLI"
+      description="Gdy włączony jest więcej niż jeden dostawca, „New session” najpierw pyta, w którym CLI uruchomić sesję."
+    >
+      {ALL_PROVIDERS.map(p => {
+        const info = infos.find(i => i.provider === p);
+        const isOn = enabled.includes(p);
+        const isLastEnabled = isOn && enabled.length === 1;
+        const labelId = `settings-providers-${p}`;
+        return (
+          <SettingsRow
+            key={p}
+            label={<ProviderLabel provider={p} />}
+            labelId={labelId}
+            description={info && !info.available ? <span className="text-warn">nie znaleziono w PATH</span> : undefined}
+          >
+            <Switch checked={isOn} disabled={isLastEnabled} onChange={() => toggle(p)} labelledBy={labelId} />
+          </SettingsRow>
+        );
+      })}
+    </SettingsSection>
   );
 }
 
@@ -89,25 +88,16 @@ function TitleGenSection() {
   const opencodeTitleGenInList = opencodeTitleGenModelId === '' || opencodeOptions.includes(opencodeTitleGenModelId);
 
   return (
-    <div>
-      <label className="block text-[10px] text-muted uppercase tracking-wider mb-2">
-        Model do generowania tytułów
-      </label>
-      <p className="text-[11px] text-muted mb-3">
-        Używany przy ręcznym wywołaniu „Generuj tytuł sesji" (ikona ✨ w nagłówku sesji).
-        Zwykle wystarczy najszybszy/najtańszy model.
-      </p>
-
+    <SettingsSection
+      label="Model do generowania tytułów"
+      description="Używany przy ręcznym wywołaniu „Generuj tytuł sesji” (ikona ✨ w nagłówku sesji). Zwykle wystarczy najszybszy/najtańszy model."
+    >
       {enabledProviders.includes('claude') && (
-        <div className="mb-3">
-          <div className="flex items-center gap-2 mb-2">
-            <Icon name="claudeLogo" className="w-3.5 h-3.5" />
-            <span className="text-[12px] text-fg-secondary">Claude Code</span>
-          </div>
-          <select
+        <SettingsRow label={<ProviderLabel provider="claude" />} htmlFor="settings-title-claude">
+          <SelectField
+            id="settings-title-claude"
             value={titleGenModelId}
             onChange={e => setTitleGenModel(e.target.value)}
-            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
           >
             <option value="">{AUTO_MODEL_LABEL}</option>
             <option value={DEFAULT_TITLE_GEN_MODEL_ID}>Haiku (najnowszy)</option>
@@ -124,20 +114,16 @@ function TitleGenSection() {
             {claudeTitleRows.undetected && claudeTitleRows.undetected.modelId !== DEFAULT_TITLE_GEN_MODEL_ID && (
               <option value={claudeTitleRows.undetected.modelId}>{claudeTitleRows.undetected.label}</option>
             )}
-          </select>
-        </div>
+          </SelectField>
+        </SettingsRow>
       )}
 
       {enabledProviders.includes('codex') && (
-        <div className="mb-3">
-          <div className="flex items-center gap-2 mb-2">
-            <Icon name="openaiLogo" className="w-3.5 h-3.5" />
-            <span className="text-[12px] text-fg-secondary">Codex</span>
-          </div>
-          <select
+        <SettingsRow label={<ProviderLabel provider="codex" />} htmlFor="settings-title-codex">
+          <SelectField
+            id="settings-title-codex"
             value={codexTitleGenModelId}
             onChange={e => setCodexTitleGenModel(e.target.value)}
-            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
           >
             <option value="">Auto (konfiguracja Codexa)</option>
             {codexOptions.map(m => (
@@ -146,20 +132,16 @@ function TitleGenSection() {
             {!codexTitleGenInList && (
               <option value={codexTitleGenModelId}>{codexTitleGenModelId}</option>
             )}
-          </select>
-        </div>
+          </SelectField>
+        </SettingsRow>
       )}
 
       {enabledProviders.includes('opencode') && (
-        <div>
-          <div className="flex items-center gap-2 mb-2">
-            <Icon name="opencodeLogo" className="w-3.5 h-3.5" />
-            <span className="text-[12px] text-fg-secondary">OpenCode</span>
-          </div>
-          <select
+        <SettingsRow label={<ProviderLabel provider="opencode" />} htmlFor="settings-title-opencode">
+          <SelectField
+            id="settings-title-opencode"
             value={opencodeTitleGenModelId}
             onChange={event => setOpencodeTitleGenModel(event.target.value)}
-            className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] text-fg"
           >
             <option value="">Auto (konfiguracja OpenCode)</option>
             {opencodeOptions.map(model => (
@@ -168,14 +150,23 @@ function TitleGenSection() {
             {!opencodeTitleGenInList && (
               <option value={opencodeTitleGenModelId}>{opencodeTitleGenModelId}</option>
             )}
-          </select>
-        </div>
+          </SelectField>
+        </SettingsRow>
       )}
-    </div>
+    </SettingsSection>
   );
 }
 
-function CliCommandSection() {
+function InstallStatus({ installedPath, error }: { installedPath: string | null; error: string | null }) {
+  return (
+    <>
+      {installedPath && <span className="mt-1 block text-success">Zainstalowano: {installedPath}</span>}
+      {error && <span className="mt-1 block text-danger">{error}</span>}
+    </>
+  );
+}
+
+function CliCommandRow() {
   const [installedPath, setInstalledPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -188,26 +179,26 @@ function CliCommandSection() {
   };
 
   return (
-    <div className="space-y-2">
-      <h3 className="text-[12px] font-semibold text-fg">Komenda terminala</h3>
-      <p className="text-[11px] text-muted">
-        Instaluje komendę <code className="mx-1">abeon-code</code> w
-        <code className="mx-1">~/.local/bin</code>. Użyj
-        <code className="mx-1">abeon-code .</code>, aby otworzyć projekt i nową sesję
-        z konsoli. Upewnij się, że ten katalog jest w <code>PATH</code>.
-      </p>
-      <button onClick={doInstall} className="text-accent underline text-[12px]">
+    <SettingsRow
+      label="Komenda terminala"
+      description={
+        <>
+          Instaluje komendę <code className="font-mono text-fg-secondary">abeon-code</code> w{' '}
+          <code className="font-mono text-fg-secondary">~/.local/bin</code>. Użyj{' '}
+          <code className="font-mono text-fg-secondary">abeon-code .</code>, aby otworzyć projekt i nową sesję
+          z konsoli. Upewnij się, że ten katalog jest w <code className="font-mono text-fg-secondary">PATH</code>.
+          <InstallStatus installedPath={installedPath} error={error} />
+        </>
+      }
+    >
+      <button type="button" onClick={doInstall} className={BUTTON_CLASS}>
         Zainstaluj komendę
       </button>
-      {installedPath && (
-        <p className="text-[11px] text-success">Zainstalowano: {installedPath}</p>
-      )}
-      {error && <p className="text-[11px] text-danger">{error}</p>}
-    </div>
+    </SettingsRow>
   );
 }
 
-function ClaudeSkillSection() {
+function ClaudeSkillRow() {
   const [installedPath, setInstalledPath] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -220,41 +211,36 @@ function ClaudeSkillSection() {
   };
 
   return (
-    <div className="space-y-2">
-      <h3 className="text-[12px] font-semibold text-fg">Skill dla Claude Code</h3>
-      <p className="text-[11px] text-muted">
-        Instaluje skill <code className="mx-1">abeon-open-session</code> w
-        <code className="mx-1">~/.claude/skills</code>. Pozwala agentowi uruchomić w tle nową
-        sesję w innym projekcie z gotowym promptem, np. „odpal sesję w ~/projects/x i dodaj
-        endpoint…”. Instaluje też (aktualizuje) komendę <code>abeon-code</code> w
-        <code className="mx-1">~/.local/bin</code>, która musi być dostępna w <code>PATH</code>.
-      </p>
-      <button onClick={doInstall} className="text-accent underline text-[12px]">
+    <SettingsRow
+      label="Skill dla Claude Code"
+      description={
+        <>
+          Instaluje skill <code className="font-mono text-fg-secondary">abeon-open-session</code> w{' '}
+          <code className="font-mono text-fg-secondary">~/.claude/skills</code>. Pozwala agentowi uruchomić w tle nową
+          sesję w innym projekcie z gotowym promptem, np. „odpal sesję w ~/projects/x i dodaj
+          endpoint…”. Instaluje też (aktualizuje) komendę <code className="font-mono text-fg-secondary">abeon-code</code> w{' '}
+          <code className="font-mono text-fg-secondary">~/.local/bin</code>, która musi być dostępna w{' '}
+          <code className="font-mono text-fg-secondary">PATH</code>.
+          <InstallStatus installedPath={installedPath} error={error} />
+        </>
+      }
+    >
+      <button type="button" onClick={doInstall} className={BUTTON_CLASS}>
         Zainstaluj skill
       </button>
-      {installedPath && (
-        <p className="text-[11px] text-success">Zainstalowano: {installedPath}</p>
-      )}
-      {error && <p className="text-[11px] text-danger">{error}</p>}
-    </div>
-  );
-}
-
-function CliTab() {
-  return (
-    <div className="space-y-6">
-      <ProvidersSection />
-      <TitleGenSection />
-      <CliCommandSection />
-      <ClaudeSkillSection />
-    </div>
+    </SettingsRow>
   );
 }
 
 export function ProvidersCategory() {
   return (
     <SettingsPage title={SETTINGS_CATEGORIES.providers.label} description={SETTINGS_CATEGORIES.providers.description}>
-      <CliTab />
+      <ProvidersSection />
+      <TitleGenSection />
+      <SettingsSection label="Terminal i skill">
+        <CliCommandRow />
+        <ClaudeSkillRow />
+      </SettingsSection>
     </SettingsPage>
   );
 }

@@ -4,8 +4,7 @@ import { tauri } from '../../../lib/tauri';
 import type { NotificationTrigger } from '../../../lib/attention';
 import { SETTINGS_CATEGORIES } from '../../../lib/settingsCategories';
 import { ConfirmDialog } from '../../dialogs/ConfirmDialog';
-import { SettingsPage } from '../controls';
-import { SELECT_BASE } from './shared';
+import { BUTTON_CLASS, SelectField, SettingsPage, SettingsRow, SettingsSection, Switch } from '../controls';
 
 const TRIGGER_OPTIONS: { value: NotificationTrigger; label: string }[] = [
   { value: 'turnEnd', label: 'Każde zakończenie tury' },
@@ -39,45 +38,50 @@ function NotificationsSection() {
   };
 
   return (
-    <div className="space-y-3">
-      <h3 className="text-[12px] font-semibold text-fg">Powiadomienia</h3>
+    <>
+      <SettingsSection label="Powiadomienia">
+        <SettingsRow label="Powiadomienia systemowe, gdy sesja czeka na Ciebie" labelId="settings-notifications-enabled">
+          <Switch checked={enabled} onChange={setEnabled} labelledBy="settings-notifications-enabled" />
+        </SettingsRow>
+        <SettingsRow label="Wyzwalaj na" htmlFor="settings-notifications-trigger">
+          <SelectField
+            id="settings-notifications-trigger"
+            value={trigger}
+            onChange={e => setTrigger(e.target.value as NotificationTrigger)}
+            disabled={!enabled}
+          >
+            {TRIGGER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </SelectField>
+        </SettingsRow>
+      </SettingsSection>
 
-      <label className="flex items-center gap-2 text-[12px] cursor-pointer">
-        <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
-        Powiadomienia systemowe, gdy sesja czeka na Ciebie
-      </label>
-
-      <div className="flex items-center gap-2 text-[12px]">
-        <span className="text-muted">Wyzwalaj na:</span>
-        <select
-          value={trigger}
-          onChange={e => setTrigger(e.target.value as NotificationTrigger)}
-          disabled={!enabled}
-          className={`${SELECT_BASE} px-2 py-1 text-[12px]`}
+      <SettingsSection label="Hook Claude Code">
+        <SettingsRow
+          label="Hook pytań Claude Code"
+          labelId="settings-notifications-hook"
+          description={
+            <>
+              Tryb „tylko pytania” wymaga hooka. Instalacja dopisuje wpis do{' '}
+              <code className="font-mono text-fg-secondary">~/.claude/settings.json</code> (Twoje istniejące hooki zostają nienaruszone).
+            </>
+          }
         >
-          {TRIGGER_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      </div>
-
-      <div className="flex items-center gap-2 text-[12px]">
-        <span className="text-muted">Hook pytań Claude Code:</span>
-        {hookInstalled === null && <span className="text-muted">—</span>}
-        {hookInstalled === true && (
-          <>
-            <span className="text-success">zainstalowany</span>
-            <button onClick={doUninstall} className="text-muted hover:text-danger underline">usuń</button>
-          </>
-        )}
-        {hookInstalled === false && (
-          <button onClick={() => setConfirmInstall(true)} className="text-accent underline">
-            Zainstaluj
-          </button>
-        )}
-      </div>
-      <p className="text-[11px] text-muted">
-        Tryb „tylko pytania" wymaga hooka. Instalacja dopisuje wpis do
-        <code className="mx-1">~/.claude/settings.json</code> (Twoje istniejące hooki zostają nienaruszone).
-      </p>
+          <div className="flex items-center gap-2.5 text-[12.5px]">
+            {hookInstalled === null && <span className="text-muted">—</span>}
+            {hookInstalled === true && (
+              <>
+                <span className="text-success">zainstalowany</span>
+                <button type="button" onClick={doUninstall} className={BUTTON_CLASS}>usuń</button>
+              </>
+            )}
+            {hookInstalled === false && (
+              <button type="button" onClick={() => setConfirmInstall(true)} className={BUTTON_CLASS}>
+                Zainstaluj
+              </button>
+            )}
+          </div>
+        </SettingsRow>
+      </SettingsSection>
 
       {confirmInstall && (
         <ConfirmDialog
@@ -87,7 +91,7 @@ function NotificationsSection() {
           onConfirm={doInstall}
         />
       )}
-    </div>
+    </>
   );
 }
 

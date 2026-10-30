@@ -6,11 +6,11 @@ import { buildClaudeModelRows, FALLBACK_EFFORT_LEVELS } from '../../lib/models';
 import {
   SUPERVISOR_GRACE_RANGE, SUPERVISOR_PRESENCE_RANGE,
 } from '../../store/settingsSlice';
+import {
+  BUTTON_CLASS, MONO_FIELD_CLASS, SelectField, SettingsRow, SettingsSection, TEXTAREA_CLASS,
+} from '../settings/controls';
 import { SupervisorDiscordSection } from './SupervisorDiscordSection';
 import type { ClaudeOptions, SupervisorLevel } from '../../types';
-
-const FIELD_BASE =
-  'bg-bg-elev-2 border border-border rounded text-fg px-2 py-1 text-[12px] transition-colors hover:border-muted focus:outline-none focus:border-accent';
 
 const LEVEL_OPTIONS: { value: SupervisorLevel; label: string }[] = [
   { value: 'off', label: 'Wyłączony' },
@@ -53,9 +53,10 @@ function useClaudeModelOptions() {
   return options;
 }
 
-function NumberField({ id, label, value, min, max, onCommit }: {
+function NumberField({ id, label, description, value, min, max, onCommit }: {
   id: string;
   label: string;
+  description: string;
   value: number;
   min: number;
   max: number;
@@ -75,21 +76,22 @@ function NumberField({ id, label, value, min, max, onCommit }: {
   };
 
   return (
-    <div className="flex items-center gap-2 text-[12px]">
-      <label htmlFor={id} className="text-muted w-40">{label}</label>
-      <input
-        id={id}
-        type="number"
-        min={min}
-        max={max}
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') commit(); }}
-        className={`${FIELD_BASE} w-24`}
-      />
-      <span className="text-[11px] text-muted">{min}–{max}</span>
-    </div>
+    <SettingsRow label={label} htmlFor={id} description={description}>
+      <div className="flex items-center gap-2.5">
+        <input
+          id={id}
+          type="number"
+          min={min}
+          max={max}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); }}
+          className={`${MONO_FIELD_CLASS} w-24`}
+        />
+        <span className="text-[12px] text-muted">{min}–{max}</span>
+      </div>
+    </SettingsRow>
   );
 }
 
@@ -141,116 +143,107 @@ export function SupervisorSettingsTab() {
   };
 
   return (
-    <div className="space-y-5">
-      <div>
-        <h3 className="text-[12px] font-semibold text-fg mb-2">Agent sterujący</h3>
-        <div className="flex items-center gap-2 text-[12px]">
-          <label htmlFor="supervisor-level" className="text-muted w-40">Poziom</label>
-          <select
+    <>
+      <SettingsSection label="Agent sterujący" description={UNSUPERVISED_NOTE}>
+        <SettingsRow label="Poziom" htmlFor="supervisor-level" description={LEVEL_HINTS[level]}>
+          <SelectField
             id="supervisor-level"
             value={level}
             onChange={e => setLevel(e.target.value as SupervisorLevel)}
-            className={`${FIELD_BASE} cursor-pointer`}
           >
             {LEVEL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </div>
-        <p className="text-[11px] text-muted mt-2">{LEVEL_HINTS[level]}</p>
-        <p className="text-[11px] text-muted mt-1">{UNSUPERVISED_NOTE}</p>
-      </div>
-
-      <div className="space-y-2">
+          </SelectField>
+        </SettingsRow>
         <NumberField
           id="supervisor-grace"
           label="Karencja (s)"
+          description="Tyle czasu masz na własną odpowiedź na pytanie sesji, zanim zajmie się nim agent."
           value={graceSeconds}
           min={SUPERVISOR_GRACE_RANGE.min}
           max={SUPERVISOR_GRACE_RANGE.max}
           onCommit={setGrace}
         />
-        <p className="text-[11px] text-muted">
-          Tyle czasu masz na własną odpowiedź na pytanie sesji, zanim zajmie się nim agent.
-        </p>
         <NumberField
           id="supervisor-presence"
           label="Próg obecności (min)"
+          description="Po tylu minutach bez aktywności uznajemy, że nie ma Cię przy komputerze."
           value={presenceMinutes}
           min={SUPERVISOR_PRESENCE_RANGE.min}
           max={SUPERVISOR_PRESENCE_RANGE.max}
           onCommit={setPresence}
         />
-        <p className="text-[11px] text-muted">
-          Po tylu minutach bez aktywności uznajemy, że nie ma Cię przy komputerze.
-        </p>
-      </div>
+        <SettingsRow label="Model" htmlFor="supervisor-model">
+          <SelectField id="supervisor-model" value={modelId} onChange={e => setModelId(e.target.value)}>
+            <option value="">Domyślny</option>
+            {modelRows.map(row => <option key={row.modelId} value={row.modelId}>{row.label}</option>)}
+          </SelectField>
+        </SettingsRow>
+      </SettingsSection>
 
-      <div className="flex items-center gap-2 text-[12px]">
-        <label htmlFor="supervisor-model" className="text-muted w-40">Model</label>
-        <select
-          id="supervisor-model"
-          value={modelId}
-          onChange={e => setModelId(e.target.value)}
-          className={`${FIELD_BASE} cursor-pointer`}
-        >
-          <option value="">Domyślny</option>
-          {modelRows.map(row => <option key={row.modelId} value={row.modelId}>{row.label}</option>)}
-        </select>
-      </div>
-
-      <div>
-        <h3 className="text-[12px] font-semibold text-fg mb-2">Operacje produkcyjne</h3>
-        <p className="text-[11px] text-muted mb-2">
-          Poniższe operacje zawsze wymagają Twojej zgody, niezależnie od poziomu.
-        </p>
-        <ul className="space-y-1 mb-2">
-          {BUILT_IN_RULES.map(rule => (
-            <li key={rule} className="text-[11px] font-mono bg-bg-elev-2 border border-border px-2 py-1">{rule}</li>
-          ))}
-        </ul>
-        <p className="text-[11px] text-muted mb-3">
-          Narzędzia bandzior ze wstępnym podglądem wymagają zgody dopiero przy faktycznym potwierdzeniu zmiany.
-        </p>
-
-        <label htmlFor="supervisor-rules" className="block text-[10px] text-muted uppercase tracking-wider mb-1">
-          Dodatkowe reguły
-        </label>
-        <textarea
-          id="supervisor-rules"
-          value={rulesDraft}
-          onChange={e => setRulesDraft(e.target.value)}
-          onBlur={() => setExtraRules(parseRules(rulesDraft))}
-          rows={4}
-          placeholder={'bash:^kubectl delete\nmcp:mcp__bandzior__*'}
-          className="w-full bg-bg border border-border px-3 py-2 text-[12px] font-mono resize-y placeholder:text-muted/60"
-        />
-        <p className="text-[11px] text-muted mt-1">
-          Jedna reguła w linii: <code>bash:&lt;regex&gt;</code> dla poleceń shella albo <code>mcp:&lt;glob&gt;</code> dla narzędzi MCP.
-        </p>
-        {invalidRules.length > 0 && (
-          <p className="text-[11px] text-danger mt-1">
-            Reguły bez prefiksu bash: lub mcp: nie będą działać ({invalidRules.length}).
+      <SettingsSection
+        label="Operacje produkcyjne"
+        description="Poniższe operacje zawsze wymagają Twojej zgody, niezależnie od poziomu."
+      >
+        <div className="px-[18px] py-4">
+          <ul className="flex flex-col gap-1.5">
+            {BUILT_IN_RULES.map(rule => (
+              <li
+                key={rule}
+                className="rounded-[7px] border border-border-subtle bg-field px-2.5 py-1.5 font-mono text-[12px] text-fg-secondary"
+              >
+                {rule}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[12px] leading-[1.5] text-muted">
+            Narzędzia bandzior ze wstępnym podglądem wymagają zgody dopiero przy faktycznym potwierdzeniu zmiany.
           </p>
-        )}
-      </div>
-
-      <div>
-        <h3 className="text-[12px] font-semibold text-fg mb-2">Discord</h3>
-        <SupervisorDiscordSection />
-      </div>
-
-      <div className="border-t border-border pt-4">
-        <button
-          onClick={() => { void startNewConversation(); }}
-          disabled={busy}
-          className="px-3 py-1.5 border border-border bg-bg-elev-2 text-[12px] text-fg-secondary hover:text-fg disabled:opacity-50"
+        </div>
+        <SettingsRow
+          label="Dodatkowe reguły"
+          htmlFor="supervisor-rules"
+          description={
+            <>
+              Jedna reguła w linii: <code className="font-mono text-fg-secondary">bash:&lt;regex&gt;</code> dla poleceń shella albo <code className="font-mono text-fg-secondary">mcp:&lt;glob&gt;</code> dla narzędzi MCP.
+              {invalidRules.length > 0 && (
+                <span className="mt-1 block text-danger">
+                  Reguły bez prefiksu bash: lub mcp: nie będą działać ({invalidRules.length}).
+                </span>
+              )}
+            </>
+          }
         >
-          Nowa rozmowa agenta
-        </button>
-        <p className="text-[11px] text-muted mt-2">
-          Zaczyna agenta od czystego kontekstu. Poprzednia rozmowa zostaje zamknięta.
-        </p>
-        {error && <p className="text-[11px] text-danger mt-2">{error}</p>}
-      </div>
-    </div>
+          <textarea
+            id="supervisor-rules"
+            value={rulesDraft}
+            onChange={e => setRulesDraft(e.target.value)}
+            onBlur={() => setExtraRules(parseRules(rulesDraft))}
+            rows={4}
+            placeholder={'bash:^kubectl delete\nmcp:mcp__bandzior__*'}
+            className={`${TEXTAREA_CLASS} basis-full`}
+          />
+        </SettingsRow>
+      </SettingsSection>
+
+      <SettingsSection label="Discord">
+        <SupervisorDiscordSection />
+      </SettingsSection>
+
+      <SettingsSection label="Rozmowa agenta">
+        <SettingsRow
+          label="Czysty kontekst"
+          description={
+            <>
+              Zaczyna agenta od czystego kontekstu. Poprzednia rozmowa zostaje zamknięta.
+              {error && <span className="mt-1 block text-danger">{error}</span>}
+            </>
+          }
+        >
+          <button type="button" onClick={() => { void startNewConversation(); }} disabled={busy} className={BUTTON_CLASS}>
+            Nowa rozmowa agenta
+          </button>
+        </SettingsRow>
+      </SettingsSection>
+    </>
   );
 }

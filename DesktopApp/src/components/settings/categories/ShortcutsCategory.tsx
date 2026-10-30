@@ -6,7 +6,7 @@ import {
   type ShortcutId,
 } from '../../../lib/shortcuts';
 import { SETTINGS_CATEGORIES } from '../../../lib/settingsCategories';
-import { SettingsPage } from '../controls';
+import { BUTTON_CLASS, SettingsPage, SettingsRow, SettingsSection } from '../controls';
 
 function ShortcutsTab() {
   const overrides = useStore(s => s.shortcutOverrides);
@@ -66,95 +66,77 @@ function ShortcutsTab() {
   }, [recordingId]);
 
   return (
-    <div>
-      <label className="block text-[10px] text-muted uppercase tracking-wider mb-3">
-        Skróty klawiszowe
-      </label>
-
-      <div className="space-y-0.5">
+    <>
+      <SettingsSection label="Skróty klawiszowe">
         {SHORTCUTS.map(s => {
           const current = getBinding(s.id, overrides);
           const isRecording = recordingId === s.id;
           const isOverridden = !!overrides[s.id];
 
           return (
-            <div
-              key={s.id}
-              className="flex items-center gap-3 py-2 px-2 hover:bg-bg-elev-2"
-            >
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px]">{s.label}</div>
-                <div className="text-[11px] text-muted">{s.description}</div>
-              </div>
-              <button
-                ref={isRecording ? recordRef : undefined}
-                onClick={() => {
-                  setRecordingId(isRecording ? null : s.id);
-                  setConflict(null);
-                }}
-                className={`font-mono text-[12px] px-3 py-1 border min-w-[100px] text-center transition-colors ${
-                  isRecording
-                    ? 'border-accent bg-accent/10 text-accent animate-pulse'
-                    : isOverridden
-                      ? 'border-accent/50 text-fg hover:border-accent'
-                      : 'border-border text-fg-secondary hover:border-fg-secondary'
-                }`}
-              >
-                {isRecording ? 'Naciśnij…' : formatBinding(current)}
-              </button>
-              {isOverridden && !isRecording && (
+            <SettingsRow key={s.id} label={s.label} description={s.description}>
+              <div className="flex items-center gap-1.5">
+                {isOverridden && !isRecording && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const { [s.id]: _, ...rest } = overrides;
+                      useStore.setState({ shortcutOverrides: rest });
+                    }}
+                    className="grid h-7 w-7 place-items-center rounded-[7px] text-icon transition-colors hover:text-fg"
+                    title="Przywróć domyślny"
+                    aria-label={`Przywróć domyślny: ${s.label}`}
+                  >
+                    <Icon name="close" className="h-3 w-3" strokeWidth={2.4} />
+                  </button>
+                )}
                 <button
+                  type="button"
+                  ref={isRecording ? recordRef : undefined}
                   onClick={() => {
-                    const { [s.id]: _, ...rest } = overrides;
-                    useStore.setState({ shortcutOverrides: rest });
+                    setRecordingId(isRecording ? null : s.id);
+                    setConflict(null);
                   }}
-                  className="text-muted hover:text-fg transition-colors p-1"
-                  title="Przywróć domyślny"
+                  className={`h-7 min-w-[110px] rounded-[7px] border px-3 text-center font-mono text-[12px] transition-colors ${
+                    isRecording
+                      ? 'animate-pulse border-accent bg-accent/10 text-accent'
+                      : isOverridden
+                        ? 'border-accent/50 bg-field text-fg hover:border-accent'
+                        : 'border-border-strong bg-field text-fg-secondary hover:text-fg'
+                  }`}
                 >
-                  <Icon name="close" className="w-3 h-3" />
+                  {isRecording ? 'Naciśnij…' : formatBinding(current)}
                 </button>
-              )}
-            </div>
+              </div>
+            </SettingsRow>
           );
         })}
-      </div>
+      </SettingsSection>
 
       {conflict && (
-        <p className="text-[11px] text-danger mt-2 px-2">
+        <p className="-mt-3 px-0.5 text-[12px] text-danger">
           Konflikt ze skrótem: {conflict}. Wybierz inną kombinację.
         </p>
       )}
 
-      <div className="border-t border-border mt-4 pt-4">
-        <label className="block text-[10px] text-muted uppercase tracking-wider mb-3">
-          Stałe skróty
-        </label>
-        <div className="space-y-0.5">
-          {FIXED_SHORTCUTS.map(s => (
-            <div key={s.label} className="flex items-center gap-3 py-2 px-2">
-              <div className="flex-1 min-w-0">
-                <div className="text-[13px] text-fg-secondary">{s.label}</div>
-                <div className="text-[11px] text-muted">{s.description}</div>
-              </div>
-              <span className="font-mono text-[12px] px-3 py-1 border border-border text-muted min-w-[100px] text-center">
-                {formatBinding(s.binding)}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
+      <SettingsSection label="Stałe skróty">
+        {FIXED_SHORTCUTS.map(s => (
+          <SettingsRow key={s.label} label={s.label} description={s.description}>
+            <span className="inline-flex h-7 min-w-[110px] items-center justify-center rounded-[7px] border border-border-strong px-3 font-mono text-[12px] text-muted">
+              {formatBinding(s.binding)}
+            </span>
+          </SettingsRow>
+        ))}
+      </SettingsSection>
 
       {hasOverrides && (
-        <div className="mt-4 pt-3 border-t border-border">
-          <button
-            onClick={resetAll}
-            className="text-[12px] text-muted hover:text-danger transition-colors"
-          >
+        <div>
+          <button type="button" onClick={resetAll} className={BUTTON_CLASS}>
             Przywróć wszystkie domyślne skróty
           </button>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

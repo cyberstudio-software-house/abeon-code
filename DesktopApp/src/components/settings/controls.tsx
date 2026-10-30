@@ -37,11 +37,37 @@ export function SettingsPage({ title, description, badge, actions, wide, childre
   );
 }
 
-export function SettingsSection({ label, children }: { label: string; children: ReactNode }) {
+const FIELD_BASE =
+  'h-8 min-w-0 rounded-[8px] border border-border-strong bg-field px-2.5 text-fg placeholder:text-muted disabled:opacity-50';
+
+export const FIELD_CLASS = `${FIELD_BASE} text-[13px]`;
+
+export const MONO_FIELD_CLASS = `${FIELD_BASE} font-mono text-[12px]`;
+
+export const TEXTAREA_CLASS =
+  'min-w-0 resize-y rounded-[8px] border border-border-strong bg-field px-2.5 py-2 font-mono text-[12px] text-fg placeholder:text-muted';
+
+const BUTTON_BASE =
+  'inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] px-3 text-[12.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50';
+
+export const BUTTON_CLASS = `${BUTTON_BASE} border border-border-strong bg-button text-fg hover:bg-pressed`;
+
+export const PRIMARY_BUTTON_CLASS = `${BUTTON_BASE} bg-accent font-medium text-accent-fg hover:bg-accent-hover`;
+
+export function SettingsSection({ label, description, action, children }: {
+  label: ReactNode;
+  description?: ReactNode;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   const id = useId();
   return (
     <section aria-labelledby={id} className="flex flex-col gap-2">
-      <h2 id={id} className="px-0.5 text-[11px] font-medium uppercase tracking-[0.06em] text-label">{label}</h2>
+      <div className="flex items-center justify-between gap-3 px-0.5">
+        <h2 id={id} className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.06em] text-label">{label}</h2>
+        {action}
+      </div>
+      {description && <p className="px-0.5 text-[12px] leading-[1.5] text-muted">{description}</p>}
       <div className="rounded-[12px] border border-border bg-sunken divide-y divide-border-subtle">{children}</div>
     </section>
   );
@@ -60,9 +86,11 @@ export function SettingsRow({ label, description, htmlFor, labelId, children }: 
     <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-[18px] py-4">
       <div className="flex-[1_1_280px] min-w-0">
         {htmlFor
-          ? <label htmlFor={htmlFor} className={ROW_LABEL}>{label}</label>
-          : <span id={labelId} className={ROW_LABEL}>{label}</span>}
-        {description && <p className="mt-[3px] text-[12px] leading-[1.5] text-muted">{description}</p>}
+          ? <label htmlFor={htmlFor} data-settings-row-label="" className={ROW_LABEL}>{label}</label>
+          : <span id={labelId} data-settings-row-label="" className={ROW_LABEL}>{label}</span>}
+        {description && (
+          <p data-settings-row-description="" className="mt-[3px] text-[12px] leading-[1.5] text-muted">{description}</p>
+        )}
       </div>
       {children}
     </div>
@@ -101,10 +129,11 @@ export function Segmented<T extends string | number>({ value, options, onChange,
   );
 }
 
-export function Switch({ checked, onChange, labelledBy }: {
+export function Switch({ checked, onChange, labelledBy, disabled }: {
   checked: boolean;
   onChange: (checked: boolean) => void;
   labelledBy: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -112,8 +141,11 @@ export function Switch({ checked, onChange, labelledBy }: {
       role="switch"
       aria-checked={checked}
       aria-labelledby={labelledBy}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${checked ? 'bg-accent' : 'bg-pressed'}`}
+      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        checked ? 'bg-accent' : 'bg-pressed'
+      }`}
     >
       <span
         aria-hidden
@@ -148,7 +180,7 @@ export function Stepper({ value, min, max, unit, onChange, labelledBy, decreaseL
         type="button"
         aria-label={decreaseLabel}
         disabled={value <= min}
-        onClick={() => onChange(Math.max(min, value - 1))}
+        onClick={() => onChange(Math.min(max, Math.max(min, value - 1)))}
         className={STEPPER_BUTTON}
       >
         <Icon name="minus" className="h-3 w-3" strokeWidth={2.5} />
@@ -160,7 +192,7 @@ export function Stepper({ value, min, max, unit, onChange, labelledBy, decreaseL
         type="button"
         aria-label={increaseLabel}
         disabled={value >= max}
-        onClick={() => onChange(Math.min(max, value + 1))}
+        onClick={() => onChange(Math.max(min, Math.min(max, value + 1)))}
         className={STEPPER_BUTTON}
       >
         <Icon name="plus" className="h-3 w-3" strokeWidth={2.5} />
@@ -169,9 +201,11 @@ export function Stepper({ value, min, max, unit, onChange, labelledBy, decreaseL
   );
 }
 
-export function SelectField({ className = '', ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+export function SelectField({ className = '', wrapperClassName = 'flex-[0_1_280px]', ...props }: SelectHTMLAttributes<HTMLSelectElement> & {
+  wrapperClassName?: string;
+}) {
   return (
-    <span className="relative block min-w-0 flex-[0_1_280px]">
+    <span className={`relative block min-w-0 ${wrapperClassName}`}>
       <select
         {...props}
         className={`h-8 w-full cursor-pointer appearance-none rounded-[8px] border border-border-strong bg-field pl-2.5 pr-[30px] text-[13px] text-fg disabled:cursor-not-allowed disabled:opacity-50 ${className}`}

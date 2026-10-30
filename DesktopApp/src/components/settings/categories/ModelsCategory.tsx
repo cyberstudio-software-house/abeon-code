@@ -1,12 +1,14 @@
-import { useEffect, useState, useMemo, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useState, useMemo, type ReactNode } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../../store';
-import { Icon } from '../../shared/Icon';
+import { Icon, type IconName } from '../../shared/Icon';
 import { buildClaudeModelRows, effortOptions, type ClaudeModelRow } from '../../../lib/models';
 import { tauri } from '../../../lib/tauri';
 import { SETTINGS_CATEGORIES } from '../../../lib/settingsCategories';
-import { SettingsPage } from '../controls';
-import { AUTO_MODEL_LABEL, SELECT_BASE, useClaudeOptions } from './shared';
+import {
+  BUTTON_CLASS, FIELD_CLASS, MONO_FIELD_CLASS, PRIMARY_BUTTON_CLASS, SelectField, SettingsPage, SettingsRow, SettingsSection,
+} from '../controls';
+import { AUTO_MODEL_LABEL, useClaudeOptions } from './shared';
 
 const EFFORT_LABELS: Record<string, string> = {
   low: 'Niski',
@@ -15,6 +17,47 @@ const EFFORT_LABELS: Record<string, string> = {
   xhigh: 'Bardzo wysoki',
   max: 'Maksymalny',
 };
+
+const BADGE_CLASS = 'rounded border border-border-strong px-1.5 py-0.5 text-[10px] text-muted';
+const ICON_BUTTON_CLASS = 'grid h-7 w-7 shrink-0 place-items-center rounded-[7px] text-icon transition-colors hover:text-danger';
+const TEXT_BUTTON_CLASS = 'text-[12px] text-muted transition-colors hover:text-fg disabled:cursor-not-allowed disabled:opacity-50';
+
+function SectionTitle({ icon, children }: { icon: IconName; children: ReactNode }) {
+  return (
+    <>
+      <Icon name={icon} className="h-3.5 w-3.5" />
+      {children}
+    </>
+  );
+}
+
+function RadioRow({ name, checked, onSelect, label, detail, badge, trailing }: {
+  name: string;
+  checked: boolean;
+  onSelect: () => void;
+  label: ReactNode;
+  detail?: string;
+  badge?: ReactNode;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div
+      className={`flex flex-wrap items-center gap-x-6 gap-y-2 px-[18px] py-3 transition-colors ${
+        checked ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'
+      }`}
+    >
+      <label className="flex min-w-0 flex-[1_1_240px] cursor-pointer items-center gap-3">
+        <input type="radio" name={name} checked={checked} onChange={onSelect} className="accent-accent" />
+        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
+          <span data-settings-row-label="" className="text-[13.5px] font-medium text-fg-strong">{label}</span>
+          {detail && <span className="truncate font-mono text-[12px] text-muted">{detail}</span>}
+          {badge && <span className={BADGE_CLASS}>{badge}</span>}
+        </span>
+      </label>
+      {trailing}
+    </div>
+  );
+}
 
 function ClaudeModelsSection() {
   const defaultModelId = useStore(s => s.defaultModelId);
@@ -65,132 +108,126 @@ function ClaudeModelsSection() {
   );
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <Icon name="claudeLogo" className="w-3.5 h-3.5" />
-          <label className="block text-[10px] text-muted uppercase tracking-wider">Claude Code</label>
-        </div>
-        <button
-          onClick={() => refresh(true)}
-          disabled={refreshing}
-          className="text-[11px] text-muted hover:text-fg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
+    <SettingsSection
+      label={<SectionTitle icon="claudeLogo">Claude Code</SectionTitle>}
+      description={
+        <>
+          Model używany przy tworzeniu nowych sesji. Istniejące sesje zachowują swój model.
+          Lista pochodzi z zainstalowanego Claude Code.
+          {nothingDetected && (
+            <span className="mt-1 block text-danger">Nie wykryto modeli — sprawdź instalację Claude Code</span>
+          )}
+        </>
+      }
+      action={
+        <button type="button" onClick={() => refresh(true)} disabled={refreshing} className={TEXT_BUTTON_CLASS}>
           {refreshing ? 'Odświeżanie…' : 'Odśwież'}
         </button>
-      </div>
-      <p className="text-[11px] text-muted mb-3">
-        Model używany przy tworzeniu nowych sesji. Istniejące sesje zachowują swój model.
-        Lista pochodzi z zainstalowanego Claude Code.
-      </p>
-
-      {nothingDetected && (
-        <p className="text-[11px] text-danger mb-2">Nie wykryto modeli — sprawdź instalację Claude Code</p>
-      )}
-
-      <div className="space-y-0.5 mb-2">
-        {renderRow({ modelId: '', label: AUTO_MODEL_LABEL })}
-        {rows.latest.map(row => renderRow(row))}
-        {visibleOlder.map(row => renderRow(row))}
-        {pinnedCustom.map(row => renderRow(row))}
-        {rows.undetected && renderRow(rows.undetected, { badge: 'niewykryty' })}
-      </div>
+      }
+    >
+      {renderRow({ modelId: '', label: AUTO_MODEL_LABEL })}
+      {rows.latest.map(row => renderRow(row))}
+      {visibleOlder.map(row => renderRow(row))}
+      {pinnedCustom.map(row => renderRow(row))}
+      {rows.undetected && renderRow(rows.undetected, { badge: 'niewykryty' })}
 
       {rows.older.length > 0 && (
-        <button
-          onClick={() => setShowOlder(v => !v)}
-          className="text-[11px] text-muted hover:text-fg transition-colors mb-4"
-        >
-          {showOlder ? 'Ukryj starsze wersje' : `Pokaż starsze wersje (${rows.older.length})`}
-        </button>
+        <div className="px-[18px] py-2.5">
+          <button type="button" onClick={() => setShowOlder(v => !v)} className={TEXT_BUTTON_CLASS}>
+            {showOlder ? 'Ukryj starsze wersje' : `Pokaż starsze wersje (${rows.older.length})`}
+          </button>
+        </div>
       )}
 
-      <div className="border-t border-border pt-3">
+      <div className="px-[18px] py-2.5">
         <button
+          type="button"
           onClick={() => setShowAdvanced(v => !v)}
-          className="flex items-center gap-1.5 text-[10px] text-muted uppercase tracking-wider hover:text-fg transition-colors mb-2"
+          className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.06em] text-label transition-colors hover:text-fg"
         >
           <span>{advancedOpen ? '▾' : '▸'}</span>
           <span>Zaawansowane</span>
         </button>
+      </div>
 
-        {advancedOpen && (
-          <div>
-            <p className="text-[11px] text-muted mb-2">
-              Modele własne — gdy wykrywanie nie znajduje potrzebnego ID (np. Bedrock/Vertex).
-            </p>
-            {(rows.custom.length > 0 || rows.detectedCustom.length > 0) && (
-              <div className="space-y-0.5 mb-3">
-                {rows.custom.map(row => renderRow(row, { onRemove: () => removeCustomModel(row.modelId) }))}
-                {rows.detectedCustom.map(row => (
-                  <div key={row.modelId} className="flex items-center gap-3 py-1.5 px-2">
-                    <span className="text-[13px]">{row.label}</span>
-                    <span className="text-[11px] text-muted font-mono truncate flex-1 min-w-0">{row.modelId}</span>
-                    <span className="text-[10px] text-muted border border-border px-1.5 py-0.5 rounded">wykryty</span>
-                    <button
-                      onClick={() => removeCustomModel(row.modelId)}
-                      className="text-muted hover:text-danger transition-colors p-1"
-                      aria-label="Usuń model"
-                    >
-                      <Icon name="trash" className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {adding ? (
-              <div className="border border-border p-3 space-y-2">
-                <label className="block text-[10px] text-muted uppercase tracking-wider">Nazwa</label>
+      {advancedOpen && (
+        <>
+          <p className="px-[18px] py-3 text-[12px] leading-[1.5] text-muted">
+            Modele własne — gdy wykrywanie nie znajduje potrzebnego ID (np. Bedrock/Vertex).
+          </p>
+          {rows.custom.map(row => renderRow(row, { onRemove: () => removeCustomModel(row.modelId) }))}
+          {rows.detectedCustom.map(row => (
+            <div key={row.modelId} className="flex items-center gap-3 px-[18px] py-3">
+              <span className="text-[13.5px] font-medium text-fg-strong">{row.label}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-muted">{row.modelId}</span>
+              <span className={BADGE_CLASS}>wykryty</span>
+              <button
+                type="button"
+                onClick={() => removeCustomModel(row.modelId)}
+                className={ICON_BUTTON_CLASS}
+                aria-label="Usuń model"
+              >
+                <Icon name="trash" className="h-3 w-3" />
+              </button>
+            </div>
+          ))}
+          {adding ? (
+            <>
+              <SettingsRow label="Nazwa" htmlFor="settings-models-new-label">
                 <input
+                  id="settings-models-new-label"
                   value={newLabel}
                   onChange={e => setNewLabel(e.target.value)}
                   placeholder="np. My Fine-tuned Model"
-                  className="w-full bg-bg border border-border px-3 py-1.5 text-[13px]"
+                  className={`${FIELD_CLASS} flex-[0_1_280px]`}
                   autoFocus
                 />
-                <label className="block text-[10px] text-muted uppercase tracking-wider">ID modelu (CLI)</label>
+              </SettingsRow>
+              <SettingsRow label="ID modelu (CLI)" htmlFor="settings-models-new-id">
                 <input
+                  id="settings-models-new-id"
                   value={newModelId}
                   onChange={e => setNewModelId(e.target.value)}
                   placeholder="np. claude-sonnet-4-6"
-                  className="w-full bg-bg border border-border px-3 py-1.5 text-[13px] font-mono"
+                  className={`${MONO_FIELD_CLASS} flex-[0_1_280px]`}
                   onKeyDown={e => { if (e.key === 'Enter') submitCustom(); }}
                 />
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    onClick={() => { setAdding(false); setNewLabel(''); setNewModelId(''); }}
-                    className="px-3 py-1.5 border border-border text-[12px] text-fg-secondary hover:text-fg"
-                  >
-                    Anuluj
-                  </button>
-                  <button
-                    onClick={submitCustom}
-                    disabled={!newLabel.trim() || !newModelId.trim()}
-                    className="px-3 py-1.5 bg-fg text-bg text-[12px] font-medium disabled:opacity-40"
-                  >
-                    Dodaj
-                  </button>
-                </div>
+              </SettingsRow>
+              <div className="flex justify-end gap-2 px-[18px] py-3">
+                <button
+                  type="button"
+                  onClick={() => { setAdding(false); setNewLabel(''); setNewModelId(''); }}
+                  className={BUTTON_CLASS}
+                >
+                  Anuluj
+                </button>
+                <button
+                  type="button"
+                  onClick={submitCustom}
+                  disabled={!newLabel.trim() || !newModelId.trim()}
+                  className={PRIMARY_BUTTON_CLASS}
+                >
+                  Dodaj
+                </button>
               </div>
-            ) : (
-              <button
-                onClick={() => setAdding(true)}
-                className="flex items-center gap-1.5 text-[12px] text-muted hover:text-fg transition-colors"
-              >
-                <Icon name="plus" className="w-3 h-3" />
+            </>
+          ) : (
+            <div className="px-[18px] py-3">
+              <button type="button" onClick={() => setAdding(true)} className={BUTTON_CLASS}>
+                <Icon name="plus" className="h-3 w-3" strokeWidth={2.5} />
                 Dodaj własny model
               </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+            </div>
+          )}
+        </>
+      )}
+    </SettingsSection>
   );
 }
 
 type PlainModelSectionProps = {
   label: string;
+  icon: IconName;
   description: string;
   radioName: string;
   autoLabel: string;
@@ -205,6 +242,7 @@ type PlainModelSectionProps = {
 
 function PlainModelSection({
   label,
+  icon,
   description,
   radioName,
   autoLabel,
@@ -218,7 +256,6 @@ function PlainModelSection({
 }: PlainModelSectionProps) {
   const [newModel, setNewModel] = useState('');
   const options = Array.from(new Set([...detected, ...custom, ...(selected ? [selected] : [])]));
-  const icon = label === 'Codex' ? 'openaiLogo' : 'opencodeLogo';
 
   const submit = () => {
     onAdd(newModel);
@@ -226,51 +263,37 @@ function PlainModelSection({
   };
 
   return (
-    <div>
-      <div className="flex items-center gap-2 mb-2">
-        <Icon name={icon} className="w-3.5 h-3.5" />
-        <label className="block text-[10px] text-muted uppercase tracking-wider">{label}</label>
-      </div>
-      <p className="text-[11px] text-muted mb-3">{description}</p>
-      <div className="space-y-0.5 mb-4">
-        <label className={`flex items-center gap-3 py-1.5 px-2 cursor-pointer ${selected === '' ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}>
-          <input type="radio" name={radioName} checked={selected === ''} onChange={() => onSelect('')} className="accent-accent" />
-          <span className="text-[13px]">{autoLabel}</span>
-        </label>
-        {options.map(model => (
-          <div key={model} className="flex items-center gap-2">
-            <label className={`flex-1 flex items-center gap-3 py-1.5 px-2 cursor-pointer ${selected === model ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}>
-              <input type="radio" name={radioName} checked={selected === model} onChange={() => onSelect(model)} className="accent-accent" />
-              <span className="text-[13px] font-mono">{model}</span>
-              {detected.includes(model) && !custom.includes(model) && (
-                <span className="text-[10px] text-muted border border-border px-1.5 py-0.5 rounded">wykryty</span>
-              )}
-            </label>
-            {custom.includes(model) && (
-              <button onClick={() => onRemove(model)} className="text-muted hover:text-danger transition-colors p-1" aria-label="Usuń model">
-                <Icon name="trash" className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-2">
+    <SettingsSection label={<SectionTitle icon={icon}>{label}</SectionTitle>} description={description}>
+      <RadioRow name={radioName} checked={selected === ''} onSelect={() => onSelect('')} label={autoLabel} />
+      {options.map(model => (
+        <RadioRow
+          key={model}
+          name={radioName}
+          checked={selected === model}
+          onSelect={() => onSelect(model)}
+          label={<span className="font-mono text-[13px]">{model}</span>}
+          badge={detected.includes(model) && !custom.includes(model) ? 'wykryty' : undefined}
+          trailing={custom.includes(model) ? (
+            <button type="button" onClick={() => onRemove(model)} className={ICON_BUTTON_CLASS} aria-label="Usuń model">
+              <Icon name="trash" className="h-3 w-3" />
+            </button>
+          ) : undefined}
+        />
+      ))}
+      <div className="flex gap-2 px-[18px] py-3">
         <input
+          aria-label={`Własny model ${label}`}
           value={newModel}
           onChange={event => setNewModel(event.target.value)}
           placeholder={placeholder}
-          className="flex-1 bg-bg border border-border px-3 py-1.5 text-[13px] font-mono placeholder:text-muted/60"
+          className={`${MONO_FIELD_CLASS} flex-1`}
           onKeyDown={event => { if (event.key === 'Enter') submit(); }}
         />
-        <button
-          onClick={submit}
-          disabled={!newModel.trim()}
-          className="px-3 py-1.5 border border-border bg-bg-elev-2 text-[12px] text-fg-secondary hover:text-fg disabled:opacity-40 shrink-0"
-        >
+        <button type="button" onClick={submit} disabled={!newModel.trim()} className={BUTTON_CLASS}>
           Dodaj
         </button>
       </div>
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -289,6 +312,7 @@ function CodexModelsSection() {
   return (
     <PlainModelSection
       label="Codex"
+      icon="openaiLogo"
       description="Model używany przy tworzeniu nowych sesji Codex. „Auto” pozostawia wybór konfiguracji Codexa."
       radioName="codex-model"
       autoLabel="Auto (konfiguracja Codexa)"
@@ -318,6 +342,7 @@ function OpencodeModelsSection() {
   return (
     <PlainModelSection
       label="OpenCode"
+      icon="opencodeLogo"
       description="Model używany przy tworzeniu nowych sesji OpenCode. „Auto” pozostawia wybór konfiguracji OpenCode."
       radioName="opencode-model"
       autoLabel="Auto (konfiguracja OpenCode)"
@@ -329,28 +354,6 @@ function OpencodeModelsSection() {
       onAdd={addCustom}
       onRemove={removeCustom}
     />
-  );
-}
-
-function ModelsTab() {
-  const enabledProviders = useStore(useShallow(s => s.enabledProviders));
-  const showClaude = enabledProviders.includes('claude');
-  const showCodex = enabledProviders.includes('codex');
-  const showOpencode = enabledProviders.includes('opencode');
-  const sections = [
-    showClaude ? <ClaudeModelsSection key="claude" /> : null,
-    showCodex ? <CodexModelsSection key="codex" /> : null,
-    showOpencode ? <OpencodeModelsSection key="opencode" /> : null,
-  ].filter((section): section is ReactElement => section !== null);
-
-  return (
-    <div>
-      {sections.map((section, index) => (
-        <div key={section.key} className={index > 0 ? 'border-t border-border pt-4 mt-4' : ''}>
-          {section}
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -366,52 +369,46 @@ function ModelRow({ label, modelId, selected, effort, effortLevels, badge, onSel
   onRemove?: () => void;
 }) {
   return (
-    <div className={`flex items-center gap-3 py-1.5 px-2 ${selected ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}>
-      <label className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer">
-        <input
-          type="radio"
-          name="default-model"
-          checked={selected}
-          onChange={onSelect}
-          className="accent-accent"
-        />
-        <span className="text-[13px]">{label}</span>
-        {modelId && <span className="text-[11px] text-muted font-mono truncate">{modelId}</span>}
-        {badge && (
-          <span className="text-[10px] text-muted border border-border px-1.5 py-0.5 rounded">{badge}</span>
-        )}
-      </label>
-      <div className="flex items-center gap-1.5">
-        <span className="text-[10px] text-muted">Effort</span>
-        <select
-          aria-label={`Effort: ${label}`}
-          value={effort ?? ''}
-          onChange={e => onEffortChange(e.target.value || null)}
-          className={`${SELECT_BASE} text-[11px] px-1.5 py-0.5`}
-        >
-          <option value="">Domyślny</option>
-          {effortOptions(effortLevels, effort).map(level => (
-            <option key={level} value={level}>{EFFORT_LABELS[level] ?? level}</option>
-          ))}
-        </select>
-      </div>
-      {onRemove && (
-        <button
-          onClick={onRemove}
-          className="text-muted hover:text-danger transition-colors p-1"
-          aria-label="Usuń model"
-        >
-          <Icon name="trash" className="w-3 h-3" />
-        </button>
-      )}
-    </div>
+    <RadioRow
+      name="default-model"
+      checked={selected}
+      onSelect={onSelect}
+      label={label}
+      detail={modelId || undefined}
+      badge={badge}
+      trailing={
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] text-muted">Effort</span>
+          <SelectField
+            aria-label={`Effort: ${label}`}
+            wrapperClassName="w-[150px]"
+            value={effort ?? ''}
+            onChange={e => onEffortChange(e.target.value || null)}
+          >
+            <option value="">Domyślny</option>
+            {effortOptions(effortLevels, effort).map(level => (
+              <option key={level} value={level}>{EFFORT_LABELS[level] ?? level}</option>
+            ))}
+          </SelectField>
+          {onRemove && (
+            <button type="button" onClick={onRemove} className={ICON_BUTTON_CLASS} aria-label="Usuń model">
+              <Icon name="trash" className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      }
+    />
   );
 }
 
 export function ModelsCategory() {
+  const enabledProviders = useStore(useShallow(s => s.enabledProviders));
+
   return (
     <SettingsPage title={SETTINGS_CATEGORIES.models.label} description={SETTINGS_CATEGORIES.models.description}>
-      <ModelsTab />
+      {enabledProviders.includes('claude') && <ClaudeModelsSection />}
+      {enabledProviders.includes('codex') && <CodexModelsSection />}
+      {enabledProviders.includes('opencode') && <OpencodeModelsSection />}
     </SettingsPage>
   );
 }
