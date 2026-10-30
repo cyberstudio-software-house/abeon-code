@@ -5,6 +5,7 @@ import { DEFAULT_MODEL_ID, DEFAULT_TITLE_GEN_MODEL_ID } from '../lib/models';
 import type { NotificationTrigger } from '../lib/attention';
 import type { Provider, SupervisorLevel } from '../types';
 import { DRAWER_DEFAULT_SIZE } from '../lib/drawerGeometry';
+import type { SettingsCategoryId } from '../lib/settingsCategories';
 import {
   TERMINAL_DEFAULTS, clampTerminalFontSize,
   type TerminalColors, type TerminalCursorStyle, type TerminalFontId, type TerminalLineHeight, type TerminalPaletteId,
@@ -63,6 +64,7 @@ export type SettingsSlice = {
   showActiveSessions: boolean;
   enabledProviders: Provider[];
   settingsOpen: boolean;
+  settingsCategory: SettingsCategoryId;
   codexModelId: string;
   codexTitleGenModelId: string;
   codexCustomModels: string[];
@@ -111,7 +113,8 @@ export type SettingsSlice = {
   setNotificationsEnabled: (v: boolean) => void;
   setNotificationTrigger: (t: NotificationTrigger) => void;
   setShowActiveSessions: (v: boolean) => void;
-  openSettings: () => void;
+  openSettings: (category?: SettingsCategoryId) => void;
+  setSettingsCategory: (id: SettingsCategoryId) => void;
   closeSettings: () => void;
   setCodexModel: (modelId: string) => void;
   setCodexTitleGenModel: (modelId: string) => void;
@@ -163,6 +166,7 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
   showActiveSessions: true,
   enabledProviders: ['claude'],
   settingsOpen: false,
+  settingsCategory: 'general',
   codexModelId: '',
   codexTitleGenModelId: '',
   codexCustomModels: [],
@@ -245,7 +249,8 @@ export const createSettingsSlice: StateCreator<SettingsSlice> = (set, get) => ({
       ...(get().titleGenModelId === modelId ? { titleGenModelId: DEFAULT_TITLE_GEN_MODEL_ID } : {}),
     });
   },
-  openSettings: () => set({ settingsOpen: true }),
+  openSettings: (category) => set(category ? { settingsOpen: true, settingsCategory: category } : { settingsOpen: true }),
+  setSettingsCategory: (settingsCategory) => set({ settingsCategory }),
   closeSettings: () => set({ settingsOpen: false }),
   setCodexModel: (codexModelId) => set({ codexModelId }),
   setCodexTitleGenModel: (codexTitleGenModelId) => set({ codexTitleGenModelId }),

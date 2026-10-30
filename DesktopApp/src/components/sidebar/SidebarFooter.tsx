@@ -31,7 +31,7 @@ export function SidebarFooter() {
         <div className="font-mono text-[10px] text-muted">{modelLabel}</div>
       </div>
       <button
-        onClick={openSettings}
+        onClick={() => openSettings()}
         className="ml-auto text-muted hover:text-fg transition-colors"
         aria-label="Ustawienia"
       >

@@ -194,3 +194,30 @@ describe('settingsSlice terminal appearance', () => {
     });
   });
 });
+
+describe('settingsSlice settings category', () => {
+  beforeEach(() => { useStore.setState({ settingsOpen: false, settingsCategory: 'general' }); });
+
+  it('defaults to the general category', () => {
+    expect(useStore.getState().settingsCategory).toBe('general');
+  });
+
+  it('openSettings with a category opens and switches to it', () => {
+    useStore.getState().openSettings('clickup');
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useStore.getState().settingsCategory).toBe('clickup');
+  });
+
+  it('openSettings without a category keeps the current one', () => {
+    useStore.getState().openSettings('clickup');
+    useStore.getState().closeSettings();
+    useStore.getState().openSettings();
+    expect(useStore.getState().settingsOpen).toBe(true);
+    expect(useStore.getState().settingsCategory).toBe('clickup');
+  });
+
+  it('setSettingsCategory switches the category', () => {
+    useStore.getState().setSettingsCategory('models');
+    expect(useStore.getState().settingsCategory).toBe('models');
+  });
+});
