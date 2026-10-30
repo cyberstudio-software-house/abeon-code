@@ -32,7 +32,7 @@ export default function App() {
           richColors
           position="bottom-right"
           toastOptions={{
-            style: { borderRadius: 0, fontFamily: "'Geist', sans-serif" },
+            style: { borderRadius: 0, fontFamily: "'Geist Sans', ui-sans-serif, system-ui, sans-serif" },
           }}
         />
       </ErrorBoundary>
