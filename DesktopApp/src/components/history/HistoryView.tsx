@@ -171,6 +171,7 @@ export function HistoryView({ projectId, sessionId, tabId, provider = 'claude' }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (useStore.getState().settingsOpen) return;
       if (tabId !== activeTabId || viewingSubagentId) return;
       const drawer = useStore.getState().drawers[tabId];
       if (drawer?.open && drawer.hasFocus) return;

@@ -5,6 +5,7 @@ import { drawerFocusDirection, matchesShortcut } from '../../lib/shortcuts';
 export function useTerminalDrawerShortcuts() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (useStore.getState().settingsOpen) return;
       const state = useStore.getState();
       const tabId = state.activeTabId;
       const drawer = tabId ? state.drawers[tabId] : undefined;

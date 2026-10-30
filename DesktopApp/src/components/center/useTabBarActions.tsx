@@ -106,6 +106,7 @@ export function useTabBarActions(
   useEffect(() => {
     if (!closeShortcut) return;
     const onKeyDown = (e: KeyboardEvent) => {
+      if (useStore.getState().settingsOpen) return;
       const overrides = useStore.getState().shortcutOverrides;
       if (!matchesShortcut(e, 'closeTab', overrides)) return;
       if (!active) return;

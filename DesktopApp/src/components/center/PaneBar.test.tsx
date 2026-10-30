@@ -193,6 +193,30 @@ describe('PaneBar session row actions', () => {
     expect(openNewTerminalTab).toHaveBeenCalledWith(1);
   });
 
+  it('ignores the close shortcut while settings are open', () => {
+    useStore.setState({
+      tabs: [{ kind: 'terminal', id: 'terminal:t1', projectId: 1, title: 'Terminal' }],
+      activeTabId: 'terminal:t1',
+      mruOrder: ['terminal:t1'],
+      navHistory: ['terminal:t1'],
+      navIndex: 0,
+      runningActions: {},
+      projects: projects as never,
+      settingsOpen: true,
+    });
+    render(<PaneBar />);
+
+    fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
+
+    expect(useStore.getState().tabs).toHaveLength(1);
+    expect(screen.queryByText('Zamknąć aktywny tab?')).toBeNull();
+
+    act(() => { useStore.getState().closeSettings(); });
+    fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
+
+    expect(screen.getByText('Zamknąć aktywny tab?')).toBeInTheDocument();
+  });
+
   it('guards closing a tab that still runs a process', () => {
     useStore.setState({
       tabs: [{ kind: 'terminal', id: 'terminal:t1', projectId: 1, title: 'Terminal' }],

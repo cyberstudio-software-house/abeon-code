@@ -94,6 +94,7 @@ export function AppShell() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (useStore.getState().settingsOpen) return;
       if (!(e.ctrlKey || e.metaKey)) return;
 
       const state = useStore.getState();

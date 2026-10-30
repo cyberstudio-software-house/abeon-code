@@ -23,6 +23,7 @@ import { tauri } from '../../lib/tauri';
 import type { AttentionEvent } from '../../lib/tauri';
 import type { SessionRebound } from '../../types';
 import { createLeaf } from '../../lib/paneTree';
+import { processManager } from '../../lib/processManager';
 import { AppShell } from './AppShell';
 
 const sessionTab = (id: string, sessionId: string) => ({
@@ -243,5 +244,32 @@ describe('AppShell settings view', () => {
 
     expect(useStore.getState().settingsOpen).toBe(false);
     expect(document.activeElement).toBe(button);
+  });
+
+  it('ignores global shortcuts while settings are open', async () => {
+    const openNewSessionTab = vi.fn();
+    const openTerminal = vi.fn();
+    const start = vi.spyOn(processManager, 'start').mockResolvedValue(undefined);
+    const action = { id: 7, projectId: 1, name: 'build', command: 'make' };
+    useStore.setState({ openNewSessionTab, openTerminal, actionsByProject: { 1: [action] } } as never);
+    render(<AppShell />);
+
+    await act(async () => { useStore.getState().openSettings(); });
+    fireEvent.keyDown(document, { key: 'n', ctrlKey: true });
+    fireEvent.keyDown(document, { key: 't', ctrlKey: true });
+    fireEvent.keyDown(document, { key: '1', ctrlKey: true });
+
+    expect(openNewSessionTab).not.toHaveBeenCalled();
+    expect(openTerminal).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+
+    await act(async () => { useStore.getState().closeSettings(); });
+    fireEvent.keyDown(document, { key: 'n', ctrlKey: true });
+    fireEvent.keyDown(document, { key: 't', ctrlKey: true });
+    fireEvent.keyDown(document, { key: '1', ctrlKey: true });
+
+    expect(openNewSessionTab).toHaveBeenCalledWith(1);
+    expect(openTerminal).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledWith(1, action);
   });
 });

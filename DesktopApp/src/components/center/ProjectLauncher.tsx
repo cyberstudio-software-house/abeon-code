@@ -19,6 +19,7 @@ export function ProjectLauncher() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (useStore.getState().settingsOpen) return;
       if (!matchesShortcut(e, 'openProjectLauncher', useStore.getState().shortcutOverrides)) return;
       e.preventDefault();
       e.stopPropagation();

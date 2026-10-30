@@ -211,6 +211,8 @@ dropped the app because its main thread stopped reading events (see the main-thr
 
 Pattern when adding a new global shortcut that may conflict with xterm: register on `document` in `useEffect` with `{ capture: true }`, then `preventDefault()` + `stopPropagation()`.
 
+Every global handler starts with `if (useStore.getState().settingsOpen) return;`: the settings view sits over the still-mounted shell, and capture listeners on `document` would otherwise keep acting on hidden tabs. The shortcut recorder in `ShortcutsCategory` and the Esc handlers of dialogs/`SettingsView` are deliberately not gated.
+
 ## Supervisor agent
 
 A background Claude session ("Agent sterujący") that answers the other sessions' `AskUserQuestion`

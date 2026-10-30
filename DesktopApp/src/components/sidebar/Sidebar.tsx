@@ -39,6 +39,7 @@ export function Sidebar() {
   }, [loadActivity, refreshActiveSessions]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (useStore.getState().settingsOpen) return;
     const overrides = useStore.getState().shortcutOverrides;
     if (matchesShortcut(e, 'focusSearch', overrides)) {
       e.preventDefault();

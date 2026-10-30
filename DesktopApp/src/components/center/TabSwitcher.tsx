@@ -33,6 +33,7 @@ export function TabSwitcher() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (useStore.getState().settingsOpen) return;
       if (e.ctrlKey && e.key === 'Tab') {
         if (!openRef.current) {
           const state = useStore.getState();
