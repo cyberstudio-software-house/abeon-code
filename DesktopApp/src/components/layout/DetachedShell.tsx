@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
-import { TitleBar } from './TitleBar';
 import { PaneLayout } from '../center/PaneLayout';
 import { RightPanel } from '../right/RightPanel';
 import { DragHandle, clamp } from './DragHandle';
@@ -27,7 +26,6 @@ export function DetachedShell({ mode }: { mode: DetachedWindowMode }) {
   const isGroup = mode.view === 'group';
   const projectId = mode.projectId;
   const rightWidth = useStore(s => s.rightWidth);
-  const tabLayoutMode = useStore(s => s.tabLayoutMode);
   const setRightWidth = useStore(s => s.setRightWidth);
   const loadProjects = useStore(s => s.loadProjects);
   const loadInitialSessions = useStore(s => s.loadInitialSessions);
@@ -115,9 +113,7 @@ export function DetachedShell({ mode }: { mode: DetachedWindowMode }) {
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
-      {tabLayoutMode === 'classic'
-        ? <TitleBar />
-        : IS_MAC && <div data-tauri-drag-region className="h-7 bg-bg shrink-0" />}
+      {IS_MAC && <div data-tauri-drag-region className="h-7 bg-bg shrink-0" />}
       <div className="flex flex-1 min-h-0">
         <main className="flex-1 h-full min-w-0 bg-bg flex flex-col">
           <PaneLayout detachedProjectId={projectId} />

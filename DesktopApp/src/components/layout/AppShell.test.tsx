@@ -167,26 +167,3 @@ describe('AppShell attention across panes', () => {
     host.remove();
   });
 });
-
-describe('AppShell tab layout mode', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.spyOn(tauri, 'setWindowTitle').mockResolvedValue(undefined);
-    vi.spyOn(tauri, 'onCliOpenPath').mockResolvedValue(() => {});
-    vi.spyOn(tauri, 'onNotificationActivate').mockResolvedValue(() => {});
-    vi.spyOn(tauri, 'onSessionAttention').mockResolvedValue(() => {});
-    vi.spyOn(tauri, 'listSessions').mockResolvedValue([]);
-    useStore.setState({ tabs: [], activeTabId: null, tabLayoutMode: 'classic' });
-  });
-
-  it('keeps the header row in the classic mode', () => {
-    const { queryByTestId } = render(<AppShell />);
-    expect(queryByTestId('titlebar')).not.toBeNull();
-  });
-
-  it('drops the header row in the stacked mode so the side panels reach the top', () => {
-    act(() => { useStore.setState({ tabLayoutMode: 'stacked' }); });
-    const { queryByTestId } = render(<AppShell />);
-    expect(queryByTestId('titlebar')).toBeNull();
-  });
-});

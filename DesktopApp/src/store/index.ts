@@ -66,7 +66,6 @@ type Persisted = {
   editorPath?: string;
   shortcutOverrides?: Record<string, string>;
   historyViewMode?: 'communication' | 'full';
-  tabLayoutMode?: 'classic' | 'stacked';
   sessionRestoreMode?: SessionRestoreMode;
   terminalDrawerSize?: number;
   notificationsEnabled?: boolean;
@@ -98,7 +97,6 @@ const PERSISTED_KEYS = [
   'editorPath',
   'shortcutOverrides',
   'historyViewMode',
-  'tabLayoutMode',
   'sessionRestoreMode',
   'terminalDrawerSize',
   'notificationsEnabled',
@@ -144,7 +142,6 @@ function pickPersistedFields(state: AppState): Persisted {
     editorPath: state.editorPath,
     shortcutOverrides: state.shortcutOverrides,
     historyViewMode: state.historyViewMode,
-    tabLayoutMode: state.tabLayoutMode,
     sessionRestoreMode: state.sessionRestoreMode,
     terminalDrawerSize: state.terminalDrawerSize,
     notificationsEnabled: state.notificationsEnabled,
@@ -272,9 +269,6 @@ function applyPersistedToState(p: Persisted) {
   }
   if (p.historyViewMode === 'communication' || p.historyViewMode === 'full') {
     patch.historyViewMode = p.historyViewMode;
-  }
-  if (p.tabLayoutMode === 'classic' || p.tabLayoutMode === 'stacked') {
-    patch.tabLayoutMode = p.tabLayoutMode;
   }
   if (isSessionRestoreMode(p.sessionRestoreMode)) patch.sessionRestoreMode = p.sessionRestoreMode;
   if (typeof p.terminalDrawerSize === 'number' && Number.isFinite(p.terminalDrawerSize)) {

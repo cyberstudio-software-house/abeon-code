@@ -1,8 +1,6 @@
 import type { PaneNode } from './paneTree';
-import type { TabLayoutMode } from '../store/settingsSlice';
 
-export const TAB_BAR_HEIGHT = 32;
-export const STACKED_TAB_BAR_HEIGHT = 60;
+export const PANE_BAR_HEIGHT = 60;
 export const MIN_PANE_WIDTH = 240;
 export const MIN_PANE_HEIGHT = 120;
 const EDGE_BAND = 0.25;
@@ -97,14 +95,10 @@ export function dropZone(local: { x: number; y: number; width: number; height: n
   return nearest[1] < EDGE_BAND ? nearest[0] : 'center';
 }
 
-export function tabBarHeight(mode: TabLayoutMode): number {
-  return mode === 'stacked' ? STACKED_TAB_BAR_HEIGHT : TAB_BAR_HEIGHT;
-}
-
 export function canSplit(
   zone: DropZone,
   size: { width: number; height: number },
-  barHeight: number = TAB_BAR_HEIGHT,
+  barHeight: number = PANE_BAR_HEIGHT,
 ): boolean {
   if (zone === 'center') return true;
   if (zone === 'left' || zone === 'right') return size.width >= MIN_PANE_WIDTH * 2;

@@ -91,6 +91,22 @@ describe('store boot with legacy Claude model settings', () => {
     expect(local.customModels).toEqual([{ modelId: 'claude-x-1', label: 'X' }]);
   });
 
+  it('ignores a stored tabLayoutMode in localStorage and keeps the other keys', async () => {
+    localStorage.setItem('abeoncode.settings', JSON.stringify({ tabLayoutMode: 'classic', theme: 'light', leftWidth: 300 }));
+    const { useStore } = await import('./index');
+    const s = useStore.getState() as Record<string, unknown>;
+    expect(s.theme).toBe('light');
+    expect(s.leftWidth).toBe(300);
+    expect('tabLayoutMode' in s).toBe(false);
+  });
+
+  it('ignores a stored tabLayoutMode in SQLite and never writes it back', async () => {
+    getAllSettings.mockResolvedValue({ migrated_v2: '1', tabLayoutMode: 'classic', displayName: 'Ala' });
+    const { useStore } = await import('./index');
+    await vi.waitFor(() => expect(useStore.getState().displayName).toBe('Ala'));
+    expect(setSetting).not.toHaveBeenCalledWith('tabLayoutMode', expect.anything());
+  });
+
   it('restores Auto as the title generation model from localStorage', async () => {
     localStorage.setItem('abeoncode.settings', JSON.stringify({ titleGenModelId: '' }));
     const { useStore } = await import('./index');

@@ -5,7 +5,7 @@ import {
   computeSplitBoundaries,
   MIN_PANE_HEIGHT,
   MIN_PANE_WIDTH,
-  tabBarHeight,
+  PANE_BAR_HEIGHT,
   type SplitBoundary,
 } from '../../lib/paneGeometry';
 import { cssLen, len, resolveLen, withinRect, type LenRect } from '../../lib/drawerGeometry';
@@ -87,10 +87,9 @@ export function SplitResizers({ layout, containerRef, frame, minPx, onResize }: 
 
 export function PaneResizers({ layout, containerRef }: { layout: PaneNode; containerRef: RefObject<HTMLDivElement | null> }) {
   const resizeSplit = useStore(s => s.resizeSplit);
-  const tabLayoutMode = useStore(s => s.tabLayoutMode);
   const minPx = useCallback(
-    (dir: 'row' | 'col') => (dir === 'row' ? MIN_PANE_WIDTH : MIN_PANE_HEIGHT + tabBarHeight(tabLayoutMode)),
-    [tabLayoutMode],
+    (dir: 'row' | 'col') => (dir === 'row' ? MIN_PANE_WIDTH : MIN_PANE_HEIGHT + PANE_BAR_HEIGHT),
+    [],
   );
   return <SplitResizers layout={layout} containerRef={containerRef} frame={FULL_FRAME} minPx={minPx} onResize={resizeSplit} />;
 }

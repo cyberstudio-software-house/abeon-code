@@ -6,7 +6,7 @@ import {
   dropZone,
   hitTestPane,
   insertionIndex,
-  tabBarHeight,
+  PANE_BAR_HEIGHT,
   type DropZone,
   type PaneRect,
 } from '../../lib/paneGeometry';
@@ -30,8 +30,8 @@ function measureTabRects(container: HTMLDivElement | null, paneId: string): TabR
   });
 }
 
-// The strip renders in DOM order, which layoutTabBar's hoisting and collapsed groups make diverge
-// from tabIds, so the measured slot is translated back through the tab it points at.
+// The strip renders only the selected project's sessions, so its DOM order diverges from tabIds
+// and the measured slot is translated back through the tab it points at.
 function barSlotIndex(leaf: PaneLeaf, tabRects: TabRect[], x: number): number {
   if (tabRects.length === 0) return leaf.tabIds.length;
   const slot = insertionIndex(tabRects, x);
@@ -83,10 +83,9 @@ export function usePaneDrag(containerRef: RefObject<HTMLDivElement | null>) {
       if (!hit) return null;
       const rect = rects.get(hit.paneId);
       if (!rect) return null;
-      const barHeight = tabBarHeight(useStore.getState().tabLayoutMode);
-      const overTabBar = hit.local.y <= barHeight;
+      const overTabBar = hit.local.y <= PANE_BAR_HEIGHT;
       const zone: DropZone = overTabBar ? 'center' : dropZone(hit.local);
-      if (zone !== 'center' && !canSplit(zone, { width: hit.local.width, height: hit.local.height }, barHeight)) return null;
+      if (zone !== 'center' && !canSplit(zone, { width: hit.local.width, height: hit.local.height })) return null;
       return { paneId: hit.paneId, zone, overTabBar, rect };
     };
 

@@ -4,7 +4,6 @@ import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { Sidebar } from '../sidebar/Sidebar';
 import { CenterPanel } from '../center/CenterPanel';
 import { RightPanel } from '../right/RightPanel';
-import { TitleBar } from './TitleBar';
 import { TabSwitcher } from '../center/TabSwitcher';
 import { ProjectLauncher } from '../center/ProjectLauncher';
 import { freezeTabPersistence, useStore } from '../../store';
@@ -43,7 +42,6 @@ export function AppShell() {
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
   const layout = useStore(s => s.layout);
-  const tabLayoutMode = useStore(s => s.tabLayoutMode);
   const supervisorPanelOpen = useStore(s => s.supervisorPanelOpen);
   const hasActiveProject = tabs.some(t => t.id === activeTabId);
   const activeTabTitle = useStore(s => s.tabs.find(t => t.id === s.activeTabId)?.title ?? null);
@@ -243,9 +241,7 @@ export function AppShell() {
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden bg-bg">
-      {tabLayoutMode === 'classic'
-        ? <TitleBar />
-        : IS_MAC && <div data-tauri-drag-region className="h-7 bg-bg shrink-0" />}
+      {IS_MAC && <div data-tauri-drag-region className="h-7 bg-bg shrink-0" />}
       <div className="flex flex-1 min-h-0">
         <div style={{ width: leftWidth }} className="h-full flex-shrink-0">
           <Sidebar />

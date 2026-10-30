@@ -95,19 +95,6 @@ describe('settingsSlice showActiveSessions', () => {
   });
 });
 
-describe('settingsSlice tabLayoutMode', () => {
-  it('defaults to the classic single-row tab bar', () => {
-    expect(useStore.getState().tabLayoutMode).toBe('classic');
-  });
-
-  it('setTabLayoutMode switches to the stacked layout', () => {
-    useStore.getState().setTabLayoutMode('stacked');
-    expect(useStore.getState().tabLayoutMode).toBe('stacked');
-    useStore.getState().setTabLayoutMode('classic');
-    expect(useStore.getState().tabLayoutMode).toBe('classic');
-  });
-});
-
 describe('settingsSlice claude models', () => {
   beforeEach(() => {
     useStore.setState({ defaultModelId: '', titleGenModelId: 'haiku', modelEfforts: {}, customModels: [] });

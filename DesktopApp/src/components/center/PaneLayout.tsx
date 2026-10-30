@@ -1,13 +1,12 @@
 import { useMemo, useRef } from 'react';
 import { useStore } from '../../store';
 import { useShallow } from 'zustand/react/shallow';
-import { computePaneRects, tabBarHeight } from '../../lib/paneGeometry';
+import { computePaneRects, PANE_BAR_HEIGHT } from '../../lib/paneGeometry';
 import { lenRectStyle } from '../../lib/drawerGeometry';
 import { computePaneLayers } from '../../lib/paneLayers';
 import { leaves } from '../../lib/paneTree';
 import { PaneDragOverlay } from './PaneDragOverlay';
 import { PaneResizers } from './PaneResizers';
-import { TabBar } from './TabBar';
 import { StackedTabBar } from './StackedTabBar';
 import { TabPanel } from './TabContent';
 import { CollapsedDrawerBar, DrawerCloseDialog, TerminalDrawerChrome } from './TerminalDrawerChrome';
@@ -20,15 +19,13 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
   const tabs = useStore(useShallow(s => s.tabs));
   const focusedPaneId = useStore(s => s.focusedPaneId);
   const focusPane = useStore(s => s.focusPane);
-  const tabLayoutMode = useStore(s => s.tabLayoutMode);
   const drawers = useStore(s => s.drawers);
   const drawerTerminals = useStore(s => s.drawerTerminals);
   const drawerSize = useStore(s => s.drawerDragSize ?? s.terminalDrawerSize);
   const focusDrawerTerminal = useStore(s => s.focusDrawerTerminal);
   const focusDrawerSession = useStore(s => s.focusDrawerSession);
   const closeDrawerTerminal = useStore(s => s.closeDrawerTerminal);
-  const barHeight = tabBarHeight(tabLayoutMode);
-  const Bar = tabLayoutMode === 'stacked' ? StackedTabBar : TabBar;
+  const barHeight = PANE_BAR_HEIGHT;
   const { drag, beginDrag } = usePaneDrag(containerRef);
   useTerminalDrawerShortcuts();
   const rects = useMemo(() => computePaneRects(layout), [layout]);
@@ -56,7 +53,7 @@ export function PaneLayout({ detachedProjectId }: { detachedProjectId?: number }
               height: `${barHeight}px`,
             }}
           >
-            <Bar paneId={pane.id} detachedProjectId={detachedProjectId} onTabPointerDown={beginDrag} />
+            <StackedTabBar paneId={pane.id} detachedProjectId={detachedProjectId} onTabPointerDown={beginDrag} />
           </div>
         );
       })}
