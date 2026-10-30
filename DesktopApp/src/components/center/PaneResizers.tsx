@@ -19,9 +19,10 @@ type SplitResizersProps = {
   frame: LenRect;
   minPx: (dir: 'row' | 'col') => number;
   onResize: (splitId: string, sizes: number[]) => void;
+  line?: boolean;
 };
 
-export function SplitResizers({ layout, containerRef, frame, minPx, onResize }: SplitResizersProps) {
+export function SplitResizers({ layout, containerRef, frame, minPx, onResize, line = true }: SplitResizersProps) {
   const boundaries = computeSplitBoundaries(layout);
   const handlersRef = useRef<{ move: (e: MouseEvent) => void; up: () => void } | null>(null);
 
@@ -70,7 +71,7 @@ export function SplitResizers({ layout, containerRef, frame, minPx, onResize }: 
             role="separator"
             aria-orientation={b.dir === 'row' ? 'vertical' : 'horizontal'}
             onMouseDown={e => startDrag(e, b)}
-            className={`absolute z-30 bg-border hover:bg-accent transition-colors ${
+            className={`absolute z-30 ${line ? 'bg-border' : 'bg-transparent'} hover:bg-accent transition-colors ${
               b.dir === 'row' ? 'cursor-col-resize -translate-x-1/2' : 'cursor-row-resize -translate-y-1/2'
             }`}
             style={
@@ -91,5 +92,5 @@ export function PaneResizers({ layout, containerRef }: { layout: PaneNode; conta
     (dir: 'row' | 'col') => (dir === 'row' ? MIN_PANE_WIDTH : MIN_PANE_HEIGHT + PANE_BAR_HEIGHT),
     [],
   );
-  return <SplitResizers layout={layout} containerRef={containerRef} frame={FULL_FRAME} minPx={minPx} onResize={resizeSplit} />;
+  return <SplitResizers layout={layout} containerRef={containerRef} frame={FULL_FRAME} minPx={minPx} onResize={resizeSplit} line={false} />;
 }

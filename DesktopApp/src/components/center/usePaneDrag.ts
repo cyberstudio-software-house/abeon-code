@@ -10,9 +10,11 @@ import {
   type DropZone,
   type PaneRect,
 } from '../../lib/paneGeometry';
+import { paneBarRect, resolveLen } from '../../lib/drawerGeometry';
 import { findLeaf, findLeafOfTab, type PaneLeaf, type PaneNode } from '../../lib/paneTree';
 
 const DRAG_THRESHOLD = 4;
+const LOCAL_BAR = paneBarRect({ left: 0, top: 0, width: 100, height: 100 }, PANE_BAR_HEIGHT);
 
 type TabRect = { id: string; left: number; width: number };
 
@@ -83,7 +85,7 @@ export function usePaneDrag(containerRef: RefObject<HTMLDivElement | null>) {
       if (!hit) return null;
       const rect = rects.get(hit.paneId);
       if (!rect) return null;
-      const overTabBar = hit.local.y <= PANE_BAR_HEIGHT;
+      const overTabBar = hit.local.y <= resolveLen(LOCAL_BAR.top, hit.local.height) + resolveLen(LOCAL_BAR.height, hit.local.height);
       const zone: DropZone = overTabBar ? 'center' : dropZone(hit.local);
       if (zone !== 'center' && !canSplit(zone, { width: hit.local.width, height: hit.local.height })) return null;
       return { paneId: hit.paneId, zone, overTabBar, rect };

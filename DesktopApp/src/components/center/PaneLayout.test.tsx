@@ -139,6 +139,15 @@ describe('PaneLayout', () => {
     expect(container.querySelectorAll('[role="separator"]')).toHaveLength(1);
   });
 
+  it('keeps the pane resizer invisible in the gap until it is hovered', () => {
+    act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
+    const { container } = render(<PaneLayout />);
+    const handle = container.querySelector('[role="separator"]') as HTMLElement;
+    expect(handle.classList.contains('bg-border')).toBe(false);
+    expect(handle.classList.contains('bg-transparent')).toBe(true);
+    expect(handle.classList.contains('hover:bg-accent')).toBe(true);
+  });
+
   it('turns a drag into fractions of the dragged split', () => {
     act(() => { useStore.getState().splitPaneWithTab(ROOT_PANE_ID, 'row', false, 't2'); });
     const { container } = render(<PaneLayout />);
@@ -540,6 +549,32 @@ describe('PaneLayout', () => {
     expect(findLeaf(useStore.getState().layout, 'right')?.tabIds).toEqual(['t2', 't1', 't3']);
   });
 
+  it('inserts a tab dropped on the bottom edge of the pane bar instead of splitting', () => {
+    act(() => {
+      useStore.setState({
+        tabs: [terminalTab('t1', 'Jeden'), terminalTab('t2', 'Dwa'), terminalTab('t3', 'Trzy')],
+        activeTabId: 't1',
+        layout: {
+          kind: 'split', id: 'outer', dir: 'row', sizes: [0.5, 0.5],
+          children: [createLeaf('left', ['t1'], 't1'), createLeaf('right', ['t2', 't3'], 't2')],
+        },
+        focusedPaneId: 'left',
+      });
+    });
+    const { container } = render(<PaneLayout />);
+    stubContainerBox(container);
+    stubTabBoxes(container, 'right', 500, 100);
+    const tab = container.querySelector('[data-tab-id="t1"]') as HTMLElement;
+    const barBottom = PANE_GAP / 2 + PANE_BORDER + PANE_BAR_HEIGHT;
+
+    fireEvent.pointerDown(tab, pointerAt(50, 10));
+    fireEvent.pointerMove(window, pointerAt(600, barBottom - 2));
+    fireEvent.pointerUp(window, pointerAt(600, barBottom - 2));
+
+    expect(leaves(useStore.getState().layout)).toHaveLength(1);
+    expect(findLeaf(useStore.getState().layout, 'right')?.tabIds).toEqual(['t2', 't1', 't3']);
+  });
+
   it('appends a tab dropped deep in a pane body, ignoring the horizontal position', () => {
     act(() => {
       useStore.setState({
@@ -879,6 +914,7 @@ describe('PaneLayout terminal drawer', () => {
     fireEvent.mouseMove(window, { clientX: 600, clientY: 700 });
     const split = useStore.getState().drawers.s1.layout as PaneSplit;
     expect(split.sizes[0]).toBeCloseTo(0.6);
+    expect(handle.classList.contains('bg-border')).toBe(true);
   });
 
   it('drops the focus ring when another pane takes focus', () => {
