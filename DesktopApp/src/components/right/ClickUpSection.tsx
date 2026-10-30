@@ -5,7 +5,7 @@ import { ClickUpTaskDialog } from '../dialogs/ClickUpTaskDialog';
 import { ClickUpScopeDialog } from './ClickUpScopeDialog';
 import { Icon } from '../shared/Icon';
 
-export function ClickUpSection(_props: { detached?: boolean }) {
+export function ClickUpSection({ detached = false }: { detached?: boolean }) {
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
   const connectionStatus = useStore(s => s.connectionStatus);
@@ -14,6 +14,7 @@ export function ClickUpSection(_props: { detached?: boolean }) {
   const loadLinks = useStore(s => s.loadLinks);
   const loadConfig = useStore(s => s.loadConfig);
   const loadConnectionStatus = useStore(s => s.loadConnectionStatus);
+  const openSettings = useStore(s => s.openSettings);
 
   const activeProjectId = tabs.find(t => t.id === activeTabId)?.projectId ?? null;
 
@@ -34,39 +35,108 @@ export function ClickUpSection(_props: { detached?: boolean }) {
   const config = configByProject[activeProjectId];
   const list = linksByProject[activeProjectId] ?? [];
 
+  const showScopeButton = connectionStatus === 'configured' && !!config;
+
   return (
-    <section className="shrink-0">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-[10px] text-muted font-medium uppercase tracking-wider">ZADANIA CLICKUP</span>
-        <button className="text-muted hover:text-fg" title="Zakres" onClick={() => setScopeOpen(true)}>
-          <Icon name="settings" className="w-[13px] h-[13px]" />
-        </button>
+    <section aria-labelledby="clickup-section-title" className="shrink-0 flex flex-col gap-1.5">
+      <div className="h-[26px] flex items-center gap-0.5 pl-1 pb-1">
+        <h2 id="clickup-section-title" className="flex-1 text-[11px] text-label font-medium uppercase tracking-[0.06em]">
+          Zadania ClickUp
+        </h2>
+        {showScopeButton && (
+          <button
+            aria-label="Zakres ClickUp"
+            title="Zakres ClickUp"
+            onClick={() => setScopeOpen(true)}
+            className="w-[26px] h-[26px] rounded-md grid place-items-center text-icon hover:bg-bg-elev-2 hover:text-fg-strong transition-colors"
+          >
+            <Icon name="sliders" className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
       {connectionStatus !== 'configured' ? (
-        <p className="text-[11px] text-muted">Token ClickUp nieprawidłowy — popraw w ustawieniach.</p>
-      ) : !config ? (
-        <p className="text-[11px] text-muted">Ustaw zakres (workspace/space) ikoną powyżej.</p>
-      ) : (
-        <>
-          <div className="space-y-0.5">
-            {list.map(l => (
-              <button
-                key={l.taskId}
-                onClick={() => setOpenTaskId(l.taskId)}
-                className="w-full text-left px-2 py-1 hover:bg-bg-elev-2 text-[11px] flex items-center gap-2"
-              >
-                <span className="text-muted font-mono">{l.customId ?? l.taskId.slice(0, 6)}</span>
-                <span className="flex-1 truncate text-fg">{l.name}</span>
-                {l.status && <span className="text-[10px] text-fg-secondary">{l.status}</span>}
-              </button>
-            ))}
-            {list.length === 0 && <p className="text-[11px] text-muted px-2 py-1">Brak powiązanych zadań.</p>}
+        <div className="flex flex-col items-start gap-2.5 p-3 rounded-[10px] bg-sunken border border-danger/30">
+          <div className="flex gap-2.5">
+            <svg
+              width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+              strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+              className="shrink-0 mt-0.5 text-danger"
+            >
+              <path d="M8 1.8 14.5 13.5h-13z" />
+              <path d="M8 6.5v3M8 11.6v.1" />
+            </svg>
+            <div className="flex flex-col gap-1">
+              <p className="text-[12.5px] leading-[1.5] text-fg-secondary">
+                Token ClickUp jest nieprawidłowy albo wygasł. Zadania nie będą się odświeżać.
+              </p>
+              {detached && (
+                <p className="text-[12.5px] leading-[1.5] text-muted">Popraw token w ustawieniach głównego okna.</p>
+              )}
+            </div>
           </div>
-          <button className="mt-2 text-[11px] text-accent hover:underline" onClick={() => setLinkOpen(true)}>
-            + powiąż zadania
+          {!detached && (
+            <button
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => openSettings('clickup')}
+              className="h-[30px] flex items-center gap-1.5 px-3 rounded-lg bg-button border border-border-strong text-[12.5px] text-fg-strong hover:bg-bg-elev-2 transition-colors"
+            >
+              Otwórz ustawienia ClickUp
+              <Icon name="chevR" className="w-3 h-3" />
+            </button>
+          )}
+        </div>
+      ) : !config ? (
+        <div className="flex flex-col items-start gap-2.5 p-3 rounded-[10px] bg-sunken border border-border">
+          <div className="flex gap-2.5">
+            <Icon name="sliders" className="shrink-0 mt-0.5 w-[15px] h-[15px] text-icon" />
+            <p className="text-[12.5px] leading-[1.5] text-fg-secondary">
+              Wybierz workspace i space, z których mają pochodzić zadania tego projektu.
+            </p>
+          </div>
+          <button
+            onClick={() => setScopeOpen(true)}
+            className="h-[30px] px-3 rounded-lg bg-button border border-border-strong text-[12.5px] text-fg-strong hover:bg-bg-elev-2 transition-colors"
+          >
+            Ustaw zakres
           </button>
-        </>
+        </div>
+      ) : list.length === 0 ? (
+        <div className="flex flex-col items-start gap-2.5 px-3 py-3.5 rounded-[10px] border border-dashed border-border-strong">
+          <p className="text-[12.5px] leading-[1.5] text-muted">Ten projekt nie ma jeszcze powiązanych zadań.</p>
+          <button
+            onClick={() => setLinkOpen(true)}
+            className="h-[30px] flex items-center gap-1.5 pl-2 pr-2.5 rounded-lg bg-button border border-border-strong text-[12.5px] text-fg-strong hover:bg-bg-elev-2 transition-colors"
+          >
+            <Icon name="plus" className="w-[13px] h-[13px]" />
+            Powiąż zadania
+          </button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-0.5">
+          {list.map(l => (
+            <button
+              key={l.taskId}
+              onClick={() => setOpenTaskId(l.taskId)}
+              className="h-8 flex items-center gap-2.5 pl-1 pr-1.5 rounded-[7px] text-left hover:bg-bg-elev-2 transition-colors"
+            >
+              <span className="shrink-0 font-mono text-[11px] text-muted">{l.customId ?? l.taskId.slice(0, 6)}</span>
+              <span className="flex-1 min-w-0 truncate text-[13px] text-fg">{l.name}</span>
+              {l.status && (
+                <span className="shrink-0 h-5 inline-flex items-center px-[7px] rounded-full bg-bg-elev-2 border border-border text-[11px] text-icon whitespace-nowrap">
+                  {l.status}
+                </span>
+              )}
+            </button>
+          ))}
+          <button
+            onClick={() => setLinkOpen(true)}
+            className="self-start mt-0.5 h-7 flex items-center gap-1.5 pl-1.5 pr-2 rounded-[7px] text-[12.5px] text-icon hover:bg-bg-elev-2 hover:text-fg-strong transition-colors"
+          >
+            <Icon name="plus" className="w-[13px] h-[13px]" />
+            Powiąż zadania
+          </button>
+        </div>
       )}
 
       {linkOpen && <LinkClickUpTaskDialog projectId={activeProjectId} onClose={() => setLinkOpen(false)} />}
