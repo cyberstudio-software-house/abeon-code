@@ -22,6 +22,7 @@ Uruchom `npm run tauri dev` w `DesktopApp/` (COSMIC / Wayland). Sprawdź każdy 
 - [ ] Po zmianie kroju lub rozmiaru liczba kolumn i wierszy dopasowuje się; w terminalu `stty size` (lub `tput cols`) zgadza się z tym, co widać.
 - [ ] Zimny start aplikacji z wybraną czcionką JetBrains Mono lub IBM Plex Mono: glify są wyrównane do siatki od pierwszej linii (bez rozjechanych odstępów po leniwym załadowaniu czcionki), a rozmiar PTY zgadza się z widocznym.
 - [ ] Przełączenie na paletę „Własna" z poprawnym JSON-em xterm.js działa, a błędny JSON pokazuje komunikat błędu bez zmiany palety.
+- [ ] Kliknięcie karty „Własna", gdy ta paleta jest już wybrana, zwija edytor, a kolejne kliknięcie go rozwija; po przejściu na inną paletę kliknięcie „Własna" przywraca zapisane kolory.
 - [ ] „Przywróć domyślne" przywraca Geist Mono 13, interlinię 1,65, paletę Grafit, kursor blok z miganiem.
 - [ ] Odznaka „Nowe" przy Terminal znika po pierwszym wejściu w kategorię i nie wraca po restarcie.
 - [ ] Motyw jasny: strona Terminal i podgląd są czytelne.

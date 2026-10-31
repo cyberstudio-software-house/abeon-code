@@ -87,8 +87,12 @@ export function TerminalCategory() {
   const customSelected = appearance.paletteId === 'custom';
 
   const selectCustom = () => {
-    if (appearance.hasCustomPalette) setPaletteId('custom');
-    setCustomOpen(true);
+    if (appearance.hasCustomPalette && !customSelected) {
+      setPaletteId('custom');
+      setCustomOpen(true);
+      return;
+    }
+    setCustomOpen(open => !open);
   };
 
   return (

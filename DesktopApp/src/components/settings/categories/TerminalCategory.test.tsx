@@ -97,6 +97,41 @@ describe('TerminalCategory', () => {
     expect(card).toHaveAttribute('aria-expanded', 'true');
   });
 
+  it('collapses and reopens the editor while the custom palette is selected', () => {
+    render(<TerminalCategory />);
+
+    const card = screen.getByRole('button', { name: /Własna/ });
+    fireEvent.click(card);
+    fireEvent.change(screen.getByLabelText('Czerwony'), { target: { value: '#abc' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Zapisz' }));
+
+    fireEvent.click(card);
+
+    expect(card).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Czerwony')).not.toBeInTheDocument();
+    expect(useStore.getState().terminalPaletteId).toBe('custom');
+    expect(card).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(card);
+
+    expect(card).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Czerwony')).toHaveValue('#abc');
+  });
+
+  it('toggles the editor without changing the palette when nothing is saved', () => {
+    render(<TerminalCategory />);
+
+    const card = screen.getByRole('button', { name: /Własna/ });
+    fireEvent.click(card);
+    expect(card).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(card);
+
+    expect(card).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Czerwony')).not.toBeInTheDocument();
+    expect(useStore.getState().terminalPaletteId).toBe('grafit');
+  });
+
   it('rejects malformed palette JSON without touching the store', () => {
     render(<TerminalCategory />);
 
