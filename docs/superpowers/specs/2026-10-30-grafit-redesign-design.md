@@ -174,8 +174,9 @@ refits. A family change takes the same path, and the PTY size is synced after sp
 ## Shell
 
 - **App header** (44 px, `data-tauri-drag-region`, below the COSMIC title bar; replaces
-  `TitleBar.tsx` and the macOS 28 px strip): a 224 px block with the logo mark and the
-  "AbeonCode" wordmark aligned over the sidebar, then the **project row**, then on the right today's
+  `TitleBar.tsx` and the macOS 28 px strip): a block with the logo mark and the "AbeonCode"
+  wordmark aligned over the sidebar (its width follows the sidebar width, so the project row
+  starts above the centre column), then the **project row**, then on the right today's
   "N aktywne sesje" indicator (green dot), my call. No window controls.
 - **Project row** = today's top row of `StackedTabBar`, lifted out of the pane into the header. It
   shows the project groups of the **focused pane** and keeps today's behavior and actions exactly
