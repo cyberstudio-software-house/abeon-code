@@ -12,16 +12,10 @@ export type AppHeaderVariant =
 
 function LogoMark() {
   return (
-    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true" className="shrink-0">
-      <rect x="1" y="1" width="18" height="18" rx="5" fill="var(--color-accent)" />
-      <path
-        d="M6.5 7 9.5 10l-3 3M11 13h3"
-        fill="none"
-        stroke="var(--color-accent-fg)"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width="20" height="20" viewBox="0 0 120 120" aria-hidden="true" className="shrink-0">
+      <rect width="120" height="120" rx="27" fill="#16162A" />
+      <circle cx="58" cy="60" r="19" fill="none" stroke="#F2F3F4" strokeWidth="12" />
+      <rect x="71" y="35" width="15" height="50" rx="2.5" fill="#7B6FF7" />
     </svg>
   );
 }
