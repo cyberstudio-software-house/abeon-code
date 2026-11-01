@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { SupervisorPanel } from './SupervisorPanel';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
@@ -8,11 +8,21 @@ import type { DecisionEntry, SupervisorSnapshot } from '../../types';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 
-vi.mock('../terminal/TerminalView', () => ({
-  TerminalView: (props: { kind: string; ptyId?: string }) => (
-    <div data-testid="terminal" data-kind={props.kind} data-pty={props.ptyId} />
-  ),
-}));
+const terminalMounts = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock('../terminal/TerminalView', async () => {
+  const { useEffect } = await import('react');
+  return {
+    TerminalView: (props: { kind: string; ptyId?: string; takeFocus?: boolean }) => {
+      useEffect(() => { terminalMounts.count += 1; }, []);
+      return (
+        <div data-testid="terminal" data-kind={props.kind} data-pty={props.ptyId} data-take-focus={String(props.takeFocus)}>
+          <textarea aria-label="Wejście terminala" />
+        </div>
+      );
+    },
+  };
+});
 
 const snapshot = (over: Partial<SupervisorSnapshot> = {}): SupervisorSnapshot => ({
   level: 'assistant', running: true, ready: true, ptyId: 'p1', present: true, away: false, discordActive: false,
@@ -27,6 +37,7 @@ const decisions: DecisionEntry[] = [
 describe('SupervisorPanel', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    terminalMounts.count = 0;
     vi.spyOn(tauri, 'supervisorResolveApproval').mockResolvedValue(undefined);
     vi.spyOn(tauri, 'supervisorDismissEscalation').mockResolvedValue(undefined);
     vi.spyOn(tauri, 'supervisorListDecisions').mockResolvedValue(decisions);
@@ -46,6 +57,67 @@ describe('SupervisorPanel', () => {
     const terminal = screen.getByTestId('terminal');
     expect(terminal).toHaveAttribute('data-kind', 'supervisor');
     expect(terminal).toHaveAttribute('data-pty', 'p1');
+  });
+
+  it('keeps the same terminal when leaving Rozmowa and coming back', () => {
+    render(<SupervisorPanel />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Dziennik' }));
+    fireEvent.click(screen.getByRole('tab', { name: /Do decyzji/ }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Rozmowa' }));
+    expect(terminalMounts.count).toBe(1);
+  });
+
+  it('hides the panel without unmounting the terminal while it is closed', () => {
+    const { container } = render(<SupervisorPanel />);
+    const panel = container.firstElementChild as HTMLElement;
+    act(() => { useStore.getState().closeSupervisorPanel(); });
+    expect(panel).toHaveAttribute('inert');
+    expect(panel).toHaveClass('invisible');
+    expect(screen.getByTestId('terminal')).toBeInTheDocument();
+    act(() => { useStore.getState().openSupervisorPanel(); });
+    expect(panel).not.toHaveAttribute('inert');
+    expect(panel).not.toHaveClass('invisible');
+    expect(terminalMounts.count).toBe(1);
+  });
+
+  it('gives the terminal the keyboard only while Rozmowa is shown', () => {
+    render(<SupervisorPanel />);
+    const terminal = screen.getByTestId('terminal');
+    expect(terminal).toHaveAttribute('data-take-focus', 'true');
+    fireEvent.click(screen.getByRole('tab', { name: /Do decyzji/ }));
+    expect(terminal).toHaveAttribute('data-take-focus', 'false');
+    fireEvent.click(screen.getByRole('tab', { name: 'Rozmowa' }));
+    expect(terminal).toHaveAttribute('data-take-focus', 'true');
+    act(() => { useStore.getState().closeSupervisorPanel(); });
+    expect(terminal).toHaveAttribute('data-take-focus', 'false');
+  });
+
+  it('takes the keyboard away from the hidden terminal', () => {
+    render(<SupervisorPanel />);
+    const input = screen.getByLabelText('Wejście terminala');
+    input.focus();
+    fireEvent.click(screen.getByRole('tab', { name: 'Dziennik' }));
+    expect(document.activeElement).not.toBe(input);
+    fireEvent.click(screen.getByRole('tab', { name: 'Rozmowa' }));
+    input.focus();
+    act(() => { useStore.getState().closeSupervisorPanel(); });
+    expect(document.activeElement).not.toBe(input);
+  });
+
+  it('takes the keyboard away from the header when the panel closes', () => {
+    render(<SupervisorPanel />);
+    const close = screen.getByRole('button', { name: 'Zamknij panel' });
+    close.focus();
+    fireEvent.click(close);
+    expect(document.activeElement).not.toBe(close);
+  });
+
+  it('reopens on Rozmowa', () => {
+    render(<SupervisorPanel />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Dziennik' }));
+    act(() => { useStore.getState().closeSupervisorPanel(); });
+    act(() => { useStore.getState().openSupervisorPanel(); });
+    expect(screen.getByRole('tab', { name: 'Rozmowa' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('shows the trust hint while running and not ready', () => {

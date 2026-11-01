@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
@@ -60,10 +60,27 @@ const primaryButtonClass = 'px-2.5 py-1 bg-accent text-accent-fg text-[12px] rou
 
 export function SupervisorPanel() {
   const snapshot = useStore(s => s.supervisor);
+  const open = useStore(s => s.supervisorPanelOpen);
   const close = useStore(s => s.closeSupervisorPanel);
   const [view, setView] = useState<View>('conversation');
+  const [shownOpen, setShownOpen] = useState(open);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const conversationRef = useRef<HTMLDivElement | null>(null);
+  const conversationShown = open && view === 'conversation';
   const discordEnabled = useStore(s => s.supervisorDiscordEnabled);
   const pending = (snapshot?.approvals.length ?? 0) + (snapshot?.escalations.length ?? 0);
+
+  if (open !== shownOpen) {
+    setShownOpen(open);
+    if (open) setView('conversation');
+  }
+
+  useEffect(() => {
+    if (conversationShown) return;
+    const hiddenRoot = open ? conversationRef.current : panelRef.current;
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && hiddenRoot?.contains(focused)) focused.blur();
+  }, [open, conversationShown]);
 
   const tabs: Array<{ id: View; label: string; count?: number }> = [
     { id: 'conversation', label: 'Rozmowa' },
@@ -72,7 +89,7 @@ export function SupervisorPanel() {
   ];
 
   return (
-    <div className="absolute inset-0 z-30 flex flex-col bg-bg">
+    <div ref={panelRef} inert={!open} className={`absolute inset-0 z-30 flex flex-col bg-bg${open ? '' : ' invisible'}`}>
       <div className="flex items-center justify-between border-b border-border px-3 h-10 shrink-0">
         <div role="tablist" className="flex items-center gap-1">
           {tabs.map(t => (
@@ -105,8 +122,14 @@ export function SupervisorPanel() {
           </button>
         </div>
       </div>
-      <div className="flex-1 min-h-0">
-        {view === 'conversation' && <ConversationView />}
+      <div className="relative flex-1 min-h-0">
+        <div
+          ref={conversationRef}
+          inert={view !== 'conversation'}
+          className={`absolute inset-0${view === 'conversation' ? '' : ' invisible'}`}
+        >
+          <ConversationView shown={conversationShown} />
+        </div>
         {view === 'pending' && <PendingView />}
         {view === 'log' && <LogView />}
       </div>
@@ -114,7 +137,7 @@ export function SupervisorPanel() {
   );
 }
 
-function ConversationView() {
+function ConversationView({ shown }: { shown: boolean }) {
   const snapshot = useStore(s => s.supervisor);
 
   if (!snapshot?.running) {
@@ -139,7 +162,7 @@ function ConversationView() {
       )}
       <div className="flex-1 min-h-0">
         {snapshot.ptyId ? (
-          <TerminalView kind="supervisor" ptyId={snapshot.ptyId} />
+          <TerminalView kind="supervisor" ptyId={snapshot.ptyId} takeFocus={shown} />
         ) : (
           <div className="h-full grid place-items-center text-[13px] text-muted">Uruchamianie…</div>
         )}

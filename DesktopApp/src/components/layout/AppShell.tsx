@@ -42,7 +42,6 @@ export function AppShell() {
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
   const layout = useStore(s => s.layout);
-  const supervisorPanelOpen = useStore(s => s.supervisorPanelOpen);
   const settingsOpen = useStore(s => s.settingsOpen);
   const focusBeforeSettings = useRef<HTMLElement | null>(null);
   const hasActiveProject = tabs.some(t => t.id === activeTabId);
@@ -266,7 +265,7 @@ export function AppShell() {
         <DragHandle onDrag={onLeftDrag} ariaLabel="Resize sidebar" />
         <div className="relative flex-1 h-full min-w-0">
           <CenterPanel />
-          {supervisorPanelOpen && <SupervisorPanel />}
+          <SupervisorPanel />
         </div>
         {hasActiveProject && (
           <>

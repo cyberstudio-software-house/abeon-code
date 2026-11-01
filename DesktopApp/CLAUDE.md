@@ -294,6 +294,13 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   `workdir`, `process` (PTY lifecycle, backoff), `claude_md`; `test_support` is test-only. Commands
   in `commands/supervisor.rs`. Frontend: `components/supervisor/*`, `lib/supervisorProcess.ts`,
   `lib/usePresenceReporter.ts`, `lib/useSupervisorSnapshot.ts`, `store/supervisorSlice.ts`.
+- **Panel stays mounted**: `AppShell` always renders `SupervisorPanel`; while closed it is
+  `invisible` + `inert`, and the "Rozmowa" layer stays mounted the same way under the other panel
+  tabs. Never render the panel or its `TerminalView` conditionally: every mount builds a new xterm and
+  replays up to 1 MB from `supervisorProcess` (2–3 s per click in the packaged app). `visibility:
+  hidden`, not `display: none`, keeps the container measurable, so the xterm and the PTY stay fitted
+  while hidden and a reveal never resizes the PTY (no full Claude redraw). The keyboard reaches the
+  terminal only through `takeFocus`, and focus left inside a part that gets hidden is blurred.
 - **Socket**: `$XDG_RUNTIME_DIR/abeoncode/supervisor.sock` (fallback
   `<data_local_dir>/pl.cyberstudio.abeoncode/run/supervisor.sock`), dir `0700`, socket `0600`. A live
   socket is never stolen; a dead one is unlinked; a second instance runs inert. `ipc`, `entry` and

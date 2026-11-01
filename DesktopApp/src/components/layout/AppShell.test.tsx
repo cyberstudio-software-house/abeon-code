@@ -12,7 +12,7 @@ vi.mock('../center/CenterPanel', () => ({
     </div>
   ),
 }));
-vi.mock('../supervisor/SupervisorPanel', () => ({ SupervisorPanel: () => <div /> }));
+vi.mock('../supervisor/SupervisorPanel', () => ({ SupervisorPanel: () => <div data-testid="supervisor-panel" /> }));
 vi.mock('../right/RightPanel', () => ({ RightPanel: () => <div /> }));
 vi.mock('../center/TabSwitcher', () => ({ TabSwitcher: () => <div /> }));
 vi.mock('../center/ProjectLauncher', () => ({ ProjectLauncher: () => <div /> }));
@@ -271,5 +271,29 @@ describe('AppShell settings view', () => {
     expect(openNewSessionTab).toHaveBeenCalledWith(1);
     expect(openTerminal).toHaveBeenCalledTimes(1);
     expect(start).toHaveBeenCalledWith(1, action);
+  });
+});
+
+describe('AppShell supervisor panel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.spyOn(tauri, 'setWindowTitle').mockResolvedValue(undefined);
+    vi.spyOn(tauri, 'onCliOpenPath').mockResolvedValue(() => {});
+    vi.spyOn(tauri, 'onNotificationActivate').mockResolvedValue(() => {});
+    vi.spyOn(tauri, 'onSessionAttention').mockResolvedValue(() => {});
+    vi.spyOn(tauri, 'listSessions').mockResolvedValue([]);
+    useStore.setState({
+      tabs: [sessionTab('session:s1', 's1')],
+      activeTabId: 'session:s1',
+      layout: createLeaf('left', ['session:s1'], 'session:s1'),
+      focusedPaneId: 'left',
+      settingsOpen: false,
+      supervisorPanelOpen: false,
+    });
+  });
+
+  it('keeps the supervisor panel mounted while it is closed', () => {
+    render(<AppShell />);
+    expect(screen.getByTestId('supervisor-panel')).toBeInTheDocument();
   });
 });
