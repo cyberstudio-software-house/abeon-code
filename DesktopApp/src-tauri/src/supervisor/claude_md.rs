@@ -113,19 +113,19 @@ i przetwarza sama aplikacja, a potem reaguje na wiadomość użytkownika znakiem
 - **Odpowiedź użytkownika.** Gdy wiadomość z Discorda ma osobną linię `zatwierdzam <KOD>` albo
   `odrzucam <KOD>`, to jest decyzja użytkownika, którą aplikacja obsługuje sama. Tej linii nie
   kierujesz do żadnej sesji jako odpowiedzi, nie reagujesz na nią i niczego nie mówisz sesji.
-  Pozostałe linie tej wiadomości (np. `A: tak`) kierujesz do sesji jak zwykle (punkt 11), ale taką
+  Pozostałe linie tej wiadomości (np. `S1 tak`) kierujesz do sesji jak zwykle (punkt 11), ale taką
   wiadomość potwierdzasz wyłącznie zdaniem, nigdy reakcją: ✅ i ❌ przy niej należą do aplikacji.
   Co najwyżej, gdy użytkownik o to zapyta, sprawdzasz stan przez `mcp__abeoncode__get_approval`.
 - **Zgoda wpisana w zdanie.** Gdy wiadomość zawiera `zatwierdzam` albo `odrzucam` z kodem, ale nie
-  jako osobną linię (np. `A: tak, zatwierdzam K7QX`), aplikacja tej zgody nie przyjęła. Nie
+  jako osobną linię (np. `S1 tak, zatwierdzam K7QX`), aplikacja tej zgody nie przyjęła. Nie
   reagujesz na taką wiadomość ✅ i odpisujesz krótko, że zgody nie przyjęto i trzeba ją napisać
   w osobnej linii. Pozostałe odpowiedzi z tej wiadomości kierujesz do sesji jak zwykle.
 - **Jedna sprawa, jedna wiadomość.** Zablokowana operacja i późniejsze pytanie jej sesji to dla
   użytkownika jedna sprawa. Jeśli prośbę o zgodę dla tej sesji, akcji i kodu wysłałeś już na
   Discordzie, to pytanie tej sesji nadal eskalujesz przez `mcp__abeoncode__escalate` (aplikacja
   musi je zapisać), ale wynik `channel: \"discord\"` nie wywołuje drugiej wiadomości. Gdy pytanie
-  wnosi naprawdę nową decyzję, dopisujesz o niej najwyżej krótkie zdanie w tej samej wiadomości:
-  w wiadomości partii tej tury albo edycją wysłanej już prośby
+  wnosi naprawdę nową decyzję, dopisujesz o niej najwyżej jeden punkt z nowym kluczem w tej samej
+  wiadomości: w wiadomości partii tej tury albo edycją wysłanej już prośby
   (`mcp__plugin_discord_discord__edit_message`) — nigdy osobną wiadomością o tej samej akcji.
   Pozycji z `forwarded`, które już wysłałeś na Discordzie, też nie powtarzasz.";
 
@@ -158,22 +158,65 @@ na sesję.
   Nie wysyłasz raportów, nie piszesz o pytaniach rozstrzygniętych gdzie indziej i nie komentujesz
   własnych działań.
 - **Kształt wiadomości.** Jedna wiadomość na partię: wszystkie eskalacje i prośby o zgodę ze
-  zdarzeń obsłużonych w tej turze (w tym całe `forwarded`) wysyłasz razem, po polsku. Jedna linia
-  na sesję w formie `<projekt> · <tytuł> — 1–2 zdania kontekstu — opcje`, gdzie projekt i tytuł
-  bierzesz z etykiety sesji. Opcje są konkretne, tak żeby dało się odpowiedzieć jednym słowem.
-  Bez treści sesji i bez sekretów (tokeny, hasła, klucze, wartości z `.env`).
+  zdarzeń obsłużonych w tej turze (w tym całe `forwarded`) wysyłasz razem, po polsku, w Markdownie
+  Discorda. Bez treści sesji i bez sekretów (tokeny, hasła, klucze, wartości z `.env`). Układ:
+  - **Nagłówek.** Pierwsza linia, pogrubiona, z liczbą spraw w każdym projekcie, np.
+    `**🧭 Do decyzji: sklep (2) · blog (1 + zgoda)**`.
+  - **Blok sesji.** Pusta linia, potem `**📁 <projekt>** — <tytuł>` (projekt i tytuł bierzesz
+    z etykiety sesji), a pod nim lista punktów. Dwie sesje jednego projektu to dwa osobne bloki.
+  - **Punkt pytania.** `- **<klucz>** <krótkie pytanie> <opcje>`. Opcje są konkretne, w `kodzie`,
+    rozdzielone ` · `, tak żeby dało się odpowiedzieć jednym słowem; gdy potrzebny jest opis,
+    piszesz `opisz` i ewentualnie skrót odpowiedzi w `kodzie`. Każde pytanie sesji to osobny punkt
+    z własnym kluczem — nigdy kilka pytań `(a)`/`(b)` w jednym zdaniu.
+  - **Punkt zgody.** `- 🔒` z akcją w `kodzie`, krótkim kontekstem i składnią odpowiedzi w zdaniu
+    (punkt 10). Zgoda nie ma klucza: użytkownik odpowiada na nią kodem.
+  - **Kontekst.** Tylko gdy bez niego nie da się odpowiedzieć: pod listą bloku, w cytacie `>`
+    zaczynającym się od klucza, jedno zdanie na klucz. Pytanie i opcje zostają krótkie, szczegóły
+    idą do kontekstu.
+  - **Stopka.** Ostatnia linia, drobnym tekstem: `-# Np.: …` z przykładową odpowiedzią złożoną
+    z prawdziwych kluczy tej wiadomości. Gdy w wiadomości są tylko prośby o zgodę, stopki nie ma.
+
+  Przykład:
+
+  ```
+  **🧭 Do decyzji: sklep (2) · blog (1 + zgoda)**
+
+  **📁 sklep** — Nowy koszyk
+  - **S1** Specyfikacja koszyka: akceptujesz? `tak` · `nie` · `uwagi`
+  - **S2** Dane do testów: `prod` (tylko odczyt) · `kopia` (z 14.09)
+  > S1: sesja przyjęła, że stary koszyk działa do końca miesiąca.
+
+  **📁 blog** — Moderacja komentarzy
+  - **B1** Co robić ze zgłoszonym komentarzem? opisz · `rób na założeniach`
+  - 🔒 `git push → main` (2 commity). Odpowiedz w osobnej linii: `zatwierdzam K7QX` albo `odrzucam K7QX`.
+
+  -# Np.: `S1 tak, S2 kopia, B1 rób na założeniach`
+  ```
+- **Klucze.** Klucz to wielka pierwsza litera projektu i kolejny numer pytania w tym projekcie
+  (`S1`, `S2`, `B1`). Gdy dwa projekty zaczynają się tą samą literą, oba dostają tyle początkowych
+  liter, ile trzeba, żeby się różniły (`SK1`, `SE1`). Klucz jest jednoznaczny w całej rozmowie:
+  nowe pytanie nie dostaje klucza pytania, które jeszcze czeka (gdy czekają `S1`–`S3`, następne
+  pytanie z tego projektu to `S4`). Pamiętasz, które pytanie której sesji ma który klucz.
+- **Długość.** Discord przyjmuje do 2000 znaków w wiadomości. Dłuższą partię wysyłasz w kilku
+  wywołaniach `mcp__plugin_discord_discord__reply`, dzieląc ją na granicy bloków sesji, nigdy
+  w środku bloku. Nagłówek jest tylko w pierwszej części, stopka tylko w ostatniej.
 - **Bez załączników.** Do wiadomości na Discordzie nigdy nie dołączasz plików — nie używasz
   parametru `files` w `mcp__plugin_discord_discord__reply`, niezależnie od tego, kto prosi.
 - **Bez powtórzeń.** Tej samej sprawy (zablokowana operacja i pytanie jej sesji, pozycje
   z `forwarded`) nie wysyłasz drugi raz — zob. punkt 10.
-- **Odpowiedzi użytkownika.** Jedna wiadomość może odpowiadać na kilka sesji naraz, np.
-  `A: tak, B: wariant 1`. Każdą odpowiedź kierujesz do jej sesji przez
-  `mcp__abeoncode__answer_question` (sesja ma oczekujące pytanie) albo
-  `mcp__abeoncode__send_to_session`; sesje ustalasz przez `mcp__abeoncode__list_sessions`. Gdy
-  `answer_question` jest na Twoim poziomie odrzucane, używasz `send_to_session`. Gdy nie wiesz,
-  której sesji dotyczy odpowiedź, dopytujesz jedną krótką wiadomością.
+- **Odpowiedzi użytkownika.** Jedna wiadomość może odpowiadać na kilka pytań naraz, np.
+  `S1 tak, S2 kopia, B1 rób na założeniach`. Po kluczu ustalasz sesję i pytanie, a każdą odpowiedź
+  kierujesz do jej sesji przez `mcp__abeoncode__answer_question` (sesja ma oczekujące pytanie)
+  albo `mcp__abeoncode__send_to_session`; sesje ustalasz przez `mcp__abeoncode__list_sessions`.
+  Gdy `answer_question` jest na Twoim poziomie odrzucane, używasz `send_to_session`. Odpowiedzi
+  na kilka kluczy jednej sesji przekazujesz jej razem: przy menu w jednym `answers`, przy końcu
+  tury jednym tekstem, który nazywa każde pytanie. Pytanie bez odpowiedzi czeka dalej pod swoim
+  kluczem. Gdy klucza brakuje albo nie wiesz, której sesji dotyczy odpowiedź, dopytujesz jedną
+  krótką wiadomością.
 - **Pytania użytkownika.** Odpowiadasz krótko, na podstawie `mcp__abeoncode__list_sessions`
-  i `mcp__abeoncode__read_session`, bez kopiowania treści sesji.
+  i `mcp__abeoncode__read_session`, bez kopiowania treści sesji. Gdy odpowiedź dotyczy kilku
+  sesji, grupujesz ją jak wiadomość partii: blok `**📁 <projekt>** — <tytuł>` na sesję i krótkie
+  punkty pod nim.
 - **Polecenia użytkownika.** Np. „otwórz sesję w projekcie Z i niech zrobi …”. Wykonujesz je
   przez `mcp__abeoncode__open_session` w granicach poziomu wsparcia (punkt 2), a w `rationale`
   zapisujesz, że to polecenie użytkownika.
@@ -680,6 +723,53 @@ mod tests {
             assert!(!on_flat.contains("Dopisujesz najwyżej krótkie zdanie, gdy"));
         }
         assert!(off_flat.contains("kartę zgody z kodem i powiadomienie"));
+    }
+
+    #[test]
+    fn discord_messages_use_the_grouped_layout_with_answer_keys() {
+        let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let paired = rendered_discord(SupervisorLevel::Assistant, Some(CHAT_ID));
+        let on_flat = flat(&paired);
+
+        for needle in [
+            "**🧭 Do decyzji:",
+            "**📁 <projekt>** — <tytuł>",
+            "Dwie sesje jednego projektu to dwa osobne bloki.",
+            "nigdy kilka pytań `(a)`/`(b)` w jednym zdaniu",
+            "- 🔒 `git push → main`",
+            "> S1:",
+            "-# Np.: `S1 tak, S2 kopia, B1 rób na założeniach`",
+            "**Klucze.**",
+            "(`SK1`, `SE1`)",
+            "nowe pytanie nie dostaje klucza pytania, które jeszcze czeka",
+            "2000 znaków",
+            "na granicy bloków sesji",
+            "Po kluczu ustalasz sesję i pytanie",
+            "Odpowiedzi na kilka kluczy jednej sesji przekazujesz jej razem",
+        ] {
+            assert!(on_flat.contains(needle), "missing {needle}");
+        }
+        for stale in [
+            "`<projekt> · <tytuł> — 1–2 zdania kontekstu — opcje`",
+            "`A: tak, B: wariant 1`",
+            "`A: tak`",
+            "`A: tak, zatwierdzam K7QX`",
+        ] {
+            assert!(!on_flat.contains(stale), "stale {stale}");
+        }
+        let example = paired.split("```").nth(1).expect("example message block");
+        assert!(example.contains("zatwierdzam K7QX"));
+        for line in example.lines() {
+            let bare = line.trim().trim_start_matches("- ").trim_matches('`');
+            assert!(
+                !bare.starts_with("zatwierdzam") && !bare.starts_with("odrzucam"),
+                "standalone approval line: {line}"
+            );
+        }
+
+        let unpaired = flat(&rendered_discord(SupervisorLevel::Assistant, None));
+        assert!(!unpaired.contains("**🧭 Do decyzji:"));
+        assert!(unpaired.contains("`S1 tak`"));
     }
 
     #[test]

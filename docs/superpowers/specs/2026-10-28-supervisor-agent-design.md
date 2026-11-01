@@ -453,12 +453,23 @@ to the supervisor as an event and written into `CLAUDE.md`.
      first.
 - **Message style:**
   - Write only when a decision is needed or the user asked.
-  - One message per batch.
-  - One line per session: `<projekt> · <tytuł>` — 1–2 sentences of context — the options.
+  - One message per batch, in Discord Markdown (chosen 2026-11-01 from three DM mock-ups; a single
+    line per session read as one dense block once several projects asked at once):
+    - a bold header counting the open items per project (`🧭 Do decyzji: sklep (2) · blog (1 + zgoda)`);
+    - one block per session, `📁 <projekt> — <tytuł>`, with a bullet list under it;
+    - every question is its own bullet with an answer key and one-word options in code spans
+      (`S1 … tak · nie`), never `(a)`/`(b)` inside one sentence;
+    - an approval is a `🔒` bullet with the action, no key, and the reply syntax inside a sentence;
+    - context only when needed, as a `>` quote starting with the key;
+    - a small-text footer (`-#`) with a sample answer built from the real keys.
+  - Answer keys: the project's first letter plus a running number (`S1`, `B1`), more letters when two
+    projects share one (`SK1`, `SE1`); a key is never reused while its question is still open.
+  - Over 2000 characters the batch is split into several replies on session-block boundaries.
   - Never paste session content or secrets.
-  - Summaries only on request.
-- **Inbound messages** are answers (routed with `answer_question`/`send_to_session`), questions about
-  sessions, or orders (`open_session`).
+  - Summaries only on request; a status answer that spans several sessions uses the same blocks.
+- **Inbound messages** are answers (routed with `answer_question`/`send_to_session`, matched by key,
+  e.g. `S1 tak, S2 kopia, B1 rób na założeniach`), questions about sessions, or orders
+  (`open_session`).
 
 ### 9. UI (shapes are the builder's call; Polish copy)
 
