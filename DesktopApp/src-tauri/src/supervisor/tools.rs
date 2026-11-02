@@ -56,6 +56,13 @@ impl<'a> Args<'a> {
         }
     }
 
+    fn optional_object_list(&self, name: &str) -> Result<Vec<Args<'a>>, String> {
+        match self.field(name) {
+            None => Ok(Vec::new()),
+            Some(_) => self.object_list(name),
+        }
+    }
+
     fn object_list(&self, name: &str) -> Result<Vec<Args<'a>>, String> {
         let invalid = || format!("{ERROR_NOT_OBJECT_LIST}: {name}");
         self.field(name)
@@ -110,30 +117,48 @@ fn done() -> Value {
     json!({ "ok": true })
 }
 
+fn located(error: String, position: &str) -> String {
+    format!("{error} ({position})")
+}
+
+fn post_item_input(item: &Args) -> Result<DiscordPostItemInput, String> {
+    Ok(DiscordPostItemInput {
+        question_id: item.text("question_id")?.to_string(),
+        question: item.text("question")?.to_string(),
+        options: item.optional_text_list("options")?,
+        text_options: item.optional_text_list("text_options")?,
+        context: item.optional_text("context")?.map(str::to_string),
+    })
+}
+
 fn post_items(args: &Args) -> Result<Vec<DiscordPostItemInput>, String> {
     let mut items = Vec::new();
-    for block in args.object_list("blocks")? {
-        for item in block.object_list("items")? {
-            items.push(DiscordPostItemInput {
-                question_id: item.text("question_id")?.to_string(),
-                question: item.text("question")?.to_string(),
-                options: item.optional_text_list("options")?,
-                text_options: item.optional_text_list("text_options")?,
-                context: item.optional_text("context")?.map(str::to_string),
-            });
+    for (block_index, block) in args.optional_object_list("blocks")?.iter().enumerate() {
+        let block_position = format!("blok {}", block_index + 1);
+        let entries = block
+            .object_list("items")
+            .map_err(|error| located(error, &block_position))?;
+        for (item_index, item) in entries.iter().enumerate() {
+            let position = format!("{block_position}, pytanie {}", item_index + 1);
+            items.push(post_item_input(item).map_err(|error| located(error, &position))?);
         }
     }
     Ok(items)
 }
 
+fn key_answer(answer: &Args) -> Result<KeyAnswer, String> {
+    Ok(KeyAnswer {
+        key: answer.text("key")?.to_string(),
+        value: answer.text("value")?.to_string(),
+    })
+}
+
 fn key_answers(args: &Args) -> Result<Vec<KeyAnswer>, String> {
     args.object_list("answers")?
         .iter()
-        .map(|answer| {
-            Ok(KeyAnswer {
-                key: answer.text("key")?.to_string(),
-                value: answer.text("value")?.to_string(),
-            })
+        .enumerate()
+        .map(|(index, answer)| {
+            key_answer(answer).map_err(|error| located(error, &format!("odpowiedź {}", index + 1)))
         })
         .collect()
 }
@@ -305,11 +330,11 @@ pub fn tool_definitions() -> Value {
             json!({
                 "blocks": {
                     "type": "array",
-                    "description": "Bloki sesji: pytania jednej sesji w jednym bloku",
+                    "description": "Bloki sesji: pytania jednej sesji w jednym bloku. Pomiń, gdy wysyłasz same prośby o zgodę",
                     "items": {
                         "type": "object",
                         "properties": {
-                            "session_id": text_property("Identyfikator sesji"),
+                            "session_id": text_property("Identyfikator sesji (informacyjnie — sesję wyznacza eskalacja)"),
                             "items": {
                                 "type": "array",
                                 "description": "Pytania sesji; jedno question_id może mieć kilka pytań",
@@ -334,7 +359,7 @@ pub fn tool_definitions() -> Value {
                                 }
                             }
                         },
-                        "required": ["session_id", "items"]
+                        "required": ["items"]
                     }
                 },
                 "approval_ids": {
@@ -343,7 +368,7 @@ pub fn tool_definitions() -> Value {
                     "description": "Identyfikatory próśb o zgodę skierowanych na Discorda"
                 }
             }),
-            &["blocks"],
+            &[],
         ),
         tool(
             "discord_answered",
@@ -373,7 +398,7 @@ mod tests {
     use crate::domain::supervisor::{EscalationChannel, SupervisorLevel};
     use crate::supervisor::core::{decision_kind, ApprovalSource, ESCALATED_REASON, WAKE_DEBOUNCE};
     use crate::supervisor::discord::registry::{
-        KeyAnswer, PostBlock, PostItem, PostRequest, PostResult, PostedKey,
+        KeyAnswer, PostApproval, PostBlock, PostItem, PostRequest, PostResult, PostedKey,
     };
     use crate::supervisor::effects::SessionListing;
     use crate::supervisor::events::SupervisorEvent;
@@ -449,7 +474,13 @@ mod tests {
             json!(["project_path", "prompt", "rationale"])
         );
         assert_eq!(required("send_to_session"), json!(["session_id", "text"]));
-        assert_eq!(required("discord_post"), json!(["blocks"]));
+        assert_eq!(required("discord_post"), json!([]));
+        let post_schema = &tools
+            .iter()
+            .find(|tool| tool["name"] == "discord_post")
+            .unwrap()["inputSchema"]["properties"];
+        assert_eq!(post_schema["blocks"]["items"]["required"], json!(["items"]));
+        assert!(post_schema["blocks"]["items"]["properties"]["session_id"].is_object());
         assert_eq!(required("discord_answered"), json!(["answers"]));
         assert!(names
             .iter()
@@ -559,7 +590,10 @@ mod tests {
             error_of(&core, "discord_post", json!({"blocks": []})),
             "Nie ma czego wysłać"
         );
-        assert!(error_of(&core, "discord_post", json!({})).contains("blocks"));
+        assert_eq!(
+            error_of(&core, "discord_post", json!({})),
+            "Nie ma czego wysłać"
+        );
         assert!(error_of(&core, "discord_post", json!({"blocks": "x"})).contains("blocks"));
         assert!(error_of(&core, "discord_post", json!({"blocks": [1]})).contains("blocks"));
         assert!(error_of(
@@ -600,6 +634,102 @@ mod tests {
             "Discord nie odpowiada"
         );
         assert_eq!(effects.discord_posts.lock().len(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn handle_tool_routes_an_approval_only_discord_post() {
+        let (effects, core) = setup();
+        *effects.branch.lock() = Some("main".into());
+        link_discord(&effects);
+        core.set_discord_active(true);
+        core.set_away(true);
+        core.on_session_hook(bash("s1", "git push")).await;
+        let approval = core.snapshot().approvals[0].clone();
+        assert_eq!(approval.channel, EscalationChannel::Discord);
+        handle_tool(
+            &core,
+            "discord_post",
+            json!({"approval_ids": [approval.id.clone()]}),
+        )
+        .unwrap();
+        assert_eq!(
+            *effects.discord_posts.lock(),
+            vec![PostRequest {
+                blocks: vec![PostBlock {
+                    session_id: "s1".into(),
+                    label: "projekt · s1".into(),
+                    items: Vec::new(),
+                    approvals: vec![PostApproval {
+                        approval_id: approval.id.clone(),
+                        action: "git push → main".into(),
+                        code: approval.code.clone(),
+                    }],
+                }],
+            }]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn discord_post_parse_errors_name_the_block_and_question() {
+        let (effects, core) = setup();
+        let valid = json!({"question_id": "q1", "question": "Który wariant?"});
+        assert_eq!(
+            error_of(
+                &core,
+                "discord_post",
+                json!({"blocks": [
+                    {"session_id": "s1", "items": [valid.clone()]},
+                    {"session_id": "s2", "items": [{"question": "Dalej?"}]}
+                ]})
+            ),
+            "Brak wymaganego argumentu: question_id (blok 2, pytanie 1)"
+        );
+        assert_eq!(
+            error_of(
+                &core,
+                "discord_post",
+                json!({"blocks": [{"items": [
+                    valid.clone(),
+                    {"question_id": "q1", "question": "Dalej?", "options": "tak"}
+                ]}]})
+            ),
+            "Argument musi być listą tekstów: options (blok 1, pytanie 2)"
+        );
+        assert_eq!(
+            error_of(
+                &core,
+                "discord_post",
+                json!({"blocks": [{"items": [valid]}, {"session_id": "s2"}]})
+            ),
+            "Brak wymaganego argumentu: items (blok 2)"
+        );
+        assert!(effects.discord_posts.lock().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn discord_answered_parse_errors_name_the_answer() {
+        let (effects, core) = setup();
+        assert_eq!(
+            error_of(
+                &core,
+                "discord_answered",
+                json!({"answers": [
+                    {"key": "S1", "value": "tak"},
+                    {"key": "S2", "value": "nie"},
+                    {"value": "później"}
+                ]})
+            ),
+            "Brak wymaganego argumentu: key (odpowiedź 3)"
+        );
+        assert_eq!(
+            error_of(
+                &core,
+                "discord_answered",
+                json!({"answers": [{"key": 1, "value": "tak"}]})
+            ),
+            "Argument musi być tekstem: key (odpowiedź 1)"
+        );
+        assert!(effects.discord_answers.lock().is_empty());
     }
 
     #[tokio::test(start_paused = true)]
