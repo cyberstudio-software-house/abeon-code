@@ -9,6 +9,8 @@ use tokio::time::{sleep, sleep_until, timeout, Instant};
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
+use super::BUTTON_PREFIX;
+
 pub const GATEWAY_URL: &str = "wss://gateway.discord.gg/?v=10&encoding=json";
 
 const BACKOFF_START: Duration = Duration::from_secs(1);
@@ -104,13 +106,15 @@ fn parse_interaction(data: &Value) -> Option<Interaction> {
     if data.get("type").and_then(Value::as_u64) != Some(COMPONENT_INTERACTION_TYPE) {
         return None;
     }
+    let custom_id = string_at(data, &["data", "custom_id"])
+        .filter(|custom_id| custom_id.starts_with(BUTTON_PREFIX))?;
     let user_id =
         string_at(data, &["user", "id"]).or_else(|| string_at(data, &["member", "user", "id"]))?;
     Some(Interaction {
         id: string_at(data, &["id"])?,
         token: string_at(data, &["token"])?,
         user_id,
-        custom_id: string_at(data, &["data", "custom_id"])?,
+        custom_id,
         message_id: string_at(data, &["message", "id"])?,
         message_components: data
             .get("message")
@@ -553,6 +557,29 @@ mod tests {
             assert!(received.is_err());
             harness.shutdown().await;
             server.abort();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn ignores_buttons_of_other_components() {
+        timeout(TEST_TIMEOUT, async {
+            let (listener, url) = bind().await;
+            let mut harness = start_client(url);
+            let mut socket = accept(&listener).await;
+            send_hello(&mut socket, 600_000).await;
+            read_non_heartbeat(&mut socket).await.unwrap();
+            send_ready(&mut socket).await;
+            let mut foreign = component_interaction(3);
+            foreign["d"]["data"]["custom_id"] = json!("perm:allow:abcde");
+            send(&mut socket, foreign).await;
+            let received = timeout(Duration::from_millis(200), harness.interactions.recv()).await;
+            assert!(received.is_err());
+            send(&mut socket, component_interaction(3)).await;
+            let interaction = harness.interactions.recv().await.unwrap();
+            assert_eq!(interaction.custom_id, "abeon:q:item-1:2");
+            harness.shutdown().await;
         })
         .await
         .unwrap();

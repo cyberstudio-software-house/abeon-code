@@ -268,6 +268,10 @@ pub fn render(view: &MessageView) -> Value {
     if let Some(footer) = &view.footer {
         components.push(text_display(footer.clone()));
     }
+    v2_payload(Value::Array(components))
+}
+
+pub fn v2_payload(components: Value) -> Value {
     json!({
         "flags": COMPONENTS_FLAG,
         "allowed_mentions": {"parse": []},
@@ -585,6 +589,19 @@ mod tests {
         assert_eq!(buttons[0]["type"], 2);
         assert_eq!(buttons[0]["style"], 2);
         assert_eq!(buttons[0]["label"], "tak");
+    }
+
+    #[test]
+    fn v2_payload_wraps_components_without_mentions() {
+        let components = json!([{"type": 10, "content": "x"}]);
+        assert_eq!(
+            v2_payload(components.clone()),
+            json!({
+                "flags": 32768,
+                "allowed_mentions": {"parse": []},
+                "components": components,
+            })
+        );
     }
 
     #[test]

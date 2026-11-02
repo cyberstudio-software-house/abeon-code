@@ -2,13 +2,13 @@ use serde_json::{json, Value};
 
 use super::gateway::Interaction;
 use super::registry::{ButtonRegistry, ButtonTarget, ClickedOption};
-use super::render::{render, replace_row, ApprovalMark, STALE_TEXT};
+use super::render::{render, replace_row, v2_payload, ApprovalMark, STALE_TEXT};
+use super::BUTTON_PREFIX;
 use crate::supervisor::core::{ApprovalSource, ApprovalState, SupervisorCore};
 
 pub const NOT_ALLOWED: &str = "Brak uprawnień.";
 pub const SUPERVISOR_OFF: &str = "Agent sterujący jest wyłączony — odpowiedz w aplikacji.";
 
-const COMPONENTS_FLAG: u64 = 1 << 15;
 const EPHEMERAL_FLAG: u64 = 1 << 6;
 const CHANNEL_MESSAGE_CALLBACK: u64 = 4;
 const UPDATE_MESSAGE_CALLBACK: u64 = 7;
@@ -33,15 +33,11 @@ fn without_answer(reply: InteractionReply) -> InteractionOutcome {
 }
 
 fn stale(interaction: &Interaction) -> InteractionReply {
-    InteractionReply::Update(json!({
-        "flags": COMPONENTS_FLAG,
-        "allowed_mentions": {"parse": []},
-        "components": replace_row(
-            &interaction.message_components,
-            &interaction.custom_id,
-            STALE_TEXT,
-        ),
-    }))
+    InteractionReply::Update(v2_payload(replace_row(
+        &interaction.message_components,
+        &interaction.custom_id,
+        STALE_TEXT,
+    )))
 }
 
 fn current(registry: &ButtonRegistry, message: u64, interaction: &Interaction) -> InteractionReply {
@@ -91,11 +87,16 @@ pub fn decide(
     {
         return without_answer(InteractionReply::Ephemeral(NOT_ALLOWED));
     }
-    let target = registry.target(&interaction.custom_id).filter(|target| {
-        registry
-            .discord_id(target_message(target))
-            .is_none_or(|posted| posted == interaction.message_id)
-    });
+    let target = interaction
+        .custom_id
+        .starts_with(BUTTON_PREFIX)
+        .then(|| registry.target(&interaction.custom_id))
+        .flatten()
+        .filter(|target| {
+            registry
+                .discord_id(target_message(target))
+                .is_none_or(|posted| posted == interaction.message_id)
+        });
     match target {
         None => without_answer(stale(interaction)),
         Some(ButtonTarget::Approval {
@@ -133,7 +134,11 @@ pub fn callback_payload(reply: &InteractionReply) -> Value {
         }),
         InteractionReply::Ephemeral(text) => json!({
             "type": CHANNEL_MESSAGE_CALLBACK,
-            "data": {"content": text, "flags": EPHEMERAL_FLAG},
+            "data": {
+                "content": text,
+                "flags": EPHEMERAL_FLAG,
+                "allowed_mentions": {"parse": []},
+            },
         }),
     }
 }
@@ -142,15 +147,11 @@ pub fn callback_payload(reply: &InteractionReply) -> Value {
 mod tests {
     use std::sync::Arc;
 
-    use serde_json::json;
-
     use super::*;
     use crate::domain::supervisor::{ApprovalView, EscalationChannel, SupervisorLevel};
-    use crate::supervisor::core::{decision_kind, ApprovalSource, ApprovalState};
+    use crate::supervisor::core::decision_kind;
     use crate::supervisor::discord::registry::{PostApproval, PostBlock, PostItem, PostRequest};
-    use crate::supervisor::discord::render::{
-        render, replace_row, ApprovalMark, ItemState, MessageView, STALE_TEXT,
-    };
+    use crate::supervisor::discord::render::{ItemState, MessageView};
     use crate::supervisor::effects::DiscordSync;
     use crate::supervisor::events::SupervisorEvent;
     use crate::supervisor::test_support::*;
@@ -361,37 +362,100 @@ mod tests {
         assert_eq!(fixture.effects.kinds(), vec![decision_kind::GUARD_BLOCKED]);
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn an_unknown_button_gets_the_stale_row() {
-        let mut fixture = fixture().await;
-        let before = fixture.view();
-        let interaction = Interaction {
+    fn old_message_click(user_id: &str, custom_id: &str) -> Interaction {
+        Interaction {
             id: "i-1".into(),
             token: TOKEN.into(),
-            user_id: OWNER.into(),
-            custom_id: "abeon:q:00000000:0".into(),
+            user_id: user_id.into(),
+            custom_id: custom_id.into(),
             message_id: "d-old".into(),
             message_components: json!([{"type": 17, "components": [
                 {"type": 10, "content": "**P9** Stare pytanie?"},
                 {"type": 1, "components": [
-                    {"type": 2, "style": 2, "label": "tak", "custom_id": "abeon:q:00000000:0"},
+                    {"type": 2, "style": 2, "label": "tak", "custom_id": custom_id},
                     {"type": 2, "style": 2, "label": "nie", "custom_id": "abeon:q:00000000:1"},
                 ]},
             ]}]),
+        }
+    }
+
+    fn stale_row() -> InteractionReply {
+        InteractionReply::Update(json!({
+            "flags": 32768,
+            "allowed_mentions": {"parse": []},
+            "components": [{"type": 17, "components": [
+                {"type": 10, "content": "**P9** Stare pytanie?"},
+                {"type": 10, "content": STALE_TEXT},
+            ]}],
+        }))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_unknown_button_gets_the_stale_row() {
+        let mut fixture = fixture().await;
+        let before = fixture.view();
+        let outcome = fixture.press(&old_message_click(OWNER, "abeon:q:00000000:0"));
+        assert_eq!(outcome.reply, stale_row());
+        assert_eq!(outcome.answer, None);
+        assert_eq!(fixture.view(), before);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_button_of_another_component_gets_the_stale_row() {
+        let mut fixture = fixture().await;
+        let before = fixture.view();
+        let outcome = fixture.press(&old_message_click(OWNER, "perm:allow:abcde"));
+        assert_eq!(outcome.reply, stale_row());
+        assert_eq!(outcome.answer, None);
+        assert_eq!(fixture.view(), before);
+        assert_eq!(fixture.status(), ApprovalState::Pending);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stranger_clicking_an_unknown_button_is_refused() {
+        let mut fixture = fixture().await;
+        let outcome = fixture.press(&old_message_click(STRANGER, "abeon:q:00000000:0"));
+        assert_eq!(outcome.reply, InteractionReply::Ephemeral(NOT_ALLOWED));
+        assert_eq!(outcome.answer, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stale_option_click_with_the_supervisor_off_gets_the_stale_row() {
+        let mut fixture = fixture().await;
+        fixture.effects.settings.lock().level = SupervisorLevel::Off;
+        let before = fixture.view();
+        let outcome = fixture.press(&old_message_click(OWNER, "abeon:q:00000000:0"));
+        assert_eq!(outcome.reply, stale_row());
+        assert_eq!(outcome.answer, None);
+
+        let custom_id = fixture.option_id("P1", 0);
+        let moved = Interaction {
+            message_id: "d-other".into(),
+            ..fixture.click(OWNER, &custom_id)
         };
-        let outcome = fixture.press(&interaction);
+        let outcome = fixture.press(&moved);
         assert_eq!(
             outcome.reply,
             InteractionReply::Update(json!({
                 "flags": 32768,
                 "allowed_mentions": {"parse": []},
-                "components": [{"type": 17, "components": [
-                    {"type": 10, "content": "**P9** Stare pytanie?"},
-                    {"type": 10, "content": STALE_TEXT},
-                ]}],
+                "components": replace_row(&moved.message_components, &custom_id, STALE_TEXT),
             }))
         );
         assert_eq!(outcome.answer, None);
+        assert_eq!(fixture.item_state("P1"), ItemState::Open);
+        assert_eq!(fixture.view(), before);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_out_of_range_option_rerenders_without_an_answer() {
+        let mut fixture = fixture().await;
+        let before = fixture.view();
+        let interaction = fixture.click(OWNER, &fixture.option_id("P1", 9));
+        let outcome = fixture.press(&interaction);
+        assert_eq!(outcome.reply, InteractionReply::Update(render(&before)));
+        assert_eq!(outcome.answer, None);
+        assert_eq!(fixture.item_state("P1"), ItemState::Open);
         assert_eq!(fixture.view(), before);
     }
 
@@ -633,13 +697,18 @@ mod tests {
         );
         assert_eq!(
             callback_payload(&InteractionReply::Ephemeral(NOT_ALLOWED)),
-            json!({"type": 4, "data": {"content": "Brak uprawnień.", "flags": 64}})
+            json!({"type": 4, "data": {
+                "content": "Brak uprawnień.",
+                "flags": 64,
+                "allowed_mentions": {"parse": []},
+            }})
         );
         assert_eq!(
             callback_payload(&InteractionReply::Ephemeral(SUPERVISOR_OFF)),
             json!({"type": 4, "data": {
                 "content": "Agent sterujący jest wyłączony — odpowiedz w aplikacji.",
                 "flags": 64,
+                "allowed_mentions": {"parse": []},
             }})
         );
     }
