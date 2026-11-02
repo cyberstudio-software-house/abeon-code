@@ -22,6 +22,8 @@ const status = (over: Partial<DiscordSetupStatus> = {}): DiscordSetupStatus => (
   globalPluginEnabled: false,
   channelActive: true,
   blocker: null,
+  buttonsConnected: true,
+  buttonsBlocker: null,
   ...over,
 });
 
@@ -80,6 +82,33 @@ describe('SupervisorDiscordSection', () => {
     await screen.findByText('Bot: AbeonCode');
     expect(screen.getByTestId('check-channel')).toHaveTextContent('✗');
     expect(screen.getByTestId('check-channel')).toHaveTextContent('czeka na sparowanie');
+  });
+
+  it('shows the buttons connection row', async () => {
+    vi.spyOn(tauri, 'supervisorDiscordStatus').mockResolvedValue(status());
+    const { unmount } = render(<SupervisorDiscordSection />);
+    await screen.findByText('Bot: AbeonCode');
+    expect(screen.getByTestId('check-buttons')).toHaveTextContent('✓');
+    expect(screen.getByTestId('check-buttons')).toHaveTextContent('Przyciski na Discordzie działają');
+    unmount();
+
+    vi.spyOn(tauri, 'supervisorDiscordStatus').mockResolvedValue(
+      status({ buttonsConnected: false, buttonsBlocker: 'brak tokenu bota' }),
+    );
+    const second = render(<SupervisorDiscordSection />);
+    await screen.findByText('Bot: AbeonCode');
+    expect(screen.getByTestId('check-buttons')).toHaveTextContent('✗');
+    expect(screen.getByTestId('check-buttons')).toHaveTextContent(
+      'Przyciski na Discordzie nie działają — brak tokenu bota',
+    );
+    second.unmount();
+
+    vi.spyOn(tauri, 'supervisorDiscordStatus').mockResolvedValue(
+      status({ buttonsConnected: false, buttonsBlocker: null }),
+    );
+    render(<SupervisorDiscordSection />);
+    await screen.findByText('Bot: AbeonCode');
+    expect(screen.getByTestId('check-buttons').textContent).not.toContain('—');
   });
 
   it('shows the bot error and marks missing guilds', async () => {

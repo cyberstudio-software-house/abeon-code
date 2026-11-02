@@ -254,6 +254,8 @@ fn plan_discord(
                 link: DiscordLink {
                     channel_active: true,
                     blocker: None,
+                    buttons_connected: false,
+                    buttons_blocker: None,
                 },
                 context: Some(DiscordContext {
                     chat_id: settings.discord_chat_id.clone(),
@@ -266,6 +268,8 @@ fn plan_discord(
                 link: DiscordLink {
                     channel_active: false,
                     blocker: Some(blocker.to_string()),
+                    buttons_connected: false,
+                    buttons_blocker: None,
                 },
                 context: None,
             };
@@ -392,6 +396,8 @@ impl SupervisorProcess {
         DiscordLink {
             channel_active: state.pty_id.is_some() && state.discord.link.channel_active,
             blocker: state.discord.link.blocker.clone(),
+            buttons_connected: false,
+            buttons_blocker: None,
         }
     }
 
@@ -993,6 +999,8 @@ mod tests {
             link: DiscordLink {
                 channel_active: channel,
                 blocker: blocker.map(str::to_string),
+                buttons_connected: false,
+                buttons_blocker: None,
             },
             context: channel.then(|| DiscordContext {
                 chat_id: chat_id.map(str::to_string),
@@ -1075,7 +1083,9 @@ mod tests {
             process.discord_link(),
             DiscordLink {
                 channel_active: true,
-                blocker: None
+                blocker: None,
+                buttons_connected: false,
+                buttons_blocker: None
             }
         );
         assert_eq!(process.detach("pty-1"), Exit::Stopped);
@@ -1107,7 +1117,9 @@ mod tests {
             process.discord_link(),
             DiscordLink {
                 channel_active: false,
-                blocker: Some("Brak tokenu bota Discord".to_string())
+                blocker: Some("Brak tokenu bota Discord".to_string()),
+                buttons_connected: false,
+                buttons_blocker: None
             }
         );
         assert_eq!(process.state.lock().discord.context, None);

@@ -148,4 +148,6 @@ pub struct DiscordSetupStatus {
     pub global_plugin_enabled: bool,
     pub channel_active: bool,
     pub blocker: Option<String>,
+    pub buttons_connected: bool,
+    pub buttons_blocker: Option<String>,
 }

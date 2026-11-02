@@ -20,4 +20,6 @@ pub const BUTTON_PREFIX: &str = "abeon:";
 pub struct DiscordLink {
     pub channel_active: bool,
     pub blocker: Option<String>,
+    pub buttons_connected: bool,
+    pub buttons_blocker: Option<String>,
 }

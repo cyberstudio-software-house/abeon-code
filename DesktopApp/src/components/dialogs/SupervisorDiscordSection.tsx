@@ -38,6 +38,13 @@ function agentConnectionText(status: DiscordSetupStatus): string {
   return 'Agent połączony z Discordem';
 }
 
+function buttonsConnectionText(status: DiscordSetupStatus): string {
+  if (status.buttonsConnected) return 'Przyciski na Discordzie działają';
+  return status.buttonsBlocker
+    ? `Przyciski na Discordzie nie działają — ${status.buttonsBlocker}`
+    : 'Przyciski na Discordzie nie działają';
+}
+
 function SetupBlock() {
   const [status, setStatus] = useState<DiscordSetupStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -125,6 +132,9 @@ function SetupBlock() {
             <CheckRow testId="check-policy" ok={status.policy === 'allowlist'}>Tylko lista dozwolonych</CheckRow>
             <CheckRow testId="check-channel" ok={status.channelActive && status.chatLinked}>
               {agentConnectionText(status)}
+            </CheckRow>
+            <CheckRow testId="check-buttons" ok={status.buttonsConnected}>
+              {buttonsConnectionText(status)}
             </CheckRow>
           </ul>
         )}

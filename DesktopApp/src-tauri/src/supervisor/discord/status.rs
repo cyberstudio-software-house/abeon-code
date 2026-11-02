@@ -39,6 +39,8 @@ pub fn setup_status(
         global_plugin_enabled: global_plugin_enabled(claude_home),
         channel_active: link.channel_active,
         blocker: link.blocker.clone(),
+        buttons_connected: link.buttons_connected,
+        buttons_blocker: link.buttons_blocker.clone(),
     }
 }
 
@@ -97,6 +99,8 @@ mod tests {
         let link = DiscordLink {
             channel_active: false,
             blocker: Some("Brak tokenu bota Discord".to_string()),
+            buttons_connected: false,
+            buttons_blocker: None,
         };
         let status = setup_status(
             &fixture.files(),
@@ -118,6 +122,46 @@ mod tests {
         assert_eq!(status.bot_error, None);
         assert_eq!(status.blocker.as_deref(), Some("Brak tokenu bota Discord"));
         assert_eq!(status.bun_path.as_deref(), Some("/h/.bun/bin/bun"));
+    }
+
+    #[test]
+    fn status_reports_the_buttons_connection() {
+        let fixture = Fixture::new();
+        let link = DiscordLink {
+            channel_active: true,
+            blocker: None,
+            buttons_connected: true,
+            buttons_blocker: None,
+        };
+        let connected = setup_status(
+            &fixture.files(),
+            fixture.root.path(),
+            None,
+            None,
+            true,
+            &link,
+        );
+        assert!(connected.buttons_connected);
+        assert_eq!(connected.buttons_blocker, None);
+
+        let link = DiscordLink {
+            buttons_connected: false,
+            buttons_blocker: Some("łączenie z Discordem".to_string()),
+            ..link
+        };
+        let waiting = setup_status(
+            &fixture.files(),
+            fixture.root.path(),
+            None,
+            None,
+            true,
+            &link,
+        );
+        assert!(!waiting.buttons_connected);
+        assert_eq!(
+            waiting.buttons_blocker.as_deref(),
+            Some("łączenie z Discordem")
+        );
     }
 
     #[test]

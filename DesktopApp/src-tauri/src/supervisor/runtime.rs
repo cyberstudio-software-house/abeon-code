@@ -751,10 +751,26 @@ pub fn buttons_status(app: &AppHandle) -> Option<GatewayStatus> {
     Some(status)
 }
 
+fn buttons_link(status: Option<GatewayStatus>) -> (bool, Option<String>) {
+    match status {
+        None => (false, None),
+        Some(GatewayStatus::Off(reason)) => (false, Some(reason)),
+        Some(GatewayStatus::Connecting) => (false, Some("łączenie z Discordem".to_string())),
+        Some(GatewayStatus::Connected) => (true, None),
+        Some(GatewayStatus::Failed(reason)) => (false, Some(reason)),
+    }
+}
+
 pub fn discord_link(app: &AppHandle) -> DiscordLink {
-    runtime(app)
+    let link = runtime(app)
         .map(|runtime| runtime.process.discord_link())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let (buttons_connected, buttons_blocker) = buttons_link(buttons_status(app));
+    DiscordLink {
+        buttons_connected,
+        buttons_blocker,
+        ..link
+    }
 }
 
 pub fn new_conversation(app: &AppHandle) -> AppResult<()> {
@@ -945,6 +961,24 @@ async fn route(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn buttons_link_maps_every_gateway_status() {
+        assert_eq!(buttons_link(None), (false, None));
+        assert_eq!(
+            buttons_link(Some(GatewayStatus::Off("brak tokenu bota".to_string()))),
+            (false, Some("brak tokenu bota".to_string()))
+        );
+        assert_eq!(
+            buttons_link(Some(GatewayStatus::Connecting)),
+            (false, Some("łączenie z Discordem".to_string()))
+        );
+        assert_eq!(buttons_link(Some(GatewayStatus::Connected)), (true, None));
+        assert_eq!(
+            buttons_link(Some(GatewayStatus::Failed("odrzucony token".to_string()))),
+            (false, Some("odrzucony token".to_string()))
+        );
+    }
 
     #[test]
     fn labels_join_project_and_title() {

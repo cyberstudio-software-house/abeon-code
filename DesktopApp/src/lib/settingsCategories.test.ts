@@ -157,7 +157,7 @@ describe('category keywords stay in sync with the rendered rows', () => {
     vi.spyOn(tauri, 'supervisorDiscordStatus').mockResolvedValue({
       bunPath: '/usr/bin/bun', tokenStored: true, bot: null, botError: null, pairedUsers: 0,
       pendingPairings: 0, policy: 'allowlist', chatLinked: false, globalPluginEnabled: false,
-      channelActive: false, blocker: null,
+      channelActive: false, blocker: null, buttonsConnected: false, buttonsBlocker: null,
     });
     useStore.setState({
       enabledProviders: ['claude', 'codex', 'opencode'],
