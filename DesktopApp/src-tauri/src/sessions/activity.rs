@@ -9,6 +9,8 @@ const TOOL_STALL_MS: i64 = 30_000;
 const RUNNING_STALL_MS: i64 = 10 * 60 * 1000;
 const WAITING_DECAY_MS: i64 = 4 * 60 * 60 * 1000;
 const IDLE_HARD_CAP_MS: i64 = 24 * 60 * 60 * 1000;
+const BACKGROUND_TASK_STALL_MS: i64 = 60 * 60 * 1000;
+const BACKGROUND_TAIL_BYTES: u64 = 1024 * 1024;
 
 pub fn compute_activity(path: &Path, now_ms: i64) -> SessionActivity {
     compute_activity_with(find_last_significant, read_tail_bytes, path, now_ms)
@@ -87,10 +89,39 @@ fn file_age_ms(path: &Path, now_ms: i64) -> Option<i64> {
 }
 
 pub fn compute_activity_with_agents(path: &Path, running_agents: u32, now_ms: i64) -> SessionActivity {
-    if running_agents > 0 && file_age_ms(path, now_ms).is_some_and(|age| age <= IDLE_HARD_CAP_MS) {
+    let Some(age_ms) = file_age_ms(path, now_ms) else { return SessionActivity::Idle };
+    if running_agents > 0 && age_ms <= IDLE_HARD_CAP_MS {
         return SessionActivity::Running;
     }
-    compute_activity(path, now_ms)
+    let activity = compute_activity(path, now_ms);
+    if matches!(activity, SessionActivity::WaitingUser | SessionActivity::Idle)
+        && age_ms <= BACKGROUND_TASK_STALL_MS
+        && read_tail_bytes(path, BACKGROUND_TAIL_BYTES).is_some_and(|lines| has_pending_background_task(&lines))
+    {
+        return SessionActivity::Running;
+    }
+    activity
+}
+
+fn has_pending_background_task(lines: &[String]) -> bool {
+    let mut started: Vec<String> = Vec::new();
+    let mut finished: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for line in lines {
+        if line.contains("<task-notification>") {
+            finished.extend(notified_task_ids(line));
+        }
+        if !line.contains("\"backgroundTaskId\"") { continue; }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if v.get("type").and_then(|t| t.as_str()) != Some("user") { continue; }
+        if let Some(id) = v.get("toolUseResult").and_then(|r| r.get("backgroundTaskId")).and_then(|id| id.as_str()) {
+            started.push(id.to_string());
+        }
+    }
+    started.iter().any(|id| !finished.contains(id.as_str()))
+}
+
+fn notified_task_ids(line: &str) -> impl Iterator<Item = &str> {
+    line.split("<task-id>").skip(1).filter_map(|rest| rest.split_once("</task-id>").map(|(id, _)| id.trim()))
 }
 
 pub fn compute_activity_for(provider: Provider, path: &Path, now_ms: i64) -> SessionActivity {
@@ -643,5 +674,127 @@ mod tests {
         let body = vec![line; 80].join("\n");
         let (p, mtime) = write_with_mtime(&td, "s.jsonl", &body);
         assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Idle);
+    }
+
+    const USER_PROMPT: &str = r#"{"type":"user","uuid":"u0","message":{"content":[{"type":"text","text":"wydaj wersje"}]}}"#;
+    const AWAY_SUMMARY: &str = r#"{"type":"system","uuid":"s9","subtype":"away_summary","content":"recap"}"#;
+
+    fn background_start(task_id: &str) -> String {
+        format!(
+            r#"{{"type":"assistant","uuid":"a-{task_id}","message":{{"content":[{{"type":"tool_use","id":"t-{task_id}","name":"Bash","input":{{"command":"gh run watch 1","run_in_background":true}}}}]}}}}
+{{"type":"user","uuid":"u-{task_id}","message":{{"content":[{{"tool_use_id":"t-{task_id}","type":"tool_result","content":"Command running in background with ID: {task_id}.","is_error":false}}]}},"toolUseResult":{{"stdout":"","stderr":"","interrupted":false,"backgroundTaskId":"{task_id}"}}}}"#
+        )
+    }
+
+    fn turn_end(text: &str) -> String {
+        format!(
+            r#"{{"type":"assistant","uuid":"a-end","message":{{"content":[{{"type":"text","text":"{text}"}}]}}}}
+{{"type":"system","uuid":"s1","subtype":"stop_hook_summary"}}
+{{"type":"system","uuid":"s2","subtype":"turn_duration","durationMs":1234}}"#
+        )
+    }
+
+    fn notification(task_id: &str) -> String {
+        format!(r#"<task-notification>\n<task-id>{task_id}</task-id>\n<status>completed</status>\n</task-notification>"#)
+    }
+
+    fn delivered_when_idle(task_id: &str) -> String {
+        let text = notification(task_id);
+        format!(
+            r#"{{"type":"queue-operation","operation":"enqueue","content":"{text}"}}
+{{"type":"queue-operation","operation":"dequeue"}}
+{{"type":"user","uuid":"u-n-{task_id}","message":{{"role":"user","content":"{text}"}}}}"#
+        )
+    }
+
+    fn delivered_mid_turn(task_id: &str) -> String {
+        let text = notification(task_id);
+        format!(
+            r#"{{"type":"queue-operation","operation":"enqueue","content":"{text}"}}
+{{"type":"queue-operation","operation":"remove","content":"{text}"}}
+{{"type":"attachment","attachment":{{"type":"queued_command","prompt":"{text}"}}}}"#
+        )
+    }
+
+    fn session(parts: &[&str]) -> (TempDir, PathBuf, i64) {
+        let td = TempDir::new().unwrap();
+        let (p, mtime) = write_with_mtime(&td, "s.jsonl", &parts.join("\n"));
+        (td, p, mtime)
+    }
+
+    #[test]
+    fn pending_background_task_keeps_a_finished_turn_running() {
+        let (_td, p, mtime) = session(&[USER_PROMPT, &background_start("b1"), &turn_end("Czekam na wynik buildu.")]);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::WaitingUser);
+        assert_eq!(compute_activity_with_agents(&p, 0, mtime + 60_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn pending_background_task_outlasts_the_away_summary() {
+        let (_td, p, mtime) = session(&[USER_PROMPT, &background_start("b1"), &turn_end("Czekam."), AWAY_SUMMARY]);
+        assert_eq!(compute_activity(&p, mtime + 60_000), SessionActivity::Idle);
+        assert_eq!(compute_activity_with_agents(&p, 0, mtime + 60_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn background_task_finished_while_idle_releases_the_session() {
+        let (_td, p, mtime) = session(&[
+            USER_PROMPT, &background_start("b1"), &turn_end("Czekam."), AWAY_SUMMARY,
+            &delivered_when_idle("b1"), &turn_end("Build przeszedł."),
+        ]);
+        assert_eq!(compute_activity_with_agents(&p, 0, mtime + 60_000), SessionActivity::WaitingUser);
+    }
+
+    #[test]
+    fn background_task_counts_as_finished_from_the_moment_it_is_enqueued() {
+        let enqueued = format!(r#"{{"type":"queue-operation","operation":"enqueue","content":"{}"}}"#, notification("b1"));
+        let (_td, p, mtime) = session(&[USER_PROMPT, &background_start("b1"), &turn_end("Czekam."), &enqueued]);
+        assert_eq!(compute_activity_with_agents(&p, 0, mtime + 60_000), SessionActivity::WaitingUser);
+    }
+
+    #[test]
+    fn background_task_finished_mid_turn_releases_the_session() {
+        let (_td, p, mtime) = session(&[
+            USER_PROMPT, &background_start("b1"), &delivered_mid_turn("b1"), &turn_end("Gotowe."),
+        ]);
+        assert_eq!(compute_activity_with_agents(&p, 0, mtime + 60_000), SessionActivity::WaitingUser);
+    }
+
+    #[test]
+    fn one_unfinished_background_task_is_enough_to_keep_running() {
+        let (_td, p, mtime) = session(&[
+            USER_PROMPT, &background_start("b1"), &background_start("b2"),
+            &delivered_mid_turn("b1"), &turn_end("Czekam na drugi."),
+        ]);
+        assert_eq!(compute_activity_with_agents(&p, 0, mtime + 60_000), SessionActivity::Running);
+    }
+
+    #[test]
+    fn background_task_silent_past_the_stall_window_stops_forcing_running() {
+        let (_td, p, mtime) = session(&[USER_PROMPT, &background_start("b1"), &turn_end("Serwer działa.")]);
+        let past = mtime + BACKGROUND_TASK_STALL_MS + 60_000;
+        assert_eq!(compute_activity_with_agents(&p, 0, past), SessionActivity::WaitingUser);
+    }
+
+    #[test]
+    fn pending_background_task_does_not_hide_a_permission_prompt() {
+        let prompt = r#"{"type":"assistant","uuid":"a-perm","message":{"content":[{"type":"tool_use","id":"t-perm","name":"Bash","input":{"command":"git push"}}]}}"#;
+        let (_td, p, mtime) = session(&[USER_PROMPT, &background_start("b1"), prompt]);
+        assert_eq!(compute_activity_with_agents(&p, 0, mtime + 60_000), SessionActivity::WaitingTool);
+    }
+
+    #[test]
+    fn background_task_started_far_back_in_the_file_is_still_found() {
+        let trailer = bulky_trailer();
+        let filler: Vec<&str> = std::iter::repeat_n(trailer.as_str(), 30).collect();
+        let mut parts = vec![USER_PROMPT];
+        let start = background_start("b1");
+        parts.push(&start);
+        parts.extend(filler);
+        let end = turn_end("Czekam.");
+        parts.push(&end);
+        let (_td, p, mtime) = session(&parts);
+        assert!(p.metadata().unwrap().len() > 256 * 1024);
+        assert_eq!(compute_activity_with_agents(&p, 0, mtime + 60_000), SessionActivity::Running);
     }
 }
