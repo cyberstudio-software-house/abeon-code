@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fmt;
 use std::time::Duration;
 
@@ -15,6 +16,10 @@ pub const GATEWAY_URL: &str = "wss://gateway.discord.gg/?v=10&encoding=json";
 
 const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
+const STABLE_SESSION: Duration = Duration::from_secs(60);
+const RECONNECT_WAIT: Duration = Duration::from_secs(5);
+const IDENTIFY_LIMIT: usize = 20;
+const IDENTIFY_WINDOW: Duration = Duration::from_secs(3600);
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_HEARTBEAT_MS: u64 = 41_250;
@@ -61,6 +66,63 @@ enum Outcome {
 
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
+#[derive(Default)]
+struct IdentifyBudget {
+    sent: VecDeque<Instant>,
+}
+
+impl IdentifyBudget {
+    fn next_allowed(&self, now: Instant) -> Option<Instant> {
+        let recent: Vec<Instant> = self
+            .sent
+            .iter()
+            .copied()
+            .filter(|sent| now.saturating_duration_since(*sent) < IDENTIFY_WINDOW)
+            .collect();
+        (recent.len() >= IDENTIFY_LIMIT)
+            .then(|| recent[recent.len() - IDENTIFY_LIMIT] + IDENTIFY_WINDOW)
+    }
+
+    fn record(&mut self, at: Instant) {
+        self.sent
+            .retain(|sent| at.saturating_duration_since(*sent) < IDENTIFY_WINDOW);
+        self.sent.push_back(at);
+    }
+}
+
+struct Backoff {
+    current: Duration,
+}
+
+impl Backoff {
+    fn new() -> Self {
+        Backoff {
+            current: BACKOFF_START,
+        }
+    }
+
+    fn delay(&self) -> Duration {
+        self.current
+    }
+
+    fn grow(&mut self) {
+        self.current = next_backoff(self.current);
+    }
+
+    fn session_ended(&mut self, ready_at: Option<Instant>, ended_at: Instant) {
+        if ready_at.is_some_and(|ready| ended_at.saturating_duration_since(ready) >= STABLE_SESSION)
+        {
+            self.current = BACKOFF_START;
+        }
+    }
+}
+
+#[derive(Default)]
+struct SessionProgress {
+    identified_at: Option<Instant>,
+    ready_at: Option<Instant>,
+}
+
 static CRYPTO_INIT: std::sync::Once = std::sync::Once::new();
 
 fn ensure_crypto_provider() {
@@ -83,6 +145,13 @@ async fn sleep_or_stop(duration: Duration, stop: &mut watch::Receiver<bool>) -> 
     tokio::select! {
         _ = stopped(stop) => false,
         _ = sleep(duration) => true,
+    }
+}
+
+async fn sleep_until_or_stop(deadline: Instant, stop: &mut watch::Receiver<bool>) -> bool {
+    tokio::select! {
+        _ = stopped(stop) => false,
+        _ = sleep_until(deadline) => true,
     }
 }
 
@@ -170,7 +239,7 @@ async fn run_session(
     interactions: &mpsc::UnboundedSender<Interaction>,
     status: &watch::Sender<GatewayStatus>,
     stop: &mut watch::Receiver<bool>,
-    became_ready: &mut bool,
+    progress: &mut SessionProgress,
 ) -> Outcome {
     let mut sequence: Option<i64> = None;
     let mut interval = Duration::from_millis(DEFAULT_HEARTBEAT_MS);
@@ -205,6 +274,7 @@ async fn run_session(
                                     heartbeat_at =
                                         Some(Instant::now() + interval.mul_f64(jitter()));
                                     identified = true;
+                                    progress.identified_at = Some(Instant::now());
                                     if send_identify(socket, token).await {
                                         None
                                     } else {
@@ -233,7 +303,7 @@ async fn run_session(
                                     }
                                     match frame.get("t").and_then(Value::as_str) {
                                         Some("READY") => {
-                                            *became_ready = true;
+                                            progress.ready_at = Some(Instant::now());
                                             let _ = status.send(GatewayStatus::Connected);
                                         }
                                         Some("INTERACTION_CREATE") => {
@@ -277,16 +347,33 @@ pub async fn run_gateway(
     token: String,
     interactions: mpsc::UnboundedSender<Interaction>,
     status: watch::Sender<GatewayStatus>,
+    stop: watch::Receiver<bool>,
+) {
+    run_paced(url, token, interactions, status, stop, RECONNECT_WAIT).await
+}
+
+async fn run_paced(
+    url: String,
+    token: String,
+    interactions: mpsc::UnboundedSender<Interaction>,
+    status: watch::Sender<GatewayStatus>,
     mut stop: watch::Receiver<bool>,
+    reconnect_wait: Duration,
 ) {
     ensure_crypto_provider();
-    let mut backoff = BACKOFF_START;
+    let mut backoff = Backoff::new();
+    let mut identifies = IdentifyBudget::default();
 
     loop {
         if *stop.borrow() {
             return;
         }
         let _ = status.send(GatewayStatus::Connecting);
+        if let Some(allowed) = identifies.next_allowed(Instant::now()) {
+            if !sleep_until_or_stop(allowed, &mut stop).await {
+                return;
+            }
+        }
 
         let connected = tokio::select! {
             _ = stopped(&mut stop) => return,
@@ -295,49 +382,47 @@ pub async fn run_gateway(
         let mut socket = match connected {
             Ok(Ok((socket, _))) => socket,
             Ok(Err(_)) | Err(_) => {
-                if !sleep_or_stop(backoff, &mut stop).await {
+                if !sleep_or_stop(backoff.delay(), &mut stop).await {
                     return;
                 }
-                backoff = next_backoff(backoff);
+                backoff.grow();
                 continue;
             }
         };
 
-        let mut became_ready = false;
+        let mut progress = SessionProgress::default();
         let outcome = run_session(
             &mut socket,
             &token,
             &interactions,
             &status,
             &mut stop,
-            &mut became_ready,
+            &mut progress,
         )
         .await;
         let _ = timeout(CLOSE_TIMEOUT, socket.close(None)).await;
-        if became_ready {
-            backoff = BACKOFF_START;
+        if let Some(identified_at) = progress.identified_at {
+            identifies.record(identified_at);
         }
+        backoff.session_ended(progress.ready_at, Instant::now());
 
-        match outcome {
+        let delay = match outcome {
             Outcome::Stop => return,
             Outcome::Fatal(message) => {
                 let _ = status.send(GatewayStatus::Failed(message));
                 return;
             }
-            Outcome::ReconnectNow => {}
-            Outcome::ReconnectAfter(delay) => {
-                let _ = status.send(GatewayStatus::Connecting);
-                if !sleep_or_stop(delay, &mut stop).await {
-                    return;
-                }
-            }
+            Outcome::ReconnectNow => reconnect_wait,
+            Outcome::ReconnectAfter(delay) => delay,
             Outcome::Backoff => {
-                let _ = status.send(GatewayStatus::Connecting);
-                if !sleep_or_stop(backoff, &mut stop).await {
-                    return;
-                }
-                backoff = next_backoff(backoff);
+                let delay = backoff.delay();
+                backoff.grow();
+                delay
             }
+        };
+        let _ = status.send(GatewayStatus::Connecting);
+        if !sleep_or_stop(delay, &mut stop).await {
+            return;
         }
     }
 }
@@ -352,6 +437,7 @@ mod tests {
     type ServerSocket = WebSocketStream<TcpStream>;
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(5);
+    const TEST_RECONNECT_WAIT: Duration = Duration::from_millis(50);
 
     async fn bind() -> (TcpListener, String) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -425,12 +511,13 @@ mod tests {
         let (interaction_tx, interactions) = mpsc::unbounded_channel();
         let (status_tx, status) = watch::channel(GatewayStatus::Off("test".to_string()));
         let (stop, stop_rx) = watch::channel(false);
-        let task = tokio::spawn(run_gateway(
+        let task = tokio::spawn(run_paced(
             url,
             "bot-token".to_string(),
             interaction_tx,
             status_tx,
             stop_rx,
+            TEST_RECONNECT_WAIT,
         ));
         Harness {
             interactions,
@@ -675,6 +762,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn op_7_waits_before_reconnecting_and_the_wait_is_stop_aware() {
+        timeout(TEST_TIMEOUT, async {
+            let (listener, url) = bind().await;
+            let (interaction_tx, _interactions) = mpsc::unbounded_channel();
+            let (status_tx, mut status) = watch::channel(GatewayStatus::Off("test".to_string()));
+            let (stop, stop_rx) = watch::channel(false);
+            let task = tokio::spawn(run_gateway(
+                url,
+                "bot-token".to_string(),
+                interaction_tx,
+                status_tx,
+                stop_rx,
+            ));
+            let mut first = accept(&listener).await;
+            send_hello(&mut first, 600_000).await;
+            read_non_heartbeat(&mut first).await.unwrap();
+            send_ready(&mut first).await;
+            status
+                .wait_for(|value| *value == GatewayStatus::Connected)
+                .await
+                .unwrap();
+            send(&mut first, json!({ "op": 7, "d": null })).await;
+            assert!(timeout(Duration::from_secs(1), listener.accept())
+                .await
+                .is_err());
+            assert_eq!(*status.borrow(), GatewayStatus::Connecting);
+            let stopping = Instant::now();
+            stop.send(true).unwrap();
+            timeout(Duration::from_secs(1), task)
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(stopping.elapsed() < Duration::from_secs(1));
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
     async fn stops_on_auth_failure() {
         timeout(TEST_TIMEOUT, async {
             let (listener, url) = bind().await;
@@ -835,6 +961,55 @@ mod tests {
             current = next_backoff(current);
         }
         assert_eq!(seen, vec![1, 2, 4, 8, 16, 32, 60, 60]);
+    }
+
+    #[test]
+    fn identify_budget_allows_twenty_then_waits_for_the_oldest() {
+        let start = Instant::now();
+        let mut budget = IdentifyBudget::default();
+        for index in 0..20u64 {
+            let at = start + Duration::from_secs(index * 10);
+            assert_eq!(budget.next_allowed(at), None);
+            budget.record(at);
+        }
+        let hour = Duration::from_secs(3600);
+        assert_eq!(
+            budget.next_allowed(start + Duration::from_secs(200)),
+            Some(start + hour)
+        );
+        assert_eq!(
+            budget.next_allowed(start + hour - Duration::from_secs(1)),
+            Some(start + hour)
+        );
+        assert_eq!(budget.next_allowed(start + hour), None);
+        budget.record(start + hour);
+        assert_eq!(
+            budget.next_allowed(start + hour),
+            Some(start + Duration::from_secs(10) + hour)
+        );
+    }
+
+    #[test]
+    fn backoff_resets_only_after_a_stable_session() {
+        let ready = Instant::now();
+        let mut backoff = Backoff::new();
+        for _ in 0..3 {
+            backoff.grow();
+        }
+        assert_eq!(backoff.delay(), Duration::from_secs(8));
+        backoff.session_ended(Some(ready), ready + Duration::from_secs(2));
+        assert_eq!(backoff.delay(), Duration::from_secs(8));
+        backoff.session_ended(None, ready + Duration::from_secs(120));
+        assert_eq!(backoff.delay(), Duration::from_secs(8));
+        backoff.session_ended(Some(ready), ready + Duration::from_secs(59));
+        assert_eq!(backoff.delay(), Duration::from_secs(8));
+        backoff.session_ended(Some(ready), ready + Duration::from_secs(60));
+        assert_eq!(backoff.delay(), BACKOFF_START);
+    }
+
+    #[test]
+    fn reconnect_now_waits_five_seconds() {
+        assert_eq!(RECONNECT_WAIT, Duration::from_secs(5));
     }
 
     #[test]
