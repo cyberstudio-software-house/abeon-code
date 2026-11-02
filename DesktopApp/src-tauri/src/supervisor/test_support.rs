@@ -49,7 +49,7 @@ pub(crate) struct FakeEffects {
     pub(crate) discord_posts: Mutex<Vec<PostRequest>>,
     pub(crate) discord_answers: Mutex<Vec<Vec<KeyAnswer>>>,
     pub(crate) discord_post_result: Mutex<Result<PostResult, String>>,
-    pub(crate) discord_answered_skipped: Mutex<Vec<String>>,
+    pub(crate) discord_answered_skipped: Mutex<Result<Vec<String>, String>>,
 }
 
 impl FakeEffects {
@@ -108,7 +108,7 @@ impl FakeEffects {
             discord_posts: Mutex::default(),
             discord_answers: Mutex::default(),
             discord_post_result: Mutex::new(Ok(PostResult::default())),
-            discord_answered_skipped: Mutex::default(),
+            discord_answered_skipped: Mutex::new(Ok(Vec::new())),
         })
     }
 
@@ -289,8 +289,14 @@ impl Effects for FakeEffects {
 
     fn discord_answered(&self, answers: Vec<KeyAnswer>) -> Result<Vec<String>, String> {
         self.discord_answers.lock().push(answers);
-        Ok(self.discord_answered_skipped.lock().clone())
+        self.discord_answered_skipped.lock().clone()
     }
+}
+
+pub(crate) fn link_discord(effects: &FakeEffects) {
+    let mut settings = effects.settings.lock();
+    settings.discord_enabled = true;
+    settings.discord_chat_id = Some("156".into());
 }
 
 pub(crate) fn setup() -> (Arc<FakeEffects>, Arc<SupervisorCore>) {

@@ -13,6 +13,7 @@ use crate::db::supervisor_decisions_repo::NewDecision;
 use crate::domain::supervisor::{ApprovalView, EscalationChannel};
 use crate::sessions::reader::now_ms;
 use crate::supervisor::approvals::Approval;
+use crate::supervisor::discord::registry::PostApproval;
 use crate::supervisor::discord::replies::PendingCode;
 use crate::supervisor::events::ForwardedApproval;
 use crate::supervisor::guard::{ProductionAction, ProductionRules};
@@ -125,6 +126,30 @@ impl CoreState {
             });
         }
         forwarded
+    }
+
+    pub(super) fn discord_approval(
+        &self,
+        approval_id: &str,
+        now: Instant,
+    ) -> Option<(String, String, PostApproval)> {
+        let approval = self
+            .approvals
+            .pending(now)
+            .into_iter()
+            .find(|approval| approval.id == approval_id)?;
+        let record = self.approval_records.get(approval_id).filter(|record| {
+            record.outcome.is_none() && record.channel == EscalationChannel::Discord
+        })?;
+        Some((
+            approval.session_id,
+            record.label.clone(),
+            PostApproval {
+                approval_id: approval.id,
+                action: record.action.label.clone(),
+                code: record.code.clone(),
+            },
+        ))
     }
 
     fn block_production(

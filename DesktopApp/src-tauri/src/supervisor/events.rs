@@ -66,6 +66,15 @@ pub enum SupervisorEvent {
         escalations: Vec<ForwardedEscalation>,
         approvals: Vec<ForwardedApproval>,
     },
+    DiscordAnswer {
+        question_id: String,
+        session_id: String,
+        label: String,
+        key: String,
+        question: String,
+        value: String,
+        open_keys: Vec<String>,
+    },
 }
 
 impl SupervisorEvent {
@@ -75,6 +84,7 @@ impl SupervisorEvent {
             SupervisorEvent::Question { .. }
                 | SupervisorEvent::GuardBlocked { .. }
                 | SupervisorEvent::Forwarded { .. }
+                | SupervisorEvent::DiscordAnswer { .. }
         )
     }
 }
@@ -203,6 +213,40 @@ mod tests {
             approvals: Vec::new(),
         }
         .wakes_supervisor());
+    }
+
+    fn discord_answer() -> SupervisorEvent {
+        SupervisorEvent::DiscordAnswer {
+            question_id: "q1".into(),
+            session_id: "s1".into(),
+            label: "projekt · s1".into(),
+            key: "S1".into(),
+            question: "Specyfikacja etapu 2: akceptujesz?".into(),
+            value: "tak".into(),
+            open_keys: vec!["S2".into()],
+        }
+    }
+
+    #[test]
+    fn discord_answer_event_json_shape() {
+        assert_eq!(
+            serde_json::to_value(discord_answer()).unwrap(),
+            json!({
+                "type": "discordAnswer",
+                "question_id": "q1",
+                "session_id": "s1",
+                "label": "projekt · s1",
+                "key": "S1",
+                "question": "Specyfikacja etapu 2: akceptujesz?",
+                "value": "tak",
+                "open_keys": ["S2"],
+            })
+        );
+    }
+
+    #[test]
+    fn discord_answer_wakes_the_supervisor() {
+        assert!(discord_answer().wakes_supervisor());
     }
 
     #[test]

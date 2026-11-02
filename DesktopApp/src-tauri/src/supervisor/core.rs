@@ -16,6 +16,7 @@ use crate::domain::supervisor::{
 use crate::pty::session_registry::SessionClaim;
 use crate::sessions::reader::now_ms;
 use crate::supervisor::approvals::ApprovalBook;
+use crate::supervisor::discord::registry::ClickedOption;
 use crate::supervisor::effects::{DiscordSync, Effects, SessionInfo, SessionListing};
 use crate::supervisor::events::{ForwardedEscalation, QuestionKind, ResolvedBy, SupervisorEvent};
 use crate::supervisor::hook_io::{menu_questions, HookInput, HookReply};
@@ -26,7 +27,7 @@ use crate::supervisor::settings::SupervisorSettings;
 mod operations;
 mod production;
 
-pub use operations::EscalateOutcome;
+pub use operations::{DiscordPostItemInput, EscalateOutcome};
 pub use production::{ApprovalSource, ApprovalState, ApprovalStatus};
 
 pub const ESCALATED_REASON: &str =
@@ -1212,6 +1213,26 @@ impl SupervisorCore {
         let now = now();
         self.state.lock().activate_discord(active, &settings, now);
         self.publish_with(&settings);
+    }
+
+    pub fn accepts_discord_answers(&self) -> bool {
+        let settings = self.effects.settings();
+        settings.level != SupervisorLevel::Off
+            && settings.discord_enabled
+            && settings.discord_chat_id.is_some()
+    }
+
+    pub fn record_discord_answer(&self, answer: ClickedOption) {
+        let event = SupervisorEvent::DiscordAnswer {
+            question_id: answer.question_id,
+            session_id: answer.session_id,
+            label: answer.label,
+            key: answer.key,
+            question: answer.question,
+            value: answer.value,
+            open_keys: answer.open_keys,
+        };
+        self.state.lock().push_event(event, now());
     }
 
     pub fn answer_card(
@@ -2801,5 +2822,72 @@ mod tests {
             .await;
         assert_eq!(pty_of(&effects, "s3"), Some("pty-s1".to_string()));
         assert_eq!(effects.discord_syncs(), vec![session_settled("s1")]);
+    }
+
+    fn clicked_option() -> ClickedOption {
+        ClickedOption {
+            question_id: "q1".into(),
+            session_id: "s1".into(),
+            label: "projekt · s1".into(),
+            key: "S1".into(),
+            question: "Specyfikacja etapu 2: akceptujesz?".into(),
+            value: "tak".into(),
+            open_keys: vec!["S2".into()],
+        }
+    }
+
+    fn discord_answer_event() -> SupervisorEvent {
+        SupervisorEvent::DiscordAnswer {
+            question_id: "q1".into(),
+            session_id: "s1".into(),
+            label: "projekt · s1".into(),
+            key: "S1".into(),
+            question: "Specyfikacja etapu 2: akceptujesz?".into(),
+            value: "tak".into(),
+            open_keys: vec!["S2".into()],
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn accepts_discord_answers_is_false_when_off() {
+        let (effects, core) = setup();
+        assert!(!core.accepts_discord_answers());
+        link_discord(&effects);
+        assert!(core.accepts_discord_answers());
+        effects.settings.lock().level = SupervisorLevel::Off;
+        assert!(!core.accepts_discord_answers());
+        effects.settings.lock().level = SupervisorLevel::Relay;
+        assert!(core.accepts_discord_answers());
+        effects.settings.lock().discord_enabled = false;
+        assert!(!core.accepts_discord_answers());
+        link_discord(&effects);
+        effects.settings.lock().discord_chat_id = None;
+        assert!(!core.accepts_discord_answers());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn accepts_discord_answers_while_the_supervisor_restarts() {
+        let (effects, core) = setup();
+        effects.settings.lock().level = SupervisorLevel::Assistant;
+        link_discord(&effects);
+        core.set_discord_active(true);
+        core.set_discord_active(false);
+        core.set_supervisor_state(false, false, None);
+        assert!(core.accepts_discord_answers());
+        core.record_discord_answer(clicked_option());
+        core.set_supervisor_state(true, true, Some("pty-supervisor".into()));
+        assert_eq!(core.take_events(), vec![discord_answer_event()]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn record_discord_answer_queues_the_event() {
+        let (effects, core) = setup();
+        core.record_discord_answer(clicked_option());
+        core.tick();
+        assert_eq!(effects.wakes(), 0);
+        advance(WAKE_DEBOUNCE).await;
+        core.tick();
+        assert_eq!(effects.wakes(), 1);
+        assert_eq!(core.take_events(), vec![discord_answer_event()]);
     }
 }
