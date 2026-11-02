@@ -1,8 +1,10 @@
 use std::collections::VecDeque;
 use std::fmt;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
+use parking_lot::Mutex;
 use serde_json::{json, Value};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, watch};
@@ -67,9 +69,11 @@ enum Outcome {
 type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 #[derive(Default)]
-struct IdentifyBudget {
+pub struct IdentifyBudget {
     sent: VecDeque<Instant>,
 }
+
+pub type SharedIdentifyBudget = Arc<Mutex<IdentifyBudget>>;
 
 impl IdentifyBudget {
     fn next_allowed(&self, now: Instant) -> Option<Instant> {
@@ -115,12 +119,6 @@ impl Backoff {
             self.current = BACKOFF_START;
         }
     }
-}
-
-#[derive(Default)]
-struct SessionProgress {
-    identified_at: Option<Instant>,
-    ready_at: Option<Instant>,
 }
 
 static CRYPTO_INIT: std::sync::Once = std::sync::Once::new();
@@ -239,7 +237,8 @@ async fn run_session(
     interactions: &mpsc::UnboundedSender<Interaction>,
     status: &watch::Sender<GatewayStatus>,
     stop: &mut watch::Receiver<bool>,
-    progress: &mut SessionProgress,
+    identifies: &Mutex<IdentifyBudget>,
+    ready_at: &mut Option<Instant>,
 ) -> Outcome {
     let mut sequence: Option<i64> = None;
     let mut interval = Duration::from_millis(DEFAULT_HEARTBEAT_MS);
@@ -274,7 +273,7 @@ async fn run_session(
                                     heartbeat_at =
                                         Some(Instant::now() + interval.mul_f64(jitter()));
                                     identified = true;
-                                    progress.identified_at = Some(Instant::now());
+                                    identifies.lock().record(Instant::now());
                                     if send_identify(socket, token).await {
                                         None
                                     } else {
@@ -303,7 +302,7 @@ async fn run_session(
                                     }
                                     match frame.get("t").and_then(Value::as_str) {
                                         Some("READY") => {
-                                            progress.ready_at = Some(Instant::now());
+                                            *ready_at = Some(Instant::now());
                                             let _ = status.send(GatewayStatus::Connected);
                                         }
                                         Some("INTERACTION_CREATE") => {
@@ -348,8 +347,18 @@ pub async fn run_gateway(
     interactions: mpsc::UnboundedSender<Interaction>,
     status: watch::Sender<GatewayStatus>,
     stop: watch::Receiver<bool>,
+    identifies: SharedIdentifyBudget,
 ) {
-    run_paced(url, token, interactions, status, stop, RECONNECT_WAIT).await
+    run_paced(
+        url,
+        token,
+        interactions,
+        status,
+        stop,
+        identifies,
+        RECONNECT_WAIT,
+    )
+    .await
 }
 
 async fn run_paced(
@@ -358,18 +367,19 @@ async fn run_paced(
     interactions: mpsc::UnboundedSender<Interaction>,
     status: watch::Sender<GatewayStatus>,
     mut stop: watch::Receiver<bool>,
+    identifies: SharedIdentifyBudget,
     reconnect_wait: Duration,
 ) {
     ensure_crypto_provider();
     let mut backoff = Backoff::new();
-    let mut identifies = IdentifyBudget::default();
 
     loop {
         if *stop.borrow() {
             return;
         }
         let _ = status.send(GatewayStatus::Connecting);
-        if let Some(allowed) = identifies.next_allowed(Instant::now()) {
+        let allowed = identifies.lock().next_allowed(Instant::now());
+        if let Some(allowed) = allowed {
             if !sleep_until_or_stop(allowed, &mut stop).await {
                 return;
             }
@@ -390,21 +400,19 @@ async fn run_paced(
             }
         };
 
-        let mut progress = SessionProgress::default();
+        let mut ready_at = None;
         let outcome = run_session(
             &mut socket,
             &token,
             &interactions,
             &status,
             &mut stop,
-            &mut progress,
+            &identifies,
+            &mut ready_at,
         )
         .await;
         let _ = timeout(CLOSE_TIMEOUT, socket.close(None)).await;
-        if let Some(identified_at) = progress.identified_at {
-            identifies.record(identified_at);
-        }
-        backoff.session_ended(progress.ready_at, Instant::now());
+        backoff.session_ended(ready_at, Instant::now());
 
         let delay = match outcome {
             Outcome::Stop => return,
@@ -508,6 +516,10 @@ mod tests {
     }
 
     fn start_client(url: String) -> Harness {
+        start_with_budget(url, SharedIdentifyBudget::default())
+    }
+
+    fn start_with_budget(url: String, identifies: SharedIdentifyBudget) -> Harness {
         let (interaction_tx, interactions) = mpsc::unbounded_channel();
         let (status_tx, status) = watch::channel(GatewayStatus::Off("test".to_string()));
         let (stop, stop_rx) = watch::channel(false);
@@ -517,6 +529,7 @@ mod tests {
             interaction_tx,
             status_tx,
             stop_rx,
+            identifies,
             TEST_RECONNECT_WAIT,
         ));
         Harness {
@@ -774,6 +787,7 @@ mod tests {
                 interaction_tx,
                 status_tx,
                 stop_rx,
+                SharedIdentifyBudget::default(),
             ));
             let mut first = accept(&listener).await;
             send_hello(&mut first, 600_000).await;
@@ -795,6 +809,49 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert!(stopping.elapsed() < Duration::from_secs(1));
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn an_exhausted_identify_budget_holds_the_connection_until_stopped() {
+        timeout(TEST_TIMEOUT, async {
+            let (listener, url) = bind().await;
+            let identifies = SharedIdentifyBudget::default();
+            let now = Instant::now();
+            for _ in 0..20 {
+                identifies.lock().record(now);
+            }
+            let harness = start_with_budget(url, identifies);
+            let mut status = harness.status.clone();
+            status
+                .wait_for(|value| *value == GatewayStatus::Connecting)
+                .await
+                .unwrap();
+            assert!(timeout(Duration::from_millis(300), listener.accept())
+                .await
+                .is_err());
+            assert_eq!(*status.borrow(), GatewayStatus::Connecting);
+            let stopping = Instant::now();
+            harness.shutdown().await;
+            assert!(stopping.elapsed() < Duration::from_secs(1));
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn identifies_are_recorded_in_the_shared_budget() {
+        timeout(TEST_TIMEOUT, async {
+            let (listener, url) = bind().await;
+            let identifies = SharedIdentifyBudget::default();
+            let harness = start_with_budget(url, identifies.clone());
+            let mut socket = accept(&listener).await;
+            send_hello(&mut socket, 600_000).await;
+            read_non_heartbeat(&mut socket).await.unwrap();
+            assert_eq!(identifies.lock().sent.len(), 1);
+            harness.shutdown().await;
         })
         .await
         .unwrap();
@@ -925,6 +982,7 @@ mod tests {
                 interaction_tx,
                 status_tx,
                 stop_rx,
+                SharedIdentifyBudget::default(),
             )
             .await;
             assert_eq!(*status.borrow(), GatewayStatus::Off("test".to_string()));

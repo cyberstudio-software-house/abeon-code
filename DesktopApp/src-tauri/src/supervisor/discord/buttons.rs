@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{interval_at, sleep, timeout, Instant, MissedTickBehavior};
 
 use super::client::{DiscordClient, DiscordError};
-use super::gateway::{run_gateway, GatewayStatus, Interaction};
+use super::gateway::{run_gateway, GatewayStatus, Interaction, SharedIdentifyBudget};
 use super::interactions::{callback_payload, decide};
 use super::jobs::{ButtonJob, ButtonsHandle, ERROR_BUTTONS_OFFLINE};
 use super::registry::{ButtonRegistry, PostRequest, PostResult};
@@ -89,6 +89,7 @@ struct Service {
     status: watch::Sender<GatewayStatus>,
     interactions: mpsc::UnboundedSender<Interaction>,
     gateway: Option<Gateway>,
+    identifies: SharedIdentifyBudget,
 }
 
 fn log_error(error: &dyn fmt::Display) {
@@ -444,6 +445,7 @@ impl Service {
             self.interactions.clone(),
             self.status.clone(),
             stop_receiver,
+            self.identifies.clone(),
         ));
         self.gateway = Some(Gateway { token, stop, task });
     }
@@ -484,6 +486,7 @@ pub fn start(
         status,
         interactions,
         gateway: None,
+        identifies: SharedIdentifyBudget::default(),
     };
     tokio::spawn(service.run(job_receiver));
     (ButtonsHandle::new(jobs), status_receiver)
