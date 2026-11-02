@@ -2,6 +2,7 @@ pub mod client;
 pub mod files;
 pub mod poll;
 pub mod preflight;
+pub mod registry;
 pub mod render;
 pub mod replies;
 pub mod status;
