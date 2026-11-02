@@ -18,6 +18,7 @@ pub enum ResolvedBy {
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct ForwardedEscalation {
     pub session_id: String,
+    pub question_id: String,
     pub label: String,
     pub summary: String,
 }
@@ -164,6 +165,7 @@ mod tests {
         let event = SupervisorEvent::Forwarded {
             escalations: vec![ForwardedEscalation {
                 session_id: "s1".into(),
+                question_id: "q1".into(),
                 label: "projekt · s1".into(),
                 summary: "Który kolor?".into(),
             }],
@@ -180,6 +182,7 @@ mod tests {
                 "type": "forwarded",
                 "escalations": [{
                     "session_id": "s1",
+                    "question_id": "q1",
                     "label": "projekt · s1",
                     "summary": "Który kolor?",
                 }],

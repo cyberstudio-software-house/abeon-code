@@ -45,7 +45,7 @@ describe('SupervisorPanel', () => {
     useStore.setState({
       supervisor: snapshot({
         approvals: [{ id: 'ap1', sessionId: 's1', projectId: 1, label: 'Sesja A', action: 'Wypchnięcie na main', detail: 'git push origin main', code: 'K7', channel: 'app', createdAt: 1 }],
-        escalations: [{ id: 'es1', sessionId: 's2', projectId: 2, label: 'Sesja B', summary: 'Nie wiem co dalej', channel: 'app', createdAt: 1 }],
+        escalations: [{ id: 'es1', sessionId: 's2', questionId: 'q-es1', projectId: 2, label: 'Sesja B', summary: 'Nie wiem co dalej', channel: 'app', createdAt: 1 }],
       }),
       supervisorPanelOpen: true,
       supervisorDiscordEnabled: false,
@@ -153,7 +153,7 @@ describe('SupervisorPanel', () => {
     useStore.setState({
       supervisor: snapshot({
         approvals: [{ id: 'ap1', sessionId: 's1', projectId: 1, label: 'Sesja A', action: 'git push → main', detail: 'git push', code: 'K7', channel: 'app', createdAt: now - 12 * 60_000 }],
-        escalations: [{ id: 'es1', sessionId: 's2', projectId: 2, label: 'Sesja B', summary: 'Nie wiem co dalej', channel: 'app', createdAt: now - 3 * 3_600_000 }],
+        escalations: [{ id: 'es1', sessionId: 's2', questionId: 'q-es1', projectId: 2, label: 'Sesja B', summary: 'Nie wiem co dalej', channel: 'app', createdAt: now - 3 * 3_600_000 }],
       }),
     });
     render(<SupervisorPanel />);
@@ -210,8 +210,8 @@ describe('SupervisorPanel', () => {
       supervisor: snapshot({
         approvals: [{ id: 'ap1', sessionId: 's1', projectId: 1, label: 'Sesja A', action: 'Wypchnięcie na main', detail: 'git push origin main', code: 'K7', channel: 'discord', createdAt: 1 }],
         escalations: [
-          { id: 'es1', sessionId: 's2', projectId: 2, label: 'Sesja B', summary: 'Pytanie B', channel: 'discord', createdAt: 1 },
-          { id: 'es2', sessionId: 's3', projectId: 3, label: 'Sesja C', summary: 'Pytanie C', channel: 'app', createdAt: 1 },
+          { id: 'es1', sessionId: 's2', questionId: 'q-es1', projectId: 2, label: 'Sesja B', summary: 'Pytanie B', channel: 'discord', createdAt: 1 },
+          { id: 'es2', sessionId: 's3', questionId: 'q-es2', projectId: 3, label: 'Sesja C', summary: 'Pytanie C', channel: 'app', createdAt: 1 },
         ],
       }),
     });

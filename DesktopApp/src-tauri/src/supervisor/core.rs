@@ -155,6 +155,7 @@ fn check_menu_answers(
 fn forwarded_escalation(escalation: &EscalationView) -> ForwardedEscalation {
     ForwardedEscalation {
         session_id: escalation.session_id.clone(),
+        question_id: escalation.question_id.clone(),
         label: escalation.label.clone(),
         summary: escalation.summary.clone(),
     }
@@ -666,6 +667,7 @@ impl CoreState {
         let escalation = EscalationView {
             id: Uuid::new_v4().to_string(),
             session_id: question.session_id,
+            question_id: question.id,
             project_id: question.project_id,
             label: question.label,
             summary,
@@ -2311,9 +2313,17 @@ mod tests {
             .collect()
     }
 
-    fn forwarded_escalation(session_id: &str) -> ForwardedEscalation {
+    fn forwarded_escalation(core: &SupervisorCore, session_id: &str) -> ForwardedEscalation {
+        let question_id = core
+            .snapshot()
+            .escalations
+            .iter()
+            .find(|escalation| escalation.session_id == session_id)
+            .map(|escalation| escalation.question_id.clone())
+            .unwrap();
         ForwardedEscalation {
             session_id: session_id.into(),
+            question_id,
             label: format!("projekt · {session_id}"),
             summary: ROUTED_SUMMARY.into(),
         }
@@ -2331,6 +2341,33 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn escalation_keeps_the_question_id() {
+        let (_effects, core) = setup();
+        let question_id = handed_question(&core, "s1").await;
+        core.escalate(&[question_id.clone()], ROUTED_SUMMARY)
+            .unwrap();
+        assert_eq!(core.snapshot().escalations[0].question_id, question_id);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn forwarded_escalations_carry_the_question_id() {
+        let (_effects, core) = setup();
+        core.set_discord_active(true);
+        core.report_activity(None);
+        let question_id = handed_question(&core, "s1").await;
+        core.escalate(&[question_id.clone()], ROUTED_SUMMARY)
+            .unwrap();
+        assert!(core.take_events().is_empty());
+        core.set_away(true);
+        let events = core.take_events();
+        let forwarded = match &events[0] {
+            SupervisorEvent::Forwarded { escalations, .. } => escalations.clone(),
+            other => panic!("unexpected event {other:?}"),
+        };
+        assert_eq!(forwarded[0].question_id, question_id);
     }
 
     #[tokio::test(start_paused = true)]
@@ -2445,7 +2482,7 @@ mod tests {
         assert_eq!(
             core.take_events(),
             vec![SupervisorEvent::Forwarded {
-                escalations: vec![forwarded_escalation("s1")],
+                escalations: vec![forwarded_escalation(&core, "s1")],
                 approvals: Vec::new(),
             }]
         );
@@ -2480,7 +2517,8 @@ mod tests {
             .find(|approval| approval.session_id == "s2")
             .unwrap()
             .clone();
-        core.resolve_approval(&resolved.id, true, ApprovalSource::App).unwrap();
+        core.resolve_approval(&resolved.id, true, ApprovalSource::App)
+            .unwrap();
         core.take_events();
         core.set_away(true);
         assert_eq!(
@@ -2535,7 +2573,7 @@ mod tests {
         assert_eq!(
             core.take_events(),
             vec![SupervisorEvent::Forwarded {
-                escalations: vec![forwarded_escalation("s1")],
+                escalations: vec![forwarded_escalation(&core, "s1")],
                 approvals: vec![ForwardedApproval {
                     approval_id: approval.id.clone(),
                     label: "projekt · s2".into(),
@@ -2606,7 +2644,7 @@ mod tests {
         assert_eq!(
             core.take_events(),
             vec![SupervisorEvent::Forwarded {
-                escalations: vec![forwarded_escalation("s1")],
+                escalations: vec![forwarded_escalation(&core, "s1")],
                 approvals: Vec::new(),
             }]
         );
@@ -2629,7 +2667,7 @@ mod tests {
         core.set_discord_active(true);
         core.set_away(true);
         let handle = spawn_menu(&core, "s1").await;
-        only_question_id(core.take_events());
+        let question_id = only_question_id(core.take_events());
         advance(DECISION_WINDOW).await;
         core.tick();
         assert!(matches!(reply_of(handle).await, HookReply::Deny { .. }));
@@ -2640,6 +2678,7 @@ mod tests {
             vec![SupervisorEvent::Forwarded {
                 escalations: vec![ForwardedEscalation {
                     session_id: "s1".into(),
+                    question_id,
                     label: "projekt · s1".into(),
                     summary: COLOR_QUESTION.into(),
                 }],

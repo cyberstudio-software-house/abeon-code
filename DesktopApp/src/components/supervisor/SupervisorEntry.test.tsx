@@ -15,7 +15,7 @@ const approval = (id: string) => ({
   id, sessionId: 's', projectId: 1, label: 'Sesja', action: 'git push', detail: 'git push origin main', code: 'ABC', channel: 'app' as const, createdAt: 1,
 });
 const escalation = (id: string) => ({
-  id, sessionId: 's', projectId: 1, label: 'Sesja', summary: 'Pytanie', channel: 'app' as const, createdAt: 1,
+  id, sessionId: 's', questionId: `q-${id}`, projectId: 1, label: 'Sesja', summary: 'Pytanie', channel: 'app' as const, createdAt: 1,
 });
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));

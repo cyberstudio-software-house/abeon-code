@@ -57,6 +57,7 @@ pub enum EscalationChannel {
 pub struct EscalationView {
     pub id: String,
     pub session_id: String,
+    pub question_id: String,
     #[ts(type = "number | null")]
     pub project_id: Option<i64>,
     pub label: String,
