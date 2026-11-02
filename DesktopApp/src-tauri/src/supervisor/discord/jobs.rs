@@ -2,6 +2,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::time::Instant;
 
 use super::registry::{KeyAnswer, PostRequest, PostResult};
 use crate::supervisor::effects::DiscordSync;
@@ -9,10 +10,12 @@ use crate::supervisor::effects::DiscordSync;
 pub const REPLY_TIMEOUT: Duration = Duration::from_secs(30);
 pub const ERROR_BUTTONS_OFFLINE: &str =
     "Przyciski Discorda nie działają — wyślij wiadomość przez reply";
+const POST_DEADLINE_MARGIN: Duration = Duration::from_secs(5);
 
 pub enum ButtonJob {
     Post {
         request: PostRequest,
+        deadline: Instant,
         reply: mpsc::Sender<Result<PostResult, String>>,
     },
     Answered {
@@ -55,8 +58,13 @@ impl ButtonsHandle {
         timeout: Duration,
     ) -> Result<PostResult, String> {
         let (reply, receiver) = mpsc::channel();
+        let deadline = Instant::now() + timeout.saturating_sub(POST_DEADLINE_MARGIN);
         self.jobs
-            .send(ButtonJob::Post { request, reply })
+            .send(ButtonJob::Post {
+                request,
+                deadline,
+                reply,
+            })
             .map_err(|_| offline())?;
         receiver.recv_timeout(timeout).map_err(|_| offline())?
     }
@@ -89,6 +97,40 @@ mod tests {
             handle.post_with_timeout(request(), Duration::from_millis(50)),
             Err(ERROR_BUTTONS_OFFLINE.to_string())
         );
+    }
+
+    #[test]
+    fn post_deadline_leaves_a_margin_before_the_reply_timeout() {
+        let (sender, mut jobs) = tokio::sync::mpsc::unbounded_channel();
+        let handle = ButtonsHandle::new(sender);
+        let before = tokio::time::Instant::now();
+        let waiter = {
+            let handle = handle.clone();
+            std::thread::spawn(move || handle.post_with_timeout(request(), REPLY_TIMEOUT))
+        };
+        let Some(ButtonJob::Post {
+            deadline, reply, ..
+        }) = jobs.blocking_recv()
+        else {
+            panic!("expected a post job");
+        };
+        let after = tokio::time::Instant::now();
+        assert!(deadline >= before + Duration::from_secs(25));
+        assert!(deadline <= after + Duration::from_secs(25));
+        reply.send(Ok(PostResult::default())).unwrap();
+        assert_eq!(waiter.join().unwrap(), Ok(PostResult::default()));
+
+        let waiter =
+            std::thread::spawn(move || handle.post_with_timeout(request(), Duration::from_secs(3)));
+        let Some(ButtonJob::Post {
+            deadline, reply, ..
+        }) = jobs.blocking_recv()
+        else {
+            panic!("expected a post job");
+        };
+        assert!(deadline <= tokio::time::Instant::now());
+        reply.send(Err(offline())).unwrap();
+        assert_eq!(waiter.join().unwrap(), Err(offline()));
     }
 
     #[test]

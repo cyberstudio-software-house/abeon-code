@@ -270,6 +270,7 @@ impl ButtonRegistry {
             .collect();
         let mut skipped: Vec<String> = Vec::new();
         let mut keys: Vec<PostedKey> = Vec::new();
+        let mut reported: HashSet<String> = HashSet::new();
         let mut staged: Vec<(String, Vec<String>, Vec<String>)> = Vec::new();
 
         for block in request.blocks {
@@ -279,6 +280,21 @@ impl ButtonRegistry {
             for item in block.items {
                 if open_questions.contains(&item.question_id) {
                     push_unique(&mut skipped, &item.question_id);
+                    if reported.insert(item.question_id.clone()) {
+                        keys.extend(
+                            self.items
+                                .iter()
+                                .filter(|stored| {
+                                    stored.question_id == item.question_id
+                                        && stored.state == ItemState::Open
+                                })
+                                .map(|stored| PostedKey {
+                                    question_id: stored.question_id.clone(),
+                                    question: stored.question.clone(),
+                                    key: stored.key.clone(),
+                                }),
+                        );
+                    }
                     continue;
                 }
                 let item_id = self.random_item_id();
@@ -759,7 +775,51 @@ mod tests {
         assert_eq!(second.result.skipped, vec!["q1".to_string()]);
         assert!(second.messages.is_empty());
         assert_eq!(second.result.posted, 0);
-        assert!(second.result.keys.is_empty());
+        assert_eq!(second.result.keys, first.result.keys);
+    }
+
+    #[test]
+    fn skipped_questions_still_report_their_open_keys_in_creation_order() {
+        let mut registry = ButtonRegistry::default();
+        registry.plan_post(request(vec![block(
+            "s1",
+            "sklep · A",
+            vec![
+                item("q1", &["tak"]),
+                item("q2", &["tak"]),
+                item("q1", &["nie"]),
+                item("q4", &["tak"]),
+                item("q4", &["nie"]),
+            ],
+        )]));
+        let closed = item_id_of(&registry, "S4");
+        registry.click_option(&closed, 0);
+
+        let again = registry.plan_post(request(vec![block(
+            "s1",
+            "sklep · A",
+            vec![
+                item("q4", &["tak"]),
+                item("q1", &["tak"]),
+                item("q1", &["nie"]),
+                item("q5", &["tak"]),
+            ],
+        )]));
+        assert_eq!(
+            again.result.skipped,
+            vec!["q4".to_string(), "q1".to_string()]
+        );
+        assert_eq!(keys_of(&again), vec!["S5", "S1", "S3", "S6"]);
+        let question_ids: Vec<&str> = again
+            .result
+            .keys
+            .iter()
+            .map(|posted| posted.question_id.as_str())
+            .collect();
+        assert_eq!(question_ids, vec!["q4", "q1", "q1", "q5"]);
+        assert_eq!(again.result.keys[0].question, "Pytanie q4?");
+        assert_eq!(again.messages.len(), 1);
+        assert_eq!(again.result.posted, 1);
     }
 
     #[test]

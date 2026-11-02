@@ -7,6 +7,7 @@ const MAX_TEXT_LENGTH: usize = 4000;
 const ANSWER_PREVIEW_LENGTH: usize = 40;
 const SAMPLE_KEYS: usize = 3;
 const LABEL_SEPARATOR: &str = " · ";
+const SETTLED_TEXT: &str = "rozstrzygnięte";
 
 pub const STALE_TEXT: &str = "⌛ Nieaktualne — odpowiedz tekstem";
 
@@ -171,13 +172,52 @@ fn item_text(item: &ItemView) -> String {
     content
 }
 
+fn state_prefix(key: &str) -> String {
+    format!("✅ {key}: ")
+}
+
 fn state_text(item: &ItemView) -> Option<String> {
+    let prefix = state_prefix(&item.key);
     match &item.state {
         ItemState::Open => None,
-        ItemState::Clicked(value) => Some(format!("✅ {}: {}", item.key, plain(value))),
-        ItemState::Answered(value) => Some(format!("✅ {}: {}", item.key, shorten(&plain(value)))),
-        ItemState::Settled => Some(format!("✅ {}: rozstrzygnięte", item.key)),
+        ItemState::Clicked(value) => Some(format!("{prefix}{}", plain(value))),
+        ItemState::Answered(value) => Some(format!("{prefix}{}", shorten(&plain(value)))),
+        ItemState::Settled => Some(format!("{prefix}{SETTLED_TEXT}")),
     }
+}
+
+fn resolved_text_reserve(item: &ItemView) -> usize {
+    if item.state != ItemState::Open {
+        return 0;
+    }
+    let longest_value = item
+        .options
+        .iter()
+        .map(|option| plain(option).chars().count())
+        .chain([ANSWER_PREVIEW_LENGTH + 1, SETTLED_TEXT.chars().count()])
+        .max()
+        .unwrap_or_default();
+    state_prefix(&item.key).chars().count() + longest_value
+}
+
+fn resolved_component_reserve(item: &ItemView) -> usize {
+    usize::from(item.state == ItemState::Open && item.options.is_empty())
+}
+
+fn mark_reserve(approval: &ApprovalRow) -> usize {
+    if approval.mark != ApprovalMark::Pending {
+        return 0;
+    }
+    [
+        ApprovalMark::Approved,
+        ApprovalMark::Rejected,
+        ApprovalMark::Expired,
+    ]
+    .into_iter()
+    .filter_map(mark_text)
+    .map(|text| text.chars().count())
+    .max()
+    .unwrap_or_default()
 }
 
 fn option_row(item: &ItemView) -> Value {
@@ -339,8 +379,14 @@ pub fn replace_row(components: &Value, custom_id: &str, text: &str) -> Value {
 
 fn within_limits(view: &MessageView) -> bool {
     let json = render(view);
-    component_count(&json["components"]) <= MAX_COMPONENTS
-        && text_length(&json["components"]) <= MAX_TEXT_LENGTH
+    let items = || view.blocks.iter().flat_map(|block| block.items.iter());
+    let approvals = view.blocks.iter().flat_map(|block| block.approvals.iter());
+    let components = component_count(&json["components"])
+        + items().map(resolved_component_reserve).sum::<usize>();
+    let text = text_length(&json["components"])
+        + items().map(resolved_text_reserve).sum::<usize>()
+        + approvals.map(mark_reserve).sum::<usize>();
+    components <= MAX_COMPONENTS && text <= MAX_TEXT_LENGTH
 }
 
 fn entry_count(block: &BlockView) -> usize {
@@ -864,6 +910,60 @@ mod tests {
         assert!(messages.len() >= 2);
         assert!(messages.iter().all(fits));
         assert_eq!(messages.last().unwrap().footer.as_deref(), Some("F"));
+    }
+
+    fn resolved(view: &MessageView) -> MessageView {
+        let mut copy = view.clone();
+        for block in &mut copy.blocks {
+            for item in &mut block.items {
+                item.state = ItemState::Answered("x".repeat(60));
+            }
+            for approval in &mut block.approvals {
+                approval.mark = ApprovalMark::Approved;
+            }
+        }
+        copy
+    }
+
+    #[test]
+    fn split_leaves_room_for_resolved_states() {
+        let entries = (1..=12)
+            .map(|n| {
+                let mut entry = item(&format!("i{n}"), &format!("S{n}"), &["a"]);
+                entry.question = "ż".repeat(300);
+                entry
+            })
+            .collect();
+        let open = view_of(vec![block("p · t", entries, vec![])]);
+        let open_text = text_length(&render(&open)["components"]);
+        assert!(open_text > 3500 && open_text <= 4000);
+        assert!(fits(&open));
+        assert!(!fits(&resolved(&open)));
+
+        let messages = split(open.blocks.clone(), None, None);
+        assert!(messages.len() >= 2);
+        assert!(messages.iter().all(|message| fits(&resolved(message))));
+        let total: usize = messages
+            .iter()
+            .flat_map(|m| &m.blocks)
+            .map(|b| b.items.len())
+            .sum();
+        assert_eq!(total, 12);
+    }
+
+    #[test]
+    fn split_leaves_room_for_resolved_text_only_items_and_approvals() {
+        let entries: Vec<ItemView> = (1..=30)
+            .map(|n| item(&format!("i{n}"), &format!("S{n}"), &[]))
+            .collect();
+        let approvals = vec![approval("a1", ApprovalMark::Pending)];
+        let open = view_of(vec![block("p · t", entries, approvals)]);
+        assert!(fits(&open));
+        assert!(!fits(&resolved(&open)));
+
+        let messages = split(open.blocks.clone(), None, None);
+        assert!(messages.len() >= 2);
+        assert!(messages.iter().all(|message| fits(&resolved(message))));
     }
 
     #[test]

@@ -351,7 +351,7 @@ pub fn tool_definitions() -> Value {
                                         "text_options": {
                                             "type": "array",
                                             "items": { "type": "string" },
-                                            "description": "Odpowiedzi, które użytkownik wpisuje tekstem"
+                                            "description": "Odpowiedzi, które użytkownik wpisuje tekstem: najwyżej 5, każda od 1 do 40 znaków"
                                         },
                                         "context": text_property("Krótki kontekst pytania, najwyżej 300 znaków")
                                     },

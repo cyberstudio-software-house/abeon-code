@@ -25,10 +25,25 @@ const ERROR_QUESTION_TOO_LONG: &str = "Treść pytania może mieć najwyżej 300
 const ERROR_CONTEXT_TOO_LONG: &str = "Kontekst może mieć najwyżej 300 znaków";
 const ERROR_TOO_MANY_OPTIONS: &str = "Pytanie może mieć najwyżej 5 opcji z przyciskami";
 const ERROR_OPTION_LENGTH: &str = "Opcja przycisku musi mieć od 1 do 25 znaków";
+const ERROR_TOO_MANY_TEXT_OPTIONS: &str = "Pytanie może mieć najwyżej 5 opcji tekstowych";
+const ERROR_TEXT_OPTION_LENGTH: &str = "Opcja tekstowa musi mieć od 1 do 40 znaków";
 const MAX_QUESTION_CHARS: usize = 300;
 const MAX_CONTEXT_CHARS: usize = 300;
 const MAX_OPTIONS: usize = 5;
 const MAX_OPTION_CHARS: usize = 25;
+const MAX_TEXT_OPTIONS: usize = 5;
+const MAX_TEXT_OPTION_CHARS: usize = 40;
+
+fn trimmed_within(values: &[String], max_chars: usize) -> Option<Vec<String>> {
+    let trimmed: Vec<String> = values
+        .iter()
+        .map(|value| value.trim().to_string())
+        .collect();
+    trimmed
+        .iter()
+        .all(|value| !value.is_empty() && value.chars().count() <= max_chars)
+        .then_some(trimmed)
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct EscalateOutcome {
@@ -64,22 +79,18 @@ fn post_item(input: DiscordPostItemInput) -> Result<PostItem, String> {
     if input.options.len() > MAX_OPTIONS {
         return Err(ERROR_TOO_MANY_OPTIONS.to_string());
     }
-    let options: Vec<String> = input
-        .options
-        .iter()
-        .map(|option| option.trim().to_string())
-        .collect();
-    if options
-        .iter()
-        .any(|option| option.is_empty() || option.chars().count() > MAX_OPTION_CHARS)
-    {
-        return Err(ERROR_OPTION_LENGTH.to_string());
+    let options = trimmed_within(&input.options, MAX_OPTION_CHARS)
+        .ok_or_else(|| ERROR_OPTION_LENGTH.to_string())?;
+    if input.text_options.len() > MAX_TEXT_OPTIONS {
+        return Err(ERROR_TOO_MANY_TEXT_OPTIONS.to_string());
     }
+    let text_options = trimmed_within(&input.text_options, MAX_TEXT_OPTION_CHARS)
+        .ok_or_else(|| ERROR_TEXT_OPTION_LENGTH.to_string())?;
     Ok(PostItem {
         question_id: input.question_id,
         question: question.to_string(),
         options,
-        text_options: input.text_options,
+        text_options,
         context: context.map(str::to_string),
     })
 }
@@ -481,7 +492,7 @@ mod tests {
             question_id: question_id.clone(),
             question: "ż".repeat(300),
             options: vec!["ż".repeat(25); 5],
-            text_options: vec!["a".repeat(400)],
+            text_options: vec!["ź".repeat(40); 5],
             context: Some("ż".repeat(300)),
         };
         assert!(core.discord_post(vec![longest], Vec::new()).is_ok());
@@ -492,9 +503,45 @@ mod tests {
                 question_id: question_id.clone(),
                 question: "ż".repeat(300),
                 options: vec!["ż".repeat(25); 5],
-                text_options: vec!["a".repeat(400)],
+                text_options: vec!["ź".repeat(40); 5],
                 context: Some("ż".repeat(300)),
             }]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn discord_post_limits_text_options() {
+        let (effects, core) = discord_ready();
+        let question_id = discord_escalation(&core, "s1").await;
+        let with_text_options = |text_options: Vec<String>| DiscordPostItemInput {
+            text_options,
+            ..item(&question_id, "Który wariant?", &["A"])
+        };
+        let error_of =
+            |input: DiscordPostItemInput| core.discord_post(vec![input], Vec::new()).unwrap_err();
+        assert_eq!(
+            error_of(with_text_options(vec!["uwagi".into(); 6])),
+            "Pytanie może mieć najwyżej 5 opcji tekstowych"
+        );
+        for invalid in ["", "   ", &"ź".repeat(41)] {
+            assert_eq!(
+                error_of(with_text_options(vec!["uwagi".into(), invalid.to_string()])),
+                "Opcja tekstowa musi mieć od 1 do 40 znaków"
+            );
+        }
+        assert!(effects.discord_posts.lock().is_empty());
+        assert!(core
+            .discord_post(
+                vec![with_text_options(vec![
+                    " uwagi ".into(),
+                    format!(" {} ", "ź".repeat(40))
+                ])],
+                Vec::new()
+            )
+            .is_ok());
+        assert_eq!(
+            effects.discord_posts.lock()[0].blocks[0].items[0].text_options,
+            vec!["uwagi".to_string(), "ź".repeat(40)]
         );
     }
 

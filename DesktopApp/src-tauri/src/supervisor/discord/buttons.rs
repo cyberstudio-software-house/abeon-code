@@ -14,7 +14,7 @@ use super::client::{DiscordClient, DiscordError};
 use super::gateway::{run_gateway, GatewayStatus, Interaction};
 use super::interactions::{callback_payload, decide};
 use super::jobs::{ButtonJob, ButtonsHandle, ERROR_BUTTONS_OFFLINE};
-use super::registry::{ButtonRegistry, KeyAnswer, PostRequest, PostResult};
+use super::registry::{ButtonRegistry, PostRequest, PostResult};
 use super::render::{render, ApprovalMark};
 use crate::supervisor::core::{ApprovalState, SupervisorCore};
 use crate::supervisor::effects::DiscordSync;
@@ -59,13 +59,21 @@ type Current = Result<Arc<Live>, String>;
 
 struct Shared {
     core: Arc<SupervisorCore>,
+    config: ConfigSource,
     registry: Mutex<ButtonRegistry>,
     current: Mutex<Current>,
+    dirty: Mutex<BTreeSet<u64>>,
 }
 
 impl Shared {
     fn current(&self) -> Current {
         self.current.lock().clone()
+    }
+
+    fn allow_from(&self) -> Vec<String> {
+        (self.config)()
+            .map(|config| config.allow_from)
+            .unwrap_or_default()
     }
 }
 
@@ -77,16 +85,22 @@ struct Gateway {
 
 struct Service {
     shared: Arc<Shared>,
-    config: ConfigSource,
     endpoints: Endpoints,
     status: watch::Sender<GatewayStatus>,
     interactions: mpsc::UnboundedSender<Interaction>,
     gateway: Option<Gateway>,
-    dirty: BTreeSet<u64>,
 }
 
 fn log_error(error: &dyn fmt::Display) {
     eprintln!("supervisor: discord buttons: {error}");
+}
+
+fn worth_retrying(error: &DiscordError) -> bool {
+    match error {
+        DiscordError::Network(_) | DiscordError::RateLimited(_) => true,
+        DiscordError::Http(status) => *status >= 500,
+        DiscordError::Unauthorized | DiscordError::Decode(_) => false,
+    }
 }
 
 fn callback_error(error: &DiscordError) -> String {
@@ -158,6 +172,9 @@ async fn patch_message(shared: &Shared, live: &Live, message: u64) {
             Ok(None) => return,
             Err(error) => {
                 log_error(&error);
+                if worth_retrying(&error) {
+                    shared.dirty.lock().insert(message);
+                }
                 return;
             }
         };
@@ -220,6 +237,10 @@ async fn post(
     request: PostRequest,
     deadline: Instant,
 ) -> Result<PostResult, String> {
+    if deadline <= Instant::now() {
+        log_error(&"post deadline passed before the post was picked up");
+        return Err(ERROR_BUTTONS_OFFLINE.to_string());
+    }
     let (planned, result) = {
         let mut registry = shared.registry.lock();
         let planned = registry.plan_post(request);
@@ -259,28 +280,17 @@ async fn post(
     Ok(result)
 }
 
-async fn answer(shared: &Shared, live: &Live, answers: &[KeyAnswer]) -> Vec<String> {
-    let outcome = shared.registry.lock().answer_keys(answers);
-    patch(shared, live, outcome.changed).await;
-    outcome.skipped
-}
-
 async fn handle_interaction(shared: Arc<Shared>, interaction: Interaction) {
     let Ok(live) = shared.current() else {
         return;
     };
     let decided = {
         let shared = shared.clone();
-        let live = live.clone();
         let interaction = interaction.clone();
         tokio::task::spawn_blocking(move || {
+            let allow_from = shared.allow_from();
             let mut registry = shared.registry.lock();
-            decide(
-                &interaction,
-                &live.config.allow_from,
-                &mut registry,
-                &shared.core,
-            )
+            decide(&interaction, &allow_from, &mut registry, &shared.core)
         })
         .await
     };
@@ -337,35 +347,42 @@ impl Service {
         let current = self.shared.current();
         match job {
             ButtonJob::Reconfigure => self.refresh().await,
-            ButtonJob::Post { request, reply } => {
+            ButtonJob::Post {
+                request,
+                deadline,
+                reply,
+            } => {
                 let outcome = match &current {
                     Ok(live) => {
-                        let deadline = Instant::now() + POST_DEADLINE;
+                        let deadline = (Instant::now() + POST_DEADLINE).min(deadline);
                         post(&self.shared, live, request, deadline).await
                     }
-                    Err(reason) => Err(reason.clone()),
+                    Err(_) => Err(ERROR_BUTTONS_OFFLINE.to_string()),
                 };
                 let _ = reply.send(outcome);
             }
-            ButtonJob::Answered { answers, reply } => {
-                let outcome = match &current {
-                    Ok(live) => Ok(answer(&self.shared, live, &answers).await),
-                    Err(reason) => Err(reason.clone()),
-                };
-                let _ = reply.send(outcome);
-            }
+            ButtonJob::Answered { answers, reply } => match &current {
+                Ok(live) => {
+                    let outcome = self.shared.registry.lock().answer_keys(&answers);
+                    let _ = reply.send(Ok(outcome.skipped));
+                    patch(&self.shared, live, outcome.changed).await;
+                }
+                Err(_) => {
+                    let _ = reply.send(Err(ERROR_BUTTONS_OFFLINE.to_string()));
+                }
+            },
             ButtonJob::Sync(change) => {
                 let changed = apply_sync(&mut self.shared.registry.lock(), change);
                 match &current {
                     Ok(live) => patch(&self.shared, live, changed).await,
-                    Err(_) => self.dirty.extend(changed),
+                    Err(_) => self.shared.dirty.lock().extend(changed),
                 }
             }
         }
     }
 
     async fn refresh(&mut self) {
-        let source = self.config.clone();
+        let source = self.shared.config.clone();
         let read = tokio::task::spawn_blocking(move || source())
             .await
             .unwrap_or_else(|error| Err(error.to_string()));
@@ -408,14 +425,14 @@ impl Service {
         }
     }
 
-    async fn flush_dirty(&mut self) {
-        if self.dirty.is_empty() {
-            return;
-        }
+    async fn flush_dirty(&self) {
         let Ok(live) = self.shared.current() else {
             return;
         };
-        let dirty = std::mem::take(&mut self.dirty);
+        let dirty = std::mem::take(&mut *self.shared.dirty.lock());
+        if dirty.is_empty() {
+            return;
+        }
         patch(&self.shared, &live, dirty).await;
     }
 
@@ -455,18 +472,18 @@ pub fn start(
     let (status, status_receiver) = watch::channel(GatewayStatus::Connecting);
     let shared = Arc::new(Shared {
         core,
+        config,
         registry: Mutex::new(ButtonRegistry::default()),
         current: Mutex::new(Err(String::new())),
+        dirty: Mutex::new(BTreeSet::new()),
     });
     tokio::spawn(dispatch_interactions(shared.clone(), interaction_receiver));
     let service = Service {
         shared,
-        config,
         endpoints,
         status,
         interactions,
         gateway: None,
-        dirty: BTreeSet::new(),
     };
     tokio::spawn(service.run(job_receiver));
     (ButtonsHandle::new(jobs), status_receiver)
@@ -483,7 +500,9 @@ mod tests {
     use wiremock::matchers::{header, method, path};
     use wiremock::{Mock, MockServer, Request, ResponseTemplate};
 
-    use crate::supervisor::discord::registry::{PostApproval, PostBlock, PostItem, PostedKey};
+    use crate::supervisor::discord::registry::{
+        KeyAnswer, PostApproval, PostBlock, PostItem, PostedKey,
+    };
     use crate::supervisor::events::SupervisorEvent;
     use crate::supervisor::test_support::{bash, link_discord, setup};
 
@@ -670,8 +689,10 @@ mod tests {
     fn shared_for(core: Arc<SupervisorCore>) -> Shared {
         Shared {
             core,
+            config: Arc::new(|| Ok(config_with(BOT_TOKEN))),
             registry: Mutex::new(ButtonRegistry::default()),
             current: Mutex::new(Err(String::new())),
+            dirty: Mutex::new(BTreeSet::new()),
         }
     }
 
@@ -858,6 +879,7 @@ mod tests {
             let again = post(&handle, request).await.unwrap();
             assert_eq!(again.posted, 0);
             assert_eq!(again.skipped, vec!["q1".to_string()]);
+            assert_eq!(again.keys, result.keys);
         })
         .await
         .unwrap();
@@ -915,14 +937,17 @@ mod tests {
             let again = post(&handle, request).await.unwrap();
             assert!(again.posted >= 1);
             assert!(!again.skipped.is_empty());
-            assert!(!again.keys.is_empty());
-            assert_eq!(again.skipped.len() + again.keys.len(), 12);
+            assert!(again.skipped.len() < 12);
+            assert_eq!(again.keys.len(), 12);
             let mut questions: Vec<String> = again
                 .keys
                 .iter()
                 .map(|posted| posted.question_id.clone())
-                .chain(again.skipped.iter().cloned())
                 .collect();
+            assert!(again
+                .skipped
+                .iter()
+                .all(|question_id| questions.contains(question_id)));
             questions.sort();
             questions.dedup();
             assert_eq!(questions.len(), 12);
@@ -1003,7 +1028,7 @@ mod tests {
             .await
             .unwrap();
             assert_eq!(skipped, vec!["P9".to_string()]);
-            let edits = requests(&server, "PATCH", &message_path("d-1")).await;
+            let edits = wait_for_requests(&server, "PATCH", &message_path("d-1"), 1).await;
             assert_eq!(edits.len(), 1);
             let payload = body(&edits[0]);
             assert!(strings(&payload, "content").contains(&"✅ P1: tak".to_string()));
@@ -1013,10 +1038,41 @@ mod tests {
                 answered(&handle, vec![key_answer("P1", "nie")]).await,
                 Ok(vec!["P1".to_string()])
             );
+            sleep(SILENCE).await;
             assert_eq!(
                 requests(&server, "PATCH", &message_path("d-1")).await.len(),
                 1
             );
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn answered_replies_before_a_slow_patch_finishes() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness { server, handle, .. } = harness(Ok(config_with(BOT_TOKEN))).await;
+            respond_to_posts(&server, "d-1").await;
+            Mock::given(method("PATCH"))
+                .and(path(message_path("d-1")))
+                .respond_with(posted_reply("d-1").set_delay(Duration::from_secs(3)))
+                .mount(&server)
+                .await;
+            assert_eq!(
+                post(&handle, block(vec![item("q1", &["tak", "nie"])], vec![]))
+                    .await
+                    .unwrap()
+                    .posted,
+                1
+            );
+            let started = Instant::now();
+            assert_eq!(
+                answered(&handle, vec![key_answer("P1", "tak")]).await,
+                Ok(vec![])
+            );
+            assert!(started.elapsed() < Duration::from_secs(1));
+            let edits = wait_for_requests(&server, "PATCH", &message_path("d-1"), 1).await;
+            assert!(strings(&body(&edits[0]), "content").contains(&"✅ P1: tak".to_string()));
         })
         .await
         .unwrap();
@@ -1438,12 +1494,12 @@ mod tests {
             handle.reconfigure();
             assert_eq!(
                 post(&handle, block(vec![item("q1", &["tak"])], vec![])).await,
-                Err(NO_TOKEN.to_string())
+                Err(ERROR_BUTTONS_OFFLINE.to_string())
             );
             assert!(!status.has_changed().unwrap());
             assert_eq!(
                 answered(&handle, vec![key_answer("P1", "tak")]).await,
-                Err(NO_TOKEN.to_string())
+                Err(ERROR_BUTTONS_OFFLINE.to_string())
             );
             assert!(timeout(SILENCE, listener.accept()).await.is_err());
             assert_eq!(*status.borrow(), GatewayStatus::Off(NO_TOKEN.into()));
@@ -1505,6 +1561,191 @@ mod tests {
             assert_eq!(identify["op"], 2);
             assert_eq!(identify["d"]["token"], "second-token");
             connected(&mut status).await;
+        })
+        .await
+        .unwrap();
+    }
+
+    async fn post_within(
+        handle: &ButtonsHandle,
+        request: PostRequest,
+        reply_timeout: Duration,
+    ) -> Result<PostResult, String> {
+        let handle = handle.clone();
+        tokio::task::spawn_blocking(move || handle.post_with_timeout(request, reply_timeout))
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_post_whose_deadline_passed_in_the_queue_is_not_planned() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness { server, handle, .. } = harness(Ok(config_with(BOT_TOKEN))).await;
+            respond_to_posts(&server, "d-1").await;
+            let request = block(vec![item("q1", &["tak"])], vec![]);
+            assert_eq!(
+                post_within(&handle, request.clone(), Duration::from_secs(5)).await,
+                Err(ERROR_BUTTONS_OFFLINE.to_string())
+            );
+            assert!(requests(&server, "POST", MESSAGES_PATH).await.is_empty());
+
+            let result = post(&handle, request).await.unwrap();
+            assert_eq!(result.posted, 1);
+            assert_eq!(result.keys[0].key, "P1");
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_enqueue_deadline_cuts_a_slow_post_short() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness { server, handle, .. } = harness(Ok(config_with(BOT_TOKEN))).await;
+            Mock::given(method("POST"))
+                .and(path(MESSAGES_PATH))
+                .respond_with(posted_reply("d-1").set_delay(Duration::from_secs(4)))
+                .up_to_n_times(1)
+                .with_priority(1)
+                .mount(&server)
+                .await;
+            respond_to_posts(&server, "d-2").await;
+            let request = block(vec![item("q1", &["tak"])], vec![]);
+
+            let started = Instant::now();
+            assert_eq!(
+                post_within(&handle, request.clone(), Duration::from_secs(6)).await,
+                Err(ERROR_BUTTONS_OFFLINE.to_string())
+            );
+            assert!(started.elapsed() < Duration::from_millis(2500));
+            assert_eq!(requests(&server, "POST", MESSAGES_PATH).await.len(), 1);
+
+            let again = post(&handle, request).await.unwrap();
+            assert_eq!(again.posted, 1);
+            assert!(again.skipped.is_empty());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_failed_patch_is_sent_again_on_the_next_refresh() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness { server, handle, .. } = harness(Ok(config_with(BOT_TOKEN))).await;
+            respond_to_posts(&server, "d-1").await;
+            Mock::given(method("PATCH"))
+                .and(path(message_path("d-1")))
+                .respond_with(ResponseTemplate::new(500))
+                .up_to_n_times(1)
+                .with_priority(1)
+                .mount(&server)
+                .await;
+            respond_to_edits(&server, "d-1").await;
+            let request = block(vec![item("q1", &["tak", "nie"])], vec![]);
+            assert_eq!(post(&handle, request).await.unwrap().posted, 1);
+
+            handle.sync(DiscordSync::QuestionSettled {
+                question_id: "q1".into(),
+            });
+            wait_for_requests(&server, "PATCH", &message_path("d-1"), 1).await;
+            sleep(SILENCE).await;
+            assert_eq!(
+                requests(&server, "PATCH", &message_path("d-1")).await.len(),
+                1
+            );
+
+            handle.reconfigure();
+            let edits = wait_for_requests(&server, "PATCH", &message_path("d-1"), 2).await;
+            let fresh = body(&edits[1]);
+            assert_eq!(fresh["flags"], 32768);
+            assert!(strings(&fresh, "content").contains(&"✅ P1: rozstrzygnięte".to_string()));
+            assert!(strings(&fresh, "custom_id").is_empty());
+
+            handle.reconfigure();
+            sleep(SILENCE).await;
+            assert_eq!(
+                requests(&server, "PATCH", &message_path("d-1")).await.len(),
+                2
+            );
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_patch_of_a_deleted_message_is_not_sent_again() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness { server, handle, .. } = harness(Ok(config_with(BOT_TOKEN))).await;
+            respond_to_posts(&server, "d-1").await;
+            Mock::given(method("PATCH"))
+                .and(path(message_path("d-1")))
+                .respond_with(ResponseTemplate::new(404))
+                .mount(&server)
+                .await;
+            let request = block(vec![item("q1", &["tak", "nie"])], vec![]);
+            assert_eq!(post(&handle, request).await.unwrap().posted, 1);
+
+            handle.sync(DiscordSync::QuestionSettled {
+                question_id: "q1".into(),
+            });
+            wait_for_requests(&server, "PATCH", &message_path("d-1"), 1).await;
+            handle.reconfigure();
+            sleep(SILENCE).await;
+            assert_eq!(
+                requests(&server, "PATCH", &message_path("d-1")).await.len(),
+                1
+            );
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_click_reads_allow_from_fresh() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness {
+                server,
+                listener,
+                config,
+                handle,
+                mut status,
+                core,
+            } = harness(Ok(config_with(BOT_TOKEN))).await;
+            core.on_session_hook(bash("s1", "git push origin main"))
+                .await;
+            let approval = core.snapshot().approvals.into_iter().next().unwrap();
+            let approve = format!("abeon:a:{}:y", approval.id);
+            respond_to_posts(&server, "d-1").await;
+            respond_to_callback(&server, "i-1", ResponseTemplate::new(204)).await;
+            respond_to_callback(&server, "i-2", ResponseTemplate::new(204)).await;
+            let (clicks, pending_clicks) = mpsc::unbounded_channel();
+            let gateway = serve_clicks(listener, pending_clicks);
+            connected(&mut status).await;
+            let request = block(vec![], vec![approval_row(&approval)]);
+            assert_eq!(post(&handle, request).await.unwrap().posted, 1);
+
+            *config.lock() = Ok(ButtonsConfig {
+                allow_from: vec!["user-9".into()],
+                ..config_with(BOT_TOKEN)
+            });
+            clicks.send(click("i-1", &approve)).unwrap();
+            let callbacks = wait_for_requests(&server, "POST", &callback_path("i-1"), 1).await;
+            let refused = body(&callbacks[0]);
+            assert_eq!(refused["type"], 4);
+            assert_eq!(refused["data"]["content"], "Brak uprawnień.");
+            assert_eq!(
+                core.approval_status(&approval.id).unwrap().status,
+                ApprovalState::Pending
+            );
+
+            *config.lock() = Err("Discord wyłączony".into());
+            clicks.send(click("i-2", &approve)).unwrap();
+            let callbacks = wait_for_requests(&server, "POST", &callback_path("i-2"), 1).await;
+            assert_eq!(body(&callbacks[0])["type"], 4);
+            assert_eq!(
+                core.approval_status(&approval.id).unwrap().status,
+                ApprovalState::Pending
+            );
+            gateway.abort();
         })
         .await
         .unwrap();
