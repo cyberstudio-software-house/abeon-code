@@ -521,10 +521,11 @@ impl ButtonRegistry {
         let mut changed = Vec::new();
         let mut skipped = Vec::new();
         for answer in answers {
+            let key = answer.key.to_uppercase();
             let open = self
                 .items
                 .iter_mut()
-                .find(|item| item.key == answer.key && item.state == ItemState::Open);
+                .find(|item| item.key == key && item.state == ItemState::Open);
             match open {
                 Some(item) => {
                     item.state = ItemState::Answered(answer.value.clone());
@@ -749,16 +750,6 @@ mod tests {
     }
 
     #[test]
-    fn keys_are_ordered_by_creation_not_by_text() {
-        let mut registry = ButtonRegistry::default();
-        let items: Vec<PostItem> = (0..11).map(|n| item(&format!("q{n}"), &["tak"])).collect();
-        let planned = registry.plan_post(request(vec![block("s1", "sklep · A", items)]));
-        assert_eq!(keys_of(&planned)[9], "S10");
-        let clicked_id = item_id_of(&registry, "S1");
-        assert!(registry.click_option(&clicked_id, 0).is_some());
-    }
-
-    #[test]
     fn posting_an_open_question_again_is_skipped() {
         let mut registry = ButtonRegistry::default();
         let same_request = request(vec![block("s1", "sklep · A", vec![item("q1", &["tak"])])]);
@@ -965,11 +956,58 @@ mod tests {
     fn open_keys_follow_creation_order() {
         let mut registry = ButtonRegistry::default();
         let items: Vec<PostItem> = (0..11).map(|_| item("q1", &["tak"])).collect();
-        registry.plan_post(request(vec![block("s1", "sklep · A", items)]));
+        let planned = registry.plan_post(request(vec![block("s1", "sklep · A", items)]));
+        assert_eq!(keys_of(&planned)[9], "S10");
         let first = item_id_of(&registry, "S1");
         let clicked = registry.click_option(&first, 0).unwrap();
         let expected: Vec<String> = (2..=11).map(|n| format!("S{n}")).collect();
         assert_eq!(clicked.open_keys, expected);
+    }
+
+    #[test]
+    fn answer_keys_ignores_the_case_of_the_key() {
+        let mut registry = ButtonRegistry::default();
+        let planned = registry.plan_post(request(vec![block(
+            "s1",
+            "sklep · A",
+            vec![item("q1", &["tak"])],
+        )]));
+        let outcome = registry.answer_keys(&[
+            KeyAnswer {
+                key: "s1".into(),
+                value: "tak".into(),
+            },
+            KeyAnswer {
+                key: "s9".into(),
+                value: "x".into(),
+            },
+        ]);
+        assert_eq!(outcome.changed, vec![planned.messages[0]]);
+        assert_eq!(outcome.skipped, vec!["s9".to_string()]);
+        assert_eq!(
+            first_item_state(&registry, planned.messages[0], "S1"),
+            ItemState::Answered("tak".into())
+        );
+    }
+
+    #[test]
+    fn only_projects_with_open_items_count_as_rivals() {
+        let mut registry = ButtonRegistry::default();
+        registry.plan_post(request(vec![block(
+            "s1",
+            "sklep · A",
+            vec![item("q1", &["tak"])],
+        )]));
+        registry.answer_keys(&[KeyAnswer {
+            key: "S1".into(),
+            value: "tak".into(),
+        }]);
+        let planned = registry.plan_post(request(vec![block(
+            "s2",
+            "serwis · B",
+            vec![item("q2", &["tak"])],
+        )]));
+        assert_eq!(keys_of(&planned), vec!["S2"]);
     }
 
     #[test]
