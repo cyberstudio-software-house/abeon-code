@@ -17,7 +17,7 @@ pub enum ButtonJob {
     },
     Answered {
         answers: Vec<KeyAnswer>,
-        reply: mpsc::Sender<Vec<String>>,
+        reply: mpsc::Sender<Result<Vec<String>, String>>,
     },
     Sync(DiscordSync),
     Reconfigure,
@@ -66,7 +66,9 @@ impl ButtonsHandle {
         self.jobs
             .send(ButtonJob::Answered { answers, reply })
             .map_err(|_| offline())?;
-        receiver.recv_timeout(REPLY_TIMEOUT).map_err(|_| offline())
+        receiver
+            .recv_timeout(REPLY_TIMEOUT)
+            .map_err(|_| offline())?
     }
 }
 

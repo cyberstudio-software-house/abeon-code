@@ -1,3 +1,4 @@
+pub mod buttons;
 pub mod client;
 pub mod files;
 pub mod gateway;

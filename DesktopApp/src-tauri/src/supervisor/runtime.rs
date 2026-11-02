@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::sync::watch;
 
 use crate::cli::request::OpenRequest;
 use crate::commands::pty::MAX_INITIAL_PROMPT_BYTES;
@@ -27,8 +28,10 @@ use crate::sessions::reader::now_ms;
 use crate::state::AppState;
 use crate::supervisor::claude_md::WAKE_TEXT;
 use crate::supervisor::core::{cap_bytes, SupervisorCore, QUIET_WINDOW};
-use crate::supervisor::discord::client::DiscordClient;
+use crate::supervisor::discord::buttons::{self, ButtonsConfig, Endpoints};
+use crate::supervisor::discord::client::{DiscordClient, API_BASE};
 use crate::supervisor::discord::files::DiscordFiles;
+use crate::supervisor::discord::gateway::{GatewayStatus, GATEWAY_URL};
 use crate::supervisor::discord::jobs::{ButtonsHandle, ERROR_BUTTONS_OFFLINE};
 use crate::supervisor::discord::poll::{poll_approvals, POLL_INTERVAL};
 use crate::supervisor::discord::registry::{KeyAnswer, PostRequest, PostResult};
@@ -67,6 +70,10 @@ const ERROR_NOT_A_DIRECTORY: &str =
 const ERROR_PROMPT_SIZE: &str = "Polecenie musi być niepuste, bez znaku NUL i mieć najwyżej";
 const ERROR_UNREGISTERED_PROJECT: &str =
     "Sesję można otworzyć tylko w projekcie zarejestrowanym w AbeonCode";
+const REASON_DISCORD_OFF: &str = "Discord wyłączony";
+const REASON_CHAT_UNLINKED: &str = "rozmowa niesparowana";
+const REASON_NO_TOKEN: &str = "brak tokenu bota";
+const REASON_NO_USER: &str = "brak sparowanego użytkownika";
 
 fn session_label(project_name: &str, title: &str) -> String {
     format!("{project_name} · {title}")
@@ -466,11 +473,18 @@ pub struct SupervisorRuntime {
     active: AtomicBool,
     applied: Mutex<AppliedSettings>,
     session_hooks: Mutex<Option<PathBuf>>,
+    buttons_status: OnceLock<watch::Receiver<GatewayStatus>>,
 }
 
 impl SupervisorRuntime {
     fn is_active(&self) -> bool {
         self.active.load(Ordering::SeqCst)
+    }
+
+    fn reconfigure_buttons(&self) {
+        if let Some(buttons) = self.effects.buttons.get() {
+            buttons.reconfigure();
+        }
     }
 
     #[cfg(unix)]
@@ -487,6 +501,11 @@ impl SupervisorRuntime {
     }
 
     fn apply_settings(&self, app: &AppHandle, core: &SupervisorCore) {
+        self.apply_transition(app, core);
+        self.reconfigure_buttons();
+    }
+
+    fn apply_transition(&self, app: &AppHandle, core: &SupervisorCore) {
         let mut last = self.applied.lock();
         let next = AppliedSettings::of(&self.effects.reload_settings());
         let previous = std::mem::replace(&mut *last, next);
@@ -550,6 +569,7 @@ pub fn start(app: AppHandle) {
         process,
         active: AtomicBool::new(cfg!(unix)),
         session_hooks: Mutex::new(None),
+        buttons_status: OnceLock::new(),
     });
     app.manage(runtime.clone());
     spawn_prune(state.db.clone());
@@ -565,7 +585,56 @@ pub fn start(app: AppHandle) {
     #[cfg(unix)]
     spawn_ipc(app, runtime.clone(), core.clone());
     spawn_ticks(runtime.clone(), core.clone());
-    spawn_discord_approvals(runtime, core);
+    spawn_discord_approvals(runtime.clone(), core.clone());
+    start_buttons(&runtime, core);
+}
+
+fn start_buttons(runtime: &SupervisorRuntime, core: Arc<SupervisorCore>) {
+    let effects = runtime.effects.clone();
+    let config: Arc<dyn Fn() -> Result<ButtonsConfig, String> + Send + Sync> =
+        Arc::new(move || discord_config(&effects));
+    let endpoints = Endpoints {
+        api_base: API_BASE.to_string(),
+        gateway_url: GATEWAY_URL.to_string(),
+    };
+    let async_runtime = tauri::async_runtime::handle();
+    let _context = async_runtime.inner().enter();
+    let (handle, status) = buttons::start(core, config, endpoints);
+    runtime.effects.set_buttons(handle);
+    let _ = runtime.buttons_status.set(status);
+}
+
+fn buttons_config(
+    settings: &SupervisorSettings,
+    files: Option<&DiscordFiles>,
+) -> Result<ButtonsConfig, String> {
+    if !settings.discord_enabled {
+        return Err(REASON_DISCORD_OFF.to_string());
+    }
+    let chat_id = settings
+        .discord_chat_id
+        .clone()
+        .ok_or_else(|| REASON_CHAT_UNLINKED.to_string())?;
+    let token = files
+        .and_then(DiscordFiles::token)
+        .ok_or_else(|| REASON_NO_TOKEN.to_string())?;
+    let allow_from = files
+        .map(|files| files.access().allow_from)
+        .unwrap_or_default();
+    if allow_from.is_empty() {
+        return Err(REASON_NO_USER.to_string());
+    }
+    Ok(ButtonsConfig {
+        token,
+        chat_id,
+        allow_from,
+    })
+}
+
+fn discord_config(effects: &AppEffects) -> Result<ButtonsConfig, String> {
+    let settings = effects.reload_settings();
+    let files = claude_home().map(|claude_home| DiscordFiles::for_claude_home(&claude_home));
+    buttons_config(&settings, files.as_ref())
 }
 
 fn spawn_prune(db: DbPool) {
@@ -611,26 +680,13 @@ fn spawn_discord_approvals(runtime: Arc<SupervisorRuntime>, core: Arc<Supervisor
             if core.pending_approval_codes().is_empty() {
                 continue;
             }
-            let settings = runtime.effects.reload_settings();
-            let Some(chat_id) = settings
-                .discord_chat_id
-                .filter(|_| settings.discord_enabled)
-            else {
+            let Ok(config) = discord_config(&runtime.effects) else {
                 continue;
             };
-            let Some(claude_home) = claude_home() else {
-                continue;
-            };
-            let files = DiscordFiles::for_claude_home(&claude_home);
-            let Some(token) = files.token() else {
-                continue;
-            };
-            let allow_from = files.access().allow_from;
-            if allow_from.is_empty() {
-                continue;
-            }
-            let client = DiscordClient::new(token);
-            if let Err(error) = poll_approvals(&client, &chat_id, &allow_from, &core).await {
+            let client = DiscordClient::new(config.token);
+            if let Err(error) =
+                poll_approvals(&client, &config.chat_id, &config.allow_from, &core).await
+            {
                 eprintln!("supervisor: discord poll failed: {error}");
             }
         }
@@ -681,6 +737,18 @@ pub fn restart_supervisor(app: &AppHandle) -> AppResult<()> {
         runtime.process.restart(app);
     }
     Ok(())
+}
+
+pub fn buttons_reconfigure(app: &AppHandle) {
+    if let Some(runtime) = runtime(app) {
+        runtime.reconfigure_buttons();
+    }
+}
+
+pub fn buttons_status(app: &AppHandle) -> Option<GatewayStatus> {
+    let runtime = runtime(app)?;
+    let status = runtime.buttons_status.get()?.borrow().clone();
+    Some(status)
 }
 
 pub fn discord_link(app: &AppHandle) -> DiscordLink {
@@ -762,6 +830,7 @@ pub fn link_discord_chat(app: &AppHandle) {
         let _ = tauri::async_runtime::spawn_blocking(move || match store_chat_id(&db, &chat_id) {
             Ok(true) => {
                 let _ = restart_supervisor(&app);
+                buttons_reconfigure(&app);
             }
             Ok(false) => {}
             Err(error) => eprintln!("supervisor: cannot store the Discord chat: {error}"),
@@ -885,6 +954,50 @@ mod tests {
         );
         assert_eq!(fallback_label("0123456789abcdef"), "Sesja 01234567");
         assert_eq!(fallback_label("abc"), "Sesja abc");
+    }
+
+    #[test]
+    fn buttons_config_reports_the_first_missing_condition() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = DiscordFiles::new(dir.path().to_path_buf());
+        let reason = |settings: &SupervisorSettings, files: Option<&DiscordFiles>| {
+            buttons_config(settings, files).unwrap_err()
+        };
+        let mut settings = SupervisorSettings {
+            discord_chat_id: Some("chat-1".into()),
+            ..SupervisorSettings::default()
+        };
+        std::fs::write(dir.path().join(".env"), "DISCORD_BOT_TOKEN=bot-token\n").unwrap();
+        std::fs::write(
+            dir.path().join("access.json"),
+            r#"{"allowFrom": ["user-1"]}"#,
+        )
+        .unwrap();
+        assert_eq!(reason(&settings, Some(&files)), "Discord wyłączony");
+
+        settings.discord_enabled = true;
+        settings.discord_chat_id = None;
+        assert_eq!(reason(&settings, Some(&files)), "rozmowa niesparowana");
+
+        settings.discord_chat_id = Some("chat-1".into());
+        assert_eq!(
+            buttons_config(&settings, Some(&files)),
+            Ok(ButtonsConfig {
+                token: "bot-token".into(),
+                chat_id: "chat-1".into(),
+                allow_from: vec!["user-1".into()],
+            })
+        );
+        assert_eq!(reason(&settings, None), "brak tokenu bota");
+
+        std::fs::write(dir.path().join("access.json"), r#"{"allowFrom": []}"#).unwrap();
+        assert_eq!(
+            reason(&settings, Some(&files)),
+            "brak sparowanego użytkownika"
+        );
+
+        std::fs::remove_file(dir.path().join(".env")).unwrap();
+        assert_eq!(reason(&settings, Some(&files)), "brak tokenu bota");
     }
 
     #[test]

@@ -197,6 +197,7 @@ fn save_token_blocking(app: &AppHandle, token: &str) -> AppResult<()> {
 pub async fn supervisor_discord_save_token(app: AppHandle, token: String) -> AppResult<()> {
     let save_app = app.clone();
     blocking(move || save_token_blocking(&save_app, &token)).await?;
+    runtime::buttons_reconfigure(&app);
     runtime::link_discord_chat(&app);
     blocking(move || {
         let settings = {
@@ -218,6 +219,7 @@ fn pair_blocking(app: &AppHandle, code: &str) -> AppResult<()> {
         settings_repo::set(&conn, DISCORD_CHAT_ID_KEY, &paired.chat_id)?;
         SupervisorSettings::load(&conn)
     };
+    runtime::buttons_reconfigure(app);
     restart_when_discord_active(app, &settings)
 }
 
