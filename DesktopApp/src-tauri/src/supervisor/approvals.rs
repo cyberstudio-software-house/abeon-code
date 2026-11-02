@@ -27,6 +27,7 @@ struct Token {
 #[derive(Default)]
 pub struct ApprovalBook {
     pending: Vec<Approval>,
+    expired: Vec<Approval>,
     tokens: Vec<Token>,
 }
 
@@ -41,8 +42,17 @@ fn random_code() -> String {
 
 impl ApprovalBook {
     fn prune(&mut self, now: Instant) {
-        self.pending.retain(|approval| approval.expires_at > now);
+        let (live, expired): (Vec<Approval>, Vec<Approval>) = std::mem::take(&mut self.pending)
+            .into_iter()
+            .partition(|approval| approval.expires_at > now);
+        self.pending = live;
+        self.expired.extend(expired);
         self.tokens.retain(|token| token.expires_at > now);
+    }
+
+    pub fn take_expired(&mut self, now: Instant) -> Vec<Approval> {
+        self.prune(now);
+        std::mem::take(&mut self.expired)
     }
 
     pub fn create(
@@ -240,6 +250,29 @@ mod tests {
         let (recreated, created) = book.create("s1", &action("deploy"), now + 25 * HOUR, 5);
         assert!(created);
         assert_ne!(recreated.id, approval.id);
+    }
+
+    #[test]
+    fn take_expired_returns_each_expired_approval_once() {
+        let now = Instant::now();
+        let mut book = ApprovalBook::default();
+        let (first, _) = book.create("s1", &action("deploy"), now, 0);
+        let (second, _) = book.create("s2", &action("deploy"), now + 2 * HOUR, 0);
+        let (resolved, _) = book.create("s1", &action("release"), now, 0);
+        book.resolve(&resolved.id, false, now).unwrap();
+        book.create("s1", &action("rollback"), now + 25 * HOUR, 0);
+        assert_eq!(book.pending(now + 25 * HOUR).len(), 2);
+        let ids = |approvals: Vec<Approval>| -> Vec<String> {
+            approvals.into_iter().map(|approval| approval.id).collect()
+        };
+        assert_eq!(ids(book.take_expired(now + 25 * HOUR)), vec![first.id]);
+        assert!(book.take_expired(now + 25 * HOUR).is_empty());
+        assert_eq!(
+            ids(book.take_expired(now + 27 * HOUR)),
+            vec![second.id.clone()]
+        );
+        assert!(book.take_expired(now + 27 * HOUR).is_empty());
+        assert!(book.resolve(&second.id, true, now + 27 * HOUR).is_none());
     }
 
     #[test]

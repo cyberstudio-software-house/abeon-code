@@ -1,5 +1,5 @@
 use super::{
-    decision_kind, excerpt, now, single_line, Outbox, SessionListing, SupervisorCore,
+    decision_kind, excerpt, now, single_line, DiscordSync, Outbox, SessionListing, SupervisorCore,
     ANSWER_PREFIX, SUMMARY_CHARS,
 };
 use crate::db::supervisor_decisions_repo::NewDecision;
@@ -106,6 +106,9 @@ impl SupervisorCore {
             question: info.label,
             decision: text,
             rationale: RATIONALE_RELAY.to_string(),
+        });
+        self.effects.discord_sync(DiscordSync::SessionSettled {
+            session_id: session_id.to_string(),
         });
         Ok(())
     }
@@ -229,5 +232,22 @@ mod tests {
             .await;
         assert!(core.take_events().is_empty());
         assert_eq!(effects.typed().len(), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn send_to_session_settles_the_session_on_discord() {
+        let (effects, core) = setup();
+        core.set_away(true);
+        assert!(core.send_to_session("s1", "Dalej").is_err());
+        assert!(effects.discord_syncs().is_empty());
+        core.on_session_hook(stop("s1", "Czy kontynuować?")).await;
+        core.send_to_session("s1", "Użytkownik wybrał wariant A")
+            .unwrap();
+        assert_eq!(
+            effects.discord_syncs(),
+            vec![DiscordSync::SessionSettled {
+                session_id: "s1".into()
+            }]
+        );
     }
 }

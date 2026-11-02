@@ -12,7 +12,8 @@ use crate::db::supervisor_decisions_repo::NewDecision;
 use crate::domain::supervisor::{SessionRebound, SupervisorLevel, SupervisorSnapshot};
 use crate::pty::session_registry::{SessionClaim, SessionPtyRegistry};
 use crate::supervisor::core::SupervisorCore;
-use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
+use crate::supervisor::discord::registry::{KeyAnswer, PostRequest, PostResult};
+use crate::supervisor::effects::{DiscordSync, Effects, SessionInfo, SessionListing};
 use crate::supervisor::events::SupervisorEvent;
 use crate::supervisor::hook_io::{HookInput, HookReply};
 use crate::supervisor::settings::SupervisorSettings;
@@ -44,6 +45,11 @@ pub(crate) struct FakeEffects {
     pub(crate) reads: Mutex<Vec<(String, usize)>>,
     pub(crate) opened: Mutex<Vec<(String, String)>>,
     pub(crate) open_error: Mutex<Option<String>>,
+    pub(crate) discord_syncs: Mutex<Vec<DiscordSync>>,
+    pub(crate) discord_posts: Mutex<Vec<PostRequest>>,
+    pub(crate) discord_answers: Mutex<Vec<Vec<KeyAnswer>>>,
+    pub(crate) discord_post_result: Mutex<Result<PostResult, String>>,
+    pub(crate) discord_answered_skipped: Mutex<Vec<String>>,
 }
 
 impl FakeEffects {
@@ -98,6 +104,11 @@ impl FakeEffects {
             reads: Mutex::default(),
             opened: Mutex::default(),
             open_error: Mutex::default(),
+            discord_syncs: Mutex::default(),
+            discord_posts: Mutex::default(),
+            discord_answers: Mutex::default(),
+            discord_post_result: Mutex::new(Ok(PostResult::default())),
+            discord_answered_skipped: Mutex::default(),
         })
     }
 
@@ -140,6 +151,10 @@ impl FakeEffects {
 
     pub(crate) fn last_snapshot(&self) -> Option<SupervisorSnapshot> {
         self.snapshots.lock().last().cloned()
+    }
+
+    pub(crate) fn discord_syncs(&self) -> Vec<DiscordSync> {
+        self.discord_syncs.lock().clone()
     }
 }
 
@@ -261,6 +276,20 @@ impl Effects for FakeEffects {
             .lock()
             .push((project_path.to_string(), prompt.to_string()));
         Ok(())
+    }
+
+    fn discord_sync(&self, change: DiscordSync) {
+        self.discord_syncs.lock().push(change);
+    }
+
+    fn discord_post(&self, request: PostRequest) -> Result<PostResult, String> {
+        self.discord_posts.lock().push(request);
+        self.discord_post_result.lock().clone()
+    }
+
+    fn discord_answered(&self, answers: Vec<KeyAnswer>) -> Result<Vec<String>, String> {
+        self.discord_answers.lock().push(answers);
+        Ok(self.discord_answered_skipped.lock().clone())
     }
 }
 

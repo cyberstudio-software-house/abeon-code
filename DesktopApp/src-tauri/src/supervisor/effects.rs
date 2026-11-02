@@ -6,6 +6,8 @@ use serde::Serialize;
 use crate::db::supervisor_decisions_repo::NewDecision;
 use crate::domain::supervisor::{SessionRebound, SupervisorSnapshot};
 use crate::pty::session_registry::SessionClaim;
+use crate::supervisor::core::ApprovalState;
+use crate::supervisor::discord::registry::{KeyAnswer, PostRequest, PostResult};
 use crate::supervisor::settings::SupervisorSettings;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,6 +28,20 @@ pub struct SessionListing {
     pub pending_question_id: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum DiscordSync {
+    SessionSettled {
+        session_id: String,
+    },
+    QuestionSettled {
+        question_id: String,
+    },
+    ApprovalSettled {
+        approval_id: String,
+        state: ApprovalState,
+    },
+}
+
 pub trait Effects: Send + Sync + 'static {
     fn settings(&self) -> SupervisorSettings;
     fn session_info(&self, session_id: &str) -> Option<SessionInfo>;
@@ -43,4 +59,7 @@ pub trait Effects: Send + Sync + 'static {
     fn list_sessions(&self) -> Vec<SessionListing>;
     fn read_session(&self, session_id: &str, max_blocks: usize) -> Option<String>;
     fn open_session(&self, project_path: &str, prompt: &str) -> Result<(), String>;
+    fn discord_sync(&self, change: DiscordSync);
+    fn discord_post(&self, request: PostRequest) -> Result<PostResult, String>;
+    fn discord_answered(&self, answers: Vec<KeyAnswer>) -> Result<Vec<String>, String>;
 }

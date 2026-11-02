@@ -5,8 +5,9 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use super::{
-    decision_kind, now, CoreState, HookInput, HookReply, Outbox, PromptOrigin, SupervisorCore,
-    SupervisorEvent, SupervisorLevel, SupervisorSettings, ANSWER_PREFIX, GUARD_REASON,
+    decision_kind, now, CoreState, DiscordSync, HookInput, HookReply, Outbox, PromptOrigin,
+    SupervisorCore, SupervisorEvent, SupervisorLevel, SupervisorSettings, ANSWER_PREFIX,
+    GUARD_REASON,
 };
 use crate::db::supervisor_decisions_repo::NewDecision;
 use crate::domain::supervisor::{ApprovalView, EscalationChannel};
@@ -327,8 +328,39 @@ impl SupervisorCore {
             }
         };
         self.effects.log_decision(entry);
+        self.effects.discord_sync(DiscordSync::ApprovalSettled {
+            approval_id: approval_id.to_string(),
+            state: if approve {
+                ApprovalState::Approved
+            } else {
+                ApprovalState::Rejected
+            },
+        });
         self.publish();
         Ok(())
+    }
+
+    pub(crate) fn report_expired_approvals(&self, now: Instant) {
+        let expired: Vec<String> = {
+            let mut state = self.state.lock();
+            let expired = state.approvals.take_expired(now);
+            expired
+                .into_iter()
+                .filter(|approval| {
+                    state
+                        .approval_records
+                        .get(&approval.id)
+                        .is_none_or(|record| record.outcome.is_none())
+                })
+                .map(|approval| approval.id)
+                .collect()
+        };
+        for approval_id in expired {
+            self.effects.discord_sync(DiscordSync::ApprovalSettled {
+                approval_id,
+                state: ApprovalState::Expired,
+            });
+        }
     }
 
     pub fn approval_status(&self, approval_id: &str) -> Result<ApprovalStatus, String> {
@@ -1194,6 +1226,89 @@ mod tests {
         assert_eq!(
             core.on_session_hook(bash("s1", "git push")).await,
             guard_denial()
+        );
+    }
+
+    fn approval_syncs(effects: &FakeEffects) -> Vec<(String, ApprovalState)> {
+        effects
+            .discord_syncs()
+            .into_iter()
+            .filter_map(|change| match change {
+                DiscordSync::ApprovalSettled { approval_id, state } => Some((approval_id, state)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    async fn two_pending_approvals(core: &Arc<SupervisorCore>) -> (ApprovalView, ApprovalView) {
+        agent_prompted(core, "s1").await;
+        agent_prompted(core, "s2").await;
+        core.on_session_hook(bash("s1", "git push")).await;
+        core.on_session_hook(bash("s2", "git push")).await;
+        let mut approvals = core.snapshot().approvals;
+        approvals.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+        (approvals[0].clone(), approvals[1].clone())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn resolving_an_approval_reports_it_to_discord() {
+        let (effects, core) = on_main();
+        let (first, second) = two_pending_approvals(&core).await;
+        assert!(effects.discord_syncs().is_empty());
+        core.resolve_approval(&first.id, true, ApprovalSource::App)
+            .unwrap();
+        core.resolve_approval(&second.id, false, ApprovalSource::Discord)
+            .unwrap();
+        assert!(core
+            .resolve_approval(&first.id, false, ApprovalSource::App)
+            .is_err());
+        assert_eq!(
+            effects.discord_syncs(),
+            vec![
+                DiscordSync::ApprovalSettled {
+                    approval_id: first.id,
+                    state: ApprovalState::Approved,
+                },
+                DiscordSync::ApprovalSettled {
+                    approval_id: second.id,
+                    state: ApprovalState::Rejected,
+                },
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_approvals_are_reported_once() {
+        let (effects, core) = on_main();
+        let (first, second) = two_pending_approvals(&core).await;
+        core.resolve_approval(&second.id, true, ApprovalSource::App)
+            .unwrap();
+        let later = Instant::now() + Duration::from_secs(25 * 3600);
+        core.report_expired_approvals(later);
+        core.report_expired_approvals(later);
+        assert_eq!(
+            approval_syncs(&effects),
+            vec![
+                (second.id, ApprovalState::Approved),
+                (first.id, ApprovalState::Expired),
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn tick_reports_expired_approvals() {
+        let (effects, core) = on_main();
+        agent_prompted(&core, "s1").await;
+        core.on_session_hook(bash("s1", "git push")).await;
+        let approval = only_approval(&core);
+        core.tick();
+        assert!(approval_syncs(&effects).is_empty());
+        advance(DAY + SECOND).await;
+        core.tick();
+        core.tick();
+        assert_eq!(
+            approval_syncs(&effects),
+            vec![(approval.id, ApprovalState::Expired)]
         );
     }
 }

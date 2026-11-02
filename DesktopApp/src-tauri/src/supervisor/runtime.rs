@@ -29,9 +29,11 @@ use crate::supervisor::claude_md::WAKE_TEXT;
 use crate::supervisor::core::{cap_bytes, SupervisorCore, QUIET_WINDOW};
 use crate::supervisor::discord::client::DiscordClient;
 use crate::supervisor::discord::files::DiscordFiles;
-use crate::supervisor::discord::DiscordLink;
+use crate::supervisor::discord::jobs::{ButtonsHandle, ERROR_BUTTONS_OFFLINE};
 use crate::supervisor::discord::poll::{poll_approvals, POLL_INTERVAL};
-use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
+use crate::supervisor::discord::registry::{KeyAnswer, PostRequest, PostResult};
+use crate::supervisor::discord::DiscordLink;
+use crate::supervisor::effects::{DiscordSync, Effects, SessionInfo, SessionListing};
 use crate::supervisor::process::{claude_home, SupervisorProcess};
 use crate::supervisor::settings::{SupervisorSettings, DISCORD_CHAT_ID_KEY};
 use crate::supervisor::{transcript, workdir};
@@ -157,6 +159,7 @@ pub struct AppEffects {
     settings: Mutex<SupervisorSettings>,
     owners: Mutex<HashMap<String, CachedOwner>>,
     process: OnceLock<Weak<SupervisorProcess>>,
+    buttons: OnceLock<ButtonsHandle>,
 }
 
 impl AppEffects {
@@ -169,8 +172,13 @@ impl AppEffects {
             input_activity: state.input_activity.clone(),
             owners: Mutex::new(HashMap::new()),
             process: OnceLock::new(),
+            buttons: OnceLock::new(),
             app,
         }
+    }
+
+    pub fn set_buttons(&self, handle: ButtonsHandle) {
+        let _ = self.buttons.set(handle);
     }
 
     fn supervisor_process(&self) -> Option<Arc<SupervisorProcess>> {
@@ -393,6 +401,26 @@ impl Effects for AppEffects {
             },
         );
         Ok(())
+    }
+
+    fn discord_sync(&self, change: DiscordSync) {
+        if let Some(buttons) = self.buttons.get() {
+            buttons.sync(change);
+        }
+    }
+
+    fn discord_post(&self, request: PostRequest) -> Result<PostResult, String> {
+        match self.buttons.get() {
+            Some(buttons) => buttons.post(request),
+            None => Err(ERROR_BUTTONS_OFFLINE.to_string()),
+        }
+    }
+
+    fn discord_answered(&self, answers: Vec<KeyAnswer>) -> Result<Vec<String>, String> {
+        match self.buttons.get() {
+            Some(buttons) => buttons.answered(answers),
+            None => Err(ERROR_BUTTONS_OFFLINE.to_string()),
+        }
     }
 }
 

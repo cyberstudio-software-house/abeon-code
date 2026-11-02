@@ -16,7 +16,7 @@ use crate::domain::supervisor::{
 use crate::pty::session_registry::SessionClaim;
 use crate::sessions::reader::now_ms;
 use crate::supervisor::approvals::ApprovalBook;
-use crate::supervisor::effects::{Effects, SessionInfo, SessionListing};
+use crate::supervisor::effects::{DiscordSync, Effects, SessionInfo, SessionListing};
 use crate::supervisor::events::{ForwardedEscalation, QuestionKind, ResolvedBy, SupervisorEvent};
 use crate::supervisor::hook_io::{menu_questions, HookInput, HookReply};
 use crate::supervisor::presence::{route, Presence};
@@ -296,6 +296,7 @@ struct Outbox {
     decisions: Vec<NewDecision>,
     notifications: Vec<(String, String, String)>,
     attention: Vec<(String, String)>,
+    discord: Vec<DiscordSync>,
 }
 
 enum Step {
@@ -679,6 +680,9 @@ impl CoreState {
     }
 
     fn forget_session(&mut self, session_id: &str, outbox: &mut Outbox) {
+        outbox.discord.push(DiscordSync::SessionSettled {
+            session_id: session_id.to_string(),
+        });
         self.sessions.remove(session_id);
         self.injections
             .retain(|injection| injection.session_id != session_id);
@@ -958,6 +962,9 @@ impl SupervisorCore {
             session.at_prompt = false;
             session.awaiting_user = false;
             if origin == PromptOrigin::Human {
+                outbox.discord.push(DiscordSync::SessionSettled {
+                    session_id: session_id.to_string(),
+                });
                 state.approvals.revoke_session(session_id);
                 state
                     .injections
@@ -1078,6 +1085,7 @@ impl SupervisorCore {
             state.advance_questions(&settings, now, &mut outbox);
         }
         self.flush(outbox);
+        self.report_expired_approvals(now);
         self.deliver_injections(now);
         self.wake_if_due(now);
         self.publish_with(&settings);
@@ -1137,6 +1145,9 @@ impl SupervisorCore {
         }
         for (session_id, message) in outbox.attention {
             self.effects.attention(&session_id, &message);
+        }
+        for change in outbox.discord {
+            self.effects.discord_sync(change);
         }
     }
 
@@ -1240,7 +1251,7 @@ impl SupervisorCore {
     }
 
     pub fn dismiss_escalation(&self, id: &str) {
-        {
+        let question_id = {
             let mut state = self.state.lock();
             let Some(index) = state
                 .escalations
@@ -1257,7 +1268,10 @@ impl SupervisorCore {
             if !remaining {
                 state.session_mut(&escalation.session_id).awaiting_user = false;
             }
-        }
+            escalation.question_id
+        };
+        self.effects
+            .discord_sync(DiscordSync::QuestionSettled { question_id });
         self.publish();
     }
 
@@ -2729,5 +2743,63 @@ mod tests {
             core.take_events().as_slice(),
             [SupervisorEvent::Forwarded { .. }]
         ));
+    }
+
+    fn session_settled(session_id: &str) -> DiscordSync {
+        DiscordSync::SessionSettled {
+            session_id: session_id.into(),
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn human_prompt_settles_the_session_on_discord() {
+        let (effects, core) = setup();
+        effects.submit("pty-s1");
+        core.on_session_hook(prompt("s1", "wybierz zielony")).await;
+        assert_eq!(
+            core.state.lock().provenance.origin("s1"),
+            PromptOrigin::Human
+        );
+        assert_eq!(effects.discord_syncs(), vec![session_settled("s1")]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn agent_prompt_does_not_settle_on_discord() {
+        let (effects, core) = setup();
+        core.on_session_hook(prompt("s1", "przygotuj wydanie"))
+            .await;
+        assert_eq!(
+            core.state.lock().provenance.origin("s1"),
+            PromptOrigin::Agent
+        );
+        assert!(effects.discord_syncs().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dismissing_an_escalation_settles_its_question_on_discord() {
+        let (effects, core) = setup();
+        let question_id = handed_question(&core, "s1").await;
+        core.escalate(&[question_id.clone()], ROUTED_SUMMARY)
+            .unwrap();
+        assert!(effects.discord_syncs().is_empty());
+        core.dismiss_escalation("unknown");
+        assert!(effects.discord_syncs().is_empty());
+        let escalation_id = core.snapshot().escalations[0].id.clone();
+        core.dismiss_escalation(&escalation_id);
+        assert!(core.snapshot().escalations.is_empty());
+        assert_eq!(
+            effects.discord_syncs(),
+            vec![DiscordSync::QuestionSettled { question_id }]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn rebind_settles_the_forgotten_session_on_discord() {
+        let (effects, core) = setup();
+        effects.submit("pty-s1");
+        core.on_session_hook(on_terminal(hook("s3", "SessionStart"), "pty-s1"))
+            .await;
+        assert_eq!(pty_of(&effects, "s3"), Some("pty-s1".to_string()));
+        assert_eq!(effects.discord_syncs(), vec![session_settled("s1")]);
     }
 }
