@@ -6,6 +6,7 @@ pub const API_BASE: &str = "https://discord.com/api/v10";
 
 const MESSAGE_CONTENT_INTENT_MASK: u64 = (1 << 18) | (1 << 19);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const DEFAULT_RETRY_AFTER: Duration = Duration::from_secs(1);
 pub const MESSAGES_PAGE_LIMIT: usize = 100;
 
 #[derive(Debug, thiserror::Error)]
@@ -14,6 +15,8 @@ pub enum DiscordError {
     Unauthorized,
     #[error("Discord zwrócił błąd HTTP {0}")]
     Http(u16),
+    #[error("Discord ogranicza liczbę zapytań")]
+    RateLimited(Duration),
     #[error("Brak połączenia z Discordem: {0}")]
     Network(String),
     #[error("Nieprawidłowa odpowiedź Discorda: {0}")]
@@ -51,7 +54,7 @@ struct ApplicationDto {
 }
 
 #[derive(Deserialize)]
-struct ChannelDto {
+struct IdDto {
     id: String,
 }
 
@@ -68,6 +71,11 @@ struct MessageDto {
     author: AuthorDto,
     #[serde(default)]
     content: String,
+}
+
+#[derive(Deserialize)]
+struct RateLimitDto {
+    retry_after: f64,
 }
 
 fn network_error(error: reqwest::Error) -> DiscordError {
@@ -115,9 +123,12 @@ impl DiscordClient {
         format!("{}{}", self.base.trim_end_matches('/'), path)
     }
 
+    fn anonymous_request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
+        self.http.request(method, self.url(path))
+    }
+
     fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
-        self.http
-            .request(method, self.url(path))
+        self.anonymous_request(method, path)
             .header("Authorization", format!("Bot {}", self.token))
     }
 
@@ -126,6 +137,15 @@ impl DiscordClient {
         match resp.status().as_u16() {
             200..=299 => Ok(resp),
             401 => Err(DiscordError::Unauthorized),
+            429 => {
+                let wait = resp
+                    .json::<RateLimitDto>()
+                    .await
+                    .ok()
+                    .and_then(|dto| Duration::try_from_secs_f64(dto.retry_after).ok())
+                    .unwrap_or(DEFAULT_RETRY_AFTER);
+                Err(DiscordError::RateLimited(wait))
+            }
             status => Err(DiscordError::Http(status)),
         }
     }
@@ -145,7 +165,7 @@ impl DiscordClient {
             .request(reqwest::Method::POST, "/users/@me/channels")
             .json(&serde_json::json!({ "recipient_id": user_id }));
         let resp = Self::send(request).await?;
-        let dto: ChannelDto = resp.json().await.map_err(decode_error)?;
+        let dto: IdDto = resp.json().await.map_err(decode_error)?;
         Ok(dto.id)
     }
 
@@ -155,12 +175,10 @@ impl DiscordClient {
         after: &str,
     ) -> Result<Vec<DiscordMessage>, DiscordError> {
         let path = format!("/channels/{}/messages", encode_path_segment(channel_id));
-        let request = self
-            .request(reqwest::Method::GET, &path)
-            .query(&[
-                ("after", after.to_string()),
-                ("limit", MESSAGES_PAGE_LIMIT.to_string()),
-            ]);
+        let request = self.request(reqwest::Method::GET, &path).query(&[
+            ("after", after.to_string()),
+            ("limit", MESSAGES_PAGE_LIMIT.to_string()),
+        ]);
         let resp = Self::send(request).await?;
         let dtos: Vec<MessageDto> = resp.json().await.map_err(decode_error)?;
         let mut messages: Vec<(u64, DiscordMessage)> =
@@ -199,6 +217,50 @@ impl DiscordClient {
         Self::send(self.request(reqwest::Method::PUT, &path))
             .await
             .map(|_| ())
+    }
+
+    pub async fn post_message(
+        &self,
+        channel_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<String, DiscordError> {
+        let path = format!("/channels/{}/messages", encode_path_segment(channel_id));
+        let request = self.request(reqwest::Method::POST, &path).json(payload);
+        let resp = Self::send(request).await?;
+        let dto: IdDto = resp.json().await.map_err(decode_error)?;
+        Ok(dto.id)
+    }
+
+    pub async fn edit_message(
+        &self,
+        channel_id: &str,
+        message_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), DiscordError> {
+        let path = format!(
+            "/channels/{}/messages/{}",
+            encode_path_segment(channel_id),
+            encode_path_segment(message_id)
+        );
+        let request = self.request(reqwest::Method::PATCH, &path).json(payload);
+        Self::send(request).await.map(|_| ())
+    }
+
+    pub async fn interaction_callback(
+        &self,
+        interaction_id: &str,
+        interaction_token: &str,
+        payload: &serde_json::Value,
+    ) -> Result<(), DiscordError> {
+        let path = format!(
+            "/interactions/{}/{}/callback",
+            encode_path_segment(interaction_id),
+            encode_path_segment(interaction_token)
+        );
+        let request = self
+            .anonymous_request(reqwest::Method::POST, &path)
+            .json(payload);
+        Self::send(request).await.map(|_| ())
     }
 }
 
@@ -307,6 +369,118 @@ mod tests {
             .await;
         let client = DiscordClient::with_base("tok", server.uri());
         client.react("c1", "m1", "\u{2705}").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn post_message_returns_the_new_message_id() {
+        let server = MockServer::start().await;
+        let payload = serde_json::json!({ "flags": 32768, "components": [] });
+        Mock::given(method("POST"))
+            .and(path("/channels/d1/messages"))
+            .and(header("Authorization", "Bot tok"))
+            .and(body_json(payload.clone()))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": "m1" })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = DiscordClient::with_base("tok", server.uri());
+        assert_eq!(client.post_message("d1", &payload).await.unwrap(), "m1");
+    }
+
+    #[tokio::test]
+    async fn edit_message_patches_the_message() {
+        let server = MockServer::start().await;
+        let payload = serde_json::json!({ "flags": 32768, "components": [] });
+        Mock::given(method("PATCH"))
+            .and(path("/channels/d1/messages/m1"))
+            .and(header("Authorization", "Bot tok"))
+            .and(body_json(payload.clone()))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "id": "m1" })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = DiscordClient::with_base("tok", server.uri());
+        client.edit_message("d1", "m1", &payload).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn interaction_callback_sends_no_bot_token() {
+        let server = MockServer::start().await;
+        let payload = serde_json::json!({ "type": 6 });
+        Mock::given(method("POST"))
+            .and(path("/interactions/i1/itok/callback"))
+            .and(header_regex("User-Agent", r"^DiscordBot \(abeoncode, "))
+            .and(body_json(payload.clone()))
+            .respond_with(ResponseTemplate::new(204))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = DiscordClient::with_base("bot-secret", server.uri());
+        client
+            .interaction_callback("i1", "itok", &payload)
+            .await
+            .unwrap();
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert!(requests[0].headers.get("authorization").is_none());
+    }
+
+    #[tokio::test]
+    async fn interaction_callback_errors_do_not_leak_the_interaction_token() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        let client = DiscordClient::with_base("tok", server.uri());
+        let err = client
+            .interaction_callback("i1", "itok-secret", &serde_json::json!({ "type": 6 }))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, DiscordError::Http(404)));
+        assert!(!err.to_string().contains("itok-secret"));
+        assert!(!format!("{err:?}").contains("itok-secret"));
+    }
+
+    #[tokio::test]
+    async fn rate_limit_maps_to_retry_after() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/channels/d1/messages"))
+            .respond_with(
+                ResponseTemplate::new(429).set_body_json(serde_json::json!({ "retry_after": 1.5 })),
+            )
+            .mount(&server)
+            .await;
+        let client = DiscordClient::with_base("tok", server.uri());
+        let err = client
+            .post_message("d1", &serde_json::json!({}))
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DiscordError::RateLimited(wait) if wait == Duration::from_millis(1500)
+        ));
+        assert_eq!(err.to_string(), "Discord ogranicza liczbę zapytań");
+    }
+
+    #[tokio::test]
+    async fn rate_limit_with_unreadable_body_falls_back_to_one_second() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/applications/@me"))
+            .respond_with(ResponseTemplate::new(429).set_body_string("slow down"))
+            .mount(&server)
+            .await;
+        let client = DiscordClient::with_base("tok", server.uri());
+        assert!(matches!(
+            client.bot().await.unwrap_err(),
+            DiscordError::RateLimited(wait) if wait == Duration::from_secs(1)
+        ));
     }
 
     #[tokio::test]
