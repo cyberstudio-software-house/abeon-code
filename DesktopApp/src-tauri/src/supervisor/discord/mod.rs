@@ -1,5 +1,6 @@
 pub mod client;
 pub mod files;
+pub mod gateway;
 pub mod poll;
 pub mod preflight;
 pub mod registry;
