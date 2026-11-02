@@ -23,12 +23,14 @@ pub enum InteractionReply {
 pub struct InteractionOutcome {
     pub reply: InteractionReply,
     pub answer: Option<ClickedOption>,
+    pub message: Option<u64>,
 }
 
 fn without_answer(reply: InteractionReply) -> InteractionOutcome {
     InteractionOutcome {
         reply,
         answer: None,
+        message: None,
     }
 }
 
@@ -40,10 +42,23 @@ fn stale(interaction: &Interaction) -> InteractionReply {
     )))
 }
 
-fn current(registry: &ButtonRegistry, message: u64, interaction: &Interaction) -> InteractionReply {
+fn current(
+    registry: &ButtonRegistry,
+    message: u64,
+    interaction: &Interaction,
+    answer: Option<ClickedOption>,
+) -> InteractionOutcome {
     match registry.view(message) {
-        Some(view) => InteractionReply::Update(render(&view)),
-        None => stale(interaction),
+        Some(view) => InteractionOutcome {
+            reply: InteractionReply::Update(render(&view)),
+            answer,
+            message: Some(message),
+        },
+        None => InteractionOutcome {
+            reply: stale(interaction),
+            answer,
+            message: None,
+        },
     }
 }
 
@@ -107,7 +122,7 @@ pub fn decide(
             if let Some(mark) = settled_mark(core, &approval_id, approve) {
                 registry.mark_approval(&approval_id, mark);
             }
-            without_answer(current(registry, message, interaction))
+            current(registry, message, interaction, None)
         }
         Some(ButtonTarget::Option {
             message,
@@ -118,10 +133,7 @@ pub fn decide(
                 return without_answer(InteractionReply::Ephemeral(SUPERVISOR_OFF));
             }
             let answer = registry.click_option(&item_id, index);
-            InteractionOutcome {
-                reply: current(registry, message, interaction),
-                answer,
-            }
+            current(registry, message, interaction, answer)
         }
     }
 }
@@ -337,6 +349,7 @@ mod tests {
         let outcome = fixture.press(&approve);
         assert_eq!(outcome.reply, InteractionReply::Ephemeral(NOT_ALLOWED));
         assert_eq!(outcome.answer, None);
+        assert_eq!(outcome.message, None);
         let option = fixture.click(STRANGER, &fixture.option_id("P1", 0));
         let outcome = fixture.press(&option);
         assert_eq!(outcome.reply, InteractionReply::Ephemeral(NOT_ALLOWED));
@@ -397,6 +410,7 @@ mod tests {
         let outcome = fixture.press(&old_message_click(OWNER, "abeon:q:00000000:0"));
         assert_eq!(outcome.reply, stale_row());
         assert_eq!(outcome.answer, None);
+        assert_eq!(outcome.message, None);
         assert_eq!(fixture.view(), before);
     }
 
@@ -491,6 +505,7 @@ mod tests {
         let interaction = fixture.click(OWNER, &fixture.approve_id());
         let outcome = fixture.press(&interaction);
         assert_eq!(outcome.answer, None);
+        assert_eq!(outcome.message, Some(fixture.message));
         assert_eq!(fixture.status(), ApprovalState::Approved);
         {
             let decisions = fixture.effects.decisions.lock();
@@ -634,6 +649,7 @@ mod tests {
                 open_keys: vec!["P2".into()],
             })
         );
+        assert_eq!(outcome.message, Some(fixture.message));
         assert_eq!(fixture.item_state("P1"), ItemState::Clicked("tak".into()));
         assert_eq!(fixture.item_state("P2"), ItemState::Open);
         let payload = updated(&outcome.reply);
@@ -659,6 +675,7 @@ mod tests {
         let outcome = fixture.press(&interaction);
         assert_eq!(outcome.reply, InteractionReply::Ephemeral(SUPERVISOR_OFF));
         assert_eq!(outcome.answer, None);
+        assert_eq!(outcome.message, None);
         assert_eq!(fixture.item_state("P1"), ItemState::Open);
         assert_eq!(fixture.view(), before);
 

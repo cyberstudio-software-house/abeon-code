@@ -292,15 +292,18 @@ async fn handle_interaction(shared: Arc<Shared>, interaction: Interaction) {
         }
     };
     let payload = callback_payload(&outcome.reply);
-    if let Err(error) = live
+    let callback = live
         .client
         .interaction_callback(&interaction.id, &interaction.token, &payload)
-        .await
-    {
-        log_error(&callback_error(&error));
-    }
+        .await;
     if let Some(answer) = outcome.answer {
         shared.core.record_discord_answer(answer);
+    }
+    if let Err(error) = callback {
+        log_error(&callback_error(&error));
+        if let Some(message) = outcome.message {
+            patch(&shared, &live, [message]).await;
+        }
     }
 }
 
@@ -1145,6 +1148,107 @@ mod tests {
             wait_for_requests(&server, "POST", &callback_path("i-2"), 1).await;
             assert_eq!(*status.borrow(), GatewayStatus::Connected);
             assert!(!gateway.is_finished());
+            gateway.abort();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_failed_approval_callback_is_repaired_with_a_patch() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness {
+                server,
+                listener,
+                handle,
+                mut status,
+                core,
+                ..
+            } = harness(Ok(config_with(BOT_TOKEN))).await;
+            core.on_session_hook(bash("s1", "git push origin main"))
+                .await;
+            let approval = core.snapshot().approvals.into_iter().next().unwrap();
+            let approve = format!("abeon:a:{}:y", approval.id);
+            respond_to_posts(&server, "d-1").await;
+            respond_to_edits(&server, "d-1").await;
+            respond_to_callback(&server, "i-1", ResponseTemplate::new(500)).await;
+            let (clicks, pending_clicks) = mpsc::unbounded_channel();
+            let gateway = serve_clicks(listener, pending_clicks);
+            connected(&mut status).await;
+
+            let request = block(
+                vec![item("q1", &["tak", "nie"])],
+                vec![approval_row(&approval)],
+            );
+            assert_eq!(post(&handle, request).await.unwrap().posted, 1);
+            clicks.send(click("i-1", &approve)).unwrap();
+
+            let callbacks = wait_for_requests(&server, "POST", &callback_path("i-1"), 1).await;
+            let current = body(&callbacks[0])["data"].clone();
+            let edits = wait_for_requests(&server, "PATCH", &message_path("d-1"), 1).await;
+            let repaired = body(&edits[0]);
+            assert_eq!(repaired, current);
+            assert!(strings(&repaired, "content").contains(&"✅ Zatwierdzono".to_string()));
+            assert!(!strings(&repaired, "custom_id").contains(&approve));
+            assert!(strings(&repaired, "custom_id")
+                .iter()
+                .any(|id| id.starts_with("abeon:q:")));
+            assert_eq!(
+                core.approval_status(&approval.id).unwrap().status,
+                ApprovalState::Approved
+            );
+            sleep(SILENCE).await;
+            assert_eq!(
+                requests(&server, "PATCH", &message_path("d-1")).await.len(),
+                1
+            );
+            gateway.abort();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_failed_option_callback_records_the_answer_and_repairs_the_message() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness {
+                server,
+                listener,
+                handle,
+                mut status,
+                core,
+                ..
+            } = harness(Ok(config_with(BOT_TOKEN))).await;
+            respond_to_posts(&server, "d-1").await;
+            respond_to_edits(&server, "d-1").await;
+            respond_to_callback(&server, "i-2", ResponseTemplate::new(500)).await;
+            let (clicks, pending_clicks) = mpsc::unbounded_channel();
+            let gateway = serve_clicks(listener, pending_clicks);
+            connected(&mut status).await;
+
+            let request = block(vec![item("q1", &["tak", "nie"])], vec![]);
+            assert_eq!(post(&handle, request).await.unwrap().posted, 1);
+            let posted = requests(&server, "POST", MESSAGES_PATH).await;
+            let custom_id = strings(&body(&posted[0]), "custom_id")
+                .into_iter()
+                .find(|id| id.ends_with(":0"))
+                .unwrap();
+            clicks.send(click("i-2", &custom_id)).unwrap();
+
+            let edits = wait_for_requests(&server, "PATCH", &message_path("d-1"), 1).await;
+            let repaired = body(&edits[0]);
+            assert!(strings(&repaired, "content").contains(&"✅ P1: tak".to_string()));
+            assert!(strings(&repaired, "custom_id").is_empty());
+            let answer = loop {
+                if let Some(answer) = take_discord_answer(&core) {
+                    break answer;
+                }
+                sleep(POLL_STEP).await;
+            };
+            assert_eq!(
+                answer,
+                ("q1".to_string(), "P1".to_string(), "tak".to_string())
+            );
             gateway.abort();
         })
         .await
