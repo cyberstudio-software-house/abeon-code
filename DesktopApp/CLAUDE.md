@@ -440,10 +440,11 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   or resolves the approval directly. The registry of posted messages is in memory, so after a restart
   old buttons answer „Nieaktualne”. Messages are PATCHed when a settle signal arrives
   (`DiscordSync`: approval resolved or expired, `discord_answered`, `send_to_session`, a Human prompt,
-  dismissed escalation, rebind). `custom_id`s start with `abeon:`: the app's gateway forwards only
-  those, and the plugin handles only its own `perm:` buttons, so neither answers the other's clicks.
-  Settings show a status row for the buttons connection. `claude_md.rs` teaches all of it; the text
-  layout stays as the fallback when `discord_post` errors.
+  dismissed escalation, rebind). `custom_id`s start with `abeon:`: the app's gateway ignores
+  non-`abeon:` buttons, and the plugin handles only its own `perm:` buttons, so neither answers the
+  other's clicks. Settings show a status row for the buttons connection. `claude_md.rs` teaches all
+  of it: a validation error is corrected and retried once, and the text layout is the fallback only
+  when the buttons are offline or the retry fails.
 
 ## Gotchas
 

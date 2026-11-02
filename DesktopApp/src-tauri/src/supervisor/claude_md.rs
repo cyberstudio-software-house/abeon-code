@@ -195,8 +195,8 @@ na sesję.
   eskalujesz przez `mcp__abeoncode__escalate` (tam aplikacja zapisuje eskalację i wybiera kanał),
   a `discord_post` wołasz dla tego, co dostało `channel: \"discord\"`. Aplikacja sama składa
   wiadomość: ramki, klucze i przyciski. Ty nie układasz nagłówka, bloków, stopki ani składni zgody.
-  Wejście to `blocks` (po jednym na sesję: `session_id` i `items`) oraz `approval_ids`. Pozycję
-  (`items`) wypełniasz tak:
+  Wejście to `blocks` (po jednym na sesję: `session_id` i `items`) oraz `approval_ids`; przy
+  samych zgodach `blocks` pomijasz. Pozycję (`items`) wypełniasz tak:
   - **Pytanie** jest krótkie i konkretne (do 300 znaków), po polsku, bez treści sesji i bez
     sekretów (tokeny, hasła, klucze, wartości z `.env`). Pytanie wieloczęściowe rozbijasz na
     kilka pozycji z tym samym `question_id`, po jednej na część — nigdy kilka pytań `(a)`/`(b)`
@@ -213,11 +213,16 @@ na sesję.
 
   Wynik to `posted`, `keys` i `skipped`; pozycje z `skipped` były już wysłane, więc nic z nimi
   nie robisz. Każda nowa partia to nowa wiadomość.
+
+  Gdy `mcp__abeoncode__discord_post` zwróci błąd walidacji (każdy błąd poza „Przyciski Discorda
+  nie działają — wyślij wiadomość przez reply”), poprawiasz dane i wołasz go jeszcze raz, tylko
+  raz; np. za długą opcję przenosisz do `text_options`, a za długie pytanie skracasz.
 - **Klucze nadaje aplikacja.** Bierzesz je z wyniku `discord_post` (`keys`: `question_id`,
   `question`, `key`) i nigdy ich nie wymyślasz. Pamiętasz, który klucz należy do której sesji
   i pytania, bo użytkownik może odpowiedzieć tekstem, np. `S1 tak`.
-- **Awaryjnie.** Gdy `mcp__abeoncode__discord_post` zwróci błąd, wysyłasz jedną wiadomość przez
-  `mcp__plugin_discord_discord__reply`, po polsku, w Markdownie Discorda, w układzie opisanym
+- **Awaryjnie.** Gdy `mcp__abeoncode__discord_post` zwróci błąd „Przyciski Discorda nie działają
+  — wyślij wiadomość przez reply” albo gdy poprawiona ponowna próba też zwróci błąd, wysyłasz
+  jedną wiadomość przez `mcp__plugin_discord_discord__reply`, po polsku, w Markdownie Discorda, w układzie opisanym
   niżej. Tylko wtedy sam układasz wiadomość, nadajesz klucze i podajesz składnię zgody. Układ:
   - **Nagłówek.** Pierwsza linia, pogrubiona, z liczbą spraw w każdym projekcie, np.
     `**🧭 Do decyzji: sklep (2) · blog (1 + zgoda)**`.
@@ -273,8 +278,10 @@ na sesję.
   Gdy użytkownik odpowiada kluczami tekstem, a klucze pochodzą z `discord_post`, to zanim
   skierujesz odpowiedzi do sesji, wołasz `mcp__abeoncode__discord_answered` z tymi kluczami
   i wartościami (`answers`: lista `{{key, value}}`), żeby aplikacja zdjęła ich przyciski,
-  a `open_keys` w zdarzeniach `discordAnswer` zostało prawdziwe. Odpowiedź przyciskiem przychodzi
-  jako zdarzenie `discordAnswer` (punkt 7) i jej nie zgłaszasz.
+  a `open_keys` w zdarzeniach `discordAnswer` zostało prawdziwe. Odpowiedź tekstowa na jeden klucz
+  pytania, którego inne klucze (z tym samym `question_id`) nadal czekają, czeka razem z nimi i jest
+  kierowana do sesji dopiero wtedy, gdy wszystkie klucze tego pytania mają odpowiedź. Odpowiedź
+  przyciskiem przychodzi jako zdarzenie `discordAnswer` (punkt 7) i jej nie zgłaszasz.
   Gdy `answer_question` jest na Twoim poziomie odrzucane, używasz `send_to_session`. Odpowiedzi
   na kilka kluczy jednej sesji przekazujesz jej razem: przy menu w jednym `answers`, przy końcu
   tury jednym tekstem, który nazywa każde pytanie. Pytanie bez odpowiedzi czeka dalej pod swoim
@@ -282,15 +289,16 @@ na sesję.
   krótką wiadomością.
 - **Pytania użytkownika.** Odpowiadasz krótko, na podstawie `mcp__abeoncode__list_sessions`
   i `mcp__abeoncode__read_session`, bez kopiowania treści sesji. Gdy odpowiedź dotyczy kilku
-  sesji, grupujesz ją jak wiadomość awaryjną (to nie partia do decyzji): blok
+  sesji, grupujesz ją w układzie z punktu „Awaryjnie” (to nie partia do decyzji): blok
   `**📁 <projekt>** — <tytuł>` na sesję i krótkie punkty pod nim.
 - **Polecenia użytkownika.** Np. „otwórz sesję w projekcie Z i niech zrobi …”. Wykonujesz je
   przez `mcp__abeoncode__open_session` w granicach poziomu wsparcia (punkt 2), a w `rationale`
   zapisujesz, że to polecenie użytkownika.
 - **Podsumowania** robisz tylko na prośbę użytkownika.
 - **Potwierdzenie.** Po skierowaniu odpowiedzi do sesji (nie dotyczy wiadomości
-  z `zatwierdzam <KOD>` / `odrzucam <KOD>`, w osobnej linii albo w zdaniu, punkt 10) potwierdzasz
-  to krótko: reakcją ✅ (`mcp__plugin_discord_discord__react` na wiadomość użytkownika,
+  z `zatwierdzam <KOD>` / `odrzucam <KOD>`, w osobnej linii albo w zdaniu, punkt 10, ani
+  zdarzenia `discordAnswer` — wtedy niczego na Discordzie nie piszesz, bo nie ma wiadomości
+  użytkownika do potwierdzenia) potwierdzasz to krótko: reakcją ✅ (`mcp__plugin_discord_discord__react` na wiadomość użytkownika,
   `message_id` bierzesz ze znacznika `<channel>`) albo jednozdaniową odpowiedzią
   (`mcp__plugin_discord_discord__reply`)."#
     )
@@ -854,7 +862,14 @@ mod tests {
             for needle in [
                 "**Partia.**",
                 "Aplikacja sama składa wiadomość: ramki, klucze i przyciski",
-                "Gdy `mcp__abeoncode__discord_post` zwróci błąd, wysyłasz jedną wiadomość przez `mcp__plugin_discord_discord__reply`",
+                "Gdy `mcp__abeoncode__discord_post` zwróci błąd walidacji (każdy błąd poza „Przyciski Discorda nie działają — wyślij wiadomość przez reply”), poprawiasz dane i wołasz go jeszcze raz, tylko raz",
+                "np. za długą opcję przenosisz do `text_options`, a za długie pytanie skracasz",
+                "Gdy `mcp__abeoncode__discord_post` zwróci błąd „Przyciski Discorda nie działają — wyślij wiadomość przez reply” albo gdy poprawiona ponowna próba też zwróci błąd, wysyłasz jedną wiadomość przez `mcp__plugin_discord_discord__reply`",
+                "przy samych zgodach `blocks` pomijasz",
+                "ani zdarzenia `discordAnswer` — wtedy niczego na Discordzie nie piszesz",
+                "czeka razem z nimi i jest kierowana do sesji dopiero wtedy, gdy wszystkie klucze tego pytania mają odpowiedź",
+                "Gdy `open_keys` jest puste, kierujesz ją do sesji razem z pozostałymi odpowiedziami na to samo `question_id`",
+                "w układzie z punktu „Awaryjnie” (to nie partia do decyzji)",
                 "`mcp__plugin_discord_discord__reply` służy tylko do rozmowy",
                 "z tym samym `question_id`",
                 "`options`",
@@ -878,11 +893,14 @@ mod tests {
             assert!(!on_flat.contains("**Kształt wiadomości.**"));
 
             let batch = on_flat.find("**Partia.**").unwrap();
+            let retry = on_flat
+                .find("Gdy `mcp__abeoncode__discord_post` zwróci błąd walidacji")
+                .unwrap();
             let fallback = on_flat
-                .find("Gdy `mcp__abeoncode__discord_post` zwróci błąd")
+                .find("Gdy `mcp__abeoncode__discord_post` zwróci błąd „Przyciski")
                 .unwrap();
             let layout = on_flat.find("**🧭 Do decyzji:").unwrap();
-            assert!(batch < fallback && fallback < layout);
+            assert!(batch < retry && retry < fallback && fallback < layout);
         }
     }
 
