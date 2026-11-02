@@ -14,6 +14,7 @@ pub const GATEWAY_URL: &str = "wss://gateway.discord.gg/?v=10&encoding=json";
 const BACKOFF_START: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_HEARTBEAT_MS: u64 = 41_250;
 const COMPONENT_INTERACTION_TYPE: u64 = 3;
 
@@ -81,6 +82,10 @@ async fn sleep_or_stop(duration: Duration, stop: &mut watch::Receiver<bool>) -> 
         _ = stopped(stop) => false,
         _ = sleep(duration) => true,
     }
+}
+
+fn invalid_session_delay(jitter: f64) -> Duration {
+    Duration::from_millis(1000) + Duration::from_millis(4000).mul_f64(jitter)
 }
 
 fn next_backoff(current: Duration) -> Duration {
@@ -168,22 +173,12 @@ async fn run_session(
     let mut heartbeat_at: Option<Instant> = None;
     let mut ack_received = true;
     let mut identified = false;
+    let hello_deadline = Instant::now() + HANDSHAKE_TIMEOUT;
 
     loop {
         let due = heartbeat_at.unwrap_or_else(|| Instant::now() + Duration::from_secs(3600));
         let step: Option<Outcome> = tokio::select! {
-            _ = stopped(stop) => Some(Outcome::Stop),
-            _ = sleep_until(due), if heartbeat_at.is_some() => {
-                if !ack_received {
-                    Some(Outcome::ReconnectNow)
-                } else if !send_heartbeat(socket, sequence).await {
-                    Some(Outcome::Backoff)
-                } else {
-                    ack_received = false;
-                    heartbeat_at = Some(Instant::now() + interval);
-                    None
-                }
-            }
+            biased;
             message = socket.next() => match message {
                 None | Some(Err(_)) => Some(Outcome::Backoff),
                 Some(Ok(Message::Close(frame))) => {
@@ -226,8 +221,7 @@ async fn run_session(
                                 }
                                 Some(7) => Some(Outcome::ReconnectNow),
                                 Some(9) => Some(Outcome::ReconnectAfter(
-                                    Duration::from_millis(1000)
-                                        + Duration::from_millis(4000).mul_f64(jitter()),
+                                    invalid_session_delay(jitter()),
                                 )),
                                 Some(0) => {
                                     if let Some(value) = frame.get("s").and_then(Value::as_i64) {
@@ -254,6 +248,19 @@ async fn run_session(
                 }
                 Some(Ok(_)) => None,
             },
+            _ = stopped(stop) => Some(Outcome::Stop),
+            _ = sleep_until(hello_deadline), if !identified => Some(Outcome::Backoff),
+            _ = sleep_until(due), if heartbeat_at.is_some() => {
+                if !ack_received {
+                    Some(Outcome::ReconnectNow)
+                } else if !send_heartbeat(socket, sequence).await {
+                    Some(Outcome::Backoff)
+                } else {
+                    ack_received = false;
+                    heartbeat_at = Some(Instant::now() + interval);
+                    None
+                }
+            }
         };
         if let Some(outcome) = step {
             return outcome;
@@ -279,11 +286,11 @@ pub async fn run_gateway(
 
         let connected = tokio::select! {
             _ = stopped(&mut stop) => return,
-            result = tokio_tungstenite::connect_async(url.as_str()) => result,
+            result = timeout(HANDSHAKE_TIMEOUT, tokio_tungstenite::connect_async(url.as_str())) => result,
         };
         let mut socket = match connected {
-            Ok((socket, _)) => socket,
-            Err(_) => {
+            Ok(Ok((socket, _))) => socket,
+            Ok(Err(_)) | Err(_) => {
                 if !sleep_or_stop(backoff, &mut stop).await {
                     return;
                 }
@@ -561,7 +568,7 @@ mod tests {
             read_non_heartbeat(&mut socket).await.unwrap();
             send_ready(&mut socket).await;
             send(&mut socket, json!({ "op": 1, "d": null })).await;
-            let heartbeat = timeout(Duration::from_millis(500), read_frame(&mut socket))
+            let heartbeat = timeout(Duration::from_secs(2), read_frame(&mut socket))
                 .await
                 .unwrap()
                 .unwrap();
@@ -801,6 +808,36 @@ mod tests {
             current = next_backoff(current);
         }
         assert_eq!(seen, vec![1, 2, 4, 8, 16, 32, 60, 60]);
+    }
+
+    #[test]
+    fn invalid_session_delay_stays_between_one_and_five_seconds() {
+        assert_eq!(invalid_session_delay(0.0), Duration::from_secs(1));
+        assert!(invalid_session_delay(0.999_999) < Duration::from_secs(5));
+        assert!(invalid_session_delay(0.999_999) > Duration::from_millis(4990));
+    }
+
+    #[test]
+    fn classify_close_separates_fatal_from_retryable_codes() {
+        fn fatal_message(code: Option<u16>) -> Option<String> {
+            match classify_close(code) {
+                Outcome::Fatal(message) => Some(message),
+                Outcome::Backoff => None,
+                _ => panic!("unexpected outcome for {code:?}"),
+            }
+        }
+
+        let token_rejected = Some("Discord odrzucił token bota".to_string());
+        assert_eq!(fatal_message(Some(4004)), token_rejected);
+        for code in [4010u16, 4014] {
+            assert_eq!(
+                fatal_message(Some(code)),
+                Some(format!("Discord odrzucił połączenie bramki (kod {code})"))
+            );
+        }
+        for code in [Some(4009), Some(4015), Some(1000), None] {
+            assert_eq!(fatal_message(code), None);
+        }
     }
 
     #[test]
