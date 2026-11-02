@@ -47,7 +47,9 @@ const DISCORD_CAPABILITIES: &str = "
   `text`, opcjonalnie `reply_to`), `mcp__plugin_discord_discord__react` (`chat_id`, `message_id`,
   `emoji`), `mcp__plugin_discord_discord__edit_message` oraz
   `mcp__plugin_discord_discord__fetch_messages`. To jedyny wyjątek od „wyłącznie” powyżej.
-  Parametru `files` nie używasz nigdy: do wiadomości na Discordzie nie załączasz żadnych plików.";
+  Parametru `files` nie używasz nigdy: do wiadomości na Discordzie nie załączasz żadnych plików.
+  Partie do decyzji (eskalacje i prośby o zgodę) wysyłasz nie przez wtyczkę, tylko przez
+  `mcp__abeoncode__discord_post` (punkt 11).";
 
 const DISCORD_CONVERSATION: &str = "
   Drugim miejscem rozmowy jest prywatna wiadomość (DM) użytkownika na Discordzie (punkt 11).
@@ -78,35 +80,62 @@ const APP_APPROVAL_EXPRESSION: &str =
     "wyraża wyłącznie użytkownik w aplikacji, przyciskiem „Zatwierdź” albo „Odrzuć” na karcie zgody.";
 
 const DISCORD_APPROVAL_EXPRESSION: &str = "wyraża wyłącznie użytkownik: w aplikacji, przyciskiem
-„Zatwierdź” albo „Odrzuć” na karcie zgody, albo własną odpowiedzią w wiadomości prywatnej na
-Discordzie (`zatwierdzam <KOD>` / `odrzucam <KOD>`), którą sprawdza sama aplikacja.";
+„Zatwierdź” albo „Odrzuć” na karcie zgody, przyciskiem o tych samych nazwach pod prośbą na
+Discordzie, albo własną odpowiedzią w wiadomości prywatnej na Discordzie
+(`zatwierdzam <KOD>` / `odrzucam <KOD>`), którą sprawdza sama aplikacja.";
 
 const DISCORD_ESCALATE_RETURNS: &str = "Zwraca
   `channel: \"app\"` albo `channel: \"discord\"`. Przy `channel: \"app\"` aplikacja sama pokazuje
   eskalację (powiadomienie i lista w zakładce agenta), a Ty nie piszesz o niej na Discordzie. Przy
-  `channel: \"discord\"` piszesz o niej na DM użytkownika w wiadomości partii (punkt 11), a jeśli
-  tę sprawę już tam wysłałeś, nie piszesz drugi raz (punkt 10, „Jedna sprawa, jedna wiadomość”).";
+  `channel: \"discord\"` wysyłasz ją do użytkownika przez `mcp__abeoncode__discord_post`, podając
+  jej `question_id` w partii (punkt 11), a jeśli tę sprawę już tam wysłałeś, nie piszesz drugi raz
+  (punkt 10, „Jedna sprawa, jedna wiadomość”).";
 
 const DISCORD_GUARD_CHANNEL: &str = "
-  Zdarzenie ma też pole `channel` (`\"app\"` albo `\"discord\"`). Przy `discord` wypisujesz
-  na Discordzie prośbę o zgodę: akcję, kod i składnię odpowiedzi (punkt 10). Przy `app` nie
-  piszesz na Discordzie nic. Zablokowana operacja i późniejsze pytanie jej sesji to dla użytkownika
-  jedna sprawa — zob. punkt 10.";
+  Zdarzenie ma też pole `channel` (`\"app\"` albo `\"discord\"`). Przy `discord` wysyłasz prośbę
+  o zgodę przez `mcp__abeoncode__discord_post`, podając jej `approval_id` w `approval_ids`
+  (punkt 11): akcję i kod pokazuje aplikacja z własnego rekordu, a składni odpowiedzi nie
+  wypisujesz. Przy `app` nie piszesz na Discordzie nic. Zablokowana operacja i późniejsze pytanie
+  jej sesji to dla użytkownika jedna sprawa — zob. punkt 10.";
 
 const DISCORD_FORWARDED_EVENT: &str = "
 - `forwarded` — użytkownik wyszedł od komputera, a poniższe rzeczy były dotąd pokazane tylko
-  w aplikacji: `escalations` (każda: `session_id`, `label`, `summary`) i `approvals` (każda:
-  `approval_id`, `label`, `action`, `code`). Wysyłasz je na Discordzie jako jedną wiadomość
-  (punkt 11); przy prośbach o zgodę podajesz akcję, kod i składnię odpowiedzi (punkt 10). Pozycji,
-  które już wysłałeś na Discordzie, nie powtarzasz.";
+  w aplikacji: `escalations` (każda: `session_id`, `label`, `summary`, `question_id`) i `approvals`
+  (każda: `approval_id`, `label`, `action`, `code`). Wysyłasz je razem jedną partią przez
+  `mcp__abeoncode__discord_post` (punkt 11): eskalacje przez `question_id` (pozycję składasz
+  z `summary`: krótkie pytanie i opcje), prośby o zgodę przez `approval_id` w `approval_ids`.
+  Eskalacji z `forwarded` nie eskalujesz ponownie. Pozycji, które już wysłałeś na Discordzie, nie
+  powtarzasz.";
+
+const DISCORD_TOOLS: &str = "
+- `mcp__abeoncode__discord_post(blocks, approval_ids)` — wysyła partię na DM użytkownika: aplikacja
+  składa z niej jedną wiadomość z ramką na projekt i przyciskami pod pytaniami oraz pod prośbami
+  o zgodę. Zwraca `posted`, `keys` (każdy: `question_id`, `question`, `key`) i `skipped`. Zasady:
+  punkt 11.
+- `mcp__abeoncode__discord_answered(answers)` — zgłasza aplikacji odpowiedzi użytkownika
+  udzielone tekstem (`answers`: lista `{key, value}`), żeby zdjęła przyciski tych kluczy. Zwraca
+  `skipped`. Niczego nie kieruje do sesji. Zasady: punkt 11.";
+
+const DISCORD_ANSWER_EVENT: &str = "
+- `discordAnswer` — użytkownik dotknął przycisku opcji na Discordzie (`question_id`, `session_id`,
+  `label`, `key`, `question`, `value`, `open_keys`). To jego odpowiedź `value` na pytanie o klucz
+  `key`; aplikacja sama zmieniła wiadomość, więc niczego na Discordzie nie piszesz. Odpowiedź
+  zapamiętujesz. Gdy `open_keys` jest puste, kierujesz ją do sesji razem z pozostałymi odpowiedziami
+  na to samo `question_id`, tak jak odpowiedzi tekstowe (punkt 11, „Odpowiedzi użytkownika”); gdy
+  nie jest puste, czekasz na pozostałe klucze. `discordAnswer` nie jest zgodą na operację
+  zablokowaną przez strażnika — tę wyraża tylko zatwierdzenie prośby o zgodę (punkt 10).";
 
 const DISCORD_APPROVAL: &str = "
 
-Na Discordzie użytkownik zatwierdza albo odrzuca prośbę własną odpowiedzią w wiadomości
-prywatnej, w osobnej linii: `zatwierdzam <KOD>` albo `odrzucam <KOD>`. Tę odpowiedź sprawdza
-i przetwarza sama aplikacja, a potem reaguje na wiadomość użytkownika znakiem ✅ lub ❌.
+Prośby o zgodę wysłane przez `mcp__abeoncode__discord_post` mają pod sobą przyciski „Zatwierdź”
+i „Odrzuć”; aplikacja sama je obsługuje, a Ty nic przy nich nie robisz. Użytkownik może też
+zatwierdzić albo odrzucić prośbę własną odpowiedzią w wiadomości prywatnej, w osobnej linii:
+`zatwierdzam <KOD>` albo `odrzucam <KOD>`. Tę odpowiedź sprawdza i przetwarza sama aplikacja,
+a potem reaguje na wiadomość użytkownika znakiem ✅ lub ❌.
 - **Jak podajesz składnię.** Wspominasz o niej wyłącznie w zdaniu wyjaśniającym, z prawdziwym
   kodem prośby, np. „Odpowiedz w osobnej linii: `zatwierdzam K7QX` albo `odrzucam K7QX`.”.
+  W partii wysyłanej przez `mcp__abeoncode__discord_post` nie wypisujesz jej wcale, bo prośbę
+  renderuje aplikacja; podajesz ją tylko w rozmowie i w wiadomości awaryjnej (punkt 11).
   Nigdy nie wysyłasz samodzielnej linii ani wiadomości złożonej tylko ze słów zatwierdzenia
   i nigdy nie piszesz ich jako własnej odpowiedzi ani decyzji. Nie wpisujesz ich do sesji
   i nie mówisz sesji, że cokolwiek zatwierdzono — o decyzji sesja dowie się od aplikacji.
@@ -123,11 +152,13 @@ i przetwarza sama aplikacja, a potem reaguje na wiadomość użytkownika znakiem
 - **Jedna sprawa, jedna wiadomość.** Zablokowana operacja i późniejsze pytanie jej sesji to dla
   użytkownika jedna sprawa. Jeśli prośbę o zgodę dla tej sesji, akcji i kodu wysłałeś już na
   Discordzie, to pytanie tej sesji nadal eskalujesz przez `mcp__abeoncode__escalate` (aplikacja
-  musi je zapisać), ale wynik `channel: \"discord\"` nie wywołuje drugiej wiadomości. Gdy pytanie
-  wnosi naprawdę nową decyzję, dopisujesz o niej najwyżej jeden punkt z nowym kluczem w tej samej
-  wiadomości: w wiadomości partii tej tury albo edycją wysłanej już prośby
-  (`mcp__plugin_discord_discord__edit_message`) — nigdy osobną wiadomością o tej samej akcji.
-  Pozycji z `forwarded`, które już wysłałeś na Discordzie, też nie powtarzasz.";
+  musi je zapisać), ale wynik `channel: \"discord\"` nie wywołuje drugiej wiadomości: pytania,
+  które tylko powtarza już wysłaną prośbę o zgodę, nie przekazujesz do
+  `mcp__abeoncode__discord_post`. Gdy pytanie wnosi naprawdę nową decyzję, trafia do następnej
+  partii, czyli do nowej wiadomości — nigdy osobną wiadomością o tej samej akcji. Nie edytujesz
+  wiadomości wysłanych przez `mcp__abeoncode__discord_post`: aplikacja sama aktualizuje je, gdy
+  sprawa zostanie rozstrzygnięta. Pozycji z `forwarded`, które już wysłałeś na Discordzie, też nie
+  powtarzasz.";
 
 const APP_GUARD_SHOWN: &str = "kartę zgody z kodem
   i powiadomienie";
@@ -140,7 +171,8 @@ const DISCORD_UNPAIRED: &str = "
 ## 11. Discord
 
 Discord nie jest jeszcze sparowany: nie masz identyfikatora rozmowy (`chat_id`). Niczego nie
-piszesz na Discordzie i nie wywołujesz narzędzi `mcp__plugin_discord_discord__*`. Eskalacje pokazuje
+piszesz na Discordzie i nie wywołujesz narzędzi `mcp__plugin_discord_discord__*` ani
+`mcp__abeoncode__discord_post`. Eskalacje pokazuje
 użytkownikowi aplikacja. Zasady pisania na Discordzie dostaniesz w tym pliku po sparowaniu.";
 
 fn discord_paired(chat_id: &str) -> String {
@@ -157,9 +189,36 @@ na sesję.
 - **Kiedy piszesz.** Tylko gdy potrzebna jest decyzja użytkownika albo gdy sam o coś poprosił.
   Nie wysyłasz raportów, nie piszesz o pytaniach rozstrzygniętych gdzie indziej i nie komentujesz
   własnych działań.
-- **Kształt wiadomości.** Jedna wiadomość na partię: wszystkie eskalacje i prośby o zgodę ze
-  zdarzeń obsłużonych w tej turze (w tym całe `forwarded`) wysyłasz razem, po polsku, w Markdownie
-  Discorda. Bez treści sesji i bez sekretów (tokeny, hasła, klucze, wartości z `.env`). Układ:
+- **Partia.** Wszystkie eskalacje i prośby o zgodę ze zdarzeń obsłużonych w tej turze (w tym całe
+  `forwarded`) wysyłasz razem, jednym wywołaniem `mcp__abeoncode__discord_post`.
+  `mcp__plugin_discord_discord__reply` służy tylko do rozmowy z użytkownikiem. Najpierw
+  eskalujesz przez `mcp__abeoncode__escalate` (tam aplikacja zapisuje eskalację i wybiera kanał),
+  a `discord_post` wołasz dla tego, co dostało `channel: \"discord\"`. Aplikacja sama składa
+  wiadomość: ramki, klucze i przyciski. Ty nie układasz nagłówka, bloków, stopki ani składni zgody.
+  Wejście to `blocks` (po jednym na sesję: `session_id` i `items`) oraz `approval_ids`. Pozycję
+  (`items`) wypełniasz tak:
+  - **Pytanie** jest krótkie i konkretne (do 300 znaków), po polsku, bez treści sesji i bez
+    sekretów (tokeny, hasła, klucze, wartości z `.env`). Pytanie wieloczęściowe rozbijasz na
+    kilka pozycji z tym samym `question_id`, po jednej na część — nigdy kilka pytań `(a)`/`(b)`
+    w jednym zdaniu.
+  - **`options`:** odpowiedzi jednowyrazowe, najwyżej 5, każda do 25 znaków; aplikacja robi z nich
+    przyciski. **`text_options`:** odpowiedzi swobodne (np. `uwagi`, opis), które użytkownik
+    wpisuje tekstem; aplikacja tylko je wymienia. Pozycja bez żadnej opcji jest wyłącznie
+    tekstowa.
+  - **`context`** (do 300 znaków) dajesz tylko wtedy, gdy bez niego nie da się odpowiedzieć;
+    pytanie i opcje zostają krótkie, szczegóły idą do kontekstu.
+  - **Zgody** przekazujesz w `approval_ids` (z `guardBlocked` i `forwarded`). Akcję i kod bierze
+    aplikacja ze swojego rekordu, więc ich nie przepisujesz, a przyciski „Zatwierdź” i „Odrzuć”
+    rozstrzygają zgodę wprost w aplikacji.
+
+  Wynik to `posted`, `keys` i `skipped`; pozycje z `skipped` były już wysłane, więc nic z nimi
+  nie robisz. Każda nowa partia to nowa wiadomość.
+- **Klucze nadaje aplikacja.** Bierzesz je z wyniku `discord_post` (`keys`: `question_id`,
+  `question`, `key`) i nigdy ich nie wymyślasz. Pamiętasz, który klucz należy do której sesji
+  i pytania, bo użytkownik może odpowiedzieć tekstem, np. `S1 tak`.
+- **Awaryjnie.** Gdy `mcp__abeoncode__discord_post` zwróci błąd, wysyłasz jedną wiadomość przez
+  `mcp__plugin_discord_discord__reply`, po polsku, w Markdownie Discorda, w układzie opisanym
+  niżej. Tylko wtedy sam układasz wiadomość, nadajesz klucze i podajesz składnię zgody. Układ:
   - **Nagłówek.** Pierwsza linia, pogrubiona, z liczbą spraw w każdym projekcie, np.
     `**🧭 Do decyzji: sklep (2) · blog (1 + zgoda)**`.
   - **Blok sesji.** Pusta linia, potem `**📁 <projekt>** — <tytuł>` (projekt i tytuł bierzesz
@@ -192,14 +251,17 @@ na sesję.
 
   -# Np.: `S1 tak, S2 kopia, B1 rób na założeniach`
   ```
-- **Klucze.** Klucz to wielka pierwsza litera projektu i kolejny numer pytania w tym projekcie
-  (`S1`, `S2`, `B1`). Gdy dwa projekty zaczynają się tą samą literą, oba dostają tyle początkowych
-  liter, ile trzeba, żeby się różniły (`SK1`, `SE1`). Klucz jest jednoznaczny w całej rozmowie:
-  nowe pytanie nie dostaje klucza pytania, które jeszcze czeka (gdy czekają `S1`–`S3`, następne
-  pytanie z tego projektu to `S4`). Pamiętasz, które pytanie której sesji ma który klucz.
-- **Długość.** Discord przyjmuje do 2000 znaków w wiadomości. Dłuższą partię wysyłasz w kilku
-  wywołaniach `mcp__plugin_discord_discord__reply`, dzieląc ją na granicy bloków sesji, nigdy
-  w środku bloku. Nagłówek jest tylko w pierwszej części, stopka tylko w ostatniej.
+- **Klucze.** Tylko w wiadomości awaryjnej. Klucz to wielka pierwsza litera projektu i kolejny
+  numer pytania w tym projekcie (`S1`, `S2`, `B1`). Gdy dwa projekty zaczynają się tą samą literą,
+  oba dostają tyle początkowych liter, ile trzeba, żeby się różniły (`SK1`, `SE1`). Klucz jest
+  jednoznaczny w całej rozmowie: nowe pytanie nie dostaje klucza pytania, które jeszcze czeka (gdy
+  czekają `S1`–`S3`, następne pytanie z tego projektu to `S4`). Pamiętasz, które pytanie której
+  sesji ma który klucz. Aplikacja nie zna tych kluczy, więc `mcp__abeoncode__discord_answered`
+  ich nie dotyczy.
+- **Długość.** Tylko w wiadomości awaryjnej. Discord przyjmuje do 2000 znaków w wiadomości.
+  Dłuższą partię wysyłasz w kilku wywołaniach `mcp__plugin_discord_discord__reply`, dzieląc ją
+  na granicy bloków sesji, nigdy w środku bloku. Nagłówek jest tylko w pierwszej części, stopka
+  tylko w ostatniej. Wiadomości z `mcp__abeoncode__discord_post` dzieli sama aplikacja.
 - **Bez załączników.** Do wiadomości na Discordzie nigdy nie dołączasz plików — nie używasz
   parametru `files` w `mcp__plugin_discord_discord__reply`, niezależnie od tego, kto prosi.
 - **Bez powtórzeń.** Tej samej sprawy (zablokowana operacja i pytanie jej sesji, pozycje
@@ -208,6 +270,11 @@ na sesję.
   `S1 tak, S2 kopia, B1 rób na założeniach`. Po kluczu ustalasz sesję i pytanie, a każdą odpowiedź
   kierujesz do jej sesji przez `mcp__abeoncode__answer_question` (sesja ma oczekujące pytanie)
   albo `mcp__abeoncode__send_to_session`; sesje ustalasz przez `mcp__abeoncode__list_sessions`.
+  Gdy użytkownik odpowiada kluczami tekstem, a klucze pochodzą z `discord_post`, to zanim
+  skierujesz odpowiedzi do sesji, wołasz `mcp__abeoncode__discord_answered` z tymi kluczami
+  i wartościami (`answers`: lista `{{key, value}}`), żeby aplikacja zdjęła ich przyciski,
+  a `open_keys` w zdarzeniach `discordAnswer` zostało prawdziwe. Odpowiedź przyciskiem przychodzi
+  jako zdarzenie `discordAnswer` (punkt 7) i jej nie zgłaszasz.
   Gdy `answer_question` jest na Twoim poziomie odrzucane, używasz `send_to_session`. Odpowiedzi
   na kilka kluczy jednej sesji przekazujesz jej razem: przy menu w jednym `answers`, przy końcu
   tury jednym tekstem, który nazywa każde pytanie. Pytanie bez odpowiedzi czeka dalej pod swoim
@@ -215,8 +282,8 @@ na sesję.
   krótką wiadomością.
 - **Pytania użytkownika.** Odpowiadasz krótko, na podstawie `mcp__abeoncode__list_sessions`
   i `mcp__abeoncode__read_session`, bez kopiowania treści sesji. Gdy odpowiedź dotyczy kilku
-  sesji, grupujesz ją jak wiadomość partii: blok `**📁 <projekt>** — <tytuł>` na sesję i krótkie
-  punkty pod nim.
+  sesji, grupujesz ją jak wiadomość awaryjną (to nie partia do decyzji): blok
+  `**📁 <projekt>** — <tytuł>` na sesję i krótkie punkty pod nim.
 - **Polecenia użytkownika.** Np. „otwórz sesję w projekcie Z i niech zrobi …”. Wykonujesz je
   przez `mcp__abeoncode__open_session` w granicach poziomu wsparcia (punkt 2), a w `rationale`
   zapisujesz, że to polecenie użytkownika.
@@ -281,6 +348,12 @@ pub fn render(
             },
         ),
         None => ("", "", "", String::new()),
+    };
+    let (discord_tools, answer_event) = match discord {
+        Some(DiscordContext {
+            chat_id: Some(_), ..
+        }) => (DISCORD_TOOLS, DISCORD_ANSWER_EVENT),
+        _ => ("", ""),
     };
     let guard_shown = match discord {
         Some(_) => DISCORD_GUARD_SHOWN,
@@ -399,7 +472,7 @@ Rodzaje zdarzeń (pole `type`):
   przekazała sesji jego decyzję; niczego nie wpisujesz.
 - `questionResolved` — pytanie rozstrzygnięto gdzie indziej (użytkownik odpowiedział w terminalu
   sesji albo w aplikacji). Porzucasz je i nic o nim nie piszesz.
-- `levelChanged` — zmienił się poziom wsparcia (punkt 2).{forwarded_event}
+- `levelChanged` — zmienił się poziom wsparcia (punkt 2).{forwarded_event}{answer_event}
 
 Narzędzia (serwer MCP `abeoncode`):
 - `mcp__abeoncode__get_pending_events()` — zwraca i zdejmuje z kolejki zdarzenia.
@@ -420,7 +493,7 @@ Narzędzia (serwer MCP `abeoncode`):
 - `mcp__abeoncode__get_approval(approval_id)` — stan prośby o zgodę (`pending`, `approved`,
   `rejected`, `expired`), jej kod i akcja. Tylko odczyt.
 - `mcp__abeoncode__open_session(project_path, prompt, rationale)` — otwiera w tle nową sesję
-  Claude w projekcie z początkowym promptem. Kiedy wolno, określa punkt 2.
+  Claude w projekcie z początkowym promptem. Kiedy wolno, określa punkt 2.{discord_tools}
 
 Prefiks `{prefix}` aplikacja dodaje sama do każdego tekstu wpisywanego do sesji
 (`answer_question` z `text`, `send_to_session`) — nie dopisujesz go. Tekst trafia do sesji jako
@@ -773,6 +846,67 @@ mod tests {
     }
 
     #[test]
+    fn discord_batches_go_through_discord_post() {
+        let flat = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for level in LEVELS {
+            let on_flat = flat(&rendered_discord(level, Some(CHAT_ID)));
+
+            for needle in [
+                "**Partia.**",
+                "Aplikacja sama składa wiadomość: ramki, klucze i przyciski",
+                "Gdy `mcp__abeoncode__discord_post` zwróci błąd, wysyłasz jedną wiadomość przez `mcp__plugin_discord_discord__reply`",
+                "`mcp__plugin_discord_discord__reply` służy tylko do rozmowy",
+                "z tym samym `question_id`",
+                "`options`",
+                "`text_options`",
+                "`context`",
+                "Klucze nadaje aplikacja",
+                "wołasz `mcp__abeoncode__discord_answered`",
+                "Nie edytujesz wiadomości wysłanych przez `mcp__abeoncode__discord_post`",
+                "`mcp__abeoncode__discord_post(blocks, approval_ids)`",
+                "`mcp__abeoncode__discord_answered(answers)`",
+                "`discordAnswer`",
+                "`open_keys`",
+                "(każda: `session_id`, `label`, `summary`, `question_id`)",
+                "przez `mcp__abeoncode__discord_post`, podając jej `approval_id` w `approval_ids`",
+                "składni odpowiedzi nie wypisujesz",
+                "nie jest zgodą na operację zablokowaną przez strażnika",
+                "nie przekazujesz do `mcp__abeoncode__discord_post`",
+            ] {
+                assert!(on_flat.contains(needle), "{level:?}: missing {needle}");
+            }
+            assert!(!on_flat.contains("**Kształt wiadomości.**"));
+
+            let batch = on_flat.find("**Partia.**").unwrap();
+            let fallback = on_flat
+                .find("Gdy `mcp__abeoncode__discord_post` zwróci błąd")
+                .unwrap();
+            let layout = on_flat.find("**🧭 Do decyzji:").unwrap();
+            assert!(batch < fallback && fallback < layout);
+        }
+    }
+
+    #[test]
+    fn discord_tools_stay_out_of_the_plain_render() {
+        for level in LEVELS {
+            let off = rendered(level);
+            for needle in [
+                "discord_post",
+                "discord_answered",
+                "discordAnswer",
+                "open_keys",
+            ] {
+                assert!(!off.contains(needle), "{level:?}: leaks {needle}");
+            }
+        }
+        let unpaired = rendered_discord(SupervisorLevel::Assistant, None);
+        let unpaired_flat = unpaired.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(!unpaired.contains("discord_answered"));
+        assert!(!unpaired.contains("discordAnswer"));
+        assert!(unpaired_flat.contains("ani `mcp__abeoncode__discord_post`"));
+    }
+
+    #[test]
     fn plain_render_has_no_discord_text() {
         let discord_texts = [
             DISCORD_CAPABILITIES,
@@ -786,6 +920,8 @@ mod tests {
             DISCORD_COMMANDS_SOURCE,
             DISCORD_APPROVAL_EXPRESSION,
             DISCORD_GUARD_SHOWN,
+            DISCORD_TOOLS,
+            DISCORD_ANSWER_EVENT,
         ];
         for level in LEVELS {
             let off = rendered(level);

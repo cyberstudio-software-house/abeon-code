@@ -453,6 +453,9 @@ to the supervisor as an event and written into `CLAUDE.md`.
      first.
 - **Message style:**
   - Write only when a decision is needed or the user asked.
+  - Batches to decide are now rendered by the app with buttons: see
+    `2026-11-01-supervisor-discord-buttons-design.md`. The layout below is the fallback when
+    posting fails.
   - One message per batch, in Discord Markdown (chosen 2026-11-01 from three DM mock-ups; a single
     line per session read as one dense block once several projects asked at once):
     - a bold header counting the open items per project (`🧭 Do decyzji: sklep (2) · blog (1 + zgoda)`);

@@ -431,6 +431,19 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   and a linked chat id, not a connected plugin. If the plugin dies at runtime (revoked token,
   network) routing still says Discord until the next relaunch; the Settings status shows `botError`
   for a revoked token.
+- **Discord buttons** (`discord/buttons.rs`, `gateway.rs`, `registry.rs`, `render.rs`,
+  `interactions.rs`, `jobs.rs`; spec `docs/superpowers/specs/2026-11-01-supervisor-discord-buttons-design.md`):
+  the supervisor posts batches with `mcp__abeoncode__discord_post` (app-rendered Components V2
+  message, keys assigned by the app) and reports text answers with `mcp__abeoncode__discord_answered`;
+  `reply` is only for conversation and the fallback text layout. The app runs its own gateway
+  connection with `intents: 0` (interactions only); a tap becomes `discordAnswer` (with `open_keys`)
+  or resolves the approval directly. The registry of posted messages is in memory, so after a restart
+  old buttons answer „Nieaktualne”. Messages are PATCHed when a settle signal arrives
+  (`DiscordSync`: approval resolved or expired, `discord_answered`, `send_to_session`, a Human prompt,
+  dismissed escalation, rebind). `custom_id`s start with `abeon:`: the app's gateway forwards only
+  those, and the plugin handles only its own `perm:` buttons, so neither answers the other's clicks.
+  Settings show a status row for the buttons connection. `claude_md.rs` teaches all of it; the text
+  layout stays as the fallback when `discord_post` errors.
 
 ## Gotchas
 
