@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-desktop
+  cancel-in-progress: false
+
 jobs:
   detect:
     runs-on: ubuntu-latest
@@ -52,9 +56,30 @@ jobs:
             echo "$delim"
           } >> "$GITHUB_OUTPUT"
 
-  release:
+  create-release:
     needs: detect
     if: needs.detect.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.draft.outputs.release_id }}
+    steps:
+      - id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.detect.outputs.version }}
+          NOTES: ${{ needs.detect.outputs.changelog }}
+        run: |
+          id="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.draft and .tag_name == \"$TAG\") | .id" | head -n 1)"
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$id" -f target_commitish="$GITHUB_SHA" -f body="$NOTES" --silent
+          else
+            id="$(gh api "repos/$GITHUB_REPOSITORY/releases" -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" -f name="AbeonCode $TAG" -f body="$NOTES" -F draft=true -F prerelease=false --jq .id)"
+          fi
+          echo "draft release $TAG: $id"
+          echo "release_id=$id" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: [detect, create-release]
     strategy:
       fail-fast: false
       matrix:
@@ -101,10 +126,30 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: DesktopApp
+          releaseId: ${{ needs.create-release.outputs.release_id }}
           tagName: v${{ needs.detect.outputs.version }}
-          releaseName: 'AbeonCode v${{ needs.detect.outputs.version }}'
           releaseBody: ${{ needs.detect.outputs.changelog }}
-          releaseDraft: false
-          prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
+
+  publish-release:
+    needs: [create-release, release]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          asset="$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets" --paginate --jq '.[] | select(.name == "latest.json") | .id')"
+          if [ -z "$asset" ]; then
+            echo "::error::latest.json is missing from the draft release"
+            exit 1
+          fi
+          gh api -H "Accept: application/octet-stream" "repos/$GITHUB_REPOSITORY/releases/assets/$asset" > latest.json
+          for platform in linux-x86_64 windows-x86_64 darwin-x86_64 darwin-aarch64; do
+            if ! jq -e --arg p "$platform" '.platforms[$p].url' latest.json > /dev/null; then
+              echo "::error::latest.json has no $platform entry, the release stays a draft"
+              exit 1
+            fi
+          done
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -F draft=false -f make_latest=true --silent
