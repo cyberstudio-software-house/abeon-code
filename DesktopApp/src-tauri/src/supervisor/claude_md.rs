@@ -202,17 +202,18 @@ na sesję.
     kilka pozycji z tym samym `question_id`, po jednej na część — nigdy kilka pytań `(a)`/`(b)`
     w jednym zdaniu.
   - **`options`:** odpowiedzi jednowyrazowe, najwyżej 5, każda do 25 znaków; aplikacja robi z nich
-    przyciski. **`text_options`:** odpowiedzi swobodne (np. `uwagi`, opis), które użytkownik
-    wpisuje tekstem; aplikacja tylko je wymienia. Pozycja bez żadnej opcji jest wyłącznie
-    tekstowa.
+    przyciski. **`text_options`:** odpowiedzi swobodne (np. `uwagi`, opis), najwyżej 5, każda do
+    40 znaków, które użytkownik wpisuje tekstem; aplikacja tylko je wymienia. Pozycja bez żadnej
+    opcji jest wyłącznie tekstowa.
   - **`context`** (do 300 znaków) dajesz tylko wtedy, gdy bez niego nie da się odpowiedzieć;
     pytanie i opcje zostają krótkie, szczegóły idą do kontekstu.
   - **Zgody** przekazujesz w `approval_ids` (z `guardBlocked` i `forwarded`). Akcję i kod bierze
     aplikacja ze swojego rekordu, więc ich nie przepisujesz, a przyciski „Zatwierdź” i „Odrzuć”
     rozstrzygają zgodę wprost w aplikacji.
 
-  Wynik to `posted`, `keys` i `skipped`; pozycje z `skipped` były już wysłane, więc nic z nimi
-  nie robisz. Każda nowa partia to nowa wiadomość.
+  Wynik to `posted`, `keys` i `skipped`; pozycje z `skipped` były już wysłane, więc nie wysyłasz
+  ich drugi raz, a klucze pytań z `skipped` i tak dostajesz w `keys`. Każda nowa partia to nowa
+  wiadomość.
 
   Gdy `mcp__abeoncode__discord_post` zwróci błąd walidacji (każdy błąd poza „Przyciski Discorda
   nie działają — wyślij wiadomość przez reply”), poprawiasz dane i wołasz go jeszcze raz, tylko
@@ -260,9 +261,10 @@ na sesję.
   numer pytania w tym projekcie (`S1`, `S2`, `B1`). Gdy dwa projekty zaczynają się tą samą literą,
   oba dostają tyle początkowych liter, ile trzeba, żeby się różniły (`SK1`, `SE1`). Klucz jest
   jednoznaczny w całej rozmowie: nowe pytanie nie dostaje klucza pytania, które jeszcze czeka (gdy
-  czekają `S1`–`S3`, następne pytanie z tego projektu to `S4`). Pamiętasz, które pytanie której
-  sesji ma który klucz. Aplikacja nie zna tych kluczy, więc `mcp__abeoncode__discord_answered`
-  ich nie dotyczy.
+  czekają `S1`–`S3`, następne pytanie z tego projektu to `S4`). Dotyczy to też kluczy z wyniku
+  `mcp__abeoncode__discord_post`: klucza, którego pytanie jeszcze czeka, nie używasz w wiadomości
+  awaryjnej, tylko bierzesz następny wolny numer. Pamiętasz, które pytanie której sesji ma który
+  klucz. Aplikacja nie zna tych kluczy, więc `mcp__abeoncode__discord_answered` ich nie dotyczy.
 - **Długość.** Tylko w wiadomości awaryjnej. Discord przyjmuje do 2000 znaków w wiadomości.
   Dłuższą partię wysyłasz w kilku wywołaniach `mcp__plugin_discord_discord__reply`, dzieląc ją
   na granicy bloków sesji, nigdy w środku bloku. Nagłówek jest tylko w pierwszej części, stopka
@@ -887,6 +889,9 @@ mod tests {
                 "składni odpowiedzi nie wypisujesz",
                 "nie jest zgodą na operację zablokowaną przez strażnika",
                 "nie przekazujesz do `mcp__abeoncode__discord_post`",
+                "**`text_options`:** odpowiedzi swobodne (np. `uwagi`, opis), najwyżej 5, każda do 40 znaków",
+                "pozycje z `skipped` były już wysłane, więc nie wysyłasz ich drugi raz, a klucze pytań z `skipped` i tak dostajesz w `keys`",
+                "Dotyczy to też kluczy z wyniku `mcp__abeoncode__discord_post`: klucza, którego pytanie jeszcze czeka, nie używasz w wiadomości awaryjnej, tylko bierzesz następny wolny numer",
             ] {
                 assert!(on_flat.contains(needle), "{level:?}: missing {needle}");
             }
