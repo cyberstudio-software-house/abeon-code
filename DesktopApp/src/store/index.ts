@@ -11,6 +11,7 @@ import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 import { createGitSlice, type GitSlice } from './gitSlice';
 import { createClickUpSlice, type ClickUpSlice } from './clickupSlice';
 import { createPanesSlice, ROOT_PANE_ID, type PanesSlice } from './panesSlice';
+import { createNotesSlice, type NotesSlice } from './notesSlice';
 import { createTerminalDrawersSlice, type TerminalDrawersSlice } from './terminalDrawersSlice';
 import {
   clampTerminalFontSize, isTerminalColors, isTerminalCursorStyle, isTerminalFontId, isTerminalLineHeight,
@@ -34,7 +35,7 @@ import type { Provider, SupervisorLevel } from '../types';
 import { isProvider } from '../lib/providers';
 import { migrateClaudeModelSettings } from '../lib/models';
 
-export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice & TerminalDrawersSlice & SupervisorSlice;
+export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice & TerminalDrawersSlice & SupervisorSlice & NotesSlice;
 
 export const useStore = create<AppState>()((...a) => ({
   ...createSettingsSlice(...a),
@@ -47,6 +48,7 @@ export const useStore = create<AppState>()((...a) => ({
   ...createPanesSlice(...a),
   ...createTerminalDrawersSlice(...a),
   ...createSupervisorSlice(...a),
+  ...createNotesSlice(...a),
 }));
 
 const PERSIST_KEY = 'abeoncode.settings';
@@ -654,6 +656,14 @@ function pruneOrphanDrawers(state: AppState) {
 }
 
 useStore.subscribe(pruneOrphanDrawers);
+
+let prevNotesActiveTabId = useStore.getState().activeTabId;
+
+useStore.subscribe((state) => {
+  const tabJustCleared = state.activeTabId === null && prevNotesActiveTabId !== null;
+  prevNotesActiveTabId = state.activeTabId;
+  if (tabJustCleared && state.notesPanelOpen) void state.closeNotesPanel();
+});
 
 // --- Subscribe: on any state change, diff + write localStorage + SQLite ---
 const tabsChangeKey = (state: AppState) =>
