@@ -14,7 +14,7 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 ## Folder map
 
 ### Frontend (`src/`)
-- `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `panesSlice`, `actionsSlice`, `gitSlice`, `terminalDrawersSlice`. Composed in `store/index.ts`.
+- `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `panesSlice`, `actionsSlice`, `gitSlice`, `terminalDrawersSlice`, `notesSlice`. Composed in `store/index.ts`.
 - `lib/settingsCategories.ts` — settings categories (groups, labels, icons, search keywords), `filterSettingsCategories` and the "Terminal is new" flag; `lib/terminalAppearance.ts` — terminal fonts, palettes and xterm option builders; `lib/toolStatus.ts` — pairs tool-use blocks with their results for the history view; `lib/activity.ts` — session activity labels and colours (amber = running, blue = waiting for you).
 - `lib/tauri.ts` — **single typed wrapper** over `invoke()`/`listen()`. Every IPC call lives here; do not call `invoke` directly from components.
 - `types/` — TS types, several are ts-rs-generated from Rust (`PtyKind.ts`, `GitStatus.ts`, etc.) — do not edit by hand.
@@ -23,7 +23,8 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
   - `layout/AppHeader.tsx` — the 44 px app header (logo, project row or breadcrumb, active-session count); see "Header project row and pane bar".
   - `sidebar/` — left column: project list, sessions, sort menu, search.
   - `center/` — middle column: `CenterPanel` → `PaneLayout` (renders the pane tree: one `PaneBar` and one card frame per pane, one `TabPanel` content layer per tab, `PaneResizers`, `PaneDragOverlay` + `usePaneDrag` for the tab-drag gesture). `HeaderProjectRow` (project groups of the focused pane, mounted in `AppHeader`) and `useTabBarActions` (close guards, rename, menus, detach) live here too. **Tabs and panes are managed here.** `TerminalDrawerChrome` + `useTerminalDrawerShortcuts` render the per-session terminal drawer (layers computed by `lib/paneLayers.ts`, geometry in `lib/drawerGeometry.ts`).
-  - `right/` — right column: Git panel (`GitSection` with tabs: working-tree changes / commit history via `GitHistory` + `CommitDiffDialog`), Actions list, runnable scripts.
+  - `right/` — right column: Git panel (`GitSection` with tabs: working-tree changes / commit history via `GitHistory` + `CommitDiffDialog`), Actions list, runnable scripts. `RightPanel` swaps in `NotesPanel` while `notesPanelOpen`.
+  - `notes/` — notes: `NotesPanel` (right-column list/editor), `NoteTiles`, `NoteEditor` (shared by panel and tab), `NoteTabView` (the `note` tab). Store in `store/notesSlice.ts`, helpers in `lib/noteText.ts`, change sync in `lib/useNotesSync.ts`. See "Notes".
   - `terminal/TerminalView.tsx` — xterm wrapper for any PTY (claude, action, shell); `useTerminalAppearance.ts` feeds it the persisted appearance settings.
   - `history/` — session history viewer (markdown blocks).
   - `settings/` — the full-window settings view: `SettingsView` (search, nav column, page), `SettingsNav`, `controls.tsx` (shared `SettingsPage`/`SettingsSection`/`SettingsRow`, `Segmented`, `Switch`, `Stepper`, `SelectField`) and `categories/*` (one page per category, plus `TerminalPreview` and `CustomPaletteEditor`). See "Settings view".
@@ -32,7 +33,7 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 
 ### Backend (`src-tauri/src/`)
 - `diagnostics.rs` — log file redirect and lifecycle lines, see "Diagnostics log".
-- `commands/` — Tauri command handlers grouped by domain: `projects.rs`, `sessions.rs`, `pty.rs`, `actions.rs`, `git.rs`, `settings.rs`, `activity.rs`. Registered in `lib.rs`.
+- `commands/` — Tauri command handlers grouped by domain: `projects.rs`, `sessions.rs`, `pty.rs`, `actions.rs`, `git.rs`, `settings.rs`, `activity.rs`, `notes.rs`. Registered in `lib.rs`.
 - `db/` — SQLite migrations + queries.
 - `pty/` — PTY spawning and lifecycle (claude / action / shell variants).
 - `sessions/` — session reading and watch; Claude Code JSONL format at top level, `sessions/codex/` holds the OpenAI Codex rollout adapter, and `sessions/opencode/` holds the read-only OpenCode SQLite adapter.
@@ -67,10 +68,11 @@ keeping them in sync: it attaches orphaned tabs to the focused pane, drops unkno
 emptied panes and keeps `activeTabId === focusedLeaf.activeTabId`. Actions that open tabs therefore
 need to know nothing about panes.
 
-Three tab kinds:
+Four tab kinds:
 - `session` — Claude session, has `mode: 'history' | 'terminal'` (resume vs. live).
 - `action` — running script with `status: 'running' | 'exited'`.
 - `terminal` — bare shell PTY.
+- `note` — one note (`noteId`), title is the note's first line. Never a live process, so it closes without a guard (through `closeNoteTab` in `useTabBarActions`, which releases the draft), cannot be renamed, is deduped by `noteId` (`note:<id>` tab id) and is **not persisted** (`writeTabsToLocalStorage` saves only session tabs). See "Notes".
 
 Closing a tab with an active process (`session+terminal`, `action`, `terminal`) **must** route through
 the `ConfirmDialog` owned by `useTabBarActions.tsx`. Helpers there: `isActiveProcess()` +
@@ -279,6 +281,68 @@ settings: `terminalFontId` (`geistMono` | `jetbrainsMono` | `ibmPlexMono` | `sys
   measures glyphs once per font, and a webfont loads lazily, so the effect waits for
   `document.fonts.load(...)` and then toggles `fontFamily` (fallback first, then the real one) to
   force a re-measure before the last refit. Without it the cells keep the fallback font's width.
+
+## Notes
+
+Short plain-text notes, per project or global, edited in the right column (`NotesPanel`, opened from
+`ProjectToolbar`) or in a `note` tab. Agents add and read them with `abeon-code note` and the
+`abeon-notes` skill. Spec: `docs/superpowers/specs/2026-11-08-notes-side-panel-design.md`.
+
+- **No titles**: the first non-blank line is the title (`noteTitle` in `lib/noteText.ts`, used for
+  tiles and tab titles). The `title` column stays in the schema but is always `''` on purpose:
+  migration 007 folded old titles into `content` and sets it to `''`, and `notes_repo` never writes
+  it, because dev and installed builds share one SQLite DB and an older build still expects the
+  column. Do not drop it or start using it. Migrations run in an IMMEDIATE transaction for the same
+  reason (two builds can start against the DB at once).
+- **Store owns everything** (`store/notesSlice.ts`): panel mode (`notesPanelOpen`, `notesScope`,
+  `notesView` list/editor), the per-scope lists (`notesLists`, keyed `global` / `project:<id>`) and
+  `noteDrafts`. Components hold no note state of their own.
+- **One draft per note, shared by panel and tabs**: drafts are keyed by a UUID (a new note has no id
+  yet) and found by `noteId` **or** `replacesNoteId` (`draftKeyForNote`). The panel editor and a `note`
+  tab for the same note edit the same draft, so they cannot diverge. `NoteTabView` gets its draft from
+  `ensureNoteDraft`.
+- **Autosave** (`editNoteDraft` -> `scheduleSave`, `NOTE_SAVE_DEBOUNCE_MS` = 700 ms): every save goes
+  through a per-draft promise chain (`saveChains`), so a create can never race the update that follows
+  it and `flushNoteDraft` just awaits the chain. A save that hits `not_found` (note deleted elsewhere)
+  recreates the note, sets `replacesNoteId` and re-points its tabs (`repointNoteTabs`). A failed
+  save leaves the draft in `error` with the content kept; `flushNoteDraft` then returns `false`.
+- **Flush points** (all await `flushNoteDraft`/`flushAllNoteDrafts` and refuse to continue on
+  `false`): back to the list, closing the panel, "open in tab", closing a tab, detaching a group
+  (`lib/detachGroup.ts`), closing the main or a detached window (`AppShell`/`DetachedShell`, with a
+  `ConfirmDialog` when notes cannot be saved), and **before `downloadAndInstall` and `relaunch`** in
+  `AppShell`. A new flush point needs the same treatment or the last 700 ms of typing is lost.
+- **Empty notes are deleted on release**: `releaseNoteDraft(key, from)` drops the draft when no other
+  holder (panel view or another note tab) still needs it, and a blank saved note is deleted from the
+  DB, a blank never-saved draft is simply discarded. Releasing while another holder exists only
+  flushes. `hasUnsavedNotes` ignores a blank unsaved draft.
+- **Lists are merged, not replaced**: `mergeFetched` keeps a local note when it is newer than the
+  fetched one, so a reload cannot show stale content over an autosave in flight. `reloadNotes`
+  also refreshes clean drafts (no edits, not saving) from the fetched content and leaves dirty ones
+  alone. Each load takes a token (`loadTokens`) and a stale response is dropped.
+- **`notes://changed`** (`NotesChangedEvent`: `createdNoteId`, `external`, `sourceWindow`): the
+  `create_note`/`update_note`/`delete_note` commands emit it with the calling window's label, and
+  `lib/useNotesSync.ts` (mounted in `AppShell` and `DetachedShell`) ignores events from its own window
+  and reloads for the rest. The CLI is a separate process, so after `note add` it sends
+  `IpcRequest::NotesChanged` over the supervisor socket (`supervisor/ipc.rs`), and the router
+  (`supervisor/runtime.rs`) re-emits it as an `external` event with no source window. Only the `main`
+  window toasts „Dodano notatkę” for an external create. The ping is best effort and unix-only: with
+  the app closed the note is still in the DB and the CLI still succeeds.
+- **Panel placement**: `RightPanel` mounts `NotesPanel` while the panel is open and keeps the rest
+  of the column mounted but `hidden` + `inert`. A subscriber in `store/index.ts` closes the panel
+  when the last tab closes (`activeTabId` goes `null`), because the panel needs a project context.
+- **CLI** (`src-tauri/src/cli/notes.rs`, reached from the `abeon-code` wrapper as
+  `abeon-code note add|list [--global] [--limit N]`): the wrapper appends `--cwd "$(pwd -P)"` and
+  the project is the registered project with the longest path prefix of it (`resolve_project`); no
+  match is an error unless `--global`. The note comes from stdin (heredoc, max `MAX_NOTE_BYTES`),
+  the output formats are what the skill documents (`abeon-code: note added …`,
+  `--- note <id> · <date> ---`), so change them together with `cli/skill.rs`.
+- **`wrapper_features` marker**: `cli/installer.rs` writes `wrapper_features="note"` into the wrapper.
+  The `abeon-notes` skill greps for it before calling `abeon-code note`, because an outdated wrapper
+  would not know `note` and start the app instead. Adding a new wrapper subcommand means extending
+  that list (the skill's `grep 'wrapper_features=.*note'` stays valid when features are appended).
+- **Skills**: `cli/skill.rs` installs `abeon-open-session` and `abeon-notes` into
+  `~/.claude/skills`; "Zainstaluj skill" in Settings reinstalls the wrapper first, then both skills,
+  and shows the skills root directory.
 
 ## Supervisor agent
 

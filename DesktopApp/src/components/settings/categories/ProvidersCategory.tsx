@@ -215,10 +215,12 @@ function ClaudeSkillRow() {
       label="Skill dla Claude Code"
       description={
         <>
-          Instaluje skill <code className="font-mono text-fg-secondary">abeon-open-session</code> w{' '}
-          <code className="font-mono text-fg-secondary">~/.claude/skills</code>. Pozwala agentowi uruchomić w tle nową
-          sesję w innym projekcie z gotowym promptem, np. „odpal sesję w ~/projects/x i dodaj
-          endpoint…”. Instaluje też (aktualizuje) komendę <code className="font-mono text-fg-secondary">abeon-code</code> w{' '}
+          Instaluje skille <code className="font-mono text-fg-secondary">abeon-open-session</code> i{' '}
+          <code className="font-mono text-fg-secondary">abeon-notes</code> w{' '}
+          <code className="font-mono text-fg-secondary">~/.claude/skills</code>. Pozwalają agentowi uruchomić w tle nową
+          sesję w innym projekcie z gotowym promptem („odpal sesję w ~/projects/x i dodaj
+          endpoint…”) oraz dodawać i czytać notatki projektu („dodaj notatkę z informacją o…”, „przeczytaj
+          notatki”). Instaluje też (aktualizuje) komendę <code className="font-mono text-fg-secondary">abeon-code</code> w{' '}
           <code className="font-mono text-fg-secondary">~/.local/bin</code>, która musi być dostępna w{' '}
           <code className="font-mono text-fg-secondary">PATH</code>.
           <InstallStatus installedPath={installedPath} error={error} />

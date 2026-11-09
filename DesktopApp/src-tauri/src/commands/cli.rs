@@ -24,6 +24,7 @@ pub fn install_cli_command() -> AppResult<String> {
 pub fn install_claude_skill() -> AppResult<String> {
     install_cli_command()?;
     let home = dirs::home_dir().ok_or_else(|| AppError::Other("no home dir".into()))?;
-    let dest = skill::install(&home.join(".claude").join("skills"))?;
-    Ok(dest.to_string_lossy().to_string())
+    let skills_root = home.join(".claude").join("skills");
+    skill::install(&skills_root)?;
+    Ok(skills_root.to_string_lossy().to_string())
 }
