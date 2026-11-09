@@ -4,8 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 type MockState = Record<string, unknown>;
 let mockState: MockState;
 
-const { openTerminal, openProjectInEditor, toastError } = vi.hoisted(() => ({
+const { openTerminal, openNotesPanel, openProjectInEditor, toastError } = vi.hoisted(() => ({
   openTerminal: vi.fn(),
+  openNotesPanel: vi.fn(),
   openProjectInEditor: vi.fn(),
   toastError: vi.fn(),
 }));
@@ -28,6 +29,7 @@ function baseState(overrides: Partial<MockState> = {}): MockState {
     tabs: [{ id: 'tab-4', projectId: 4 }],
     activeTabId: 'tab-4',
     openTerminal,
+    openNotesPanel,
     ...overrides,
   };
 }
@@ -47,9 +49,15 @@ describe('ProjectToolbar', () => {
     expect(openProjectInEditor).toHaveBeenCalledWith('/demo');
   });
 
-  it('renders the two actions without a pressed state', () => {
+  it('opens the notes panel', () => {
     render(<ProjectToolbar />);
-    for (const name of ['Terminal', 'Edytor']) {
+    fireEvent.click(screen.getByRole('button', { name: 'Notatki' }));
+    expect(openNotesPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the three actions without a pressed state', () => {
+    render(<ProjectToolbar />);
+    for (const name of ['Terminal', 'Edytor', 'Notatki']) {
       expect(screen.getByRole('button', { name })).not.toHaveAttribute('aria-pressed');
     }
   });
