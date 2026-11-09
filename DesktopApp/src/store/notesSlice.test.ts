@@ -15,7 +15,7 @@ vi.mock('../lib/tauri', async (importOriginal) => {
 });
 
 import { useStore } from './index';
-import { draftKeyForNote, hasUnsavedNotes } from './notesSlice';
+import { draftKeyForNote, hasNotesToSettle, hasUnsavedNotes } from './notesSlice';
 
 const note = (id: number, content: string, updatedAt = id * 10, projectId: number | null = 2): Note => ({
   id, projectId, content, createdAt: 1, updatedAt,
@@ -560,5 +560,139 @@ describe('notesSlice', () => {
     expect(state().notesPanelOpen).toBe(true);
     useStore.setState({ tabs: [], activeTabId: null });
     expect(state().notesPanelOpen).toBe(false);
+  });
+
+  const notFound = (id: number) => ({ code: 'not_found', message: `note ${id}` });
+
+  it('releasing an emptied note that was deleted elsewhere still closes it', async () => {
+    tauriMock.deleteNote.mockRejectedValue(notFound(5));
+    tauriMock.listNotes.mockResolvedValue([note(5, 'X'), note(7, 'Y')]);
+    await state().loadNotes(2);
+    state().openNoteInPanel(note(5, 'X'));
+    state().editNoteDraft(onlyDraftKey(), '');
+    expect(await state().backToNotesList()).toBe(true);
+    expect(state().noteDrafts).toEqual({});
+    expect(state().notesLists['project:2']?.notes.map((n) => n.id)).toEqual([7]);
+  });
+
+  it('deleteNoteById treats a note already deleted elsewhere as gone', async () => {
+    tauriMock.deleteNote.mockRejectedValue(notFound(5));
+    tauriMock.listNotes.mockResolvedValue([note(5, 'A'), note(7, 'B')]);
+    await state().loadNotes(2);
+    state().openNoteInPanel(note(5, 'A'));
+    useStore.setState({ tabs: [{ kind: 'note', id: 'note:5', projectId: 2, noteId: 5, title: 'A' }], activeTabId: 'note:5' });
+    expect(await state().deleteNoteById(5)).toBe(true);
+    expect(state().noteDrafts).toEqual({});
+    expect(state().tabs).toEqual([]);
+    expect(state().notesLists['project:2']?.notes.map((n) => n.id)).toEqual([7]);
+  });
+
+  describe('settling drafts for exit', () => {
+    it('deletes an emptied note instead of saving it', async () => {
+      tauriMock.deleteNote.mockResolvedValue(undefined);
+      tauriMock.listNotes.mockResolvedValue([note(5, 'X'), note(7, 'Y')]);
+      await state().loadNotes(2);
+      state().openNoteInPanel(note(5, 'X'));
+      state().editNoteDraft(onlyDraftKey(), '  ');
+      expect(await state().settleNoteDraftsForExit()).toBe(true);
+      expect(tauriMock.deleteNote).toHaveBeenCalledWith(5);
+      expect(tauriMock.updateNote).not.toHaveBeenCalled();
+      expect(state().notesLists['project:2']?.notes.map((n) => n.id)).toEqual([7]);
+    });
+
+    it('deletes a note whose blank content was already autosaved', async () => {
+      tauriMock.deleteNote.mockResolvedValue(undefined);
+      tauriMock.updateNote.mockResolvedValue(note(5, '', 200));
+      state().openNoteInPanel(note(5, 'X'));
+      const key = onlyDraftKey();
+      state().editNoteDraft(key, '');
+      await state().flushNoteDraft(key);
+      expect(hasUnsavedNotes(state())).toBe(false);
+      expect(hasNotesToSettle(state())).toBe(true);
+      tauriMock.updateNote.mockClear();
+      expect(await state().settleNoteDraftsForExit()).toBe(true);
+      expect(tauriMock.deleteNote).toHaveBeenCalledWith(5);
+      expect(tauriMock.updateNote).not.toHaveBeenCalled();
+      expect(hasNotesToSettle(state())).toBe(false);
+    });
+
+    it('still saves non-blank drafts', async () => {
+      tauriMock.updateNote.mockResolvedValue(note(5, 'XY', 70));
+      state().openNoteInPanel(note(5, 'X'));
+      state().editNoteDraft(onlyDraftKey(), 'XY');
+      expect(await state().settleNoteDraftsForExit()).toBe(true);
+      expect(tauriMock.updateNote).toHaveBeenCalledWith(5, 'XY');
+      expect(tauriMock.deleteNote).not.toHaveBeenCalled();
+    });
+
+    it('reports a failed delete', async () => {
+      tauriMock.deleteNote.mockRejectedValue(new Error('disk'));
+      state().openNoteInPanel(note(5, 'X'));
+      state().editNoteDraft(onlyDraftKey(), '');
+      expect(await state().settleNoteDraftsForExit()).toBe(false);
+    });
+
+    it('treats a note already deleted elsewhere as settled', async () => {
+      tauriMock.deleteNote.mockRejectedValue(notFound(5));
+      state().openNoteInPanel(note(5, 'X'));
+      state().editNoteDraft(onlyDraftKey(), '');
+      expect(await state().settleNoteDraftsForExit()).toBe(true);
+    });
+
+    it('keeps a tab of the emptied note working and recreates it on typing', async () => {
+      tauriMock.deleteNote.mockResolvedValue(undefined);
+      tauriMock.createNote.mockResolvedValue(note(11, 'Z', 300));
+      useStore.setState({ tabs: [{ kind: 'note', id: 'note:5', projectId: 2, noteId: 5, title: 'X' }], activeTabId: 'note:5' });
+      state().openNoteInPanel(note(5, 'X'));
+      const key = onlyDraftKey();
+      state().editNoteDraft(key, '');
+      expect(await state().settleNoteDraftsForExit()).toBe(true);
+      expect(draftOf(5)?.key).toBe(key);
+      state().editNoteDraft(key, 'Z');
+      expect(await state().flushNoteDraft(key)).toBe(true);
+      expect(tauriMock.createNote).toHaveBeenCalledWith(2, 'Z');
+      expect(state().tabs[0]).toMatchObject({ noteId: 11, title: 'Z' });
+    });
+
+    it('flushAllNoteDrafts keeps saving a blank note without deleting it', async () => {
+      tauriMock.updateNote.mockResolvedValue(note(5, '', 200));
+      state().openNoteInPanel(note(5, 'X'));
+      state().editNoteDraft(onlyDraftKey(), '');
+      expect(await state().flushAllNoteDrafts()).toBe(true);
+      expect(tauriMock.updateNote).toHaveBeenCalledWith(5, '');
+      expect(tauriMock.deleteNote).not.toHaveBeenCalled();
+    });
+  });
+
+  it('a blank edit of a note deleted elsewhere does not recreate it', async () => {
+    tauriMock.listNotes.mockResolvedValue([note(5, 'X'), note(7, 'Y')]);
+    await state().loadNotes(2);
+    tauriMock.updateNote.mockRejectedValue(notFound(5));
+    tauriMock.createNote.mockResolvedValue(note(11, 'X2', 300));
+    useStore.setState({ tabs: [{ kind: 'note', id: 'note:5', projectId: 2, noteId: 5, title: 'X' }], activeTabId: 'note:5' });
+    state().openNoteInPanel(note(5, 'X'));
+    const key = onlyDraftKey();
+    state().editNoteDraft(key, '');
+    expect(await state().flushNoteDraft(key)).toBe(true);
+    expect(tauriMock.createNote).not.toHaveBeenCalled();
+    expect(state().noteDrafts[key]).toMatchObject({ noteId: null, replacesNoteId: 5, savedContent: '', status: 'idle' });
+    expect(draftKeyForNote(state(), 5)).toBe(key);
+    expect(state().notesLists['project:2']?.notes.map((n) => n.id)).toEqual([7]);
+
+    state().editNoteDraft(key, 'X2');
+    expect(await state().flushNoteDraft(key)).toBe(true);
+    expect(tauriMock.createNote).toHaveBeenCalledWith(2, 'X2');
+    expect(state().tabs[0]).toMatchObject({ noteId: 11, title: 'X2' });
+  });
+
+  it('reloadNotes retitles the tabs of a note refreshed from outside', async () => {
+    tauriMock.listNotes.mockResolvedValueOnce([note(7, 'Stary')]);
+    await state().loadNotes(2);
+    useStore.setState({ tabs: [{ kind: 'note', id: 'note:7', projectId: 2, noteId: 7, title: 'Stary' }] });
+    state().openNoteInPanel(note(7, 'Stary'));
+    tauriMock.listNotes.mockResolvedValueOnce([note(7, 'Nowy\nreszta', 90)]);
+    await state().reloadNotes();
+    expect(draftOf(7).content).toBe('Nowy\nreszta');
+    expect(state().tabs.find((t) => t.id === 'note:7')?.title).toBe('Nowy');
   });
 });

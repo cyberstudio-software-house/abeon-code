@@ -100,10 +100,11 @@ export async function detachProjectGroup(args: {
   runningActions: ActionMap;
   detachTabs: (ids: string[]) => void;
   flushNotes: () => Promise<boolean>;
+  readTabs?: () => Tab[];
 }): Promise<void> {
-  const { projectId, projectName, tabs, activeTabId, runningActions, detachTabs, flushNotes } = args;
-  if (tabs.length === 0) return;
-  const hasPendingOpenCodeSession = tabs.some(
+  const { projectId, projectName, tabs: initialTabs, activeTabId, runningActions, detachTabs, flushNotes, readTabs } = args;
+  if (initialTabs.length === 0) return;
+  const hasPendingOpenCodeSession = initialTabs.some(
     (tab) => tab.kind === 'session' && isPendingOpenCodeSession(tab),
   );
   if (hasPendingOpenCodeSession) {
@@ -115,6 +116,8 @@ export async function detachProjectGroup(args: {
     toast.error('Nie udało się zapisać notatki');
     return;
   }
+  const tabs = readTabs ? readTabs() : initialTabs;
+  if (tabs.length === 0) return;
 
   const label = groupWindowLabel(projectId);
   const actionTabs = tabs.filter(t => t.kind === 'action');

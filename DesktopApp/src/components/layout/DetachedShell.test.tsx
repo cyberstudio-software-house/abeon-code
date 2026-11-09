@@ -42,6 +42,12 @@ function seedDirtyNote() {
   useStore.getState().editNoteDraft(key, 'XY');
 }
 
+function seedEmptiedNote() {
+  useStore.getState().openNoteInPanel(savedNote);
+  const key = Object.keys(useStore.getState().noteDrafts)[0];
+  useStore.getState().editNoteDraft(key, '');
+}
+
 const sessionTab = (id: string, sessionId: string) => ({
   kind: 'session' as const, id, projectId: 1, sessionId, title: sessionId, mode: 'history' as const,
 });
@@ -144,6 +150,21 @@ describe('DetachedShell', () => {
     expect(event.preventDefault).toHaveBeenCalled();
     await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
     expect(tauri.updateNote).toHaveBeenCalledWith(5, 'XY');
+  });
+
+  it('deletes an emptied note instead of saving it when closing', async () => {
+    useStore.setState({ tabs: [sessionTab('session:s1', 's1')] });
+    vi.spyOn(tauri, 'updateNote').mockResolvedValue({ ...savedNote, content: '', updatedAt: 2 });
+    vi.spyOn(tauri, 'deleteNote').mockResolvedValue(undefined);
+    seedEmptiedNote();
+    render(<DetachedShell mode={groupMode} />);
+    const handler = onCloseRequested.mock.calls[0][0];
+
+    act(() => { handler({ preventDefault: vi.fn() }); });
+
+    await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+    expect(tauri.deleteNote).toHaveBeenCalledWith(5);
+    expect(tauri.updateNote).not.toHaveBeenCalled();
   });
 
   it('asks before closing when a note cannot be saved', async () => {

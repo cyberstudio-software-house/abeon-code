@@ -90,6 +90,7 @@ export function useTabBarActions(
       runningActions: state.runningActions,
       detachTabs,
       flushNotes: useStore.getState().flushAllNoteDrafts,
+      readTabs: () => selectProjectTabsWithDrawers(useStore.getState(), projectId),
     });
   };
 

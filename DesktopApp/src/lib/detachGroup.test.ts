@@ -29,6 +29,7 @@ import { summarizeDetach, detachSummaryMessage, buildDetachPayload, detachProjec
 import { detachSessionTab } from './detachSession';
 import { processManager } from './processManager';
 import { tauri } from './tauri';
+import { parseWindowMode } from './windowMode';
 import type { Tab } from '../store/tabsSlice';
 import type { RunningAction } from '../store/actionsSlice';
 
@@ -138,6 +139,21 @@ describe('detachProjectGroup', () => {
     expect(toast.error).toHaveBeenCalledWith('Nie udało się zapisać notatki');
     expect(windowCtor).not.toHaveBeenCalled();
     expect(detachTabs).not.toHaveBeenCalled();
+  });
+
+  it('builds the payload from the tabs as they are after the flush', async () => {
+    const staleTabs: Tab[] = [{ kind: 'note', id: 'note:5', projectId: 5, noteId: 5, title: 'X' }];
+    const freshTabs: Tab[] = [{ kind: 'note', id: 'note:5', projectId: 5, noteId: 11, title: 'XY' }];
+    const detachTabs = vi.fn();
+    await detachProjectGroup({
+      projectId: 5, projectName: 'P', tabs: staleTabs, activeTabId: 'note:5', runningActions, detachTabs, flushNotes,
+      readTabs: () => freshTabs,
+    });
+    const [, options] = windowCtor.mock.calls[0] as [string, { url: string }];
+    const mode = parseWindowMode(options.url.slice(options.url.indexOf('?')));
+    expect(mode).toMatchObject({ view: 'group', tabs: [{ kind: 'note', id: 'note:5', noteId: 11, title: 'XY' }] });
+    await new Promise(r => queueMicrotask(() => r(null)));
+    expect(detachTabs).toHaveBeenCalledWith(['note:5']);
   });
 
   it('ignores a ready event from another window', async () => {

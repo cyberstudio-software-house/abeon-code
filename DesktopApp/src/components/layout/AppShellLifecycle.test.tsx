@@ -60,6 +60,13 @@ function seedDirtyNote() {
   useStore.getState().editNoteDraft(key, 'XY');
 }
 
+function seedEmptiedNote() {
+  useStore.setState({ noteDrafts: {} });
+  useStore.getState().openNoteInPanel(savedNote);
+  const key = Object.keys(useStore.getState().noteDrafts)[0];
+  useStore.getState().editNoteDraft(key, '');
+}
+
 const closeRequest = () => {
   const event = { preventDefault: vi.fn() };
   act(() => { onCloseRequested.mock.calls[0][0](event); });
@@ -180,6 +187,21 @@ describe('AppShell lifecycle', () => {
       expect(tauri.updateNote).toHaveBeenCalledWith(5, 'XY');
     });
 
+    it('deletes an emptied note instead of saving it when closing', async () => {
+      seed({ a: 'history' });
+      vi.spyOn(tauri, 'updateNote').mockResolvedValue({ ...savedNote, content: '', updatedAt: 2 });
+      vi.spyOn(tauri, 'deleteNote').mockResolvedValue(undefined);
+      seedEmptiedNote();
+      render(<AppShell />);
+
+      const event = closeRequest();
+
+      expect(event.preventDefault).toHaveBeenCalled();
+      await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+      expect(tauri.deleteNote).toHaveBeenCalledWith(5);
+      expect(tauri.updateNote).not.toHaveBeenCalled();
+    });
+
     it('asks before closing when a note cannot be saved', async () => {
       seed({ a: 'history' });
       vi.spyOn(tauri, 'updateNote').mockRejectedValue(new Error('disk'));
@@ -218,7 +240,7 @@ describe('AppShell lifecycle', () => {
   describe('update install', () => {
     const relaunch = vi.fn();
     const downloadAndInstall = vi.fn();
-    const originalFlush = useStore.getState().flushAllNoteDrafts;
+    const originalFlush = useStore.getState().settleNoteDraftsForExit;
     const calls: string[] = [];
 
     const offerUpdate = () => {
@@ -230,7 +252,7 @@ describe('AppShell lifecycle', () => {
     const stubFlush = (results: boolean[]) => {
       const queue = [...results];
       useStore.setState({
-        flushAllNoteDrafts: vi.fn(async () => {
+        settleNoteDraftsForExit: vi.fn(async () => {
           calls.push('flush');
           return queue.shift() ?? true;
         }),
@@ -245,7 +267,7 @@ describe('AppShell lifecycle', () => {
     });
 
     afterEach(() => {
-      useStore.setState({ flushAllNoteDrafts: originalFlush });
+      useStore.setState({ settleNoteDraftsForExit: originalFlush });
     });
 
     it('saves notes before installing and again before relaunching', async () => {
@@ -272,6 +294,20 @@ describe('AppShell lifecycle', () => {
 
       await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
       expect(calls).toEqual(['save', 'install', 'relaunch']);
+    });
+
+    it('deletes an emptied note instead of saving it before installing', async () => {
+      offerUpdate();
+      vi.spyOn(tauri, 'updateNote').mockResolvedValue({ ...savedNote, content: '', updatedAt: 2 });
+      vi.spyOn(tauri, 'deleteNote').mockImplementation(async () => { calls.push('delete'); });
+      seedEmptiedNote();
+      render(<AppShell />);
+
+      fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+      await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
+      expect(calls).toEqual(['delete', 'install', 'relaunch']);
+      expect(tauri.updateNote).not.toHaveBeenCalled();
     });
 
     it('does not install when notes cannot be saved', async () => {

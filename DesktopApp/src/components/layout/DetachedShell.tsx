@@ -7,7 +7,7 @@ import { AppHeader } from './AppHeader';
 import { DragHandle, clamp } from './DragHandle';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { useStore, adoptedActions } from '../../store';
-import { hasUnsavedNotes } from '../../store/notesSlice';
+import { hasNotesToSettle } from '../../store/notesSlice';
 import { tauri } from '../../lib/tauri';
 import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
@@ -96,9 +96,9 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
     let unlisten: (() => void) | null = null;
     win.onCloseRequested((event) => {
       const state = useStore.getState();
-      if (hasUnsavedNotes(state)) {
+      if (hasNotesToSettle(state)) {
         event.preventDefault();
-        void state.flushAllNoteDrafts()
+        void state.settleNoteDraftsForExit()
           .catch(() => false)
           .then(saved => (saved ? continueClose() : setConfirmingNotesLoss(true)));
         return;

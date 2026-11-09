@@ -8,7 +8,7 @@ import { RightPanel } from '../right/RightPanel';
 import { TabSwitcher } from '../center/TabSwitcher';
 import { ProjectLauncher } from '../center/ProjectLauncher';
 import { freezeTabPersistence, useStore } from '../../store';
-import { hasUnsavedNotes } from '../../store/notesSlice';
+import { hasNotesToSettle } from '../../store/notesSlice';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { tauri } from '../../lib/tauri';
 import type { AttentionEvent } from '../../lib/tauri';
@@ -213,9 +213,9 @@ export function AppShell() {
     let unlisten: (() => void) | null = null;
     getCurrentWebviewWindow().onCloseRequested((event) => {
       const state = useStore.getState();
-      if (hasUnsavedNotes(state)) {
+      if (hasNotesToSettle(state)) {
         event.preventDefault();
-        void state.flushAllNoteDrafts()
+        void state.settleNoteDraftsForExit()
           .catch(() => false)
           .then(saved => (saved ? continueClose() : setConfirmingNotesLoss(true)));
         return;
@@ -264,7 +264,7 @@ export function AppShell() {
     setUpdateProgress(null);
     setUpdateBusy(true);
     const holdForUnsavedNotes = async () => {
-      if (await useStore.getState().flushAllNoteDrafts()) return false;
+      if (await useStore.getState().settleNoteDraftsForExit()) return false;
       toast.error('Nie udało się zapisać notatki — ponowne uruchomienie wstrzymane');
       setUpdateBusy(false);
       setUpdateProgress(null);
