@@ -15,7 +15,7 @@ dependencies = [
 
 [[package]]
 name = "abeoncode"
-version = "0.1.39"
+version = "0.1.40"
 dependencies = [
  "abeon-remote-core",
  "anyhow",
