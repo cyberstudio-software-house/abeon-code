@@ -77,6 +77,9 @@ export function buildDetachPayload(tabs: Tab[], runningActions: ActionMap): Deta
     if (tab.kind === 'terminal') {
       return { kind: 'terminal', id: tab.id, title: tab.title };
     }
+    if (tab.kind === 'note') {
+      return { kind: 'note', id: tab.id, noteId: tab.noteId, title: tab.title };
+    }
     return { kind: 'providerPicker', id: tab.id, title: tab.title };
   });
 }
@@ -96,8 +99,9 @@ export async function detachProjectGroup(args: {
   activeTabId: string | null;
   runningActions: ActionMap;
   detachTabs: (ids: string[]) => void;
+  flushNotes: () => Promise<boolean>;
 }): Promise<void> {
-  const { projectId, projectName, tabs, activeTabId, runningActions, detachTabs } = args;
+  const { projectId, projectName, tabs, activeTabId, runningActions, detachTabs, flushNotes } = args;
   if (tabs.length === 0) return;
   const hasPendingOpenCodeSession = tabs.some(
     (tab) => tab.kind === 'session' && isPendingOpenCodeSession(tab),
@@ -107,6 +111,10 @@ export async function detachProjectGroup(args: {
     return;
   }
   if (await focusExistingGroupWindow(projectId)) return;
+  if (!(await flushNotes())) {
+    toast.error('Nie udało się zapisać notatki');
+    return;
+  }
 
   const label = groupWindowLabel(projectId);
   const actionTabs = tabs.filter(t => t.kind === 'action');

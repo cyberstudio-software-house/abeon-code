@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useStore } from './index';
 import { findLeaf } from '../lib/paneTree';
-import { sessionTabFromMode, tabsFromGroupMode } from './tabsSlice';
+import { noteTabId, sessionTabFromMode, tabsFromGroupMode } from './tabsSlice';
 import type { GroupWindowMode } from '../lib/windowMode';
 
 describe('tabsSlice mruOrder', () => {
@@ -417,6 +417,41 @@ describe('tabsFromGroupMode', () => {
       { kind: 'action', id: 'action:4', projectId: 5, actionId: 4, title: 'dev', status: 'running' },
       { kind: 'terminal', id: 'terminal:t1', projectId: 5, title: 'Terminal' },
     ]);
+  });
+});
+
+describe('note tabs', () => {
+  beforeEach(() => {
+    useStore.setState({ tabs: [], activeTabId: null, mruOrder: [], navHistory: [], navIndex: 0 });
+  });
+
+  it('openNoteTab opens once and re-activates', () => {
+    useStore.setState({ tabs: [{ kind: 'terminal', id: 't1', projectId: 1, title: 'a' }], activeTabId: 't1', mruOrder: ['t1'] });
+    useStore.getState().openNoteTab(5, 1, 'Pierwsza');
+    useStore.getState().openNoteTab(5, 1, 'Pierwsza');
+    const s = useStore.getState();
+    expect(noteTabId(5)).toBe('note:5');
+    expect(s.tabs.filter(t => t.id === 'note:5')).toEqual([{ kind: 'note', id: 'note:5', projectId: 1, noteId: 5, title: 'Pierwsza' }]);
+    expect(s.activeTabId).toBe('note:5');
+    expect(s.mruOrder[0]).toBe('note:5');
+  });
+
+  it('openNoteTab closes the supervisor panel', () => {
+    useStore.setState({ supervisorPanelOpen: true });
+    useStore.getState().openNoteTab(5, 1, 'X');
+    expect(useStore.getState().supervisorPanelOpen).toBe(false);
+  });
+});
+
+describe('tabsFromGroupMode with notes', () => {
+  it('tabsFromGroupMode keeps note tabs', () => {
+    const mode: GroupWindowMode = {
+      view: 'group',
+      projectId: 5,
+      activeTabId: 'note:5',
+      tabs: [{ kind: 'note', id: 'note:5', noteId: 5, title: 'X' }],
+    };
+    expect(tabsFromGroupMode(mode)).toEqual([{ kind: 'note', id: 'note:5', projectId: 5, noteId: 5, title: 'X' }]);
   });
 });
 

@@ -4,6 +4,7 @@ import { SubagentView } from '../history/SubagentView';
 import { TerminalView } from '../terminal/TerminalView';
 import { ProviderPicker } from './ProviderPicker';
 import { QuestionCard } from '../supervisor/QuestionCard';
+import { NoteTabView } from '../notes/NoteTabView';
 import { useStore } from '../../store';
 import type { Tab } from '../../store/tabsSlice';
 import type { Provider } from '../../types';
@@ -102,6 +103,13 @@ export function TabPanel({ tab, visible, focused = true, takeFocus, focusToken, 
     return (
       <div className={layer(visible)}>
         <TerminalView projectId={tab.projectId} kind="shell" visible={visible} focused={focused} takeFocus={takeFocus} focusToken={focusToken} onExit={onExit} />
+      </div>
+    );
+  }
+  if (tab.kind === 'note') {
+    return (
+      <div className={layer(visible)}>
+        <NoteTabView tab={tab} visible={visible} focused={focused} />
       </div>
     );
   }

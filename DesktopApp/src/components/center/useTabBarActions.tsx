@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import type { ReactNode } from 'react';
 import { useStore } from '../../store';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { processManager } from '../../lib/processManager';
 import { closeConfirmMessage, isTabLiveProcess } from '../../lib/tabProcess';
+import { draftKeyForNote } from '../../store/notesSlice';
 import { countDrawerTerminals, selectProjectTabsWithDrawers } from '../../store/terminalDrawersSlice';
 import { actionTone } from '../../lib/actionStatus';
 import type { RunningAction } from '../../store/actionsSlice';
@@ -48,8 +50,22 @@ export function useTabBarActions(
     return t ? isTabLiveProcess(t, runningActions, useStore.getState().drawers) : false;
   };
 
+  const closeNoteTab = async (tab: Extract<Tab, { kind: 'note' }>) => {
+    const state = useStore.getState();
+    const draftKey = draftKeyForNote(state, tab.noteId);
+    if (draftKey !== null && !(await state.releaseNoteDraft(draftKey, { tabId: tab.id }))) {
+      toast.error('Nie udało się zapisać notatki');
+      return;
+    }
+    closeTab(tab.id);
+  };
+
   const doClose = (id: string) => {
     const t = tabs.find(x => x.id === id);
+    if (t?.kind === 'note') {
+      void closeNoteTab(t);
+      return;
+    }
     if (t?.kind === 'action') processManager.dismiss(t.actionId);
     closeTab(id);
   };
@@ -73,6 +89,7 @@ export function useTabBarActions(
       activeTabId: state.activeTabId,
       runningActions: state.runningActions,
       detachTabs,
+      flushNotes: useStore.getState().flushAllNoteDrafts,
     });
   };
 
@@ -146,6 +163,7 @@ export function useTabBarActions(
             <TabContextMenu
               canDetach={ctxMenu.tab.kind === 'session' && detachedProjectId == null}
               canDetachGroup={detachedProjectId == null}
+              canRename={ctxMenu.tab.kind !== 'note'}
               onDetach={() => {
                 if (ctxMenu.tab.kind !== 'session') return;
                 void detachSessionTab(ctxMenu.tab, id => {

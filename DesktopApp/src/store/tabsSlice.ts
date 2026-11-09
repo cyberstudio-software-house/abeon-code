@@ -12,7 +12,8 @@ export type Tab =
   | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; ptyId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider; viewingSubagentId?: string; initialPrompt?: string }
   | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number }
   | { kind: 'terminal'; id: string; projectId: number; title: string }
-  | { kind: 'providerPicker'; id: string; projectId: number; title: string };
+  | { kind: 'providerPicker'; id: string; projectId: number; title: string }
+  | { kind: 'note'; id: string; projectId: number; noteId: number; title: string };
 
 export type TabsSlice = {
   tabs: Tab[];
@@ -28,6 +29,7 @@ export type TabsSlice = {
   openSessionTab: (projectId: number, sessionId: string, title: string, provider?: Provider) => void;
   openNewSessionTab: (projectId: number) => void;
   openNewTerminalTab: (projectId: number) => void;
+  openNoteTab: (noteId: number, projectId: number, title: string) => void;
   startSessionTab: (projectId: number, provider: Provider) => void;
   startBackgroundSessionTab: (projectId: number, initialPrompt: string) => string;
   consumeInitialPrompt: (tabId: string) => void;
@@ -46,6 +48,7 @@ export type TabsSlice = {
 };
 
 export const sessionTabId = (sessionId: string) => `session:${sessionId}`;
+export const noteTabId = (noteId: number) => `note:${noteId}`;
 
 export function selectActiveSession(
   state: Pick<TabsSlice, 'tabs' | 'activeTabId'>,
@@ -98,6 +101,9 @@ export function tabsFromGroupMode(mode: GroupWindowMode): Tab[] {
     }
     if (t.kind === 'terminal') {
       return { kind: 'terminal', id: t.id, projectId: mode.projectId, title: t.title };
+    }
+    if (t.kind === 'note') {
+      return { kind: 'note', id: t.id, projectId: mode.projectId, noteId: t.noteId, title: t.title };
     }
     return { kind: 'providerPicker', id: t.id, projectId: mode.projectId, title: t.title };
   });
@@ -233,6 +239,17 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice & Superviso
     const id = `terminal:${crypto.randomUUID()}`;
     set({
       tabs: [...get().tabs, { kind: 'terminal', id, projectId, title: 'Terminal' }],
+      activeTabId: id,
+      mruOrder: moveToFront(get().mruOrder, id),
+      ...withNav(get, id),
+      ...closedSupervisorPanel,
+    });
+  },
+  openNoteTab: (noteId, projectId, title) => {
+    const id = noteTabId(noteId);
+    const exists = get().tabs.some(t => t.id === id);
+    set({
+      tabs: exists ? get().tabs : [...get().tabs, { kind: 'note', id, projectId, noteId, title }],
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
       ...withNav(get, id),

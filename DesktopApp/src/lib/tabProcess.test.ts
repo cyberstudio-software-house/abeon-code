@@ -17,6 +17,9 @@ describe('isTabLiveProcess', () => {
   it('shell terminal is live', () => {
     expect(isTabLiveProcess(shell, {})).toBe(true);
   });
+  it('note tab is never live', () => {
+    expect(isTabLiveProcess({ kind: 'note', id: 'note:5', projectId: 1, noteId: 5, title: 'N' }, {})).toBe(false);
+  });
   it('action is live only when running', () => {
     expect(isTabLiveProcess(action, { 5: { status: 'running' } as never })).toBe(true);
     expect(isTabLiveProcess(action, { 5: { status: 'exited' } as never })).toBe(false);

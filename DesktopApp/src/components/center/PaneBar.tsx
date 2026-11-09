@@ -105,7 +105,7 @@ export function PaneBar({ detachedProjectId, paneId, onTabPointerDown }: {
               onPointerDown={(e) => onTabPointerDown?.(t.id, e)}
               onMiddleClick={() => bar.closeWithGuard(t.id)}
               onContextMenu={(e) => bar.showTabMenu(e, t)}
-              onBeginRename={() => bar.setEditingId(t.id)}
+              onBeginRename={() => { if (t.kind !== 'note') bar.setEditingId(t.id); }}
               onCommitRename={() => bar.commitRename(t.id)}
               onCancelRename={() => bar.setEditingId(null)}
               onClose={(e) => bar.requestClose(e, t.id)}

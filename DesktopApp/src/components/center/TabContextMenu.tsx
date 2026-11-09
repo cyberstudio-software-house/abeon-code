@@ -3,6 +3,7 @@ import { Icon } from '../shared/Icon';
 type Props = {
   canDetach: boolean;
   canDetachGroup: boolean;
+  canRename: boolean;
   onDetach: () => void;
   onDetachGroup: () => void;
   onRename: () => void;
@@ -10,7 +11,7 @@ type Props = {
   onCloseMenu: () => void;
 };
 
-export function TabContextMenu({ canDetach, canDetachGroup, onDetach, onDetachGroup, onRename, onClose, onCloseMenu }: Props) {
+export function TabContextMenu({ canDetach, canDetachGroup, canRename, onDetach, onDetachGroup, onRename, onClose, onCloseMenu }: Props) {
   return (
     <div role="menu">
       <button
@@ -32,14 +33,16 @@ export function TabContextMenu({ canDetach, canDetachGroup, onDetach, onDetachGr
           <span>Wydziel projekt do nowego okna</span>
         </button>
       )}
-      <button
-        role="menuitem"
-        onClick={() => { onRename(); onCloseMenu(); }}
-        className="menu-item"
-      >
-        <Icon name="pencil" className="w-3 h-3" strokeWidth={2} />
-        <span>Zmień nazwę</span>
-      </button>
+      {canRename && (
+        <button
+          role="menuitem"
+          onClick={() => { onRename(); onCloseMenu(); }}
+          className="menu-item"
+        >
+          <Icon name="pencil" className="w-3 h-3" strokeWidth={2} />
+          <span>Zmień nazwę</span>
+        </button>
+      )}
       <button
         role="menuitem"
         onClick={() => { onClose(); onCloseMenu(); }}

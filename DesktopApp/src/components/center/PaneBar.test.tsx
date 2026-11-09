@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
 vi.mock('../../lib/processManager', () => ({ processManager: { dismiss: vi.fn(), release: vi.fn() } }));
 vi.mock('../../lib/detachGroup', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/detachGroup')>();
@@ -24,6 +25,7 @@ vi.stubGlobal('ResizeObserver', class {
 
 Element.prototype.scrollIntoView = vi.fn();
 
+import { toast } from 'sonner';
 import { processManager } from '../../lib/processManager';
 import { detachProjectGroup, focusExistingGroupWindow } from '../../lib/detachGroup';
 import { detachSessionTab } from '../../lib/detachSession';
@@ -420,6 +422,55 @@ describe('PaneBar per pane', () => {
     fireEvent.click(screen.getByText('Zamknij'));
     expect(processManager.dismiss).toHaveBeenCalledExactlyOnceWith(1);
     expect(useStore.getState().tabs.map(t => t.id)).toEqual(['t2']);
+  });
+});
+
+describe('PaneBar note tabs', () => {
+  const seedNote = () => {
+    useStore.setState({
+      tabs: [{ kind: 'note', id: 'note:5', projectId: 1, noteId: 5, title: 'Klient' }],
+      activeTabId: 'note:5',
+      mruOrder: ['note:5'],
+      navHistory: ['note:5'],
+      navIndex: 0,
+      runningActions: {},
+      projects: [{ id: 1, name: 'P', path: '/p' }] as never,
+      layout: createLeaf(ROOT_PANE_ID, ['note:5'], 'note:5'),
+      focusedPaneId: ROOT_PANE_ID,
+      noteDrafts: { k1: { key: 'k1', noteId: 5, projectId: 1, content: 'Klient', savedContent: 'Klient', status: 'idle' } },
+    });
+  };
+
+  const originalRelease = useStore.getState().releaseNoteDraft;
+
+  beforeEach(() => { vi.clearAllMocks(); });
+  afterEach(() => { useStore.setState({ releaseNoteDraft: originalRelease, noteDrafts: {} }); });
+
+  it('closes a note tab without a confirmation once the draft is released', async () => {
+    seedNote();
+    const releaseNoteDraft = vi.fn().mockResolvedValue(true);
+    useStore.setState({ releaseNoteDraft });
+    render(<PaneBar />);
+    fireEvent.click(screen.getByLabelText('Zamknij tab'));
+    await waitFor(() => expect(useStore.getState().tabs).toHaveLength(0));
+    expect(releaseNoteDraft).toHaveBeenCalledWith('k1', { tabId: 'note:5' });
+    expect(screen.queryByText('Zamknąć aktywny tab?')).not.toBeInTheDocument();
+  });
+
+  it('keeps the note tab and warns when the draft cannot be saved', async () => {
+    seedNote();
+    useStore.setState({ releaseNoteDraft: vi.fn().mockResolvedValue(false) });
+    render(<PaneBar />);
+    fireEvent.click(screen.getByLabelText('Zamknij tab'));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Nie udało się zapisać notatki'));
+    expect(useStore.getState().tabs).toHaveLength(1);
+  });
+
+  it('does not start renaming a note tab', () => {
+    seedNote();
+    const { container } = render(<PaneBar />);
+    fireEvent.doubleClick(screen.getByText('Klient'));
+    expect(container.querySelector('input')).toBeNull();
   });
 });
 

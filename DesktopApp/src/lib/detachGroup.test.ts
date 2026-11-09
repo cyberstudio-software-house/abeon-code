@@ -24,6 +24,7 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), info: vi.fn() } }));
 
+import { toast } from 'sonner';
 import { summarizeDetach, detachSummaryMessage, buildDetachPayload, detachProjectGroup, focusExistingGroupWindow } from './detachGroup';
 import { detachSessionTab } from './detachSession';
 import { processManager } from './processManager';
@@ -74,11 +75,21 @@ describe('buildDetachPayload', () => {
   });
 });
 
+describe('buildDetachPayload with notes', () => {
+  it('buildDetachPayload keeps note tabs', () => {
+    const noteTab: Tab = { kind: 'note', id: 'note:5', projectId: 5, noteId: 5, title: 'X' };
+    expect(buildDetachPayload([noteTab], runningActions)).toEqual([{ kind: 'note', id: 'note:5', noteId: 5, title: 'X' }]);
+  });
+});
+
 describe('detachProjectGroup', () => {
   let readyCb: (label: string) => void = () => {};
 
+  const flushNotes = vi.fn();
+
   beforeEach(() => {
     vi.clearAllMocks();
+    flushNotes.mockResolvedValue(true);
     getByLabel.mockResolvedValue(null);
     vi.spyOn(tauri, 'onDetachReady').mockImplementation(async (cb) => { readyCb = cb; return () => {}; });
     vi.spyOn(processManager, 'release').mockImplementation(() => {});
@@ -87,7 +98,7 @@ describe('detachProjectGroup', () => {
   it('focuses an existing window instead of opening a second one', async () => {
     getByLabel.mockResolvedValue({ setFocus });
     const detachTabs = vi.fn();
-    await detachProjectGroup({ projectId: 5, projectName: 'P', tabs, activeTabId: 'action:4', runningActions, detachTabs });
+    await detachProjectGroup({ projectId: 5, projectName: 'P', tabs, activeTabId: 'action:4', runningActions, detachTabs, flushNotes });
     expect(setFocus).toHaveBeenCalled();
     expect(windowCtor).not.toHaveBeenCalled();
     expect(detachTabs).not.toHaveBeenCalled();
@@ -99,7 +110,7 @@ describe('detachProjectGroup', () => {
       { kind: 'session', id: 'new-open', projectId: 5, sessionId: 'new-open', title: 'OpenCode', mode: 'terminal', provider: 'opencode', fresh: true, ptyId: 'pty-open' },
     ];
 
-    await detachProjectGroup({ projectId: 5, projectName: 'P', tabs: pendingTabs, activeTabId: 'new-open', runningActions, detachTabs });
+    await detachProjectGroup({ projectId: 5, projectName: 'P', tabs: pendingTabs, activeTabId: 'new-open', runningActions, detachTabs, flushNotes });
 
     expect(windowCtor).not.toHaveBeenCalled();
     expect(detachTabs).not.toHaveBeenCalled();
@@ -107,7 +118,7 @@ describe('detachProjectGroup', () => {
 
   it('removes non-action tabs on created, and action tabs only after the new window is ready', async () => {
     const detachTabs = vi.fn();
-    await detachProjectGroup({ projectId: 5, projectName: 'P', tabs, activeTabId: 'action:4', runningActions, detachTabs });
+    await detachProjectGroup({ projectId: 5, projectName: 'P', tabs, activeTabId: 'action:4', runningActions, detachTabs, flushNotes });
     expect(windowCtor).toHaveBeenCalledWith('project-5', expect.objectContaining({ title: 'P' }));
 
     await new Promise(r => queueMicrotask(() => r(null)));
@@ -120,9 +131,18 @@ describe('detachProjectGroup', () => {
     expect(detachTabs).toHaveBeenCalledWith(['action:4', 'action:5']);
   });
 
+  it('does not detach when notes cannot be saved', async () => {
+    flushNotes.mockResolvedValue(false);
+    const detachTabs = vi.fn();
+    await detachProjectGroup({ projectId: 5, projectName: 'P', tabs, activeTabId: null, runningActions, detachTabs, flushNotes });
+    expect(toast.error).toHaveBeenCalledWith('Nie udało się zapisać notatki');
+    expect(windowCtor).not.toHaveBeenCalled();
+    expect(detachTabs).not.toHaveBeenCalled();
+  });
+
   it('ignores a ready event from another window', async () => {
     const detachTabs = vi.fn();
-    await detachProjectGroup({ projectId: 5, projectName: 'P', tabs, activeTabId: null, runningActions, detachTabs });
+    await detachProjectGroup({ projectId: 5, projectName: 'P', tabs, activeTabId: null, runningActions, detachTabs, flushNotes });
     readyCb('project-99');
     expect(processManager.release).not.toHaveBeenCalled();
   });

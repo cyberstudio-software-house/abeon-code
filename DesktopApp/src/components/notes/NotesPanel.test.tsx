@@ -16,6 +16,7 @@ const actions = vi.hoisted(() => ({
   retryNoteDraft: vi.fn(),
   discardNoteDraft: vi.fn(),
   deleteNoteById: vi.fn(),
+  openNoteInTab: vi.fn(),
   toastError: vi.fn(),
 }));
 
@@ -77,6 +78,7 @@ describe('NotesPanel', () => {
     actions.closeNotesPanel.mockResolvedValue(true);
     actions.backToNotesList.mockResolvedValue(true);
     actions.deleteNoteById.mockResolvedValue(true);
+    actions.openNoteInTab.mockResolvedValue(true);
     mockState = baseState();
   });
 
@@ -212,6 +214,28 @@ describe('NotesPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Usuń notatkę' }));
     expect(actions.discardNoteDraft).toHaveBeenCalledWith('k1');
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('opens the note in a tab', async () => {
+    mockState = editorState();
+    render(<NotesPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Otwórz w zakładce' }));
+    await waitFor(() => expect(actions.openNoteInTab).toHaveBeenCalledWith('k1'));
+    expect(actions.toastError).not.toHaveBeenCalled();
+  });
+
+  it('warns when the note cannot be opened in a tab', async () => {
+    actions.openNoteInTab.mockResolvedValueOnce(false);
+    mockState = editorState();
+    render(<NotesPanel />);
+    fireEvent.click(screen.getByRole('button', { name: 'Otwórz w zakładce' }));
+    await waitFor(() => expect(actions.toastError).toHaveBeenCalledWith('Nie udało się zapisać notatki'));
+  });
+
+  it('does not offer a tab for a blank new draft', () => {
+    mockState = editorState({ noteId: null, content: '', savedContent: '' });
+    render(<NotesPanel />);
+    expect(screen.getByRole('button', { name: 'Otwórz w zakładce' })).toBeDisabled();
   });
 
   it('goes back to the list', async () => {

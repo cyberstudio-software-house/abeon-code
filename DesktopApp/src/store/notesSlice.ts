@@ -1,7 +1,8 @@
 import type { StateCreator } from 'zustand';
 import { tauri } from '../lib/tauri';
-import { isBlankNote, notesListKey, type NotesListKey } from '../lib/noteText';
+import { isBlankNote, noteTitle, notesListKey, type NotesListKey } from '../lib/noteText';
 import type { Note } from '../types';
+import type { AppState } from './index';
 
 export const NOTE_SAVE_DEBOUNCE_MS = 700;
 
@@ -33,6 +34,7 @@ export type NotesSlice = {
   startNewNote: (projectId: number | null) => void;
   openNoteInPanel: (note: Note) => void;
   ensureNoteDraft: (noteId: number) => Promise<string | null>;
+  openNoteInTab: (key: string) => Promise<boolean>;
   backToNotesList: () => Promise<boolean>;
   editNoteDraft: (key: string, content: string) => void;
   flushNoteDraft: (key: string) => Promise<boolean>;
@@ -91,7 +93,7 @@ function withoutNote(lists: NotesSlice['notesLists'], noteId: number): NotesSlic
   return next;
 }
 
-export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
+export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set, get) => {
   const patchDraft = (key: string, patch: Partial<NoteDraft>) => {
     set((s) => (s.noteDrafts[key] ? { noteDrafts: { ...s.noteDrafts, [key]: { ...s.noteDrafts[key], ...patch } } } : s));
   };
@@ -103,6 +105,15 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
       const { [key]: _removed, ...rest } = s.noteDrafts;
       const view = s.notesView.mode === 'editor' && s.notesView.draftKey === key ? { mode: 'list' as const } : s.notesView;
       return { noteDrafts: rest, notesView: view };
+    });
+  };
+
+  const retitleNoteTabs = (noteId: number, content: string) => {
+    const title = noteTitle(content);
+    set((s) => {
+      const stale = s.tabs.some((t) => t.kind === 'note' && t.noteId === noteId && t.title !== title);
+      if (!stale) return s;
+      return { tabs: s.tabs.map((t) => (t.kind === 'note' && t.noteId === noteId ? { ...t, title } : t)) };
     });
   };
 
@@ -135,6 +146,7 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
         status: current.content === snapshot ? 'saved' : 'idle',
       });
       upsertNote(saved, current.projectId);
+      if (draft.noteId === null) retitleNoteTabs(saved.id, current.content);
     } catch {
       patchDraft(key, { status: 'error' });
     }
@@ -294,6 +306,18 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
       return key;
     },
 
+    openNoteInTab: async (key) => {
+      if (!(await get().flushNoteDraft(key))) return false;
+      const draft = get().noteDrafts[key];
+      if (!draft || draft.noteId === null) return false;
+      const state = get();
+      const projectId = draft.projectId ?? state.tabs.find((t) => t.id === state.activeTabId)?.projectId;
+      if (projectId === undefined) return false;
+      state.openNoteTab(draft.noteId, projectId, noteTitle(draft.content));
+      if (panelDraftKey() === key) set({ notesView: { mode: 'list' } });
+      return true;
+    },
+
     backToNotesList: async () => {
       const key = panelDraftKey();
       if (key === null) {
@@ -310,6 +334,7 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
       const draft = get().noteDrafts[key];
       if (!draft) return;
       patchDraft(key, { content, status: draft.status === 'saving' ? 'saving' : 'idle' });
+      if (draft.noteId !== null) retitleNoteTabs(draft.noteId, content);
       if (draft.noteId === null && isBlankNote(content)) clearSaveTimer(key);
       else scheduleSave(key);
     },
@@ -338,7 +363,11 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
       const draft = get().noteDrafts[key];
       if (!draft) return true;
       const view = get().notesView;
-      const otherHolder = from !== 'panel' && view.mode === 'editor' && view.draftKey === key;
+      const panelHolds = from !== 'panel' && view.mode === 'editor' && view.draftKey === key;
+      const releasingTabId = from === 'panel' ? null : from.tabId;
+      const tabHolds = draft.noteId !== null
+        && get().tabs.some((t) => t.kind === 'note' && t.noteId === draft.noteId && t.id !== releasingTabId);
+      const otherHolder = panelHolds || tabHolds;
       if (otherHolder) return get().flushNoteDraft(key);
       for (;;) {
         const current = get().noteDrafts[key];
@@ -384,6 +413,7 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
       }
       const keys = Object.values(get().noteDrafts).filter((d) => d.noteId === noteId).map((d) => d.key);
       keys.forEach((key) => dropDraft(key));
+      get().tabs.filter((t) => t.kind === 'note' && t.noteId === noteId).forEach((t) => get().closeTab(t.id));
       set((s) => ({ notesLists: withoutNote(s.notesLists, noteId) }));
       return true;
     },

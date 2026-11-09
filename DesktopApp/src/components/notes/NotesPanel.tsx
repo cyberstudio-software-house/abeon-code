@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { notesListKey } from '../../lib/noteText';
+import { isBlankNote, notesListKey } from '../../lib/noteText';
 import { useStore } from '../../store';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { Icon } from '../shared/Icon';
@@ -62,14 +62,19 @@ function NotesListView({ projectId }: { projectId: number | null }) {
   );
 }
 
-function NotesEditorView({ draftKey, noteId }: { draftKey: string; noteId: number | null }) {
+function NotesEditorView({ draftKey, noteId, blank }: { draftKey: string; noteId: number | null; blank: boolean }) {
   const backToNotesList = useStore(state => state.backToNotesList);
   const discardNoteDraft = useStore(state => state.discardNoteDraft);
   const deleteNoteById = useStore(state => state.deleteNoteById);
+  const openNoteInTab = useStore(state => state.openNoteInTab);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const back = async () => {
     if (!(await backToNotesList())) toast.error('Nie udało się zapisać notatki');
+  };
+
+  const toTab = async () => {
+    if (!(await openNoteInTab(draftKey)) && !blank) toast.error('Nie udało się zapisać notatki');
   };
 
   const requestDelete = () => {
@@ -95,9 +100,10 @@ function NotesEditorView({ draftKey, noteId }: { draftKey: string; noteId: numbe
           Notatki
         </button>
         <span className="flex-1" />
+        <IconBtn icon="toTab" label="Otwórz w zakładce" tone="ghost" disabled={noteId === null && blank} onClick={() => void toTab()} />
         <IconBtn icon="trash" label="Usuń notatkę" tone="ghost" onClick={requestDelete} />
       </div>
-      <NoteEditor draftKey={draftKey} variant="panel" />
+      <NoteEditor draftKey={draftKey} variant="panel" autoFocus />
       {confirmingDelete && (
         <ConfirmDialog
           title="Usuń notatkę"
@@ -122,7 +128,7 @@ export function NotesPanel() {
   return (
     <section aria-label="Notatki" className="flex min-h-0 flex-1 flex-col gap-2 rounded-[10px] border border-border bg-bg p-2">
       {draftKey !== null && draft
-        ? <NotesEditorView key={draftKey} draftKey={draftKey} noteId={draft.noteId} />
+        ? <NotesEditorView key={draftKey} draftKey={draftKey} noteId={draft.noteId} blank={isBlankNote(draft.content)} />
         : <NotesListView projectId={projectId} />}
     </section>
   );

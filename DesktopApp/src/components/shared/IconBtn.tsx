@@ -10,6 +10,7 @@ type Props = {
   tone?: Tone;
   size?: Size;
   loading?: boolean;
+  disabled?: boolean;
 };
 
 const sizes: Record<Size, string> = { sm: 'w-6 h-6', md: 'w-7 h-7', lg: 'w-8 h-8' };
@@ -18,15 +19,15 @@ const tones: Record<Tone, string> = {
   ghost:   'border-transparent bg-transparent text-muted hover:text-fg hover:bg-bg-elev-2',
 };
 
-export function IconBtn({ icon, label, onClick, tone = 'default', size = 'md', loading = false }: Props) {
+export function IconBtn({ icon, label, onClick, tone = 'default', size = 'md', loading = false, disabled = false }: Props) {
   return (
     <button
       onClick={loading ? undefined : onClick}
       aria-label={label}
       aria-busy={loading || undefined}
       title={label}
-      disabled={loading}
-      className={`inline-flex items-center justify-center rounded-md border transition-colors ${sizes[size]} ${tones[tone]} ${loading ? 'cursor-wait opacity-70' : ''}`}
+      disabled={loading || disabled}
+      className={`inline-flex items-center justify-center rounded-md border transition-colors ${sizes[size]} ${tones[tone]} ${loading ? 'cursor-wait opacity-70' : ''} ${disabled && !loading ? 'cursor-not-allowed opacity-40' : ''}`}
     >
       <Icon
         name={loading ? 'spinner' : icon}

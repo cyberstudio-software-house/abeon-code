@@ -10,6 +10,7 @@ function SwitcherIcon({ tab }: { tab: Tab }) {
   if (tab.kind === 'session') return <>{tab.mode === 'terminal' ? '›' : '◇'}</>;
   if (tab.kind === 'terminal') return <>$</>;
   if (tab.kind === 'providerPicker') return <>+</>;
+  if (tab.kind === 'note') return <>✎</>;
   return <>▶</>;
 }
 

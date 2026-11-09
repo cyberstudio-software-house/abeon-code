@@ -383,6 +383,98 @@ describe('notesSlice', () => {
     expect(state().noteDrafts).toEqual({});
   });
 
+  it('openNoteInTab saves a new note first and opens its tab', async () => {
+    tauriMock.createNote.mockResolvedValue(note(9, 'Klient\nx', 100));
+    state().startNewNote(2);
+    const key = onlyDraftKey();
+    state().editNoteDraft(key, 'Klient\nx');
+    expect(await state().openNoteInTab(key)).toBe(true);
+    expect(tauriMock.createNote).toHaveBeenCalledWith(2, 'Klient\nx');
+    expect(state().tabs).toContainEqual({ kind: 'note', id: 'note:9', projectId: 2, noteId: 9, title: 'Klient' });
+    expect(state().activeTabId).toBe('note:9');
+    expect(state().notesView).toEqual({ mode: 'list' });
+    expect(state().noteDrafts[key]).toBeDefined();
+  });
+
+  it('openNoteInTab refuses a blank new note', async () => {
+    state().startNewNote(2);
+    const key = onlyDraftKey();
+    expect(await state().openNoteInTab(key)).toBe(false);
+    expect(state().tabs).toEqual([]);
+    expect(state().notesView).toEqual({ mode: 'editor', draftKey: key });
+  });
+
+  it('openNoteInTab reports a failed save', async () => {
+    tauriMock.createNote.mockRejectedValue(new Error('disk'));
+    state().startNewNote(2);
+    const key = onlyDraftKey();
+    state().editNoteDraft(key, 'Klient');
+    expect(await state().openNoteInTab(key)).toBe(false);
+    expect(state().tabs).toEqual([]);
+  });
+
+  it('openNoteInTab puts a global note in the active project', async () => {
+    useStore.setState({ tabs: [{ kind: 'terminal', id: 't1', projectId: 3, title: 'a' }], activeTabId: 't1' });
+    state().openNoteInPanel(note(5, 'Globalna', 50, null));
+    const key = onlyDraftKey();
+    expect(await state().openNoteInTab(key)).toBe(true);
+    expect(state().tabs.find((t) => t.id === 'note:5')).toMatchObject({ kind: 'note', projectId: 3, noteId: 5 });
+  });
+
+  it('editing renames the note tab', () => {
+    state().openNoteInPanel(note(5, 'Stary tytuł'));
+    useStore.setState({ tabs: [{ kind: 'note', id: 'note:5', projectId: 2, noteId: 5, title: 'Stary tytuł' }] });
+    state().editNoteDraft(onlyDraftKey(), 'Nowy tytuł\nreszta');
+    expect(state().tabs.find((t) => t.id === 'note:5')?.title).toBe('Nowy tytuł');
+  });
+
+  it('a successful create renames the note tab', async () => {
+    tauriMock.createNote.mockResolvedValue(note(9, 'Tytuł', 100));
+    useStore.setState({ tabs: [{ kind: 'note', id: 'note:9', projectId: 2, noteId: 9, title: 'Stary' }] });
+    state().startNewNote(2);
+    const key = onlyDraftKey();
+    state().editNoteDraft(key, 'Tytuł');
+    await state().flushNoteDraft(key);
+    expect(state().tabs.find((t) => t.id === 'note:9')?.title).toBe('Tytuł');
+  });
+
+  it('closing the last view of an emptied note deletes it', async () => {
+    tauriMock.getNote.mockResolvedValue(note(5, 'X'));
+    tauriMock.deleteNote.mockResolvedValue(undefined);
+    const key = (await state().ensureNoteDraft(5)) as string;
+    useStore.setState({ tabs: [{ kind: 'note', id: 'note:5', projectId: 2, noteId: 5, title: 'X' }] });
+    state().editNoteDraft(key, '');
+    expect(await state().releaseNoteDraft(key, { tabId: 'note:5' })).toBe(true);
+    expect(tauriMock.deleteNote).toHaveBeenCalledWith(5);
+  });
+
+  it('release keeps a draft another view still shows', async () => {
+    tauriMock.updateNote.mockResolvedValue(note(5, '', 200));
+    state().openNoteInPanel(note(5, 'X'));
+    const key = onlyDraftKey();
+    useStore.setState({ tabs: [{ kind: 'note', id: 'note:5', projectId: 2, noteId: 5, title: 'X' }] });
+    state().editNoteDraft(key, '');
+    expect(await state().releaseNoteDraft(key, 'panel')).toBe(true);
+    expect(tauriMock.deleteNote).not.toHaveBeenCalled();
+    expect(state().noteDrafts[key]).toBeDefined();
+    expect(await state().releaseNoteDraft(key, { tabId: 'note:5' })).toBe(true);
+    expect(tauriMock.deleteNote).not.toHaveBeenCalled();
+    expect(state().noteDrafts[key]).toBeDefined();
+  });
+
+  it('deleteNoteById closes the note tabs', async () => {
+    tauriMock.deleteNote.mockResolvedValue(undefined);
+    useStore.setState({
+      tabs: [
+        { kind: 'note', id: 'note:5', projectId: 2, noteId: 5, title: 'X' },
+        { kind: 'terminal', id: 't1', projectId: 2, title: 'a' },
+      ],
+      activeTabId: 'note:5',
+    });
+    expect(await state().deleteNoteById(5)).toBe(true);
+    expect(state().tabs.map((t) => t.id)).toEqual(['t1']);
+  });
+
   it('the panel closes when no tab is left', () => {
     useStore.setState({ tabs: [{ kind: 'terminal', id: 't1', projectId: 1, title: 'a' }], activeTabId: 't1' });
     state().openNotesPanel();

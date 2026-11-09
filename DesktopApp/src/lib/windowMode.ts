@@ -5,7 +5,8 @@ export type DetachedTab =
   | { kind: 'session'; id: string; sessionId: string; linkedSessionId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider }
   | { kind: 'action'; id: string; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number; ptyId?: string }
   | { kind: 'terminal'; id: string; title: string }
-  | { kind: 'providerPicker'; id: string; title: string };
+  | { kind: 'providerPicker'; id: string; title: string }
+  | { kind: 'note'; id: string; noteId: number; title: string };
 
 export type SessionWindowMode = {
   view: 'session';

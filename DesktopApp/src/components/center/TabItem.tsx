@@ -46,6 +46,7 @@ function TabMarker({ tab, actionColor }: { tab: Tab; actionColor?: string }) {
   if (tab.kind === 'session') return <SessionTabMarker tab={tab} />;
   if (tab.kind === 'terminal') return <Icon name="terminal" className={MARKER_ICON} />;
   if (tab.kind === 'providerPicker') return <Icon name="plus" className={MARKER_ICON} />;
+  if (tab.kind === 'note') return <Icon name="notebook" className={MARKER_ICON} />;
   return <span className={`w-1.5 h-1.5 shrink-0 rounded-full bg-current ${actionColor ?? 'text-muted'}`} />;
 }
 

@@ -4,21 +4,25 @@ import { useStore } from '../../store';
 type Props = {
   draftKey: string;
   variant: 'panel' | 'tab';
+  autoFocus: boolean;
 };
 
-export function NoteEditor({ draftKey, variant }: Props) {
+export function NoteEditor({ draftKey, variant, autoFocus }: Props) {
   const draft = useStore(state => state.noteDrafts[draftKey]);
   const editNoteDraft = useStore(state => state.editNoteDraft);
   const retryNoteDraft = useStore(state => state.retryNoteDraft);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const caretPlacedFor = useRef<string | null>(null);
   const present = draft !== undefined;
 
   useEffect(() => {
     const element = textareaRef.current;
-    if (!element) return;
+    if (!element || !autoFocus) return;
     element.focus();
+    if (caretPlacedFor.current === draftKey) return;
     element.setSelectionRange(element.value.length, element.value.length);
-  }, [draftKey, present]);
+    caretPlacedFor.current = draftKey;
+  }, [draftKey, present, autoFocus]);
 
   if (!draft) return null;
 

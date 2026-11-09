@@ -130,6 +130,19 @@ describe('TabPanel keyboard and exit wiring', () => {
   });
 });
 
+describe('TabPanel note tab', () => {
+  it('renders a note tab with its editor', async () => {
+    const original = useStore.getState().ensureNoteDraft;
+    useStore.setState({
+      ensureNoteDraft: vi.fn().mockResolvedValue('k1'),
+      noteDrafts: { k1: { key: 'k1', noteId: 5, projectId: 1, content: 'Treść', savedContent: 'Treść', status: 'idle' } },
+    });
+    render(<TabPanel tab={{ kind: 'note', id: 'note:5', projectId: 1, noteId: 5, title: 'Treść' }} visible focused />);
+    expect(await screen.findByRole('textbox', { name: 'Treść notatki' })).toBeInTheDocument();
+    useStore.setState({ ensureNoteDraft: original, noteDrafts: {} });
+  });
+});
+
 describe('TabPanel question card', () => {
   const baseSnapshot = {
     level: 'assistant' as const, running: true, ready: true, ptyId: 'p1', present: true, away: false, discordActive: false,
