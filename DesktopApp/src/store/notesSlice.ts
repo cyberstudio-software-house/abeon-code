@@ -16,6 +16,7 @@ export type NoteDraft = {
   content: string;
   savedContent: string;
   status: NoteSaveStatus;
+  replacesNoteId?: number;
 };
 export type NotesView = { mode: 'list' } | { mode: 'editor'; draftKey: string };
 export type DraftHolder = 'panel' | { tabId: string };
@@ -46,7 +47,7 @@ export type NotesSlice = {
 };
 
 export function draftKeyForNote(state: Pick<NotesSlice, 'noteDrafts'>, noteId: number): string | null {
-  const draft = Object.values(state.noteDrafts).find((d) => d.noteId === noteId);
+  const draft = Object.values(state.noteDrafts).find((d) => d.noteId === noteId || d.replacesNoteId === noteId);
   return draft ? draft.key : null;
 }
 
@@ -152,6 +153,7 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
       let saved: Note;
       if (draft.noteId === null) {
         saved = await tauri.createNote(draft.projectId, snapshot);
+        recreatedFrom = draft.replacesNoteId ?? null;
       } else {
         const removedId = draft.noteId;
         try {
@@ -159,10 +161,10 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
         } catch (error) {
           if (!isNotFoundError(error)) throw error;
           set((s) => ({ notesLists: withoutNote(s.notesLists, removedId) }));
-          patchDraft(key, { noteId: null, savedContent: '' });
+          patchDraft(key, { noteId: null, savedContent: '', replacesNoteId: removedId });
           created = true;
-          recreatedFrom = removedId;
           saved = await tauri.createNote(draft.projectId, snapshot);
+          recreatedFrom = removedId;
         }
       }
       if (recreatedFrom !== null) repointNoteTabs(recreatedFrom, saved.id, snapshot);
@@ -170,6 +172,7 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
       if (!current) return;
       patchDraft(key, {
         noteId: saved.id,
+        replacesNoteId: undefined,
         savedContent: snapshot,
         status: current.content === snapshot ? 'saved' : 'idle',
       });
@@ -362,7 +365,8 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
       const draft = get().noteDrafts[key];
       if (!draft) return;
       patchDraft(key, { content, status: draft.status === 'saving' ? 'saving' : 'idle' });
-      if (draft.noteId !== null) retitleNoteTabs(draft.noteId, content);
+      const tabNoteId = draft.noteId ?? draft.replacesNoteId;
+      if (tabNoteId !== undefined && tabNoteId !== null) retitleNoteTabs(tabNoteId, content);
       if (draft.noteId === null && isBlankNote(content)) clearSaveTimer(key);
       else scheduleSave(key);
     },
@@ -393,8 +397,8 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
       const view = get().notesView;
       const panelHolds = from !== 'panel' && view.mode === 'editor' && view.draftKey === key;
       const releasingTabId = from === 'panel' ? null : from.tabId;
-      const tabHolds = draft.noteId !== null
-        && get().tabs.some((t) => t.kind === 'note' && t.noteId === draft.noteId && t.id !== releasingTabId);
+      const heldIds = [draft.noteId, draft.replacesNoteId].filter((id): id is number => id !== null && id !== undefined);
+      const tabHolds = get().tabs.some((t) => t.kind === 'note' && heldIds.includes(t.noteId) && t.id !== releasingTabId);
       const otherHolder = panelHolds || tabHolds;
       if (otherHolder) return get().flushNoteDraft(key);
       for (;;) {

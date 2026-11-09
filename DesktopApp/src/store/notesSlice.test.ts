@@ -151,6 +151,27 @@ describe('notesSlice', () => {
     expect(tauriMock.deleteNote).toHaveBeenCalledWith(11);
   });
 
+  it('re-points note tabs when the recreate only succeeds on a retry', async () => {
+    tauriMock.updateNote.mockRejectedValue({ code: 'not_found', message: 'note 5' });
+    tauriMock.createNote.mockRejectedValue(new Error('boom'));
+    useStore.setState({ tabs: [{ kind: 'note', id: 'note:5', projectId: 2, noteId: 5, title: 'X' }], activeTabId: 'note:5' });
+    state().openNoteInPanel(note(5, 'X'));
+    const key = onlyDraftKey();
+    state().editNoteDraft(key, 'XY');
+    expect(await state().flushNoteDraft(key)).toBe(false);
+    expect(state().noteDrafts[key].status).toBe('error');
+    expect(draftKeyForNote(state(), 5)).toBe(key);
+    expect(state().tabs[0]).toMatchObject({ noteId: 5 });
+
+    tauriMock.createNote.mockResolvedValue(note(12, 'XYZ', 400));
+    state().editNoteDraft(key, 'XYZ');
+    expect(await state().flushNoteDraft(key)).toBe(true);
+    expect(state().noteDrafts[key].noteId).toBe(12);
+    expect(state().noteDrafts[key].replacesNoteId).toBeUndefined();
+    expect(state().tabs).toEqual([{ kind: 'note', id: 'note:5', projectId: 2, noteId: 12, title: 'XYZ' }]);
+    expect(draftKeyForNote(state(), 12)).toBe(key);
+  });
+
   it('keeps the text when recreating a deleted note fails too', async () => {
     tauriMock.updateNote.mockRejectedValue({ code: 'not_found', message: 'note 5' });
     tauriMock.createNote.mockRejectedValue(new Error('boom'));
