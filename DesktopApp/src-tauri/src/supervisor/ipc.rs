@@ -42,6 +42,10 @@ pub enum IpcRequest {
         name: String,
         args: Value,
     },
+    NotesChanged {
+        #[serde(default)]
+        created_note_id: Option<i64>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -49,6 +53,7 @@ pub enum IpcRequest {
 pub enum IpcResponse {
     Hook { stdout: Option<String> },
     Tool { ok: bool, result: Value },
+    Ack,
 }
 
 pub trait IpcHandler: Send + Sync {
@@ -199,6 +204,7 @@ mod tests {
                         ok: name != "fail",
                         result: json!({ "name": name, "args": args }),
                     },
+                    IpcRequest::NotesChanged { .. } => IpcResponse::Ack,
                 }
             })
         }
@@ -440,6 +446,37 @@ mod tests {
         assert_eq!(
             serde_json::from_value::<IpcRequest>(encoded).unwrap(),
             from_terminal
+        );
+    }
+
+    #[test]
+    fn notes_changed_request_round_trips() {
+        let request = IpcRequest::NotesChanged {
+            created_note_id: Some(7),
+        };
+        let encoded = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            encoded,
+            json!({ "type": "notesChanged", "created_note_id": 7 })
+        );
+        assert_eq!(
+            serde_json::from_value::<IpcRequest>(encoded).unwrap(),
+            request
+        );
+        let bare: IpcRequest = serde_json::from_value(json!({ "type": "notesChanged" })).unwrap();
+        assert_eq!(
+            bare,
+            IpcRequest::NotesChanged {
+                created_note_id: None
+            }
+        );
+    }
+
+    #[test]
+    fn ack_response_serializes() {
+        assert_eq!(
+            serde_json::to_value(IpcResponse::Ack).unwrap(),
+            json!({ "type": "ack" })
         );
     }
 

@@ -16,8 +16,9 @@ use crate::commands::sessions::{
 use crate::db::supervisor_decisions_repo::{self, NewDecision};
 use crate::db::DbPool;
 use crate::db::{projects_repo, settings_repo};
+use crate::domain::note::NOTES_CHANGED_EVENT;
 use crate::domain::supervisor::{SessionRebound, SupervisorLevel, SupervisorSnapshot};
-use crate::domain::SessionActivity;
+use crate::domain::{NotesChangedEvent, SessionActivity};
 use crate::error::AppResult;
 use crate::notifications::marker::MarkerFilter;
 use crate::notifications::AttentionEvent;
@@ -698,6 +699,7 @@ fn spawn_ipc(app: AppHandle, runtime: Arc<SupervisorRuntime>, core: Arc<Supervis
     let handler: Arc<dyn IpcHandler> = Arc::new(IpcRouter {
         core,
         process: runtime.process.clone(),
+        app: app.clone(),
     });
     tauri::async_runtime::spawn(async move {
         let listener = match ipc::bind(&ipc::socket_path()) {
@@ -897,15 +899,34 @@ pub fn session_hooks_path(app: &AppHandle) -> Option<PathBuf> {
 }
 
 #[cfg(unix)]
+type NotesNotifier = Arc<dyn Fn(Option<i64>) + Send + Sync>;
+
+#[cfg(unix)]
+fn emit_external_notes_change(app: &AppHandle, created_note_id: Option<i64>) {
+    let event = NotesChangedEvent {
+        created_note_id,
+        external: true,
+        source_window: None,
+    };
+    if let Err(error) = app.emit(NOTES_CHANGED_EVENT, event) {
+        eprintln!("notes: change event failed: {error}");
+    }
+}
+
+#[cfg(unix)]
 struct IpcRouter {
     core: Arc<SupervisorCore>,
     process: Arc<SupervisorProcess>,
+    app: AppHandle,
 }
 
 #[cfg(unix)]
 impl IpcHandler for IpcRouter {
     fn handle(&self, req: IpcRequest) -> Pin<Box<dyn Future<Output = IpcResponse> + Send>> {
-        Box::pin(route(self.core.clone(), self.process.clone(), req))
+        let app = self.app.clone();
+        let notify: NotesNotifier =
+            Arc::new(move |created_note_id| emit_external_notes_change(&app, created_note_id));
+        Box::pin(route(self.core.clone(), self.process.clone(), notify, req))
     }
 }
 
@@ -913,6 +934,7 @@ impl IpcHandler for IpcRouter {
 async fn route(
     core: Arc<SupervisorCore>,
     process: Arc<SupervisorProcess>,
+    notify_notes: NotesNotifier,
     req: IpcRequest,
 ) -> IpcResponse {
     match req {
@@ -942,6 +964,10 @@ async fn route(
                 }
             }
             IpcResponse::Hook { stdout: None }
+        }
+        IpcRequest::NotesChanged { created_note_id } => {
+            notify_notes(created_note_id);
+            IpcResponse::Ack
         }
         IpcRequest::Tool { name, args } => {
             let outcome = tokio::task::spawn_blocking(move || handle_tool(&core, &name, args))
@@ -1324,8 +1350,18 @@ mod tests {
         use crate::supervisor::test_support::{setup, FakeEffects};
         use serde_json::{json, Value};
 
+        fn no_notes() -> NotesNotifier {
+            Arc::new(|_| {})
+        }
+
         async fn route_to(core: &Arc<SupervisorCore>, req: IpcRequest) -> IpcResponse {
-            route(core.clone(), SupervisorProcess::new(core.clone()), req).await
+            route(
+                core.clone(),
+                SupervisorProcess::new(core.clone()),
+                no_notes(),
+                req,
+            )
+            .await
         }
 
         fn supervisor_hook(event: &str) -> IpcRequest {
@@ -1416,6 +1452,7 @@ mod tests {
             let response = route(
                 core.clone(),
                 process.clone(),
+                no_notes(),
                 supervisor_hook("SessionStart"),
             )
             .await;
@@ -1431,7 +1468,7 @@ mod tests {
                 input: json!({ "hook_event_name": "SessionStart", "session_id": "killed" }),
                 pty_id: None,
             };
-            let response = route(core.clone(), process.clone(), foreign).await;
+            let response = route(core.clone(), process.clone(), no_notes(), foreign).await;
             assert_eq!(response, IpcResponse::Hook { stdout: None });
             assert!(!process.is_ready());
             let anonymous = IpcRequest::Hook {
@@ -1439,9 +1476,15 @@ mod tests {
                 input: json!({ "hook_event_name": "SessionStart" }),
                 pty_id: None,
             };
-            route(core.clone(), process.clone(), anonymous).await;
+            route(core.clone(), process.clone(), no_notes(), anonymous).await;
             assert!(!process.is_ready());
-            let response = route(core.clone(), process.clone(), supervisor_hook("Stop")).await;
+            let response = route(
+                core.clone(),
+                process.clone(),
+                no_notes(),
+                supervisor_hook("Stop"),
+            )
+            .await;
             assert_eq!(response, IpcResponse::Hook { stdout: None });
             assert!(!process.is_ready());
             assert!(!core.snapshot().ready);
@@ -1449,6 +1492,7 @@ mod tests {
             let response = route(
                 core.clone(),
                 process.clone(),
+                no_notes(),
                 supervisor_hook("SessionStart"),
             )
             .await;
@@ -1492,6 +1536,24 @@ mod tests {
                 } => assert!(error.contains("drop_tables"), "{error}"),
                 other => panic!("expected a tool error, got {other:?}"),
             }
+        }
+
+        #[tokio::test]
+        async fn notes_changed_is_announced_and_acknowledged() {
+            let (_effects, core) = setup();
+            let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let recorder = seen.clone();
+            let response = route(
+                core.clone(),
+                SupervisorProcess::new(core.clone()),
+                Arc::new(move |id| recorder.lock().unwrap().push(id)),
+                IpcRequest::NotesChanged {
+                    created_note_id: Some(7),
+                },
+            )
+            .await;
+            assert_eq!(response, IpcResponse::Ack);
+            assert_eq!(*seen.lock().unwrap(), vec![Some(7)]);
         }
     }
 }

@@ -16,6 +16,7 @@ import { visibleSessionIds } from '../../lib/visibleTabs';
 import type { WindowMode } from '../../lib/windowMode';
 import { usePresenceReporter } from '../../lib/usePresenceReporter';
 import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
+import { useNotesSync } from '../../lib/useNotesSync';
 
 const RIGHT_MIN = 220;
 const RIGHT_MAX = 480;
@@ -41,6 +42,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
 
   usePresenceReporter();
   useSupervisorSnapshot();
+  useNotesSync();
 
   useEffect(() => { void loadProjects(); }, [loadProjects]);
 

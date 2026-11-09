@@ -20,6 +20,7 @@ import { useMouseNavigation } from '../../hooks/useMouseNavigation';
 import { usePresenceReporter } from '../../lib/usePresenceReporter';
 import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
 import { useSupervisorAutoOpen } from '../../lib/useSupervisorAutoOpen';
+import { useNotesSync } from '../../lib/useNotesSync';
 import { SupervisorPanel } from '../supervisor/SupervisorPanel';
 import { openProjectPath } from '../../lib/openProject';
 import { AppHeader } from './AppHeader';
@@ -70,6 +71,7 @@ export function AppShell() {
   usePresenceReporter();
   useSupervisorSnapshot();
   useSupervisorAutoOpen();
+  useNotesSync();
 
   useEffect(() => {
     startActivityPolling();

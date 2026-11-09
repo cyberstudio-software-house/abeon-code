@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound } from '../types';
+import type { NotesChangedEvent } from '../types/NotesChangedEvent';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
 import type { ClickUpSpace } from '../types/ClickUpSpace';
@@ -43,6 +44,8 @@ export const tauri = {
   updateNote: (id: number, content: string) =>
     invoke<Note>('update_note', { id, content }),
   deleteNote: (id: number) => invoke<void>('delete_note', { id }),
+  onNotesChanged: (cb: (event: NotesChangedEvent) => void): Promise<UnlistenFn> =>
+    listen<NotesChangedEvent>('notes://changed', e => cb(e.payload)),
   takePendingOpenPaths: () => invoke<OpenRequest[]>('take_pending_open_paths'),
   installCliCommand: () => invoke<string>('install_cli_command'),
   installClaudeSkill: () => invoke<string>('install_claude_skill'),

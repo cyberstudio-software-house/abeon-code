@@ -15,3 +15,15 @@ pub struct Note {
     #[ts(type = "number")]
     pub updated_at: i64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct NotesChangedEvent {
+    #[ts(type = "number | null")]
+    pub created_note_id: Option<i64>,
+    pub external: bool,
+    pub source_window: Option<String>,
+}
+
+pub const NOTES_CHANGED_EVENT: &str = "notes://changed";
