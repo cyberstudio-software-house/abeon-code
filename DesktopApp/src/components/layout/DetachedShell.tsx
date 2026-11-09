@@ -19,9 +19,7 @@ import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
 const RIGHT_MIN = 220;
 const RIGHT_MAX = 480;
 
-type DetachedWindowMode = Exclude<WindowMode, { view: 'notes' }>;
-
-export function DetachedShell({ mode }: { mode: DetachedWindowMode }) {
+export function DetachedShell({ mode }: { mode: WindowMode }) {
   const isGroup = mode.view === 'group';
   const projectId = mode.projectId;
   const rightWidth = useStore(s => s.rightWidth);

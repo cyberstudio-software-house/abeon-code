@@ -37,10 +37,11 @@ export const tauri = {
     invoke<Project>('find_or_create_project', { path }),
   listNotes: (projectId: number | null) =>
     invoke<Note[]>('list_notes', { projectId }),
-  createNote: (projectId: number | null, title: string, content: string) =>
-    invoke<Note>('create_note', { projectId, title, content }),
-  updateNote: (id: number, title: string, content: string) =>
-    invoke<Note>('update_note', { id, title, content }),
+  getNote: (id: number) => invoke<Note>('get_note', { id }),
+  createNote: (projectId: number | null, content: string) =>
+    invoke<Note>('create_note', { projectId, content }),
+  updateNote: (id: number, content: string) =>
+    invoke<Note>('update_note', { id, content }),
   deleteNote: (id: number) => invoke<void>('delete_note', { id }),
   takePendingOpenPaths: () => invoke<OpenRequest[]>('take_pending_open_paths'),
   installCliCommand: () => invoke<string>('install_cli_command'),

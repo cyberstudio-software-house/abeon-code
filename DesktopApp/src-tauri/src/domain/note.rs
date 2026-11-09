@@ -9,7 +9,6 @@ pub struct Note {
     pub id: i64,
     #[ts(type = "number | null")]
     pub project_id: Option<i64>,
-    pub title: String,
     pub content: String,
     #[ts(type = "number")]
     pub created_at: i64,

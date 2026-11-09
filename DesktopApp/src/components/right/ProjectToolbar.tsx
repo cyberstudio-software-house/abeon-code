@@ -1,4 +1,3 @@
-import { openNotesWindow } from '../../lib/openNotesWindow';
 import { tauri } from '../../lib/tauri';
 import { useStore } from '../../store';
 import { Icon, type IconName } from '../shared/Icon';
@@ -38,14 +37,8 @@ export function ProjectToolbar() {
     });
   };
 
-  const openNotes = () => {
-    void openNotesWindow(project.id, project.name).catch(() => {
-      toast.error('Nie udało się otworzyć okna notatek');
-    });
-  };
-
   return (
-    <div role="group" aria-label="Otwórz projekt w" className="grid shrink-0 grid-cols-3 gap-0.5 rounded-[10px] border border-border bg-sunken p-[3px]">
+    <div role="group" aria-label="Otwórz projekt w" className="grid shrink-0 grid-cols-2 gap-0.5 rounded-[10px] border border-border bg-sunken p-[3px]">
       <ToolbarButton
         icon="terminal"
         label="Terminal"
@@ -55,11 +48,6 @@ export function ProjectToolbar() {
         icon="code"
         label="Edytor"
         onClick={openEditor}
-      />
-      <ToolbarButton
-        icon="notebook"
-        label="Notatki"
-        onClick={openNotes}
       />
     </div>
   );

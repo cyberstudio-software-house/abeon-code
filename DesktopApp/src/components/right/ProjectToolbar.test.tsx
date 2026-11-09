@@ -4,10 +4,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 type MockState = Record<string, unknown>;
 let mockState: MockState;
 
-const { openTerminal, openProjectInEditor, openNotesWindow, toastError } = vi.hoisted(() => ({
+const { openTerminal, openProjectInEditor, toastError } = vi.hoisted(() => ({
   openTerminal: vi.fn(),
   openProjectInEditor: vi.fn(),
-  openNotesWindow: vi.fn(),
   toastError: vi.fn(),
 }));
 
@@ -18,8 +17,6 @@ vi.mock('../../store', () => ({
 vi.mock('../../lib/tauri', () => ({
   tauri: { openProjectInEditor },
 }));
-
-vi.mock('../../lib/openNotesWindow', () => ({ openNotesWindow }));
 
 vi.mock('sonner', () => ({ toast: { error: toastError } }));
 
@@ -39,7 +36,6 @@ describe('ProjectToolbar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     openProjectInEditor.mockResolvedValue(undefined);
-    openNotesWindow.mockResolvedValue(undefined);
     mockState = baseState();
   });
 
@@ -47,15 +43,13 @@ describe('ProjectToolbar', () => {
     render(<ProjectToolbar />);
     fireEvent.click(screen.getByRole('button', { name: 'Terminal' }));
     fireEvent.click(screen.getByRole('button', { name: 'Edytor' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Notatki' }));
     expect(openTerminal).toHaveBeenCalledWith(4, { toggle: false });
     expect(openProjectInEditor).toHaveBeenCalledWith('/demo');
-    expect(openNotesWindow).toHaveBeenCalledWith(4, 'Demo');
   });
 
-  it('renders the three actions without a pressed state', () => {
+  it('renders the two actions without a pressed state', () => {
     render(<ProjectToolbar />);
-    for (const name of ['Terminal', 'Edytor', 'Notatki']) {
+    for (const name of ['Terminal', 'Edytor']) {
       expect(screen.getByRole('button', { name })).not.toHaveAttribute('aria-pressed');
     }
   });
@@ -70,12 +64,5 @@ describe('ProjectToolbar', () => {
     render(<ProjectToolbar />);
     fireEvent.click(screen.getByRole('button', { name: 'Edytor' }));
     await waitFor(() => expect(toastError).toHaveBeenCalledWith('Nie udało się otworzyć projektu w edytorze'));
-  });
-
-  it('shows a notes launch failure', async () => {
-    openNotesWindow.mockRejectedValueOnce(new Error('failed'));
-    render(<ProjectToolbar />);
-    fireEvent.click(screen.getByRole('button', { name: 'Notatki' }));
-    await waitFor(() => expect(toastError).toHaveBeenCalledWith('Nie udało się otworzyć okna notatek'));
   });
 });
