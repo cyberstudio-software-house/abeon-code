@@ -436,6 +436,13 @@ describe('note tabs', () => {
     expect(s.mruOrder[0]).toBe('note:5');
   });
 
+  it('openNoteTab activates a tab that was re-pointed to the note', () => {
+    useStore.setState({ tabs: [{ kind: 'note', id: 'note:5', projectId: 1, noteId: 11, title: 'X' }], activeTabId: null });
+    useStore.getState().openNoteTab(11, 1, 'X');
+    expect(useStore.getState().tabs.map(t => t.id)).toEqual(['note:5']);
+    expect(useStore.getState().activeTabId).toBe('note:5');
+  });
+
   it('openNoteTab closes the supervisor panel', () => {
     useStore.setState({ supervisorPanelOpen: true });
     useStore.getState().openNoteTab(5, 1, 'X');

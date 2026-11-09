@@ -246,10 +246,10 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice & Superviso
     });
   },
   openNoteTab: (noteId, projectId, title) => {
-    const id = noteTabId(noteId);
-    const exists = get().tabs.some(t => t.id === id);
+    const existing = get().tabs.find(t => t.kind === 'note' && t.noteId === noteId);
+    const id = existing ? existing.id : noteTabId(noteId);
     set({
-      tabs: exists ? get().tabs : [...get().tabs, { kind: 'note', id, projectId, noteId, title }],
+      tabs: existing ? get().tabs : [...get().tabs, { kind: 'note', id, projectId, noteId, title }],
       activeTabId: id,
       mruOrder: moveToFront(get().mruOrder, id),
       ...withNav(get, id),

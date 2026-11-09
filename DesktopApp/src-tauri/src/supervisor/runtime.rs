@@ -16,9 +16,12 @@ use crate::commands::sessions::{
 use crate::db::supervisor_decisions_repo::{self, NewDecision};
 use crate::db::DbPool;
 use crate::db::{projects_repo, settings_repo};
+#[cfg(unix)]
 use crate::domain::note::NOTES_CHANGED_EVENT;
 use crate::domain::supervisor::{SessionRebound, SupervisorLevel, SupervisorSnapshot};
-use crate::domain::{NotesChangedEvent, SessionActivity};
+#[cfg(unix)]
+use crate::domain::NotesChangedEvent;
+use crate::domain::SessionActivity;
 use crate::error::AppResult;
 use crate::notifications::marker::MarkerFilter;
 use crate::notifications::AttentionEvent;

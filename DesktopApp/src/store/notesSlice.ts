@@ -121,6 +121,14 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
     });
   };
 
+  const repointNoteTabs = (fromId: number, toId: number, content: string) => {
+    const title = noteTitle(content);
+    set((s) => {
+      if (!s.tabs.some((t) => t.kind === 'note' && t.noteId === fromId)) return s;
+      return { tabs: s.tabs.map((t) => (t.kind === 'note' && t.noteId === fromId ? { ...t, noteId: toId, title } : t)) };
+    });
+  };
+
   const upsertNote = (note: Note, projectId: number | null) => {
     const listKey = notesListKey(projectId);
     set((s) => {
@@ -140,6 +148,7 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
     patchDraft(key, { status: 'saving' });
     try {
       let created = draft.noteId === null;
+      let recreatedFrom: number | null = null;
       let saved: Note;
       if (draft.noteId === null) {
         saved = await tauri.createNote(draft.projectId, snapshot);
@@ -152,9 +161,11 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
           set((s) => ({ notesLists: withoutNote(s.notesLists, removedId) }));
           patchDraft(key, { noteId: null, savedContent: '' });
           created = true;
+          recreatedFrom = removedId;
           saved = await tauri.createNote(draft.projectId, snapshot);
         }
       }
+      if (recreatedFrom !== null) repointNoteTabs(recreatedFrom, saved.id, snapshot);
       const current = get().noteDrafts[key];
       if (!current) return;
       patchDraft(key, {
