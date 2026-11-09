@@ -92,6 +92,15 @@ describe('NotesPanel', () => {
     expect(actions.openNoteInPanel).toHaveBeenCalledWith(NOTE);
   });
 
+  it('clamps tile text without a conflicting display utility', () => {
+    render(<NotesPanel />);
+    const content = screen.getByText('Klient chce CSV…');
+    expect(content).toHaveClass('line-clamp-4', 'whitespace-pre-line');
+    for (const utility of ['block', 'flex', 'inline', 'inline-block', 'grid']) {
+      expect(content).not.toHaveClass(utility);
+    }
+  });
+
   it('creates a note in the selected scope', () => {
     const { rerender } = render(<NotesPanel />);
     fireEvent.click(screen.getByRole('button', { name: 'Nowa notatka' }));

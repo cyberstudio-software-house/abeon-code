@@ -34,7 +34,7 @@ export function NoteTiles({ list, emptyLabel, onOpen, onRetry }: Props) {
           onClick={() => onOpen(note)}
           className="block w-full shrink-0 rounded-[9px] border border-border bg-bg-elev px-2.5 py-2 text-left transition-colors hover:border-border-strong hover:bg-bg-elev-2"
         >
-          <span className="line-clamp-4 block whitespace-pre-line break-words text-[12.5px] text-fg-secondary">{note.content}</span>
+          <span className="line-clamp-4 whitespace-pre-line break-words text-[12.5px] text-fg-secondary">{note.content}</span>
           <time className="mt-1.5 block text-[10px] text-muted">{formatNoteDate(note.updatedAt, now)}</time>
         </button>
       ))}
