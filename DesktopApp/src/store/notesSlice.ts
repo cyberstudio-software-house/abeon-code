@@ -75,6 +75,14 @@ function isDirty(draft: NoteDraft): boolean {
   return draft.noteId === null ? !isBlankNote(draft.content) : draft.content !== draft.savedContent;
 }
 
+function mergeFetched(existing: Note[], fetched: Note[]): Note[] {
+  const known = new Map(existing.map((n) => [n.id, n]));
+  return fetched.map((n) => {
+    const local = known.get(n.id);
+    return local && local.updatedAt > n.updatedAt ? local : n;
+  });
+}
+
 function withoutNote(lists: NotesSlice['notesLists'], noteId: number): NotesSlice['notesLists'] {
   const next: NotesSlice['notesLists'] = {};
   for (const [key, list] of Object.entries(lists) as [NotesListKey, NotesList][]) {
@@ -187,9 +195,12 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
       const previous = get().notesLists[listKey]?.notes ?? [];
       set((s) => ({ notesLists: { ...s.notesLists, [listKey]: { status: 'loading', notes: previous } } }));
       try {
-        const notes = await tauri.listNotes(projectId);
+        const fetched = await tauri.listNotes(projectId);
         if (loadTokens.get(listKey) !== token) return;
-        set((s) => ({ notesLists: { ...s.notesLists, [listKey]: { status: 'ready', notes } } }));
+        set((s) => {
+          const notes = mergeFetched(s.notesLists[listKey]?.notes ?? [], fetched);
+          return { notesLists: { ...s.notesLists, [listKey]: { status: 'ready', notes } } };
+        });
       } catch {
         if (loadTokens.get(listKey) !== token) return;
         set((s) => ({ notesLists: { ...s.notesLists, [listKey]: { status: 'error', notes: s.notesLists[listKey]?.notes ?? [] } } }));
@@ -198,6 +209,10 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
 
     reloadNotes: async () => {
       const loadedKeys = Object.keys(get().notesLists) as NotesListKey[];
+      const isClean = (d: NoteDraft | undefined): d is NoteDraft =>
+        d !== undefined && d.noteId !== null && d.content === d.savedContent && d.status !== 'saving';
+      const baseline = new Map<string, string>();
+      Object.values(get().noteDrafts).filter(isClean).forEach((d) => baseline.set(d.key, d.savedContent));
       const fetched = new Map<number, Note>();
       await Promise.all(loadedKeys.map(async (listKey) => {
         const projectId = listKey === 'global' ? null : Number(listKey.slice('project:'.length));
@@ -206,16 +221,19 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
           const notes = await tauri.listNotes(projectId);
           notes.forEach((n) => fetched.set(n.id, n));
           if (loadTokens.get(listKey) !== token) return;
-          set((s) => ({ notesLists: { ...s.notesLists, [listKey]: { status: 'ready', notes } } }));
+          set((s) => {
+            const merged = mergeFetched(s.notesLists[listKey]?.notes ?? [], notes);
+            return { notesLists: { ...s.notesLists, [listKey]: { status: 'ready', notes: merged } } };
+          });
         } catch {
-          return;
+          if (loadTokens.get(listKey) !== token) return;
+          set((s) => ({ notesLists: { ...s.notesLists, [listKey]: { status: 'error', notes: s.notesLists[listKey]?.notes ?? [] } } }));
         }
       }));
-      const isClean = (d: NoteDraft | undefined): d is NoteDraft =>
-        d !== undefined && d.noteId !== null && d.content === d.savedContent && d.status !== 'saving';
-      const candidates = Object.values(get().noteDrafts).filter(isClean);
-      await Promise.all(candidates.map(async (candidate) => {
-        const noteId = candidate.noteId as number;
+      await Promise.all([...baseline.keys()].map(async (draftKey) => {
+        const candidate = get().noteDrafts[draftKey];
+        if (!candidate || candidate.noteId === null) return;
+        const noteId = candidate.noteId;
         let note = fetched.get(noteId);
         if (!note && !loadedKeys.includes(notesListKey(candidate.projectId))) {
           try {
@@ -225,9 +243,9 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
           }
         }
         if (!note) return;
-        const current = get().noteDrafts[candidate.key];
-        if (!isClean(current) || current.content === note.content) return;
-        patchDraft(candidate.key, { content: note.content, savedContent: note.content });
+        const current = get().noteDrafts[draftKey];
+        if (!isClean(current) || current.savedContent !== baseline.get(draftKey) || current.content === note.content) return;
+        patchDraft(draftKey, { content: note.content, savedContent: note.content });
       }));
     },
 
@@ -322,26 +340,40 @@ export const createNotesSlice: StateCreator<NotesSlice> = (set, get) => {
       const view = get().notesView;
       const otherHolder = from !== 'panel' && view.mode === 'editor' && view.draftKey === key;
       if (otherHolder) return get().flushNoteDraft(key);
-      if (isBlankNote(draft.content)) {
-        clearSaveTimer(key);
-        await saveChains.get(key);
-        const settled = get().noteDrafts[key];
-        if (!settled) return true;
-        if (settled.noteId !== null) {
-          try {
-            await tauri.deleteNote(settled.noteId);
-          } catch {
-            return false;
+      for (;;) {
+        const current = get().noteDrafts[key];
+        if (!current) return true;
+        if (isBlankNote(current.content)) {
+          clearSaveTimer(key);
+          await saveChains.get(key);
+          const settled = get().noteDrafts[key];
+          if (!settled) return true;
+          if (!isBlankNote(settled.content)) continue;
+          if (settled.noteId !== null) {
+            const removedId = settled.noteId;
+            try {
+              await tauri.deleteNote(removedId);
+            } catch {
+              return false;
+            }
+            set((s) => ({ notesLists: withoutNote(s.notesLists, removedId) }));
+            const afterDelete = get().noteDrafts[key];
+            if (afterDelete && !isBlankNote(afterDelete.content)) {
+              patchDraft(key, { noteId: null, savedContent: '', status: 'idle' });
+              continue;
+            }
           }
-          const removedId = settled.noteId;
-          set((s) => ({ notesLists: withoutNote(s.notesLists, removedId) }));
+          dropDraft(key);
+          return true;
         }
-        dropDraft(key);
-        return true;
+        if (!(await get().flushNoteDraft(key))) return false;
+        const flushed = get().noteDrafts[key];
+        if (!flushed) return true;
+        if (!isDirty(flushed)) {
+          dropDraft(key);
+          return true;
+        }
       }
-      if (!(await get().flushNoteDraft(key))) return false;
-      dropDraft(key);
-      return true;
     },
 
     deleteNoteById: async (noteId) => {

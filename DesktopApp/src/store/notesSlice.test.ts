@@ -299,6 +299,90 @@ describe('notesSlice', () => {
     expect(state().notesLists['project:2']?.notes.map((n) => n.id)).toEqual([6]);
   });
 
+  it('reloadNotes keeps text saved while the fetch was in flight', async () => {
+    tauriMock.listNotes.mockResolvedValueOnce([note(5, 'A2', 20)]);
+    await state().loadNotes(2);
+    state().openNoteInPanel(note(5, 'A2', 20));
+    const key = onlyDraftKey();
+    const fetch = deferred<Note[]>();
+    tauriMock.listNotes.mockReturnValueOnce(fetch.promise);
+    const reloading = state().reloadNotes();
+    tauriMock.updateNote.mockResolvedValue(note(5, 'A23', 40));
+    state().editNoteDraft(key, 'A23');
+    await state().flushNoteDraft(key);
+    fetch.resolve([note(5, 'A2', 20)]);
+    await reloading;
+    expect(state().noteDrafts[key].content).toBe('A23');
+    expect(state().noteDrafts[key].savedContent).toBe('A23');
+    expect(state().notesLists['project:2']?.notes[0].content).toBe('A23');
+  });
+
+  it('a failed reload does not leave a list stuck in loading', async () => {
+    tauriMock.listNotes.mockResolvedValueOnce([note(5, 'A')]);
+    await state().loadNotes(2);
+    const pending = deferred<Note[]>();
+    tauriMock.listNotes.mockReturnValueOnce(pending.promise);
+    const loading = state().loadNotes(2);
+    tauriMock.listNotes.mockRejectedValueOnce(new Error('boom'));
+    await state().reloadNotes();
+    pending.resolve([note(5, 'A')]);
+    await loading;
+    expect(state().notesLists['project:2']?.status).toBe('error');
+    expect(state().notesLists['project:2']?.notes.map((n) => n.id)).toEqual([5]);
+  });
+
+  it('text typed while a release flushes is saved before the draft is dropped', async () => {
+    const firstSave = deferred<Note>();
+    tauriMock.updateNote.mockReturnValueOnce(firstSave.promise);
+    tauriMock.updateNote.mockResolvedValueOnce(note(5, 'XYZ', 80));
+    state().openNoteInPanel(note(5, 'X'));
+    const key = onlyDraftKey();
+    state().editNoteDraft(key, 'XY');
+    const leaving = state().backToNotesList();
+    await vi.advanceTimersByTimeAsync(0);
+    state().editNoteDraft(key, 'XYZ');
+    firstSave.resolve(note(5, 'XY', 70));
+    expect(await leaving).toBe(true);
+    expect(tauriMock.updateNote).toHaveBeenNthCalledWith(1, 5, 'XY');
+    expect(tauriMock.updateNote).toHaveBeenNthCalledWith(2, 5, 'XYZ');
+    expect(state().noteDrafts).toEqual({});
+    expect(state().notesView).toEqual({ mode: 'list' });
+  });
+
+  it('text typed into an emptied note while releasing prevents its deletion', async () => {
+    const inFlight = deferred<Note>();
+    tauriMock.updateNote.mockReturnValueOnce(inFlight.promise);
+    tauriMock.updateNote.mockResolvedValueOnce(note(5, 'Z', 80));
+    state().openNoteInPanel(note(5, 'X'));
+    const key = onlyDraftKey();
+    state().editNoteDraft(key, 'XY');
+    await vi.advanceTimersByTimeAsync(700);
+    state().editNoteDraft(key, '');
+    const leaving = state().backToNotesList();
+    state().editNoteDraft(key, 'Z');
+    inFlight.resolve(note(5, 'XY', 70));
+    expect(await leaving).toBe(true);
+    expect(tauriMock.deleteNote).not.toHaveBeenCalled();
+    expect(tauriMock.updateNote).toHaveBeenLastCalledWith(5, 'Z');
+    expect(state().noteDrafts).toEqual({});
+  });
+
+  it('text typed while an emptied note is being deleted is kept as a new note', async () => {
+    const deletion = deferred<void>();
+    tauriMock.deleteNote.mockReturnValueOnce(deletion.promise);
+    tauriMock.createNote.mockResolvedValueOnce(note(11, 'Q', 90));
+    state().openNoteInPanel(note(5, 'X'));
+    const key = onlyDraftKey();
+    state().editNoteDraft(key, '');
+    const leaving = state().backToNotesList();
+    await vi.advanceTimersByTimeAsync(0);
+    state().editNoteDraft(key, 'Q');
+    deletion.resolve();
+    expect(await leaving).toBe(true);
+    expect(tauriMock.createNote).toHaveBeenCalledWith(2, 'Q');
+    expect(state().noteDrafts).toEqual({});
+  });
+
   it('the panel closes when no tab is left', () => {
     useStore.setState({ tabs: [{ kind: 'terminal', id: 't1', projectId: 1, title: 'a' }], activeTabId: 't1' });
     state().openNotesPanel();
