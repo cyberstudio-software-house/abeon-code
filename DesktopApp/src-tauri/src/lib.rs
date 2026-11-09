@@ -26,6 +26,9 @@ fn greet(name: &str) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(code) = cli::notes::try_run(&std::env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     #[cfg(unix)]
     if let Some(code) = supervisor::entry::try_run_subcommand(&std::env::args().collect::<Vec<_>>()) {
         std::process::exit(code);

@@ -29,11 +29,18 @@ set -euo pipefail
 exe="{exe_path}"
 max_prompt_bytes={MAX_INITIAL_PROMPT_BYTES}
 unset_args=({unset_args})
+wrapper_features="note"
 
 fail() {{
   echo "abeon-code: $1" >&2
   exit 2
 }}
+
+if [ "${{1:-}}" = "note" ]; then
+  [ -x "$exe" ] || fail "AbeonCode executable not found: $exe (reinstall the command in AbeonCode settings)"
+  shift
+  exec env "${{unset_args[@]}}" "$exe" note "$@" --cwd "$(pwd -P)"
+fi
 
 if [ "${{1:-}}" = "session" ]; then
   target="${{2:-}}"
@@ -125,9 +132,22 @@ mod tests {
     }
 
     fn run_wrapper(wrapper: &Path, args: &[&str], stdin: &str, out: &Path) -> std::process::Output {
-        let mut child = Command::new("bash")
-            .arg(wrapper)
-            .args(args)
+        run_wrapper_in(wrapper, args, stdin, out, None)
+    }
+
+    fn run_wrapper_in(
+        wrapper: &Path,
+        args: &[&str],
+        stdin: &str,
+        out: &Path,
+        cwd: Option<&Path>,
+    ) -> std::process::Output {
+        let mut command = Command::new("bash");
+        command.arg(wrapper).args(args);
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+        let mut child = command
             .env("ABEON_TEST_OUT", out)
             .env("CLAUDECODE", "1")
             .env("CLAUDE_CODE_SESSION_ID", "leak-session")
@@ -298,5 +318,53 @@ mod tests {
         let res = run_wrapper(&wrapper, &[dir.path().to_str().unwrap()], "", &dir.path().join("argv"));
         assert_eq!(res.status.code(), Some(2));
         assert!(String::from_utf8_lossy(&res.stderr).contains("abeon-code: AbeonCode executable not found"));
+    }
+
+    #[test]
+    fn wrapper_declares_the_note_feature() {
+        assert!(wrapper_script("/opt/AbeonCode/abeoncode").contains("wrapper_features=\"note\""));
+    }
+
+    fn recording_exe(dir: &Path, exit_code: i32) -> PathBuf {
+        let exe = dir.join("recording-exe");
+        std::fs::write(
+            &exe,
+            format!(
+                "#!/usr/bin/env bash\nenv > \"$ABEON_TEST_OUT.env\"\ncat > \"$ABEON_TEST_OUT.stdin\"\nprintf '%s\\0' \"$@\" > \"$ABEON_TEST_OUT\"\nexit {exit_code}\n"
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        exe
+    }
+
+    #[test]
+    fn note_branch_runs_synchronously_with_cwd() {
+        let dir = tempdir().unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        let exe = recording_exe(dir.path(), 3);
+        let wrapper = install(&exe.to_string_lossy(), dir.path()).unwrap();
+        let out = dir.path().join("argv");
+        let res = run_wrapper_in(&wrapper, &["note", "add", "--global"], "Treść", &out, Some(&work));
+        assert_eq!(res.status.code(), Some(3));
+        let canonical = std::fs::canonicalize(&work).unwrap();
+        assert_eq!(
+            wait_for_argv(&out),
+            vec![
+                "note".to_string(),
+                "add".to_string(),
+                "--global".to_string(),
+                "--cwd".to_string(),
+                canonical.to_string_lossy().to_string(),
+            ]
+        );
+        assert_eq!(std::fs::read_to_string(format!("{}.stdin", out.display())).unwrap(), "Treść");
+        let env = read_env(&out);
+        assert!(!env.contains("CLAUDECODE="));
+        assert!(!env.contains("CLAUDE_CODE_SESSION_ID="));
+        assert!(!env.contains("AI_AGENT="));
+        assert!(env.contains("CLAUDE_CODE_USE_BEDROCK=1"));
     }
 }

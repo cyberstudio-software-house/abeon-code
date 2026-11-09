@@ -2,6 +2,7 @@ pub mod open_input;
 pub mod installer;
 pub mod skill;
 pub mod request;
+pub mod notes;
 
 use tauri::{AppHandle, Emitter, Manager};
 use crate::state::AppState;
