@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const { onCloseRequested, destroy, checkForUpdate, toastError } = vi.hoisted(() => ({
@@ -215,32 +215,67 @@ describe('AppShell lifecycle', () => {
     });
   });
 
-  describe('update relaunch', () => {
+  describe('update install', () => {
     const relaunch = vi.fn();
+    const downloadAndInstall = vi.fn();
+    const originalFlush = useStore.getState().flushAllNoteDrafts;
+    const calls: string[] = [];
 
     const offerUpdate = () => {
-      relaunch.mockResolvedValue(undefined);
-      checkForUpdate.mockResolvedValue({
-        version: '9.9.9', notes: '', downloadAndInstall: async () => {}, relaunch,
+      relaunch.mockImplementation(async () => { calls.push('relaunch'); });
+      downloadAndInstall.mockImplementation(async () => { calls.push('install'); });
+      checkForUpdate.mockResolvedValue({ version: '9.9.9', notes: '', downloadAndInstall, relaunch });
+    };
+
+    const stubFlush = (results: boolean[]) => {
+      const queue = [...results];
+      useStore.setState({
+        flushAllNoteDrafts: vi.fn(async () => {
+          calls.push('flush');
+          return queue.shift() ?? true;
+        }),
       });
     };
 
-    it('saves notes before relaunching', async () => {
-      offerUpdate();
+    beforeEach(() => {
+      calls.length = 0;
+      relaunch.mockReset();
+      downloadAndInstall.mockReset();
       seed({ a: 'history' });
-      vi.spyOn(tauri, 'updateNote').mockResolvedValue({ ...savedNote, content: 'XY', updatedAt: 2 });
+    });
+
+    afterEach(() => {
+      useStore.setState({ flushAllNoteDrafts: originalFlush });
+    });
+
+    it('saves notes before installing and again before relaunching', async () => {
+      offerUpdate();
+      stubFlush([true, true]);
+      render(<AppShell />);
+
+      fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+      await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
+      expect(calls).toEqual(['flush', 'install', 'flush', 'relaunch']);
+    });
+
+    it('writes a pending note to disk before installing', async () => {
+      offerUpdate();
+      vi.spyOn(tauri, 'updateNote').mockImplementation(async () => {
+        calls.push('save');
+        return { ...savedNote, content: 'XY', updatedAt: 2 };
+      });
       seedDirtyNote();
       render(<AppShell />);
 
       fireEvent.click(await screen.findByText('Zaktualizuj'));
 
       await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
-      expect(tauri.updateNote).toHaveBeenCalledWith(5, 'XY');
+      expect(calls).toEqual(['save', 'install', 'relaunch']);
     });
 
-    it('does not relaunch when notes cannot be saved', async () => {
+    it('does not install when notes cannot be saved', async () => {
       offerUpdate();
-      seed({ a: 'history' });
       vi.spyOn(tauri, 'updateNote').mockRejectedValue(new Error('disk'));
       seedDirtyNote();
       render(<AppShell />);
@@ -250,6 +285,20 @@ describe('AppShell lifecycle', () => {
       await waitFor(() => expect(toastError).toHaveBeenCalledWith(
         'Nie udało się zapisać notatki — ponowne uruchomienie wstrzymane',
       ));
+      expect(downloadAndInstall).not.toHaveBeenCalled();
+      expect(relaunch).not.toHaveBeenCalled();
+      expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+    });
+
+    it('does not relaunch when notes typed during the download cannot be saved', async () => {
+      offerUpdate();
+      stubFlush([true, false]);
+      render(<AppShell />);
+
+      fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+      await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+      expect(calls).toEqual(['flush', 'install', 'flush']);
       expect(relaunch).not.toHaveBeenCalled();
       expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
     });

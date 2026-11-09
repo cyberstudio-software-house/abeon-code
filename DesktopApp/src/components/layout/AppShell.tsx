@@ -261,16 +261,19 @@ export function AppShell() {
     if (!update) return;
     setUpdateProgress(null);
     setUpdateBusy(true);
+    const holdForUnsavedNotes = async () => {
+      if (await useStore.getState().flushAllNoteDrafts()) return false;
+      toast.error('Nie udało się zapisać notatki — ponowne uruchomienie wstrzymane');
+      setUpdateBusy(false);
+      setUpdateProgress(null);
+      return true;
+    };
     try {
+      if (await holdForUnsavedNotes()) return;
       await update.downloadAndInstall((downloaded, total) => {
         setUpdateProgress(total ? Math.min(1, downloaded / total) : null);
       });
-      if (!(await useStore.getState().flushAllNoteDrafts())) {
-        toast.error('Nie udało się zapisać notatki — ponowne uruchomienie wstrzymane');
-        setUpdateBusy(false);
-        setUpdateProgress(null);
-        return;
-      }
+      if (await holdForUnsavedNotes()) return;
       await update.relaunch();
     } catch (err) {
       console.error('Update install failed', err);
