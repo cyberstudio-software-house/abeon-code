@@ -71,6 +71,10 @@ function nextLoadToken(listKey: NotesListKey): number {
   return token;
 }
 
+function isNotFoundError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'not_found';
+}
+
 const byRecency = (a: Note, b: Note) => b.updatedAt - a.updatedAt || b.id - a.id;
 
 function isDirty(draft: NoteDraft): boolean {
@@ -135,9 +139,22 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
     if (draft.noteId !== null && snapshot === draft.savedContent) return;
     patchDraft(key, { status: 'saving' });
     try {
-      const saved = draft.noteId === null
-        ? await tauri.createNote(draft.projectId, snapshot)
-        : await tauri.updateNote(draft.noteId, snapshot);
+      let created = draft.noteId === null;
+      let saved: Note;
+      if (draft.noteId === null) {
+        saved = await tauri.createNote(draft.projectId, snapshot);
+      } else {
+        const removedId = draft.noteId;
+        try {
+          saved = await tauri.updateNote(removedId, snapshot);
+        } catch (error) {
+          if (!isNotFoundError(error)) throw error;
+          set((s) => ({ notesLists: withoutNote(s.notesLists, removedId) }));
+          patchDraft(key, { noteId: null, savedContent: '' });
+          created = true;
+          saved = await tauri.createNote(draft.projectId, snapshot);
+        }
+      }
       const current = get().noteDrafts[key];
       if (!current) return;
       patchDraft(key, {
@@ -146,7 +163,7 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
         status: current.content === snapshot ? 'saved' : 'idle',
       });
       upsertNote(saved, current.projectId);
-      if (draft.noteId === null) retitleNoteTabs(saved.id, current.content);
+      if (created) retitleNoteTabs(saved.id, current.content);
     } catch {
       patchDraft(key, { status: 'error' });
     }

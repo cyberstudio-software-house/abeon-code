@@ -111,6 +111,41 @@ describe('notesSlice', () => {
     expect(state().noteDrafts[key].status).toBe('saved');
   });
 
+  it('recreates a note that was deleted elsewhere while it was being edited', async () => {
+    tauriMock.listNotes.mockResolvedValue([note(5, 'X'), note(7, 'Y')]);
+    await state().loadNotes(2);
+    tauriMock.updateNote.mockRejectedValue({ code: 'not_found', message: 'note 5' });
+    tauriMock.createNote.mockResolvedValue(note(11, 'XY', 300));
+    state().openNoteInPanel(note(5, 'X'));
+    const key = onlyDraftKey();
+    state().editNoteDraft(key, 'XY');
+    expect(await state().flushNoteDraft(key)).toBe(true);
+    expect(tauriMock.createNote).toHaveBeenCalledTimes(1);
+    expect(tauriMock.createNote).toHaveBeenCalledWith(2, 'XY');
+    expect(state().noteDrafts[key].noteId).toBe(11);
+    expect(state().noteDrafts[key].status).toBe('saved');
+    expect(state().noteDrafts[key].content).toBe('XY');
+    expect(state().notesLists['project:2']?.notes.map((n) => n.id)).toEqual([11, 7]);
+  });
+
+  it('keeps the text when recreating a deleted note fails too', async () => {
+    tauriMock.updateNote.mockRejectedValue({ code: 'not_found', message: 'note 5' });
+    tauriMock.createNote.mockRejectedValue(new Error('boom'));
+    state().openNoteInPanel(note(5, 'X'));
+    const key = onlyDraftKey();
+    state().editNoteDraft(key, 'XY');
+    expect(await state().flushNoteDraft(key)).toBe(false);
+    expect(state().noteDrafts[key].status).toBe('error');
+    expect(state().noteDrafts[key].noteId).toBeNull();
+    expect(state().noteDrafts[key].content).toBe('XY');
+
+    tauriMock.createNote.mockResolvedValue(note(12, 'XY', 400));
+    state().retryNoteDraft(key);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state().noteDrafts[key].noteId).toBe(12);
+    expect(state().noteDrafts[key].status).toBe('saved');
+  });
+
   it('releasing an emptied note deletes it', async () => {
     tauriMock.deleteNote.mockResolvedValue(undefined);
     tauriMock.listNotes.mockResolvedValue([note(5, 'X'), note(7, 'Y')]);
