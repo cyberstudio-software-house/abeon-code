@@ -68,11 +68,12 @@ keeping them in sync: it attaches orphaned tabs to the focused pane, drops unkno
 emptied panes and keeps `activeTabId === focusedLeaf.activeTabId`. Actions that open tabs therefore
 need to know nothing about panes.
 
-Four tab kinds:
+Five tab kinds:
 - `session` — Claude session, has `mode: 'history' | 'terminal'` (resume vs. live).
 - `action` — running script with `status: 'running' | 'exited'`.
 - `terminal` — bare shell PTY.
-- `note` — one note (`noteId`), title is the note's first line. Never a live process, so it closes without a guard (through `closeNoteTab` in `useTabBarActions`, which releases the draft), cannot be renamed, is deduped by `noteId` (`note:<id>` tab id) and is **not persisted** (`writeTabsToLocalStorage` saves only session tabs). See "Notes".
+- `providerPicker` — opens instead of a new session when more than one provider is enabled (see "Providers").
+- `note` — one note (`noteId`), title is the note's first line. Never a live process, so it closes without a guard (through `closeNoteTab` in `useTabBarActions`, which releases the draft), cannot be renamed, is deduped by `noteId` in `openNoteTab` (its id `note:<id>` is set when the tab opens and kept by `repointNoteTabs` after a recreate, so never look a tab up by `noteTabId(noteId)`) and is **not persisted** (`writeTabsToLocalStorage` saves only session tabs). See "Notes".
 
 Closing a tab with an active process (`session+terminal`, `action`, `terminal`) **must** route through
 the `ConfirmDialog` owned by `useTabBarActions.tsx`. Helpers there: `isActiveProcess()` +
@@ -290,13 +291,14 @@ Short plain-text notes, per project or global, edited in the right column (`Note
 
 - **No titles**: the first non-blank line is the title (`noteTitle` in `lib/noteText.ts`, used for
   tiles and tab titles). The `title` column stays in the schema but is always `''` on purpose:
-  migration 007 folded old titles into `content` and sets it to `''`, and `notes_repo` never writes
-  it, because dev and installed builds share one SQLite DB and an older build still expects the
+  migration 007 folded old titles into `content` and sets it to `''`, and `notes_repo` only inserts `''`
+  (the column is NOT NULL without a default) and never reads or updates it, because dev and installed builds share one SQLite DB and an older build still expects the
   column. Do not drop it or start using it. Migrations run in an IMMEDIATE transaction for the same
   reason (two builds can start against the DB at once).
 - **Store owns everything** (`store/notesSlice.ts`): panel mode (`notesPanelOpen`, `notesScope`,
   `notesView` list/editor), the per-scope lists (`notesLists`, keyed `global` / `project:<id>`) and
-  `noteDrafts`. Components hold no note state of their own.
+  `noteDrafts`: note content, save status and panel mode live in the store. Components keep only view
+  state (e.g. the `NoteTabView` load status and confirm dialogs).
 - **One draft per note, shared by panel and tabs**: drafts are keyed by a UUID (a new note has no id
   yet) and found by `noteId` **or** `replacesNoteId` (`draftKeyForNote`). The panel editor and a `note`
   tab for the same note edit the same draft, so they cannot diverge. `NoteTabView` gets its draft from
@@ -304,20 +306,32 @@ Short plain-text notes, per project or global, edited in the right column (`Note
 - **Autosave** (`editNoteDraft` -> `scheduleSave`, `NOTE_SAVE_DEBOUNCE_MS` = 700 ms): every save goes
   through a per-draft promise chain (`saveChains`), so a create can never race the update that follows
   it and `flushNoteDraft` just awaits the chain. A save that hits `not_found` (note deleted elsewhere)
-  recreates the note, sets `replacesNoteId` and re-points its tabs (`repointNoteTabs`). A failed
+  recreates the note, sets `replacesNoteId` and re-points its tabs (`repointNoteTabs`); when the
+  content being saved is blank it recreates nothing: the draft becomes a blank new draft
+  (`noteId: null`, `replacesNoteId` kept so tabs still find it, status `idle`) and typing later
+  recreates the note. A failed
   save leaves the draft in `error` with the content kept; `flushNoteDraft` then returns `false`.
-- **Flush points** (all await `flushNoteDraft`/`flushAllNoteDrafts` and refuse to continue on
-  `false`): back to the list, closing the panel, "open in tab", closing a tab, detaching a group
-  (`lib/detachGroup.ts`), closing the main or a detached window (`AppShell`/`DetachedShell`, with a
-  `ConfirmDialog` when notes cannot be saved), and **before `downloadAndInstall` and `relaunch`** in
-  `AppShell`. A new flush point needs the same treatment or the last 700 ms of typing is lost.
+- **Flush points** (all await `flushNoteDraft`/`flushAllNoteDrafts`/`settleNoteDraftsForExit` and
+  refuse to continue on `false`): back to the list, closing the panel, "open in tab", closing a tab,
+  detaching a group (`lib/detachGroup.ts`, which then re-reads the group's tabs, because the flush
+  may have re-pointed a note tab to a recreated note), closing the main or a detached window
+  (`AppShell`/`DetachedShell`, with a `ConfirmDialog` when notes cannot be saved), and **before
+  `downloadAndInstall` and `relaunch`** in `AppShell`. A new flush point needs the same treatment or
+  the last 700 ms of typing is lost.
+- **Exit settles, detach only flushes**: the window-close handlers and both update flushes call
+  `settleNoteDraftsForExit`, which flushes non-blank drafts but deletes a blank draft that has a
+  `noteId` (an emptied note is never stored; the draft turns into a blank new draft so an open tab
+  keeps working). Their guard is `hasNotesToSettle`, which also covers a blank note already autosaved
+  as `''`. Detach uses `flushAllNoteDrafts`, which saves blanks as they are, because the note stays
+  open in the new window.
 - **Empty notes are deleted on release**: `releaseNoteDraft(key, from)` drops the draft when no other
   holder (panel view or another note tab) still needs it, and a blank saved note is deleted from the
-  DB, a blank never-saved draft is simply discarded. Releasing while another holder exists only
+  DB (a `not_found` from the delete counts as success, the note is already gone), a blank never-saved
+  draft is simply discarded. `deleteNoteById` treats `not_found` the same way. Releasing while another holder exists only
   flushes. `hasUnsavedNotes` ignores a blank unsaved draft.
 - **Lists are merged, not replaced**: `mergeFetched` keeps a local note when it is newer than the
   fetched one, so a reload cannot show stale content over an autosave in flight. `reloadNotes`
-  also refreshes clean drafts (no edits, not saving) from the fetched content and leaves dirty ones
+  also refreshes clean drafts (no edits, not saving) from the fetched content (and retitles that note's tabs) and leaves dirty ones
   alone. Each load takes a token (`loadTokens`) and a stale response is dropped.
 - **`notes://changed`** (`NotesChangedEvent`: `createdNoteId`, `external`, `sourceWindow`): the
   `create_note`/`update_note`/`delete_note` commands emit it with the calling window's label, and
