@@ -1,6 +1,5 @@
 use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use chrono::{Local, TimeZone};
 use rusqlite::Connection;
@@ -194,7 +193,7 @@ fn notify_app(note_id: i64) {
         &IpcRequest::NotesChanged {
             created_note_id: Some(note_id),
         },
-        Duration::from_secs(2),
+        std::time::Duration::from_secs(2),
     );
 }
 
