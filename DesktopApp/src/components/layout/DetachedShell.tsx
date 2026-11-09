@@ -7,6 +7,7 @@ import { AppHeader } from './AppHeader';
 import { DragHandle, clamp } from './DragHandle';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { useStore, adoptedActions } from '../../store';
+import { hasUnsavedNotes } from '../../store/notesSlice';
 import { tauri } from '../../lib/tauri';
 import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
@@ -36,6 +37,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
   });
 
   const [confirming, setConfirming] = useState(false);
+  const [confirmingNotesLoss, setConfirmingNotesLoss] = useState(false);
 
   usePresenceReporter();
   useSupervisorSnapshot();
@@ -75,6 +77,15 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
     void adoptedActions.then(() => tauri.emitDetachReady(getCurrentWebviewWindow().label));
   }, [isGroup]);
 
+  const continueClose = useCallback(() => {
+    const state = useStore.getState();
+    if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
+      setConfirming(true);
+    } else {
+      void getCurrentWebviewWindow().destroy();
+    }
+  }, []);
+
   // Closing the window ends every session in it. Prompt when any PTY is live; the
   // confirm path unmounts the pane layers (flushSync) so TerminalView's cleanup
   // kills the PTYs before the window closes — otherwise the processes orphan.
@@ -83,13 +94,20 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
     let unlisten: (() => void) | null = null;
     win.onCloseRequested((event) => {
       const state = useStore.getState();
+      if (hasUnsavedNotes(state)) {
+        event.preventDefault();
+        void state.flushAllNoteDrafts()
+          .catch(() => false)
+          .then(saved => (saved ? continueClose() : setConfirmingNotesLoss(true)));
+        return;
+      }
       if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
         event.preventDefault();
         setConfirming(true);
       }
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
-  }, []);
+  }, [continueClose]);
 
   const onRightDrag = useCallback(
     (delta: number) => setRightWidth(clamp(rightWidth - delta, RIGHT_MIN, RIGHT_MAX)),
@@ -120,6 +138,18 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
           <RightPanel detached />
         </div>
       </div>
+      {confirmingNotesLoss && (
+        <ConfirmDialog
+          title="Nie udało się zapisać notatki"
+          message="Zamknięcie okna spowoduje utratę niezapisanej treści notatki."
+          confirmLabel="Zamknij mimo to"
+          onCancel={() => setConfirmingNotesLoss(false)}
+          onConfirm={() => {
+            setConfirmingNotesLoss(false);
+            continueClose();
+          }}
+        />
+      )}
       {confirming && (
         <ConfirmDialog
           title={isGroup ? 'Zamknąć okno projektu?' : 'Zamknąć sesję?'}

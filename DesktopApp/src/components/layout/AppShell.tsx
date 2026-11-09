@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
+import { toast } from 'sonner';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { Sidebar } from '../sidebar/Sidebar';
 import { CenterPanel } from '../center/CenterPanel';
@@ -7,6 +8,7 @@ import { RightPanel } from '../right/RightPanel';
 import { TabSwitcher } from '../center/TabSwitcher';
 import { ProjectLauncher } from '../center/ProjectLauncher';
 import { freezeTabPersistence, useStore } from '../../store';
+import { hasUnsavedNotes } from '../../store/notesSlice';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { tauri } from '../../lib/tauri';
 import type { AttentionEvent } from '../../lib/tauri';
@@ -61,6 +63,7 @@ export function AppShell() {
     [tabs, pendingResumeTabIds, projects],
   );
   const [confirmingClose, setConfirmingClose] = useState(false);
+  const [confirmingNotesLoss, setConfirmingNotesLoss] = useState(false);
   const startActivityPolling = useStore(s => s.startActivityPolling);
   const stopActivityPolling = useStore(s => s.stopActivityPolling);
 
@@ -195,17 +198,33 @@ export function AppShell() {
     for (const sessionId of visibleSessionIds(state.layout, state.tabs)) state.clearAttention(sessionId);
   }, [activeTabId, layout]);
 
+  const continueClose = useCallback(() => {
+    const state = useStore.getState();
+    if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
+      setConfirmingClose(true);
+    } else {
+      void getCurrentWebviewWindow().destroy();
+    }
+  }, []);
+
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     getCurrentWebviewWindow().onCloseRequested((event) => {
       const state = useStore.getState();
+      if (hasUnsavedNotes(state)) {
+        event.preventDefault();
+        void state.flushAllNoteDrafts()
+          .catch(() => false)
+          .then(saved => (saved ? continueClose() : setConfirmingNotesLoss(true)));
+        return;
+      }
       if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
         event.preventDefault();
         setConfirmingClose(true);
       }
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
-  }, []);
+  }, [continueClose]);
 
   const confirmClose = () => {
     const state = useStore.getState();
@@ -246,6 +265,12 @@ export function AppShell() {
       await update.downloadAndInstall((downloaded, total) => {
         setUpdateProgress(total ? Math.min(1, downloaded / total) : null);
       });
+      if (!(await useStore.getState().flushAllNoteDrafts())) {
+        toast.error('Nie udało się zapisać notatki — ponowne uruchomienie wstrzymane');
+        setUpdateBusy(false);
+        setUpdateProgress(null);
+        return;
+      }
       await update.relaunch();
     } catch (err) {
       console.error('Update install failed', err);
@@ -284,6 +309,18 @@ export function AppShell() {
           sessions={restorableSessions}
           onResume={resumePendingSessions}
           onDismiss={dismissPendingResume}
+        />
+      )}
+      {confirmingNotesLoss && (
+        <ConfirmDialog
+          title="Nie udało się zapisać notatki"
+          message="Zamknięcie okna spowoduje utratę niezapisanej treści notatki."
+          confirmLabel="Zamknij mimo to"
+          onCancel={() => setConfirmingNotesLoss(false)}
+          onConfirm={() => {
+            setConfirmingNotesLoss(false);
+            continueClose();
+          }}
         />
       )}
       {confirmingClose && (

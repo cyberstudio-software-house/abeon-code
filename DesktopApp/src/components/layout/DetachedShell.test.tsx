@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const { onCloseRequested, destroy } = vi.hoisted(() => ({
   onCloseRequested: vi.fn(),
@@ -21,6 +21,7 @@ vi.stubGlobal('ResizeObserver', class {
 Element.prototype.scrollIntoView = vi.fn();
 
 import { useStore } from '../../store';
+import type { Note } from '../../types';
 import { tauri } from '../../lib/tauri';
 import type { AttentionEvent } from '../../lib/tauri';
 import type { SessionRebound } from '../../types';
@@ -32,6 +33,14 @@ const groupMode = { view: 'group' as const, projectId: 1, tabs: [], activeTabId:
 const sessionMode = { view: 'session' as const, projectId: 1, sessionId: 's1', title: 'S1', fresh: false };
 
 const DETACHED_HINT = 'Otwórz nową sesję przyciskiem + na pasku zakładek';
+
+const savedNote: Note = { id: 5, projectId: 1, content: 'X', createdAt: 1, updatedAt: 1 };
+
+function seedDirtyNote() {
+  useStore.getState().openNoteInPanel(savedNote);
+  const key = Object.keys(useStore.getState().noteDrafts)[0];
+  useStore.getState().editNoteDraft(key, 'XY');
+}
 
 const sessionTab = (id: string, sessionId: string) => ({
   kind: 'session' as const, id, projectId: 1, sessionId, title: sessionId, mode: 'history' as const,
@@ -72,6 +81,7 @@ describe('DetachedShell', () => {
     vi.spyOn(tauri, 'onSessionAttention').mockResolvedValue(() => {});
     vi.spyOn(document, 'hasFocus').mockReturnValue(true);
     useStore.setState({
+      noteDrafts: {},
       tabs: [
         sessionTab('session:s1', 's1'),
         { kind: 'terminal', id: 'terminal:t1', projectId: 1, title: 'Terminal' },
@@ -119,6 +129,56 @@ describe('DetachedShell', () => {
     const event = { preventDefault: vi.fn() };
     handler(event);
     expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('saves pending notes before closing', async () => {
+    useStore.setState({ tabs: [sessionTab('session:s1', 's1')] });
+    vi.spyOn(tauri, 'updateNote').mockResolvedValue({ ...savedNote, content: 'XY', updatedAt: 2 });
+    seedDirtyNote();
+    render(<DetachedShell mode={groupMode} />);
+    const handler = onCloseRequested.mock.calls[0][0];
+    const event = { preventDefault: vi.fn() };
+
+    act(() => { handler(event); });
+
+    expect(event.preventDefault).toHaveBeenCalled();
+    await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+    expect(tauri.updateNote).toHaveBeenCalledWith(5, 'XY');
+  });
+
+  it('asks before closing when a note cannot be saved', async () => {
+    useStore.setState({ tabs: [sessionTab('session:s1', 's1')] });
+    vi.spyOn(tauri, 'updateNote').mockRejectedValue(new Error('disk'));
+    seedDirtyNote();
+    render(<DetachedShell mode={groupMode} />);
+    const handler = onCloseRequested.mock.calls[0][0];
+
+    act(() => { handler({ preventDefault: vi.fn() }); });
+
+    expect(await screen.findByText('Nie udało się zapisać notatki')).toBeTruthy();
+    expect(screen.getByText('Zamknięcie okna spowoduje utratę niezapisanej treści notatki.')).toBeTruthy();
+    expect(destroy).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByText('Anuluj'));
+    expect(screen.queryByText('Nie udało się zapisać notatki')).toBeNull();
+    expect(destroy).not.toHaveBeenCalled();
+
+    act(() => { handler({ preventDefault: vi.fn() }); });
+    fireEvent.click(await screen.findByText('Zamknij mimo to'));
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves notes and then asks about running sessions', async () => {
+    vi.spyOn(tauri, 'updateNote').mockResolvedValue({ ...savedNote, content: 'XY', updatedAt: 2 });
+    seedDirtyNote();
+    render(<DetachedShell mode={groupMode} />);
+    const handler = onCloseRequested.mock.calls[0][0];
+
+    act(() => { handler({ preventDefault: vi.fn() }); });
+
+    expect(await screen.findByText('Zamknąć okno projektu?')).toBeTruthy();
+    expect(tauri.updateNote).toHaveBeenCalledWith(5, 'XY');
+    expect(destroy).not.toHaveBeenCalled();
   });
 
   it('links a terminal\'s new session id to the tab that owns it', async () => {
