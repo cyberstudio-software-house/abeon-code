@@ -2,6 +2,7 @@ pub mod content;
 pub mod listing;
 pub mod paths;
 pub mod search;
+pub mod write;
 
 pub const MAX_TEXT_BYTES: u64 = 1_048_576;
 pub const MAX_IMAGE_BYTES: u64 = 10 * 1_048_576;

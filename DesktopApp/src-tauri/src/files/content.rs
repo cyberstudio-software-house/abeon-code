@@ -77,7 +77,7 @@ pub fn read_file(path: &Path) -> AppResult<FileContent> {
     }
 }
 
-fn version_of(metadata: &Metadata) -> AppResult<String> {
+pub(crate) fn version_of(metadata: &Metadata) -> AppResult<String> {
     let nanos = metadata
         .modified()?
         .duration_since(UNIX_EPOCH)
