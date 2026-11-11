@@ -25,3 +25,29 @@ pub struct FileSearchResponse {
     pub results: Vec<String>,
     pub truncated: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum FileContent {
+    Text {
+        content: String,
+        version: String,
+        #[ts(type = "number")]
+        size: u64,
+    },
+    Image {
+        data_url: String,
+        version: String,
+        #[ts(type = "number")]
+        size: u64,
+    },
+    Binary {
+        #[ts(type = "number")]
+        size: u64,
+    },
+    TooLarge {
+        #[ts(type = "number")]
+        size: u64,
+    },
+}
