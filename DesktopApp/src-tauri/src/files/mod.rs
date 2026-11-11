@@ -1,3 +1,4 @@
+pub mod listing;
 pub mod paths;
 
 pub const MAX_TEXT_BYTES: u64 = 1_048_576;

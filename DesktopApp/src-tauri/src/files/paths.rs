@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::error::{AppError, AppResult};
 
-const GIT_DIR: &str = ".git";
+pub const GIT_DIR: &str = ".git";
 
 pub fn resolve_existing(root: &Path, rel: &str) -> AppResult<PathBuf> {
     let relative = relative_path(rel)?;
