@@ -17,3 +17,11 @@ pub struct FileEntry {
     pub kind: FileEntryKind,
     pub ignored: bool,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct FileSearchResponse {
+    pub results: Vec<String>,
+    pub truncated: bool,
+}

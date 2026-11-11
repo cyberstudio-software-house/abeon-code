@@ -30,6 +30,10 @@ impl IgnoreChecker {
         }
     }
 
+    pub fn has_repository(&self) -> bool {
+        self.repository.is_some()
+    }
+
     pub fn is_ignored(&self, path: &Path, is_dir: bool) -> bool {
         let Some(repository) = &self.repository else {
             return false;
@@ -170,6 +174,18 @@ mod tests {
         assert!(!find(&entries, "public.txt").ignored);
         let top = list_dir(root.path(), "").unwrap();
         assert!(!find(&top, "svc").ignored);
+    }
+
+    #[test]
+    fn parent_repo_is_not_used() {
+        let outer = tempfile::tempdir().unwrap();
+        git2::Repository::init(outer.path()).unwrap();
+        fs::write(outer.path().join(".gitignore"), "*.log\n").unwrap();
+        let project = outer.path().join("project");
+        fs::create_dir(&project).unwrap();
+        fs::write(project.join("a.log"), "x").unwrap();
+        let entries = list_dir(&project, "").unwrap();
+        assert!(!find(&entries, "a.log").ignored);
     }
 
     #[test]
