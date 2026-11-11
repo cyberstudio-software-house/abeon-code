@@ -10,6 +10,7 @@ pub mod cli;
 pub mod clickup;
 pub mod detectors;
 pub mod diagnostics;
+pub mod files;
 pub mod git;
 pub mod remote;
 pub mod validation;
