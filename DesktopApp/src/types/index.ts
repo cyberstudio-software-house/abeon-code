@@ -47,3 +47,8 @@ export type { DiscordBotView } from './DiscordBotView';
 export type { DiscordSetupStatus } from './DiscordSetupStatus';
 export type { DecisionEntry } from './DecisionEntry';
 export type { SessionRebound } from './SessionRebound';
+export type { FileEntryKind } from './FileEntryKind';
+export type { FileEntry } from './FileEntry';
+export type { FileSearchResponse } from './FileSearchResponse';
+export type { FileContent } from './FileContent';
+export type { FilesDirChangedEvent } from './FilesDirChangedEvent';

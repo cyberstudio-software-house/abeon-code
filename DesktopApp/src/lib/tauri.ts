@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound, FileEntry, FileSearchResponse, FileContent, FilesDirChangedEvent } from '../types';
 import type { NotesChangedEvent } from '../types/NotesChangedEvent';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
@@ -46,6 +46,25 @@ export const tauri = {
   deleteNote: (id: number) => invoke<void>('delete_note', { id }),
   onNotesChanged: (cb: (event: NotesChangedEvent) => void): Promise<UnlistenFn> =>
     listen<NotesChangedEvent>('notes://changed', e => cb(e.payload)),
+  listProjectDir: (projectId: number, relPath: string) =>
+    invoke<FileEntry[]>('list_project_dir', { projectId, relPath }),
+  searchProjectFiles: (projectId: number, query: string) =>
+    invoke<FileSearchResponse>('search_project_files', { projectId, query }),
+  readProjectFile: (projectId: number, relPath: string) =>
+    invoke<FileContent>('read_project_file', { projectId, relPath }),
+  projectFileVersion: (projectId: number, relPath: string) =>
+    invoke<string | null>('project_file_version', { projectId, relPath }),
+  writeProjectFile: (projectId: number, relPath: string, content: string, expectedVersion: string | null, force: boolean) =>
+    invoke<string>('write_project_file', { projectId, relPath, content, expectedVersion, force }),
+  watchProjectDir: (projectId: number, relPath: string) =>
+    invoke<void>('watch_project_dir', { projectId, relPath }),
+  unwatchProjectDir: (projectId: number, relPath: string) =>
+    invoke<void>('unwatch_project_dir', { projectId, relPath }),
+  setDirtyFileCount: (count: number) =>
+    invoke<void>('set_dirty_file_count', { count }),
+  dirtyFilesInOtherWindows: () => invoke<number>('dirty_files_in_other_windows'),
+  onFilesDirChanged: (cb: (event: FilesDirChangedEvent) => void): Promise<UnlistenFn> =>
+    listen<FilesDirChangedEvent>('files://dir-changed', e => cb(e.payload)),
   takePendingOpenPaths: () => invoke<OpenRequest[]>('take_pending_open_paths'),
   installCliCommand: () => invoke<string>('install_cli_command'),
   installClaudeSkill: () => invoke<string>('install_claude_skill'),

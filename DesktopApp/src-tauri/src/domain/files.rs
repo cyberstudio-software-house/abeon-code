@@ -51,3 +51,14 @@ pub enum FileContent {
         size: u64,
     },
 }
+
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct FilesDirChangedEvent {
+    #[ts(type = "number")]
+    pub project_id: i64,
+    pub rel_dir: String,
+}
+
+pub const FILES_DIR_CHANGED_EVENT: &str = "files://dir-changed";

@@ -51,6 +51,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(app_state)
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                window.state::<AppState>().file_watches.drop_window(window.label());
+            }
+        })
         .setup(|app| {
             #[cfg(unix)]
             crate::diagnostics::watch_termination_signals();
@@ -93,6 +98,15 @@ pub fn run() {
             commands::notes::create_note,
             commands::notes::update_note,
             commands::notes::delete_note,
+            commands::files::list_project_dir,
+            commands::files::search_project_files,
+            commands::files::read_project_file,
+            commands::files::project_file_version,
+            commands::files::write_project_file,
+            commands::files::watch_project_dir,
+            commands::files::unwatch_project_dir,
+            commands::files::set_dirty_file_count,
+            commands::files::dirty_files_in_other_windows,
             commands::cli::take_pending_open_paths,
             commands::cli::install_cli_command,
             commands::cli::install_claude_skill,

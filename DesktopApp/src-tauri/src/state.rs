@@ -5,6 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use parking_lot::Mutex;
 use crate::db::DbPool;
 use crate::sessions::watcher::SessionWatchers;
+use crate::files::watch::FileWatches;
 use crate::pty::PtyManager;
 use crate::pty::input_activity::InputActivity;
 use crate::pty::session_registry::SessionPtyRegistry;
@@ -112,6 +113,7 @@ fn current_time_millis() -> i64 {
 pub struct AppState {
     pub db: DbPool,
     pub session_watchers: Arc<SessionWatchers>,
+    pub file_watches: Arc<FileWatches>,
     pub pty: Arc<PtyManager>,
     pub session_pty: Arc<SessionPtyRegistry>,
     pub input_activity: Arc<InputActivity>,
@@ -132,6 +134,7 @@ impl AppState {
         Self {
             db,
             session_watchers: SessionWatchers::new(),
+            file_watches: FileWatches::new(),
             pty: PtyManager::new(),
             session_pty: Arc::new(SessionPtyRegistry::new()),
             input_activity: Arc::new(InputActivity::new()),
