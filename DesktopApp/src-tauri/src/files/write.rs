@@ -75,23 +75,41 @@ fn replace(target: &Target, bytes: &[u8], original: &Metadata) -> AppResult<()> 
 }
 
 fn replace_atomically(target: &Target, bytes: &[u8], original: &Metadata) -> AppResult<bool> {
-    let Ok(mut temp) = NamedTempFile::new_in(parent_dir(target.path)?) else {
-        return Ok(false);
+    let mut temp = match NamedTempFile::new_in(parent_dir(target.path)?) {
+        Ok(temp) => temp,
+        Err(error) => return in_place_unless_out_of_space(error),
     };
-    if copy_permissions(temp.as_file(), original).is_err() {
-        return Ok(false);
+    if let Err(error) = copy_permissions(temp.as_file(), original) {
+        return in_place_unless_out_of_space(error);
     }
     temp.write_all(bytes)?;
     temp.as_file().sync_all()?;
     target.verify_on_disk()?;
-    Ok(temp.persist(target.path).is_ok())
+    match temp.persist(target.path) {
+        Ok(_) => Ok(true),
+        Err(error) => in_place_unless_out_of_space(error.error),
+    }
+}
+
+fn in_place_unless_out_of_space(error: std::io::Error) -> AppResult<bool> {
+    if is_out_of_space(&error) {
+        return Err(error.into());
+    }
+    Ok(false)
+}
+
+fn is_out_of_space(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::StorageFull | ErrorKind::QuotaExceeded
+    )
 }
 
 fn write_in_place(target: &Target, bytes: &[u8]) -> AppResult<()> {
     let mut file = open_for_rewrite(target.path)?;
     target.verify(Some(&version_of(&file.metadata()?)?))?;
-    file.set_len(0)?;
     file.write_all(bytes)?;
+    file.set_len(bytes.len() as u64)?;
     file.sync_all()?;
     Ok(())
 }
@@ -341,6 +359,38 @@ mod tests {
     }
 
     #[test]
+    fn recognises_out_of_space_errors() {
+        assert!(is_out_of_space(&std::io::Error::from(
+            std::io::ErrorKind::StorageFull
+        )));
+        assert!(is_out_of_space(&std::io::Error::from(
+            std::io::ErrorKind::QuotaExceeded
+        )));
+        for kind in [
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::CrossesDevices,
+            std::io::ErrorKind::ResourceBusy,
+            std::io::ErrorKind::Unsupported,
+        ] {
+            assert!(!is_out_of_space(&std::io::Error::from(kind)), "{kind:?}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recognises_out_of_space_os_errors() {
+        assert!(is_out_of_space(&std::io::Error::from_raw_os_error(
+            libc::ENOSPC
+        )));
+        assert!(is_out_of_space(&std::io::Error::from_raw_os_error(
+            libc::EDQUOT
+        )));
+        assert!(!is_out_of_space(&std::io::Error::from_raw_os_error(
+            libc::EXDEV
+        )));
+    }
+
+    #[test]
     fn content_is_byte_exact() {
         let dir = tempdir().unwrap();
         let path = file_with(dir.path(), "a.txt", "x");
@@ -406,6 +456,26 @@ mod tests {
         assert_eq!(fs::read_to_string(&link).unwrap(), "A=2");
         assert_eq!(new, version(&path));
         assert_eq!(entries(dir.path()), vec!["a.env", "b.env"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn in_place_rewrite_is_exact_when_size_changes() {
+        for (old, new) in [
+            ("A=1234567890\nB=2\n", "A=1\n"),
+            ("A=1\n", "A=1234567890\nB=2\n"),
+        ] {
+            let dir = tempdir().unwrap();
+            let path = file_with(dir.path(), "a.env", old);
+            let link = dir.path().join("b.env");
+            fs::hard_link(&path, &link).unwrap();
+            let before = inode(&path);
+            let version_after = write_file(&path, new, Some(&version(&path)), false).unwrap();
+            assert_eq!(inode(&path), before);
+            assert_eq!(fs::read(&path).unwrap(), new.as_bytes());
+            assert_eq!(fs::read(&link).unwrap(), new.as_bytes());
+            assert_eq!(version_after, version(&path));
+        }
     }
 
     #[cfg(unix)]
