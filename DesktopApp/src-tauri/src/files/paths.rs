@@ -39,7 +39,7 @@ fn relative_path(rel: &str) -> AppResult<PathBuf> {
     let mut relative = PathBuf::new();
     for component in Path::new(rel).components() {
         match component {
-            Component::Normal(name) if name == GIT_DIR => {
+            Component::Normal(name) if name.eq_ignore_ascii_case(GIT_DIR) => {
                 return Err(invalid(rel, "katalog .git jest niedostępny"));
             }
             Component::Normal(name) => relative.push(name),
@@ -59,7 +59,7 @@ fn ensure_inside(canonical_root: &Path, resolved: PathBuf, rel: &str) -> AppResu
         .map_err(|_| invalid(rel, "ścieżka wychodzi poza projekt"))?;
     if inner
         .components()
-        .any(|component| component.as_os_str() == GIT_DIR)
+        .any(|component| component.as_os_str().eq_ignore_ascii_case(GIT_DIR))
     {
         return Err(invalid(rel, "katalog .git jest niedostępny"));
     }
@@ -279,6 +279,35 @@ mod tests {
             assert_invalid(resolve_for_write(root.path(), rel));
         }
         assert_invalid(resolve_for_write(root.path(), "git-link/new"));
+    }
+
+    #[test]
+    fn rejects_git_dir_in_any_case() {
+        let root = tempfile::tempdir().unwrap();
+        for rel in [
+            ".GIT",
+            ".Git",
+            ".GIT/config",
+            ".GIT/hooks/pre-commit",
+            "sub/.gIt/config",
+        ] {
+            assert_invalid(resolve_existing(root.path(), rel));
+            assert_invalid(resolve_for_write(root.path(), rel));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_into_git_dir_in_any_case() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".GIT")).unwrap();
+        fs::write(root.path().join(".GIT/config"), "x").unwrap();
+        symlink(Path::new(".GIT"), &root.path().join("upper-link"));
+        for rel in ["upper-link", "upper-link/config"] {
+            assert_invalid(resolve_existing(root.path(), rel));
+            assert_invalid(resolve_for_write(root.path(), rel));
+        }
+        assert_invalid(resolve_for_write(root.path(), "upper-link/new"));
     }
 
     #[test]
