@@ -19,17 +19,21 @@ pub fn file_version(path: &Path) -> AppResult<Option<String>> {
 
 pub fn read_file(path: &Path) -> AppResult<FileContent> {
     let display = path.to_string_lossy().into_owned();
-    let mut file = File::open(path).map_err(|error| match error.kind() {
+    let not_found = |error: std::io::Error| match error.kind() {
         ErrorKind::NotFound => AppError::NotFound(display.clone()),
-        _ => error.into(),
-    })?;
-    let metadata = file.metadata()?;
-    if metadata.is_dir() {
+        _ => AppError::from(error),
+    };
+    if !std::fs::metadata(path).map_err(not_found)?.is_file() {
         return Err(AppError::InvalidPath {
             path: display,
-            reason: "to jest katalog".to_string(),
+            reason: "to nie jest zwykły plik".to_string(),
         });
     }
+    let mut file = File::open(path).map_err(|error| match error.kind() {
+        ErrorKind::NotFound => AppError::NotFound(display.clone()),
+        _ => AppError::from(error),
+    })?;
+    let metadata = file.metadata()?;
     let size = metadata.len();
     let version = version_of(&metadata)?;
 
@@ -262,6 +266,19 @@ mod tests {
         let dir = tempdir().unwrap();
         let error = read_file(&dir.path().join("nope.txt")).unwrap_err();
         assert!(matches!(error, AppError::NotFound(_)), "{error:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fifo_is_invalid_path_without_blocking() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("pipe");
+        let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
+        let error = read_file(&path).unwrap_err();
+        assert!(matches!(error, AppError::InvalidPath { .. }), "{error:?}");
     }
 
     #[cfg(unix)]
