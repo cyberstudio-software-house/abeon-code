@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render } from '@testing-library/react';
+import { Text } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { undo } from '@codemirror/commands';
 import { CodeEditor, diffRange } from './CodeEditor';
@@ -23,6 +24,34 @@ describe('CodeEditor', () => {
     update('theirs\nsecond\n');
     expect(editor.state.doc.toString()).toBe('theirs\nsecond\n');
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('reads the document once per keystroke, also when the store hands the typed text back', () => {
+    const { editor, update, onChange } = mount('hello\n');
+    const reads = vi.spyOn(Text.prototype, 'toString');
+    editor.dispatch({ changes: { from: 0, insert: 'X' } });
+    update(onChange.mock.calls[0][0]);
+    expect(reads).toHaveBeenCalledTimes(1);
+    reads.mockRestore();
+    expect(editor.state.doc.toString()).toBe('Xhello\n');
+  });
+
+  it('applies an external value that equals text typed earlier but not the current document', () => {
+    const { editor, update, onChange } = mount('a');
+    editor.dispatch({ changes: { from: 1, insert: 'b' } });
+    update('ab');
+    update('theirs');
+    expect(editor.state.doc.toString()).toBe('theirs');
+    editor.dispatch({ changes: { from: 6, insert: '!' } });
+    update('theirs!');
+    update('ab');
+    expect(editor.state.doc.toString()).toBe('ab');
+    expect(onChange).toHaveBeenCalledTimes(2);
+  });
+
+  it('takes the monospace font from the app font-mono class', () => {
+    const view = render(<CodeEditor value="a" path="notes.txt" onChange={vi.fn()} onSave={vi.fn()} focused={false} />);
+    expect(view.container.firstElementChild).toHaveClass('font-mono');
   });
 
   it('reports a user change with the full text', () => {

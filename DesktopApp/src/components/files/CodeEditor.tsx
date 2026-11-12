@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Annotation, Compartment, EditorState, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
@@ -17,7 +17,6 @@ type Props = {
   focusToken?: number;
 };
 
-const MONO_FONT = "'Geist Mono', ui-monospace, monospace";
 const SELECTION = 'color-mix(in srgb, var(--color-accent) 30%, transparent)';
 
 const highlightStyle = HighlightStyle.define([
@@ -63,7 +62,7 @@ const isDarkTheme = () => document.documentElement.getAttribute('data-theme') ==
 const buildTheme = (dark: boolean): Extension => EditorView.theme({
   '&': { height: '100%', color: 'var(--color-fg)', backgroundColor: 'var(--color-bg-elev)', fontSize: '12.5px' },
   '&.cm-focused': { outline: 'none' },
-  '.cm-scroller': { fontFamily: MONO_FONT, lineHeight: '1.6', overflow: 'auto' },
+  '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.6', overflow: 'auto' },
   '.cm-content': { caretColor: 'var(--color-accent)', padding: '8px 0' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--color-accent)' },
   '.cm-content ::selection, .cm-line::selection': { backgroundColor: SELECTION },
@@ -104,9 +103,8 @@ async function loadLanguage(path: string): Promise<Extension | null> {
 export function CodeEditor({ value, path, onChange, onSave, focused, focusToken }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const languageRef = useRef(new Compartment());
-  const themeRef = useRef(new Compartment());
-  const historyRef = useRef(new Compartment());
+  const [compartments] = useState(() => ({ language: new Compartment(), theme: new Compartment(), history: new Compartment() }));
+  const lastEmittedRef = useRef(value);
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
   const initialRef = useRef({ value, focused });
@@ -116,9 +114,7 @@ export function CodeEditor({ value, path, onChange, onSave, focused, focusToken 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const language = languageRef.current;
-    const theme = themeRef.current;
-    const undoHistory = historyRef.current;
+    const { language, theme, history: undoHistory } = compartments;
     const view = new EditorView({
       parent: container,
       state: EditorState.create({
@@ -141,7 +137,9 @@ export function CodeEditor({ value, path, onChange, onSave, focused, focusToken 
           ]),
           EditorView.updateListener.of((update) => {
             if (!update.docChanged || update.transactions.some((tr) => tr.annotation(externalChange))) return;
-            onChangeRef.current(update.state.doc.toString());
+            const text = update.state.doc.toString();
+            lastEmittedRef.current = text;
+            onChangeRef.current(text);
           }),
         ],
       }),
@@ -157,36 +155,37 @@ export function CodeEditor({ value, path, onChange, onSave, focused, focusToken 
       view.destroy();
       viewRef.current = null;
     };
-  }, []);
+  }, [compartments]);
 
   useEffect(() => {
     const view = viewRef.current;
-    if (!view || view.state.doc.toString() === value) return;
+    if (!view || value === lastEmittedRef.current) return;
+    lastEmittedRef.current = value;
     const change = diffRange(view.state.doc.toString(), value);
     if (!change) return;
     view.dispatch({
       changes: change,
-      effects: historyRef.current.reconfigure([]),
+      effects: compartments.history.reconfigure([]),
       annotations: [externalChange.of(true), Transaction.addToHistory.of(false)],
     });
-    view.dispatch({ effects: historyRef.current.reconfigure(history()) });
-  }, [value]);
+    view.dispatch({ effects: compartments.history.reconfigure(history()) });
+  }, [value, compartments]);
 
   useEffect(() => {
     let cancelled = false;
     void loadLanguage(path).then((extension) => {
       const view = viewRef.current;
       if (cancelled || !view) return;
-      view.dispatch({ effects: languageRef.current.reconfigure(extension ?? []) });
+      view.dispatch({ effects: compartments.language.reconfigure(extension ?? []) });
     }).catch(() => {
       console.warn('[files] language load failed', fileName(path));
     });
     return () => { cancelled = true; };
-  }, [path]);
+  }, [path, compartments]);
 
   useEffect(() => {
     if (focused) viewRef.current?.focus();
   }, [focused, focusToken]);
 
-  return <div ref={containerRef} className="h-full min-h-0" />;
+  return <div ref={containerRef} className="h-full min-h-0 font-mono" />;
 }

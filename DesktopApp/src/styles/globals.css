@@ -91,6 +91,9 @@
   :root[data-theme="dark"] .shiki {
     background-color: var(--color-console) !important;
   }
+  .cm-panels {
+    font-family: theme(fontFamily.sans);
+  }
 }
 
 @layer components {
