@@ -25,6 +25,7 @@ import { tauri } from '../../lib/tauri';
 import { createLeaf } from '../../lib/paneTree';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
 import type { Note } from '../../types';
+import { mockFileIo, seedDirtyFileTab } from '../../test-helpers/dirtyFiles';
 import { AppShell } from './AppShell';
 
 const sessionTab = (sessionId: string, mode: 'history' | 'terminal') => ({
@@ -84,6 +85,8 @@ describe('AppShell lifecycle', () => {
     vi.spyOn(tauri, 'onNotificationActivate').mockResolvedValue(() => {});
     vi.spyOn(tauri, 'onSessionAttention').mockResolvedValue(() => {});
     vi.spyOn(tauri, 'listSessions').mockResolvedValue([]);
+    vi.spyOn(tauri, 'dirtyFilesInOtherWindows').mockResolvedValue(0);
+    mockFileIo();
   });
 
   describe('session restore prompt', () => {
@@ -235,6 +238,111 @@ describe('AppShell lifecycle', () => {
       expect(tauri.updateNote).toHaveBeenCalledWith(5, 'XY');
       expect(destroy).not.toHaveBeenCalled();
     });
+
+    describe('unsaved files', () => {
+      const dialogTitle = () => screen.queryByText('Niezapisane zmiany', { selector: 'h2' });
+
+      beforeEach(async () => {
+        useStore.setState({ fileBuffers: {} });
+        seed({ a: 'history' });
+        await seedDirtyFileTab('src/a.ts');
+      });
+
+      afterEach(() => {
+        useStore.setState({ fileBuffers: {} });
+      });
+
+      it('holds the close and lists the dirty file', () => {
+        render(<AppShell />);
+
+        const event = closeRequest();
+
+        expect(event.preventDefault).toHaveBeenCalled();
+        expect(dialogTitle()).toBeTruthy();
+        expect(screen.getByText('src/a.ts')).toBeTruthy();
+        expect(destroy).not.toHaveBeenCalled();
+      });
+
+      it('keeps the window open when cancelled', () => {
+        render(<AppShell />);
+        closeRequest();
+
+        fireEvent.click(screen.getByText('Anuluj'));
+
+        expect(dialogTitle()).toBeNull();
+        expect(destroy).not.toHaveBeenCalled();
+        expect(tauri.writeProjectFile).not.toHaveBeenCalled();
+      });
+
+      it('closes the window after saving', async () => {
+        render(<AppShell />);
+        closeRequest();
+
+        fireEvent.click(screen.getByText('Zapisz'));
+
+        await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+        expect(tauri.writeProjectFile).toHaveBeenCalledWith(1, 'src/a.ts', 'edited', 'v1', false);
+      });
+
+      it('closes the window after discarding, without writing', async () => {
+        render(<AppShell />);
+        closeRequest();
+
+        fireEvent.click(screen.getByText('Odrzuć zmiany'));
+
+        await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+        expect(tauri.writeProjectFile).not.toHaveBeenCalled();
+      });
+
+      it('keeps the window and the dialog when saving fails', async () => {
+        vi.spyOn(tauri, 'writeProjectFile').mockRejectedValue({ code: 'conflict', message: 'conflict: src/a.ts' });
+        render(<AppShell />);
+        closeRequest();
+
+        fireEvent.click(screen.getByText('Zapisz'));
+
+        expect(await screen.findByText('Nie udało się zapisać wszystkich plików.')).toBeTruthy();
+        expect(destroy).not.toHaveBeenCalled();
+      });
+
+      it('asks about running sessions after the files are resolved', async () => {
+        seed({ a: 'terminal' });
+        await seedDirtyFileTab('src/a.ts');
+        render(<AppShell />);
+        closeRequest();
+        expect(screen.queryByText('Zamknąć AbeonCode?')).toBeNull();
+
+        fireEvent.click(screen.getByText('Odrzuć zmiany'));
+
+        expect(await screen.findByText('Zamknąć AbeonCode?')).toBeTruthy();
+        expect(destroy).not.toHaveBeenCalled();
+      });
+
+      it('settles notes only after the files are resolved', async () => {
+        const updateNote = vi.spyOn(tauri, 'updateNote').mockResolvedValue({ ...savedNote, content: 'XY', updatedAt: 2 });
+        seedDirtyNote();
+        render(<AppShell />);
+        closeRequest();
+
+        expect(updateNote).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByText('Odrzuć zmiany'));
+
+        await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+        expect(updateNote).toHaveBeenCalledWith(5, 'XY');
+      });
+
+      it('does not touch the notes when the close is cancelled', () => {
+        const updateNote = vi.spyOn(tauri, 'updateNote').mockResolvedValue({ ...savedNote, content: 'XY', updatedAt: 2 });
+        seedDirtyNote();
+        render(<AppShell />);
+        closeRequest();
+
+        fireEvent.click(screen.getByText('Anuluj'));
+
+        expect(updateNote).not.toHaveBeenCalled();
+        expect(destroy).not.toHaveBeenCalled();
+      });
+    });
   });
 
   describe('update install', () => {
@@ -337,6 +445,167 @@ describe('AppShell lifecycle', () => {
       expect(calls).toEqual(['flush', 'install', 'flush']);
       expect(relaunch).not.toHaveBeenCalled();
       expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+    });
+    describe('unsaved files', () => {
+      const otherWindowsMessage =
+        'Masz niezapisane pliki w innym oknie. Zapisz je lub zamknij to okno i spróbuj ponownie.';
+      const dialogTitle = () => screen.queryByText('Niezapisane zmiany', { selector: 'h2' });
+
+      beforeEach(() => {
+        useStore.setState({ fileBuffers: {} });
+      });
+
+      afterEach(() => {
+        useStore.setState({ fileBuffers: {} });
+      });
+
+      it('asks about this window\'s dirty files before downloading', async () => {
+        offerUpdate();
+        await seedDirtyFileTab('src/a.ts');
+        render(<AppShell />);
+
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+        expect(await screen.findByText('src/a.ts')).toBeTruthy();
+        expect(downloadAndInstall).not.toHaveBeenCalled();
+        expect(tauri.dirtyFilesInOtherWindows).not.toHaveBeenCalled();
+      });
+
+      it('does not download when cancelled and offers the update again', async () => {
+        offerUpdate();
+        await seedDirtyFileTab('src/a.ts');
+        render(<AppShell />);
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+        fireEvent.click(await screen.findByText('Anuluj'));
+
+        await waitFor(() => expect(dialogTitle()).toBeNull());
+        expect(downloadAndInstall).not.toHaveBeenCalled();
+        expect(relaunch).not.toHaveBeenCalled();
+        expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+      });
+
+      it('installs after the files are saved', async () => {
+        offerUpdate();
+        await seedDirtyFileTab('src/a.ts');
+        render(<AppShell />);
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+        fireEvent.click(await screen.findByText('Zapisz'));
+
+        await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
+        expect(tauri.writeProjectFile).toHaveBeenCalledOnce();
+        expect(calls).toEqual(['install', 'relaunch']);
+      });
+
+      it('installs after the changes are discarded', async () => {
+        offerUpdate();
+        await seedDirtyFileTab('src/a.ts');
+        render(<AppShell />);
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+        fireEvent.click(await screen.findByText('Odrzuć zmiany'));
+
+        await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
+        expect(tauri.writeProjectFile).not.toHaveBeenCalled();
+      });
+
+      it('asks again about a discarded file that is edited again during the download', async () => {
+        offerUpdate();
+        const id = await seedDirtyFileTab('src/a.ts');
+        downloadAndInstall.mockImplementation(async () => {
+          calls.push('install');
+          useStore.getState().editFileBuffer(id, 'edited again');
+        });
+        render(<AppShell />);
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+        fireEvent.click(await screen.findByText('Odrzuć zmiany'));
+
+        expect(await screen.findByText('src/a.ts')).toBeTruthy();
+        expect(relaunch).not.toHaveBeenCalled();
+      });
+
+      it('asks about the files before settling notes', async () => {
+        offerUpdate();
+        stubFlush([true, true]);
+        await seedDirtyFileTab('src/a.ts');
+        render(<AppShell />);
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+        await screen.findByText('src/a.ts');
+        expect(calls).toEqual([]);
+
+        fireEvent.click(screen.getByText('Odrzuć zmiany'));
+
+        await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
+        expect(calls).toEqual(['flush', 'install', 'flush', 'relaunch']);
+      });
+
+      it('refuses with a message and does not download when another window has unsaved files', async () => {
+        offerUpdate();
+        vi.spyOn(tauri, 'dirtyFilesInOtherWindows').mockResolvedValue(2);
+        render(<AppShell />);
+
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+        await waitFor(() => expect(toastError).toHaveBeenCalledWith(otherWindowsMessage));
+        expect(downloadAndInstall).not.toHaveBeenCalled();
+        expect(relaunch).not.toHaveBeenCalled();
+        expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+      });
+
+      it('proceeds when no other window has unsaved files', async () => {
+        offerUpdate();
+        render(<AppShell />);
+
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+        await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
+        expect(tauri.dirtyFilesInOtherWindows).toHaveBeenCalledTimes(2);
+        expect(toastError).not.toHaveBeenCalled();
+      });
+
+      it('does not relaunch when another window gains unsaved files during the download', async () => {
+        offerUpdate();
+        vi.spyOn(tauri, 'dirtyFilesInOtherWindows').mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+        render(<AppShell />);
+
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+        await waitFor(() => expect(toastError).toHaveBeenCalledWith(otherWindowsMessage));
+        expect(calls).toEqual(['install']);
+        expect(relaunch).not.toHaveBeenCalled();
+        expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+      });
+
+      it('asks again before relaunching when this window gains unsaved files during the download', async () => {
+        offerUpdate();
+        downloadAndInstall.mockImplementation(async () => {
+          calls.push('install');
+          await seedDirtyFileTab('src/late.ts');
+        });
+        render(<AppShell />);
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+        expect(await screen.findByText('src/late.ts')).toBeTruthy();
+        expect(relaunch).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByText('Anuluj'));
+
+        await waitFor(() => expect(dialogTitle()).toBeNull());
+        expect(relaunch).not.toHaveBeenCalled();
+        expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+      });
+
+      it('holds the update when the registry cannot be read', async () => {
+        offerUpdate();
+        vi.spyOn(tauri, 'dirtyFilesInOtherWindows').mockRejectedValue(new Error('ipc'));
+        render(<AppShell />);
+
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+        await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+        expect(downloadAndInstall).not.toHaveBeenCalled();
+        expect(relaunch).not.toHaveBeenCalled();
+      });
     });
   });
 });

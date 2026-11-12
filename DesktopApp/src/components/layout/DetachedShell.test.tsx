@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 const { onCloseRequested, destroy } = vi.hoisted(() => ({
   onCloseRequested: vi.fn(),
@@ -26,6 +26,7 @@ import { tauri } from '../../lib/tauri';
 import type { AttentionEvent } from '../../lib/tauri';
 import type { SessionRebound } from '../../types';
 import { createLeaf, findLeaf, leaves } from '../../lib/paneTree';
+import { mockFileIo, seedDirtyFileTab } from '../../test-helpers/dirtyFiles';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
 import { DetachedShell } from './DetachedShell';
 
@@ -79,6 +80,7 @@ function splitTwoSessions() {
 describe('DetachedShell', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFileIo();
     onCloseRequested.mockResolvedValue(() => {});
     vi.spyOn(tauri, 'emitDetachReady').mockResolvedValue(undefined);
     vi.spyOn(tauri, 'setWindowTitle').mockResolvedValue(undefined);
@@ -200,6 +202,114 @@ describe('DetachedShell', () => {
     expect(await screen.findByText('Zamknąć okno projektu?')).toBeTruthy();
     expect(tauri.updateNote).toHaveBeenCalledWith(5, 'XY');
     expect(destroy).not.toHaveBeenCalled();
+  });
+
+  describe('unsaved files', () => {
+    const dialogTitle = () => screen.queryByText('Niezapisane zmiany', { selector: 'h2' });
+    const closeRequest = () => {
+      const event = { preventDefault: vi.fn() };
+      act(() => { onCloseRequested.mock.calls[0][0](event); });
+      return event;
+    };
+
+    beforeEach(async () => {
+      useStore.setState({ tabs: [sessionTab('session:s1', 's1')], fileBuffers: {} });
+      await seedDirtyFileTab('src/a.ts');
+    });
+
+    afterEach(() => {
+      useStore.setState({ fileBuffers: {} });
+    });
+
+    it('holds the close and lists the dirty file', () => {
+      render(<DetachedShell mode={groupMode} />);
+
+      const event = closeRequest();
+
+      expect(event.preventDefault).toHaveBeenCalled();
+      expect(dialogTitle()).toBeTruthy();
+      expect(within(screen.getByRole('dialog')).getByText('src/a.ts')).toBeTruthy();
+      expect(destroy).not.toHaveBeenCalled();
+    });
+
+    it('keeps the window open when cancelled', () => {
+      render(<DetachedShell mode={groupMode} />);
+      closeRequest();
+
+      fireEvent.click(within(screen.getByRole('dialog')).getByText('Anuluj'));
+
+      expect(dialogTitle()).toBeNull();
+      expect(destroy).not.toHaveBeenCalled();
+    });
+
+    it('closes the window after saving', async () => {
+      render(<DetachedShell mode={groupMode} />);
+      closeRequest();
+
+      fireEvent.click(within(screen.getByRole('dialog')).getByText('Zapisz'));
+
+      await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+      expect(tauri.writeProjectFile).toHaveBeenCalledWith(1, 'src/a.ts', 'edited', 'v1', false);
+    });
+
+    it('closes the window after discarding, without writing', async () => {
+      render(<DetachedShell mode={groupMode} />);
+      closeRequest();
+
+      fireEvent.click(within(screen.getByRole('dialog')).getByText('Odrzuć zmiany'));
+
+      await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+      expect(tauri.writeProjectFile).not.toHaveBeenCalled();
+    });
+
+    it('keeps the window and the dialog when saving fails', async () => {
+      vi.spyOn(tauri, 'writeProjectFile').mockRejectedValue({ code: 'conflict', message: 'conflict: src/a.ts' });
+      render(<DetachedShell mode={groupMode} />);
+      closeRequest();
+
+      fireEvent.click(within(screen.getByRole('dialog')).getByText('Zapisz'));
+
+      expect(await screen.findByText('Nie udało się zapisać wszystkich plików.')).toBeTruthy();
+      expect(destroy).not.toHaveBeenCalled();
+    });
+
+    it('asks about running sessions after the files are resolved', async () => {
+      useStore.setState({ tabs: [sessionTab('session:s1', 's1'), { kind: 'terminal', id: 'terminal:t1', projectId: 1, title: 'Terminal' }] });
+      await seedDirtyFileTab('src/a.ts');
+      render(<DetachedShell mode={groupMode} />);
+      closeRequest();
+      expect(screen.queryByText('Zamknąć okno projektu?')).toBeNull();
+
+      fireEvent.click(within(screen.getByRole('dialog')).getByText('Odrzuć zmiany'));
+
+      expect(await screen.findByText('Zamknąć okno projektu?')).toBeTruthy();
+      expect(destroy).not.toHaveBeenCalled();
+    });
+
+    it('settles notes only after the files are resolved', async () => {
+      const updateNote = vi.spyOn(tauri, 'updateNote').mockResolvedValue({ ...savedNote, content: 'XY', updatedAt: 2 });
+      seedDirtyNote();
+      render(<DetachedShell mode={groupMode} />);
+      closeRequest();
+
+      expect(updateNote).not.toHaveBeenCalled();
+      fireEvent.click(within(screen.getByRole('dialog')).getByText('Odrzuć zmiany'));
+
+      await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+      expect(updateNote).toHaveBeenCalledWith(5, 'XY');
+    });
+
+    it('does not touch the notes when the close is cancelled', () => {
+      const updateNote = vi.spyOn(tauri, 'updateNote').mockResolvedValue({ ...savedNote, content: 'XY', updatedAt: 2 });
+      seedDirtyNote();
+      render(<DetachedShell mode={groupMode} />);
+      closeRequest();
+
+      fireEvent.click(within(screen.getByRole('dialog')).getByText('Anuluj'));
+
+      expect(updateNote).not.toHaveBeenCalled();
+      expect(destroy).not.toHaveBeenCalled();
+    });
   });
 
   it('links a terminal\'s new session id to the tab that owns it', async () => {

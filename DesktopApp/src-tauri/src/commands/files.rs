@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use tauri::{Manager, State, WebviewWindow};
@@ -123,7 +124,12 @@ pub fn set_dirty_file_count(window: WebviewWindow, state: State<AppState>, count
 
 #[tauri::command(async)]
 pub fn dirty_files_in_other_windows(window: WebviewWindow, state: State<AppState>) -> u32 {
-    state.file_watches.dirty_elsewhere(window.label())
+    let live_labels: HashSet<String> = window
+        .app_handle()
+        .webview_windows()
+        .into_keys()
+        .collect();
+    state.file_watches.dirty_elsewhere(window.label(), &live_labels)
 }
 
 #[cfg(test)]

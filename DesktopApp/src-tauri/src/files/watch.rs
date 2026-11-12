@@ -119,7 +119,8 @@ impl<H> Registry<H> {
         }
     }
 
-    fn dirty_elsewhere(&self, window_label: &str) -> u32 {
+    fn dirty_elsewhere(&mut self, window_label: &str, live_labels: &HashSet<String>) -> u32 {
+        self.dirty.retain(|label, _| live_labels.contains(label));
         self.dirty
             .iter()
             .filter(|(label, _)| label.as_str() != window_label)
@@ -350,8 +351,8 @@ impl FileWatches {
         self.registry.lock().set_dirty(window_label, count);
     }
 
-    pub fn dirty_elsewhere(&self, window_label: &str) -> u32 {
-        self.registry.lock().dirty_elsewhere(window_label)
+    pub fn dirty_elsewhere(&self, window_label: &str, live_labels: &HashSet<String>) -> u32 {
+        self.registry.lock().dirty_elsewhere(window_label, live_labels)
     }
 }
 
@@ -376,14 +377,41 @@ mod tests {
         condition()
     }
 
+    fn labels(names: &[&str]) -> HashSet<String> {
+        names.iter().map(|name| name.to_string()).collect()
+    }
+
     #[test]
     fn dirty_elsewhere_sums_other_windows() {
         let mut registry: Registry<()> = Registry::new();
         registry.set_dirty("main", 0);
         registry.set_dirty("project-1", 2);
         registry.set_dirty("session-x", 1);
-        assert_eq!(registry.dirty_elsewhere("main"), 3);
-        assert_eq!(registry.dirty_elsewhere("project-1"), 1);
+        let live = labels(&["main", "project-1", "session-x"]);
+        assert_eq!(registry.dirty_elsewhere("main", &live), 3);
+        assert_eq!(registry.dirty_elsewhere("project-1", &live), 1);
+    }
+
+    #[test]
+    fn dirty_elsewhere_ignores_and_prunes_labels_of_closed_windows() {
+        let mut registry: Registry<()> = Registry::new();
+        registry.set_dirty("project-1", 2);
+        registry.set_dirty("project-2", 5);
+        let live = labels(&["main", "project-1"]);
+
+        assert_eq!(registry.dirty_elsewhere("main", &live), 2);
+        assert!(!registry.dirty.contains_key("project-2"));
+        assert_eq!(registry.dirty.get("project-1"), Some(&2));
+    }
+
+    #[test]
+    fn dirty_count_set_after_the_window_was_dropped_never_blocks() {
+        let mut registry: Registry<()> = Registry::new();
+        registry.drop_window("project-1");
+        registry.set_dirty("project-1", 3);
+
+        assert_eq!(registry.dirty_elsewhere("main", &labels(&["main"])), 0);
+        assert!(registry.dirty.is_empty());
     }
 
     #[test]
@@ -400,8 +428,9 @@ mod tests {
         assert_eq!(dropped.len(), 2);
         assert_eq!(registry.slots.len(), 1);
         assert!(registry.slots.contains_key(&key("main", 1, "")));
-        assert_eq!(registry.dirty_elsewhere("main"), 0);
-        assert_eq!(registry.dirty_elsewhere("other"), 1);
+        let live = labels(&["main", "other", "project-1"]);
+        assert_eq!(registry.dirty_elsewhere("main", &live), 0);
+        assert_eq!(registry.dirty_elsewhere("other", &live), 1);
     }
 
     #[test]

@@ -6,8 +6,10 @@ import { RightPanel } from '../right/RightPanel';
 import { AppHeader } from './AppHeader';
 import { DragHandle, clamp } from './DragHandle';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
+import { useUnsavedFilesPrompt } from '../dialogs/useUnsavedFilesPrompt';
 import { useStore, adoptedActions } from '../../store';
 import { hasNotesToSettle } from '../../store/notesSlice';
+import { dirtyFileTabIds } from '../../store/filesSlice';
 import { tauri } from '../../lib/tauri';
 import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
@@ -40,6 +42,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
 
   const [confirming, setConfirming] = useState(false);
   const [confirmingNotesLoss, setConfirmingNotesLoss] = useState(false);
+  const { prompt: promptUnsavedFiles, dialog: unsavedFilesDialog } = useUnsavedFilesPrompt();
 
   usePresenceReporter();
   useSupervisorSnapshot();
@@ -90,6 +93,17 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
     }
   }, []);
 
+  const settleNotesThenContinue = useCallback(() => {
+    void useStore.getState().settleNoteDraftsForExit()
+      .catch(() => false)
+      .then(saved => (saved ? continueClose() : setConfirmingNotesLoss(true)));
+  }, [continueClose]);
+
+  const continueAfterFiles = useCallback(() => {
+    if (hasNotesToSettle(useStore.getState())) settleNotesThenContinue();
+    else continueClose();
+  }, [continueClose, settleNotesThenContinue]);
+
   // Closing the window ends every session in it. Prompt when any PTY is live; the
   // confirm path unmounts the pane layers (flushSync) so TerminalView's cleanup
   // kills the PTYs before the window closes — otherwise the processes orphan.
@@ -98,11 +112,15 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
     let unlisten: (() => void) | null = null;
     win.onCloseRequested((event) => {
       const state = useStore.getState();
+      const dirtyFileIds = dirtyFileTabIds(state);
+      if (dirtyFileIds.length > 0) {
+        event.preventDefault();
+        void promptUnsavedFiles(dirtyFileIds).then(proceed => { if (proceed) continueAfterFiles(); });
+        return;
+      }
       if (hasNotesToSettle(state)) {
         event.preventDefault();
-        void state.settleNoteDraftsForExit()
-          .catch(() => false)
-          .then(saved => (saved ? continueClose() : setConfirmingNotesLoss(true)));
+        settleNotesThenContinue();
         return;
       }
       if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
@@ -111,7 +129,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
       }
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
-  }, [continueClose]);
+  }, [continueAfterFiles, settleNotesThenContinue, promptUnsavedFiles]);
 
   const onRightDrag = useCallback(
     (delta: number) => setRightWidth(clamp(rightWidth - delta, RIGHT_MIN, RIGHT_MAX)),
@@ -162,6 +180,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
           onConfirm={confirmClose}
         />
       )}
+      {unsavedFilesDialog}
     </div>
   );
 }

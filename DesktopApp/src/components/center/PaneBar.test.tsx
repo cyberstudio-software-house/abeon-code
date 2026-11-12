@@ -34,6 +34,8 @@ import { PaneBar } from './PaneBar';
 import { createLeaf, insertBeside } from '../../lib/paneTree';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
 import type { Tab } from '../../store/tabsSlice';
+import { tauri } from '../../lib/tauri';
+import { mockFileIo, seedCleanFileTab, seedDirtyFileTab } from '../../test-helpers/dirtyFiles';
 
 const projects = [
   { id: 1, name: 'Alfa', path: '/a' },
@@ -507,5 +509,210 @@ describe('PaneBar session detach to a window', () => {
     expect(state.tabs[0].kind).toBe('terminal');
     expect(state.drawers).toEqual({});
     expect(state.drawerTerminals).toEqual({});
+  });
+});
+
+describe('PaneBar unsaved file guard', () => {
+  const seedFileWindow = async (kind: 'dirty' | 'clean') => {
+    useStore.setState({
+      tabs: [], fileBuffers: {}, activeTabId: null, mruOrder: [], navHistory: [], navIndex: 0, runningActions: {},
+      projects: [{ id: 1, name: 'P', path: '/p' }] as never,
+    });
+    const id = kind === 'dirty' ? await seedDirtyFileTab('src/a.ts') : await seedCleanFileTab('src/a.ts');
+    useStore.setState({
+      activeTabId: id,
+      mruOrder: [id],
+      navHistory: [id],
+      layout: createLeaf(ROOT_PANE_ID, [id], id),
+      focusedPaneId: ROOT_PANE_ID,
+    });
+    return id;
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFileIo();
+    vi.mocked(focusExistingGroupWindow).mockResolvedValue(false);
+  });
+
+  afterEach(() => { useStore.setState({ tabs: [], fileBuffers: {} }); });
+
+  it('closes a clean file tab at once', async () => {
+    await seedFileWindow('clean');
+    render(<PaneBar />);
+
+    fireEvent.click(screen.getByTitle('Zamknij tab'));
+
+    expect(screen.queryByText('Niezapisane zmiany', { selector: 'h2' })).toBeNull();
+    expect(useStore.getState().tabs).toHaveLength(0);
+  });
+
+  it('asks before closing a dirty file tab and keeps it while asking', async () => {
+    await seedFileWindow('dirty');
+    render(<PaneBar />);
+
+    fireEvent.click(screen.getByTitle('Zamknij tab'));
+
+    expect(screen.getByText('Niezapisane zmiany', { selector: 'h2' })).toBeInTheDocument();
+    expect(screen.getAllByText('src/a.ts').length).toBeGreaterThan(0);
+    expect(useStore.getState().tabs).toHaveLength(1);
+  });
+
+  it('saves and closes the tab, dropping its buffer', async () => {
+    const id = await seedFileWindow('dirty');
+    render(<PaneBar />);
+    fireEvent.click(screen.getByTitle('Zamknij tab'));
+
+    fireEvent.click(screen.getByText('Zapisz'));
+
+    await waitFor(() => expect(useStore.getState().tabs).toHaveLength(0));
+    expect(tauri.writeProjectFile).toHaveBeenCalledWith(1, 'src/a.ts', 'edited', 'v1', false);
+    expect(useStore.getState().fileBuffers[id]).toBeUndefined();
+  });
+
+  it('keeps the tab and shows the error when saving fails', async () => {
+    await seedFileWindow('dirty');
+    vi.spyOn(tauri, 'writeProjectFile').mockRejectedValue({ code: 'conflict', message: 'conflict: src/a.ts' });
+    render(<PaneBar />);
+    fireEvent.click(screen.getByTitle('Zamknij tab'));
+
+    fireEvent.click(screen.getByText('Zapisz'));
+
+    expect(await screen.findByText('Nie udało się zapisać wszystkich plików.')).toBeInTheDocument();
+    expect(useStore.getState().tabs).toHaveLength(1);
+  });
+
+  it('closes without writing on discard', async () => {
+    await seedFileWindow('dirty');
+    render(<PaneBar />);
+    fireEvent.click(screen.getByTitle('Zamknij tab'));
+
+    fireEvent.click(screen.getByText('Odrzuć zmiany'));
+
+    await waitFor(() => expect(useStore.getState().tabs).toHaveLength(0));
+    expect(tauri.writeProjectFile).not.toHaveBeenCalled();
+  });
+
+  it('keeps the tab and its edits on cancel', async () => {
+    const id = await seedFileWindow('dirty');
+    render(<PaneBar />);
+    fireEvent.click(screen.getByTitle('Zamknij tab'));
+
+    fireEvent.click(screen.getByText('Anuluj'));
+
+    expect(screen.queryByText('Niezapisane zmiany', { selector: 'h2' })).toBeNull();
+    expect(useStore.getState().tabs).toHaveLength(1);
+    expect(useStore.getState().fileBuffers[id].content).toBe('edited');
+  });
+
+  it('asks on the close shortcut', async () => {
+    await seedFileWindow('dirty');
+    render(<PaneBar />);
+
+    fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
+
+    expect(screen.getByText('Niezapisane zmiany', { selector: 'h2' })).toBeInTheDocument();
+    expect(useStore.getState().tabs).toHaveLength(1);
+  });
+
+  it('ignores the close shortcut while settings are open', async () => {
+    await seedFileWindow('dirty');
+    useStore.setState({ settingsOpen: true });
+    render(<PaneBar />);
+
+    fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
+
+    expect(screen.queryByText('Niezapisane zmiany', { selector: 'h2' })).toBeNull();
+    act(() => { useStore.getState().closeSettings(); });
+  });
+
+  it('asks on middle click', async () => {
+    await seedFileWindow('dirty');
+    const { container } = render(<PaneBar />);
+
+    fireEvent.mouseDown(container.querySelector('[data-tab-id]') as HTMLElement, { button: 1 });
+
+    expect(screen.getByText('Niezapisane zmiany', { selector: 'h2' })).toBeInTheDocument();
+  });
+
+  it('asks from the context menu', async () => {
+    await seedFileWindow('dirty');
+    render(<PaneBar />);
+
+    fireEvent.contextMenu(screen.getByText('a.ts'));
+    fireEvent.click(screen.getByText('Zamknij'));
+
+    expect(screen.getByText('Niezapisane zmiany', { selector: 'h2' })).toBeInTheDocument();
+  });
+
+  describe('group detach', () => {
+    const detachFromMenu = () => {
+      fireEvent.contextMenu(screen.getByText('a.ts'));
+      fireEvent.click(screen.getByText('Wydziel projekt do nowego okna'));
+    };
+
+    it('asks about the dirty file tabs of the group before detaching', async () => {
+      await seedFileWindow('dirty');
+      render(<PaneBar />);
+
+      detachFromMenu();
+
+      expect(await screen.findByText('Niezapisane zmiany', { selector: 'h2' })).toBeInTheDocument();
+      expect(detachProjectGroup).not.toHaveBeenCalled();
+    });
+
+    it('detaches after the files are saved', async () => {
+      await seedFileWindow('dirty');
+      render(<PaneBar />);
+      detachFromMenu();
+
+      fireEvent.click(await screen.findByText('Zapisz'));
+
+      await waitFor(() => expect(detachProjectGroup).toHaveBeenCalledOnce());
+      expect(tauri.writeProjectFile).toHaveBeenCalledOnce();
+    });
+
+    it('detaches after the changes are discarded', async () => {
+      await seedFileWindow('dirty');
+      render(<PaneBar />);
+      detachFromMenu();
+
+      fireEvent.click(await screen.findByText('Odrzuć zmiany'));
+
+      await waitFor(() => expect(detachProjectGroup).toHaveBeenCalledOnce());
+      expect(tauri.writeProjectFile).not.toHaveBeenCalled();
+    });
+
+    it('does not detach when cancelled', async () => {
+      await seedFileWindow('dirty');
+      render(<PaneBar />);
+      detachFromMenu();
+
+      fireEvent.click(await screen.findByText('Anuluj'));
+
+      expect(detachProjectGroup).not.toHaveBeenCalled();
+    });
+
+    it('detaches a group with only clean file tabs without asking', async () => {
+      await seedFileWindow('clean');
+      render(<PaneBar />);
+
+      detachFromMenu();
+
+      await waitFor(() => expect(detachProjectGroup).toHaveBeenCalledOnce());
+      expect(screen.queryByText('Niezapisane zmiany', { selector: 'h2' })).toBeNull();
+    });
+
+    it('does not ask about dirty files of another project', async () => {
+      await seedFileWindow('clean');
+      const other = await seedDirtyFileTab('src/b.ts', 2);
+      expect(other).toBeTruthy();
+      render(<PaneBar />);
+
+      detachFromMenu();
+
+      await waitFor(() => expect(detachProjectGroup).toHaveBeenCalledOnce());
+      expect(screen.queryByText('Niezapisane zmiany', { selector: 'h2' })).toBeNull();
+    });
   });
 });

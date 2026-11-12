@@ -6,11 +6,13 @@ import { matchesShortcut } from '../../lib/shortcuts';
 import { processManager } from '../../lib/processManager';
 import { closeConfirmMessage, isTabLiveProcess } from '../../lib/tabProcess';
 import { draftKeyForNote } from '../../store/notesSlice';
+import { dirtyFileTabIds } from '../../store/filesSlice';
 import { countDrawerTerminals, selectProjectTabsWithDrawers } from '../../store/terminalDrawersSlice';
 import { actionTone } from '../../lib/actionStatus';
 import type { RunningAction } from '../../store/actionsSlice';
 import type { Tab } from '../../store/tabsSlice';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
+import { useUnsavedFilesPrompt } from '../dialogs/useUnsavedFilesPrompt';
 import { TabContextMenu } from './TabContextMenu';
 import { GroupContextMenu } from './GroupContextMenu';
 import { detachSessionTab } from '../../lib/detachSession';
@@ -42,6 +44,7 @@ export function useTabBarActions(
   const [editingId, setEditingId] = useState<string | null>(null);
   const [ctxMenu, setCtxMenu] = useState<{ tab: Tab; x: number; y: number } | null>(null);
   const [groupMenu, setGroupMenu] = useState<{ projectId: number; x: number; y: number } | null>(null);
+  const { prompt: promptUnsavedFiles, dialog: unsavedFilesDialog } = useUnsavedFilesPrompt();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const ctxMenuRef = useRef<HTMLDivElement>(null);
 
@@ -71,6 +74,10 @@ export function useTabBarActions(
   };
 
   const closeWithGuard = (id: string) => {
+    if (dirtyFileTabIds(useStore.getState()).includes(id)) {
+      void promptUnsavedFiles([id]).then(proceed => { if (proceed) doClose(id); });
+      return;
+    }
     if (isActiveProcess(id)) setPendingClose(id);
     else doClose(id);
   };
@@ -96,6 +103,9 @@ export function useTabBarActions(
 
   const detachWithGuard = async (projectId: number) => {
     if (await focusExistingGroupWindow(projectId)) return;
+    const groupTabIds = new Set(selectProjectTabsWithDrawers(useStore.getState(), projectId).map(t => t.id));
+    const dirtyIds = dirtyFileTabIds(useStore.getState()).filter(id => groupTabIds.has(id));
+    if (dirtyIds.length > 0 && !(await promptUnsavedFiles(dirtyIds))) return;
     const state = useStore.getState();
     const groupTabs = selectProjectTabsWithDrawers(state, projectId);
     const message = detachSummaryMessage(summarizeDetach(groupTabs, state.runningActions));
@@ -207,6 +217,7 @@ export function useTabBarActions(
           onConfirm={() => { runDetach(pendingDetach.projectId); setPendingDetach(null); }}
         />
       )}
+      {unsavedFilesDialog}
     </>
   );
 

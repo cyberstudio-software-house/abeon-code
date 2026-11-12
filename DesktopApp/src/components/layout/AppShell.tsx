@@ -9,6 +9,7 @@ import { TabSwitcher } from '../center/TabSwitcher';
 import { ProjectLauncher } from '../center/ProjectLauncher';
 import { freezeTabPersistence, useStore } from '../../store';
 import { hasNotesToSettle } from '../../store/notesSlice';
+import { dirtyFileTabIds, isFileDirty } from '../../store/filesSlice';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { tauri } from '../../lib/tauri';
 import type { AttentionEvent } from '../../lib/tauri';
@@ -29,6 +30,7 @@ import { DragHandle, clamp } from './DragHandle';
 import { checkForUpdate, type AvailableUpdate } from '../../lib/updater';
 import { UpdateDialog } from '../dialogs/UpdateDialog';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
+import { useUnsavedFilesPrompt } from '../dialogs/useUnsavedFilesPrompt';
 import { RestoreSessionsDialog } from '../dialogs/RestoreSessionsDialog';
 import { isTabLiveProcess } from '../../lib/tabProcess';
 import { SettingsView } from '../settings/SettingsView';
@@ -37,6 +39,10 @@ const LEFT_MIN = 200;
 const LEFT_MAX = 420;
 const RIGHT_MIN = 220;
 const RIGHT_MAX = 480;
+const OTHER_WINDOW_FILES_MESSAGE =
+  'Masz niezapisane pliki w innym oknie. Zapisz je lub zamknij to okno i spróbuj ponownie.';
+const FILE_CHECK_FAILED_MESSAGE =
+  'Nie udało się sprawdzić niezapisanych plików w innych oknach — aktualizacja wstrzymana';
 
 export function AppShell() {
   const leftWidth = useStore(s => s.leftWidth);
@@ -68,6 +74,7 @@ export function AppShell() {
   const [confirmingNotesLoss, setConfirmingNotesLoss] = useState(false);
   const startActivityPolling = useStore(s => s.startActivityPolling);
   const stopActivityPolling = useStore(s => s.stopActivityPolling);
+  const { prompt: promptUnsavedFiles, dialog: unsavedFilesDialog } = useUnsavedFilesPrompt();
 
   usePresenceReporter();
   useSupervisorSnapshot();
@@ -211,15 +218,30 @@ export function AppShell() {
     }
   }, []);
 
+  const settleNotesThenContinue = useCallback(() => {
+    void useStore.getState().settleNoteDraftsForExit()
+      .catch(() => false)
+      .then(saved => (saved ? continueClose() : setConfirmingNotesLoss(true)));
+  }, [continueClose]);
+
+  const continueAfterFiles = useCallback(() => {
+    if (hasNotesToSettle(useStore.getState())) settleNotesThenContinue();
+    else continueClose();
+  }, [continueClose, settleNotesThenContinue]);
+
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     getCurrentWebviewWindow().onCloseRequested((event) => {
       const state = useStore.getState();
+      const dirtyFileIds = dirtyFileTabIds(state);
+      if (dirtyFileIds.length > 0) {
+        event.preventDefault();
+        void promptUnsavedFiles(dirtyFileIds).then(proceed => { if (proceed) continueAfterFiles(); });
+        return;
+      }
       if (hasNotesToSettle(state)) {
         event.preventDefault();
-        void state.settleNoteDraftsForExit()
-          .catch(() => false)
-          .then(saved => (saved ? continueClose() : setConfirmingNotesLoss(true)));
+        settleNotesThenContinue();
         return;
       }
       if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
@@ -228,7 +250,7 @@ export function AppShell() {
       }
     }).then(fn => { unlisten = fn; });
     return () => { if (unlisten) unlisten(); };
-  }, [continueClose]);
+  }, [continueAfterFiles, settleNotesThenContinue, promptUnsavedFiles]);
 
   const confirmClose = () => {
     const state = useStore.getState();
@@ -272,11 +294,43 @@ export function AppShell() {
       setUpdateProgress(null);
       return true;
     };
+    const holdUpdate = () => {
+      setUpdateBusy(false);
+      setUpdateProgress(null);
+      return true;
+    };
+    const discardedContent = new Map<string, string>();
+    const holdForUnsavedFiles = async () => {
+      const { fileBuffers } = useStore.getState();
+      const dirtyFileIds = dirtyFileTabIds(useStore.getState())
+        .filter(id => discardedContent.get(id) !== fileBuffers[id]?.content);
+      if (dirtyFileIds.length > 0) {
+        if (!(await promptUnsavedFiles(dirtyFileIds))) return holdUpdate();
+        const remaining = useStore.getState().fileBuffers;
+        for (const id of dirtyFileIds) {
+          const buffer = remaining[id];
+          if (buffer && isFileDirty(buffer)) discardedContent.set(id, buffer.content);
+        }
+      }
+      let dirtyElsewhere: number;
+      try {
+        dirtyElsewhere = await tauri.dirtyFilesInOtherWindows();
+      } catch (err) {
+        console.error('Unsaved files check failed', err);
+        toast.error(FILE_CHECK_FAILED_MESSAGE);
+        return holdUpdate();
+      }
+      if (dirtyElsewhere === 0) return false;
+      toast.error(OTHER_WINDOW_FILES_MESSAGE);
+      return holdUpdate();
+    };
     try {
+      if (await holdForUnsavedFiles()) return;
       if (await holdForUnsavedNotes()) return;
       await update.downloadAndInstall((downloaded, total) => {
         setUpdateProgress(total ? Math.min(1, downloaded / total) : null);
       });
+      if (await holdForUnsavedFiles()) return;
       if (await holdForUnsavedNotes()) return;
       await update.relaunch();
     } catch (err) {
@@ -285,7 +339,7 @@ export function AppShell() {
       setUpdateProgress(null);
       setUpdate(null);
     }
-  }, [update]);
+  }, [update, promptUnsavedFiles]);
 
   return (
     <div className="relative flex flex-col h-full w-full overflow-hidden bg-bg">
@@ -348,6 +402,7 @@ export function AppShell() {
           onLater={() => setUpdate(null)}
         />
       )}
+      {unsavedFilesDialog}
     </div>
   );
 }
