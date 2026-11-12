@@ -20,16 +20,27 @@ pub fn write_file(
         force,
     };
     let bytes = content.as_bytes();
-    match regular_file(path)? {
+    let written = match regular_file(path)? {
         None => {
             target.verify(None)?;
-            create(&target, bytes)
+            create(&target, bytes)?
         }
         Some(metadata) => {
             target.verify(Some(&version_of(&metadata)?))?;
-            replace(&target, bytes, &metadata)
+            replace(&target, bytes, &metadata)?
         }
-    }
+    };
+    settled_version(path, written)
+}
+
+#[cfg(windows)]
+fn settled_version(path: &Path, _written: String) -> AppResult<String> {
+    crate::files::content::file_version(path)?.ok_or_else(|| AppError::NotFound(display(path)))
+}
+
+#[cfg(not(windows))]
+fn settled_version(_path: &Path, written: String) -> AppResult<String> {
+    Ok(written)
 }
 
 struct Target<'a> {

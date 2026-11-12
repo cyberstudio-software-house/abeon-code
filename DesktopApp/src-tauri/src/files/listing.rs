@@ -1,5 +1,9 @@
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+use parking_lot::Mutex;
 
 use git2::{ErrorCode, Repository, RepositoryOpenFlags};
 
@@ -15,13 +19,15 @@ pub struct IgnoreChecker {
 
 impl IgnoreChecker {
     pub fn for_dir(root: &Path, dir: &Path) -> IgnoreChecker {
-        let repository = open_repository(root, dir).unwrap_or_else(|error| {
-            eprintln!(
-                "files: cannot open the repository of {}: {:?}/{:?}",
-                dir.display(),
-                error.class(),
-                error.code()
-            );
+        let repository = open_repository(root, dir).unwrap_or_else(|failure| {
+            if first_report_of(&failure.repository) {
+                eprintln!(
+                    "files: cannot open the repository {}: {:?}/{:?}",
+                    failure.repository.display(),
+                    failure.error.class(),
+                    failure.error.code()
+                );
+            }
             None
         });
         let workdir = repository
@@ -66,14 +72,31 @@ impl IgnoreChecker {
     }
 }
 
-fn open_repository(root: &Path, dir: &Path) -> Result<Option<Repository>, git2::Error> {
+struct OpenFailure {
+    repository: PathBuf,
+    error: git2::Error,
+}
+
+fn open_repository(root: &Path, dir: &Path) -> Result<Option<Repository>, OpenFailure> {
     let canonical_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let ceilings: Vec<&Path> = canonical_root.parent().into_iter().collect();
     match Repository::open_ext(dir, RepositoryOpenFlags::empty(), &ceilings) {
         Ok(repository) => Ok(Some(repository)),
         Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
-        Err(error) => Err(error),
+        Err(error) => Err(OpenFailure {
+            repository: Repository::discover_path(dir, &ceilings)
+                .unwrap_or_else(|_| dir.to_path_buf()),
+            error,
+        }),
     }
+}
+
+fn first_report_of(repository: &Path) -> bool {
+    static REPORTED: OnceLock<Mutex<HashSet<PathBuf>>> = OnceLock::new();
+    REPORTED
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .insert(repository.to_path_buf())
 }
 
 pub fn list_dir(root: &Path, rel: &str) -> AppResult<Vec<FileEntry>> {
@@ -298,6 +321,26 @@ mod tests {
         assert!(checker.ignore_error_reported.get());
         assert!(!checker.is_ignored(&unrepresentable, false));
         assert!(checker.is_ignored(&canonical_root.join("a.txt"), false));
+    }
+
+    #[test]
+    fn a_broken_repository_is_reported_once_for_every_directory_below_it() {
+        let root = tempfile::tempdir().unwrap();
+        init_ignoring(root.path(), "");
+        fs::write(root.path().join(".git/config"), "[core\n").unwrap();
+        fs::create_dir(root.path().join("a")).unwrap();
+        fs::create_dir(root.path().join("b")).unwrap();
+        let canonical_root = fs::canonicalize(root.path()).unwrap();
+
+        let checker = IgnoreChecker::for_dir(&canonical_root, &canonical_root.join("a"));
+        assert!(!checker.has_repository());
+        let Err(failure) = open_repository(&canonical_root, &canonical_root.join("b")) else {
+            panic!("the broken repository opened");
+        };
+        assert!(failure.repository.starts_with(&canonical_root));
+        assert!(!first_report_of(&failure.repository));
+        assert!(list_dir(&canonical_root, "b").is_ok());
+        assert!(!first_report_of(&failure.repository));
     }
 
     #[cfg(unix)]

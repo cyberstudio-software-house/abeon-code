@@ -43,10 +43,13 @@ struct DirtyCount {
     generation: u64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Armed {
     Unchanged,
-    Added { first_for_dir: bool },
+    Added {
+        first_for_dir: bool,
+        replaced: Option<PathBuf>,
+    },
 }
 
 struct Registry<H> {
@@ -80,7 +83,7 @@ impl<H> Registry<H> {
         }
         let first_for_dir = self.live_users(&dir) == 0;
         let handle = make()?;
-        self.slots.insert(
+        let replaced = self.slots.insert(
             key,
             Slot {
                 dir,
@@ -89,7 +92,10 @@ impl<H> Registry<H> {
                 generation,
             },
         );
-        Ok(Armed::Added { first_for_dir })
+        Ok(Armed::Added {
+            first_for_dir,
+            replaced: replaced.map(|slot| slot.dir),
+        })
     }
 
     fn generation_of(&self, window_label: &str) -> u64 {
@@ -340,17 +346,36 @@ impl FileWatches {
                 }))
             })?
         };
-        let Armed::Added { first_for_dir } = armed else {
+        let Armed::Added {
+            first_for_dir,
+            replaced,
+        } = armed
+        else {
             return Ok(());
         };
+        let settled = self.settle_added(app, &mut control, &key, &abs_dir, first_for_dir);
+        if let Some(dir) = replaced {
+            self.release_dirs(&mut control, HashSet::from([dir]));
+        }
+        settled
+    }
+
+    fn settle_added(
+        &self,
+        app: &AppHandle,
+        control: &mut Option<RecommendedWatcher>,
+        key: &WatchKey,
+        abs_dir: &Path,
+        first_for_dir: bool,
+    ) -> AppResult<()> {
         if app.get_webview_window(&key.window_label).is_none() {
-            let removed = self.registry.lock().remove(&key);
+            let removed = self.registry.lock().remove(key);
             drop(removed);
             return Ok(());
         }
         if first_for_dir {
-            if let Err(error) = self.establish(&mut control, &abs_dir) {
-                let removed = self.registry.lock().remove(&key);
+            if let Err(error) = self.establish(control, abs_dir) {
+                let removed = self.registry.lock().remove(key);
                 drop(removed);
                 return Err(error);
             }
@@ -542,7 +567,8 @@ mod tests {
         assert_eq!(
             first,
             Armed::Added {
-                first_for_dir: true
+                first_for_dir: true,
+                replaced: None,
             }
         );
         assert_eq!(second, Armed::Unchanged);
@@ -599,7 +625,8 @@ mod tests {
         assert_eq!(
             replaced,
             Armed::Added {
-                first_for_dir: true
+                first_for_dir: true,
+                replaced: Some(dir.clone()),
             }
         );
         assert_eq!(registry.live_users(&dir), 1);
@@ -661,7 +688,8 @@ mod tests {
         assert_eq!(
             rearmed,
             Armed::Added {
-                first_for_dir: false
+                first_for_dir: false,
+                replaced: Some(PathBuf::from("/a/src")),
             }
         );
         let dropped: Vec<u8> = dropped.iter().map(|slot| slot.handle).collect();
@@ -676,6 +704,48 @@ mod tests {
         assert!(registry.slots.contains_key(&key("project-1", 1, "docs")));
         let live = labels(&["main", "project-1"]);
         assert_eq!(registry.dirty_elsewhere("main", &live), 2);
+    }
+
+    #[test]
+    fn replacing_a_slot_hands_its_directory_to_the_release_path() {
+        let mut registry: Registry<u8> = Registry::new();
+        let src = PathBuf::from("/a/src");
+        let lib = PathBuf::from("/a/lib");
+        let moved = PathBuf::from("/b/lib");
+        registry
+            .insert_with(key("project-1", 1, "src"), src.clone(), || Ok(1))
+            .unwrap();
+        registry
+            .insert_with(key("project-1", 1, "lib"), lib.clone(), || Ok(2))
+            .unwrap();
+        registry.retire_window("project-1");
+
+        let same_dir = registry
+            .insert_with(key("project-1", 1, "src"), src.clone(), || Ok(3))
+            .unwrap();
+        assert_eq!(
+            same_dir,
+            Armed::Added {
+                first_for_dir: false,
+                replaced: Some(src.clone()),
+            }
+        );
+        assert_eq!(registry.live_users(&src), 1);
+        drop(registry.remove(&key("project-1", 1, "src")));
+        assert_eq!(registry.live_users(&src), 0);
+
+        let elsewhere = registry
+            .insert_with(key("project-1", 1, "lib"), moved.clone(), || Ok(4))
+            .unwrap();
+        assert_eq!(
+            elsewhere,
+            Armed::Added {
+                first_for_dir: true,
+                replaced: Some(lib.clone()),
+            }
+        );
+        assert_eq!(registry.live_users(&lib), 0);
+        assert_eq!(registry.live_users(&moved), 1);
     }
 
     #[test]
@@ -694,7 +764,8 @@ mod tests {
         assert_eq!(
             again,
             Armed::Added {
-                first_for_dir: true
+                first_for_dir: true,
+                replaced: None,
             }
         );
     }
@@ -726,14 +797,16 @@ mod tests {
         assert_eq!(
             first,
             Armed::Added {
-                first_for_dir: true
+                first_for_dir: true,
+                replaced: None,
             }
         );
         assert!(rearms.iter().all(|armed| *armed == Armed::Unchanged));
         assert_eq!(
             other_window,
             Armed::Added {
-                first_for_dir: false
+                first_for_dir: false,
+                replaced: None,
             }
         );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
@@ -870,7 +943,8 @@ mod tests {
         assert_eq!(
             replaced,
             Armed::Added {
-                first_for_dir: true
+                first_for_dir: true,
+                replaced: Some(watched.clone()),
             }
         );
         let _ = watcher.unwatch(&watched);
