@@ -64,7 +64,7 @@ export const tauri = {
     invoke<void>('set_dirty_file_count', { count }),
   dirtyFilesInOtherWindows: () => invoke<number>('dirty_files_in_other_windows'),
   onFilesDirChanged: (cb: (event: FilesDirChangedEvent) => void): Promise<UnlistenFn> =>
-    listen<FilesDirChangedEvent>('files://dir-changed', e => cb(e.payload)),
+    getCurrentWindow().listen<FilesDirChangedEvent>('files://dir-changed', e => cb(e.payload)),
   takePendingOpenPaths: () => invoke<OpenRequest[]>('take_pending_open_paths'),
   installCliCommand: () => invoke<string>('install_cli_command'),
   installClaudeSkill: () => invoke<string>('install_claude_skill'),
