@@ -1,11 +1,48 @@
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use crate::domain::FileSearchResponse;
 use crate::error::AppResult;
 use crate::files::listing::IgnoreChecker;
 use crate::files::paths::{resolve_existing, GIT_DIR};
 use crate::files::FALLBACK_SKIP_DIRS;
+
+#[derive(Default)]
+pub struct SearchGenerations {
+    counters: Mutex<HashMap<String, Arc<AtomicU64>>>,
+}
+
+impl SearchGenerations {
+    pub fn begin(&self, window_label: &str) -> SearchTicket {
+        let counter = self
+            .counters
+            .lock()
+            .entry(window_label.to_string())
+            .or_default()
+            .clone();
+        let generation = counter.fetch_add(1, Ordering::SeqCst) + 1;
+        SearchTicket {
+            counter,
+            generation,
+        }
+    }
+}
+
+pub struct SearchTicket {
+    counter: Arc<AtomicU64>,
+    generation: u64,
+}
+
+impl SearchTicket {
+    pub fn is_superseded(&self) -> bool {
+        self.counter.load(Ordering::SeqCst) != self.generation
+    }
+}
 
 struct PendingDir {
     path: PathBuf,
@@ -34,7 +71,7 @@ fn rank_of(name: &str, relative: &str, needle: &str, match_path: bool) -> Option
     }
 }
 
-fn is_directory_symlink(path: &Path) -> bool {
+fn points_to_directory(path: &Path) -> bool {
     std::fs::metadata(path)
         .map(|metadata| metadata.is_dir())
         .unwrap_or(false)
@@ -45,6 +82,7 @@ pub fn search_files(
     query: &str,
     limit: usize,
     visit_cap: usize,
+    cancelled: &dyn Fn() -> bool,
 ) -> AppResult<FileSearchResponse> {
     let needle = query.trim().to_lowercase();
     if needle.is_empty() {
@@ -55,16 +93,20 @@ pub fn search_files(
     }
     let match_path = needle.contains('/');
     let canonical_root = resolve_existing(root, "")?;
-    let mut stack = vec![PendingDir {
+    let mut queue = VecDeque::from([PendingDir {
         checker: Rc::new(IgnoreChecker::for_dir(&canonical_root, &canonical_root)),
         path: canonical_root.clone(),
         relative: String::new(),
-    }];
+    }]);
     let mut matches: Vec<Match> = Vec::new();
     let mut visited = 0usize;
-    let mut capped = false;
+    let mut stopped = false;
 
-    'walk: while let Some(dir) = stack.pop() {
+    'walk: while let Some(dir) = queue.pop_front() {
+        if cancelled() {
+            stopped = true;
+            break;
+        }
         let checker = if !dir.relative.is_empty()
             && std::fs::symlink_metadata(dir.path.join(GIT_DIR)).is_ok()
         {
@@ -72,10 +114,17 @@ pub fn search_files(
         } else {
             Rc::clone(&dir.checker)
         };
-        let Ok(entries) = std::fs::read_dir(&dir.path) else {
-            continue;
+        let entries = match std::fs::read_dir(&dir.path) {
+            Ok(entries) => entries,
+            Err(error) if dir.relative.is_empty() => return Err(error.into()),
+            Err(_) => continue,
         };
         for item in entries {
+            if visited >= visit_cap {
+                stopped = true;
+                break 'walk;
+            }
+            visited += 1;
             let Ok(item) = item else {
                 continue;
             };
@@ -85,11 +134,6 @@ pub fn search_files(
             if name.eq_ignore_ascii_case(GIT_DIR) {
                 continue;
             }
-            if visited >= visit_cap {
-                capped = true;
-                break 'walk;
-            }
-            visited += 1;
             let Ok(file_type) = item.file_type() else {
                 continue;
             };
@@ -103,7 +147,7 @@ pub fn search_files(
                 let skipped = checker.is_ignored(&path, true)
                     || (!checker.has_repository() && FALLBACK_SKIP_DIRS.contains(&name.as_str()));
                 if !skipped {
-                    stack.push(PendingDir {
+                    queue.push_back(PendingDir {
                         path,
                         relative,
                         checker: Rc::clone(&checker),
@@ -111,7 +155,7 @@ pub fn search_files(
                 }
                 continue;
             }
-            if file_type.is_symlink() && is_directory_symlink(&path) {
+            if file_type.is_symlink() && points_to_directory(&path) {
                 continue;
             }
             if let Some(rank) = rank_of(&name, &relative, &needle, match_path) {
@@ -120,13 +164,15 @@ pub fn search_files(
         }
     }
 
-    matches.sort_by(|left, right| {
-        left.rank
-            .cmp(&right.rank)
-            .then_with(|| left.relative.len().cmp(&right.relative.len()))
-            .then_with(|| left.relative.cmp(&right.relative))
+    matches.sort_by_cached_key(|found| {
+        (
+            found.rank,
+            found.relative.len(),
+            found.relative.to_lowercase(),
+            found.relative.clone(),
+        )
     });
-    let truncated = capped || matches.len() > limit;
+    let truncated = stopped || matches.len() > limit;
     matches.truncate(limit);
     Ok(FileSearchResponse {
         results: matches.into_iter().map(|found| found.relative).collect(),
@@ -137,8 +183,8 @@ pub fn search_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AppError;
     use std::fs;
-    use std::path::Path;
 
     const LIMIT: usize = 200;
     const CAP: usize = 200_000;
@@ -149,8 +195,14 @@ mod tests {
         fs::write(path, "x").unwrap();
     }
 
+    fn never() -> bool {
+        false
+    }
+
     fn search(root: &Path, query: &str) -> Vec<String> {
-        search_files(root, query, LIMIT, CAP).unwrap().results
+        search_files(root, query, LIMIT, CAP, &never)
+            .unwrap()
+            .results
     }
 
     fn init_repo(root: &Path, gitignore: &str) {
@@ -235,15 +287,181 @@ mod tests {
     }
 
     #[test]
-    fn nested_repo_uses_its_own_rules() {
+    fn nested_repo_replaces_the_outer_rules() {
         let root = tempfile::tempdir().unwrap();
-        init_repo(root.path(), "");
+        init_repo(root.path(), "secret/\n");
+        touch(root.path(), "secret/env.txt");
         let service = root.path().join("svc");
         fs::create_dir(&service).unwrap();
-        init_repo(&service, "secret/\n");
+        init_repo(&service, "");
         touch(&service, "secret/env.txt");
-        touch(&service, "public/env.txt");
-        assert_eq!(search(root.path(), "env"), ["svc/public/env.txt"]);
+        assert_eq!(search(root.path(), "env"), ["svc/secret/env.txt"]);
+    }
+
+    #[test]
+    fn skips_git_dir_in_any_case() {
+        let root = tempfile::tempdir().unwrap();
+        touch(root.path(), ".GIT/env.txt");
+        touch(root.path(), ".Git/env.txt");
+        touch(root.path(), "env.txt");
+        assert_eq!(search(root.path(), "env"), ["env.txt"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_names_that_are_not_utf8() {
+        use std::os::unix::ffi::OsStrExt;
+        let root = tempfile::tempdir().unwrap();
+        touch(root.path(), "env.txt");
+        fs::write(
+            root.path()
+                .join(std::ffi::OsStr::from_bytes(b"env\xff.txt")),
+            "x",
+        )
+        .unwrap();
+        assert_eq!(search(root.path(), "env"), ["env.txt"]);
+    }
+
+    #[cfg(unix)]
+    fn is_root() -> bool {
+        unsafe { libc::geteuid() == 0 }
+    }
+
+    #[cfg(unix)]
+    fn set_mode(path: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_unreadable_subdirectories() {
+        if is_root() {
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        touch(root.path(), "env.txt");
+        touch(root.path(), "locked/env.txt");
+        let locked = root.path().join("locked");
+        set_mode(&locked, 0o000);
+        let result = search_files(root.path(), "env", LIMIT, CAP, &never);
+        set_mode(&locked, 0o755);
+        assert_eq!(result.unwrap().results, ["env.txt"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_root_is_an_error() {
+        if is_root() {
+            return;
+        }
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("project");
+        touch(&root, "env.txt");
+        set_mode(&root, 0o000);
+        let result = search_files(&root, "env", LIMIT, CAP, &never);
+        set_mode(&root, 0o755);
+        assert!(result.is_err(), "{result:?}");
+    }
+
+    #[test]
+    fn missing_root_is_an_error() {
+        let base = tempfile::tempdir().unwrap();
+        let result = search_files(&base.path().join("gone"), "env", LIMIT, CAP, &never);
+        assert!(matches!(result, Err(AppError::NotFound(_))), "{result:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_file_is_a_result() {
+        use std::os::unix::fs::symlink;
+        let root = tempfile::tempdir().unwrap();
+        touch(root.path(), "config/real.env");
+        symlink("config/real.env", root.path().join("link.env")).unwrap();
+        assert_eq!(search(root.path(), ".env"), ["link.env", "config/real.env"]);
+    }
+
+    #[test]
+    fn ties_sort_case_insensitively_then_exactly() {
+        let root = tempfile::tempdir().unwrap();
+        for name in ["b-x.txt", "B-x.txt", "a-x.txt", "C-x.txt"] {
+            touch(root.path(), name);
+        }
+        assert_eq!(
+            search(root.path(), "x.txt"),
+            ["a-x.txt", "B-x.txt", "b-x.txt", "C-x.txt"]
+        );
+    }
+
+    #[test]
+    fn exact_visit_cap_boundary() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..3 {
+            touch(root.path(), &format!("f{index}.txt"));
+        }
+        let at_cap = search_files(root.path(), "f", LIMIT, 3, &never).unwrap();
+        assert_eq!(at_cap.results.len(), 3);
+        assert!(!at_cap.truncated);
+        let below_cap = search_files(root.path(), "f", LIMIT, 2, &never).unwrap();
+        assert_eq!(below_cap.results.len(), 2);
+        assert!(below_cap.truncated);
+    }
+
+    #[test]
+    fn git_dir_counts_toward_the_visit_cap() {
+        let root = tempfile::tempdir().unwrap();
+        init_repo(root.path(), "");
+        touch(root.path(), "f.txt");
+        let response = search_files(root.path(), "f", LIMIT, 2, &never).unwrap();
+        assert!(response.truncated);
+    }
+
+    #[test]
+    fn a_capped_walk_keeps_shallow_paths() {
+        let root = tempfile::tempdir().unwrap();
+        for side in ["a", "b"] {
+            touch(root.path(), &format!("{side}/keep.txt"));
+            for index in 0..5 {
+                touch(root.path(), &format!("{side}/sub/x{index}.txt"));
+            }
+        }
+        let response = search_files(root.path(), "keep", LIMIT, 6, &never).unwrap();
+        assert_eq!(response.results, ["a/keep.txt", "b/keep.txt"]);
+        assert!(response.truncated);
+    }
+
+    #[test]
+    fn a_cancelled_walk_stops_and_is_truncated() {
+        let root = tempfile::tempdir().unwrap();
+        for index in 0..5 {
+            touch(root.path(), &format!("d{index}/hit.txt"));
+        }
+        let complete = search_files(root.path(), "hit", LIMIT, CAP, &never).unwrap();
+        assert_eq!(complete.results.len(), 5);
+        assert!(!complete.truncated);
+
+        let reads = std::cell::Cell::new(0);
+        let cancelled = || {
+            reads.set(reads.get() + 1);
+            reads.get() > 2
+        };
+        let response = search_files(root.path(), "hit", LIMIT, CAP, &cancelled).unwrap();
+        assert_eq!(response.results.len(), 1);
+        assert!(response.truncated);
+        assert_eq!(reads.get(), 3);
+    }
+
+    #[test]
+    fn a_newer_search_from_the_same_window_supersedes_the_older_one() {
+        let generations = SearchGenerations::default();
+        let first = generations.begin("main");
+        assert!(!first.is_superseded());
+        let other_window = generations.begin("project-1");
+        assert!(!first.is_superseded());
+        let second = generations.begin("main");
+        assert!(first.is_superseded());
+        assert!(!second.is_superseded());
+        assert!(!other_window.is_superseded());
     }
 
     #[cfg(unix)]
@@ -263,7 +481,7 @@ mod tests {
         for index in 0..5 {
             touch(root.path(), &format!("f{index}.txt"));
         }
-        let response = search_files(root.path(), "f", 3, CAP).unwrap();
+        let response = search_files(root.path(), "f", 3, CAP, &never).unwrap();
         assert_eq!(response.results.len(), 3);
         assert!(response.truncated);
     }
@@ -274,7 +492,7 @@ mod tests {
         for index in 0..3 {
             touch(root.path(), &format!("f{index}.txt"));
         }
-        let response = search_files(root.path(), "f", 3, CAP).unwrap();
+        let response = search_files(root.path(), "f", 3, CAP, &never).unwrap();
         assert_eq!(response.results.len(), 3);
         assert!(!response.truncated);
     }
@@ -286,7 +504,7 @@ mod tests {
             touch(root.path(), &format!("dir/f{index}.txt"));
         }
         touch(root.path(), "top.txt");
-        let response = search_files(root.path(), "f", LIMIT, 2).unwrap();
+        let response = search_files(root.path(), "f", LIMIT, 2, &never).unwrap();
         assert!(response.truncated);
     }
 
@@ -294,7 +512,7 @@ mod tests {
     fn blank_query_returns_nothing() {
         let root = tempfile::tempdir().unwrap();
         touch(root.path(), "a.txt");
-        let response = search_files(root.path(), "   ", LIMIT, CAP).unwrap();
+        let response = search_files(root.path(), "   ", LIMIT, CAP, &never).unwrap();
         assert!(response.results.is_empty());
         assert!(!response.truncated);
     }

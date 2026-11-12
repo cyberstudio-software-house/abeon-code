@@ -38,12 +38,16 @@ pub fn list_project_dir(
 
 #[tauri::command(async)]
 pub fn search_project_files(
+    window: WebviewWindow,
     state: State<AppState>,
     project_id: i64,
     query: String,
 ) -> AppResult<FileSearchResponse> {
+    let ticket = state.file_searches.begin(window.label());
     let root = project_root(&state, project_id)?;
-    search::search_files(&root, &query, SEARCH_LIMIT, SEARCH_VISIT_CAP)
+    search::search_files(&root, &query, SEARCH_LIMIT, SEARCH_VISIT_CAP, &|| {
+        ticket.is_superseded()
+    })
 }
 
 fn read_with_watch_dir(root: &Path, rel_path: &str) -> AppResult<FileReadResponse> {
