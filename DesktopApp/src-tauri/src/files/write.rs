@@ -2,10 +2,10 @@ use std::fs::{File, Metadata, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::Path;
 
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, PersistError};
 
 use crate::error::{AppError, AppResult};
-use crate::files::content::{file_version, version_of};
+use crate::files::content::version_of;
 
 pub fn write_file(
     path: &Path,
@@ -22,14 +22,13 @@ pub fn write_file(
     match regular_file(path)? {
         None => {
             target.verify(None)?;
-            create(&target, bytes)?;
+            create(&target, bytes)
         }
         Some(metadata) => {
             target.verify(Some(&version_of(&metadata)?))?;
-            replace(&target, bytes, &metadata)?;
+            replace(&target, bytes, &metadata)
         }
     }
-    file_version(path)?.ok_or_else(|| AppError::NotFound(display(path)))
 }
 
 struct Target<'a> {
@@ -58,44 +57,67 @@ impl Target<'_> {
     }
 }
 
-fn create(target: &Target, bytes: &[u8]) -> AppResult<()> {
+fn create(target: &Target, bytes: &[u8]) -> AppResult<String> {
     let mut temp = new_file_temp(parent_dir(target.path)?)?;
     temp.write_all(bytes)?;
     temp.as_file().sync_all()?;
-    target.verify_on_disk()?;
-    temp.persist(target.path).map_err(|error| error.error)?;
-    Ok(())
+    let version = version_of(&temp.as_file().metadata()?)?;
+    if target.force {
+        temp.persist(target.path).map_err(|error| error.error)?;
+        return Ok(version);
+    }
+    if let Err(error) = temp.persist_noclobber(target.path) {
+        let temp = retry_without_noclobber(target.path, error)?;
+        target.verify_on_disk()?;
+        temp.persist(target.path).map_err(|error| error.error)?;
+    }
+    Ok(version)
 }
 
-fn replace(target: &Target, bytes: &[u8], original: &Metadata) -> AppResult<()> {
-    if !needs_in_place(target.path, original) && replace_atomically(target, bytes, original)? {
-        return Ok(());
+fn retry_without_noclobber(path: &Path, error: PersistError) -> AppResult<NamedTempFile> {
+    if error.error.kind() == ErrorKind::AlreadyExists {
+        return Err(AppError::Conflict(display(path)));
+    }
+    Ok(error.file)
+}
+
+fn replace(target: &Target, bytes: &[u8], original: &Metadata) -> AppResult<String> {
+    if !needs_in_place(target.path, original) {
+        if let Some(version) = replace_atomically(target, bytes, original)? {
+            return Ok(version);
+        }
     }
     write_in_place(target, bytes)
 }
 
-fn replace_atomically(target: &Target, bytes: &[u8], original: &Metadata) -> AppResult<bool> {
+fn replace_atomically(
+    target: &Target,
+    bytes: &[u8],
+    original: &Metadata,
+) -> AppResult<Option<String>> {
     let mut temp = match NamedTempFile::new_in(parent_dir(target.path)?) {
         Ok(temp) => temp,
         Err(error) => return in_place_unless_out_of_space(error),
     };
+    temp.write_all(bytes)?;
+    temp.as_file().sync_all()?;
     if let Err(error) = copy_permissions(temp.as_file(), original) {
         return in_place_unless_out_of_space(error);
     }
-    temp.write_all(bytes)?;
     temp.as_file().sync_all()?;
+    let version = version_of(&temp.as_file().metadata()?)?;
     target.verify_on_disk()?;
     match temp.persist(target.path) {
-        Ok(_) => Ok(true),
+        Ok(_) => Ok(Some(version)),
         Err(error) => in_place_unless_out_of_space(error.error),
     }
 }
 
-fn in_place_unless_out_of_space(error: std::io::Error) -> AppResult<bool> {
+fn in_place_unless_out_of_space(error: std::io::Error) -> AppResult<Option<String>> {
     if is_out_of_space(&error) {
         return Err(error.into());
     }
-    Ok(false)
+    Ok(None)
 }
 
 fn is_out_of_space(error: &std::io::Error) -> bool {
@@ -105,13 +127,13 @@ fn is_out_of_space(error: &std::io::Error) -> bool {
     )
 }
 
-fn write_in_place(target: &Target, bytes: &[u8]) -> AppResult<()> {
+fn write_in_place(target: &Target, bytes: &[u8]) -> AppResult<String> {
     let mut file = open_for_rewrite(target.path)?;
     target.verify(Some(&version_of(&file.metadata()?)?))?;
     file.write_all(bytes)?;
     file.set_len(bytes.len() as u64)?;
     file.sync_all()?;
-    Ok(())
+    version_of(&file.metadata()?)
 }
 
 fn regular_file(path: &Path) -> AppResult<Option<Metadata>> {
@@ -519,6 +541,109 @@ mod tests {
         assert_eq!(fs::read_to_string(&path).unwrap(), "A=1");
         assert_eq!(mode(&path), 0o444);
         assert_eq!(entries(dir.path()), vec!["locked.env"]);
+    }
+
+    #[test]
+    fn returned_version_is_the_version_of_the_written_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("a.env");
+        let created = write_file(&path, "A=1", None, false).unwrap();
+        assert_eq!(created, version(&path));
+        let replaced = write_file(&path, "A=22", Some(&created), false).unwrap();
+        assert_eq!(replaced, version(&path));
+        let forced = write_file(&path, "A=333", Some("stale"), true).unwrap();
+        assert_eq!(forced, version(&path));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn in_place_returned_version_is_the_version_of_the_written_file() {
+        let dir = tempdir().unwrap();
+        let path = file_with(dir.path(), "a.env", "A=1");
+        fs::hard_link(&path, dir.path().join("b.env")).unwrap();
+        let written = write_file(&path, "A=2\nB=3\n", Some(&version(&path)), false).unwrap();
+        assert_eq!(written, version(&path));
+    }
+
+    #[test]
+    fn existing_target_on_noclobber_is_a_conflict_and_drops_the_temp_file() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("a.env");
+        let temp = NamedTempFile::new_in(dir.path()).unwrap();
+        let temp_path = temp.path().to_path_buf();
+        let error = PersistError {
+            error: std::io::Error::from(ErrorKind::AlreadyExists),
+            file: temp,
+        };
+        assert_conflict(retry_without_noclobber(&target, error).map(|_| String::new()));
+        assert!(!temp_path.exists());
+    }
+
+    #[test]
+    fn create_never_replaces_a_file_that_appeared_after_the_check() {
+        let dir = tempdir().unwrap();
+        let path = file_with(dir.path(), "a.env", "theirs");
+        let target = Target {
+            path: &path,
+            expected_version: None,
+            force: false,
+        };
+        assert_conflict(create(&target, b"mine"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "theirs");
+        assert_eq!(entries(dir.path()), vec!["a.env"]);
+    }
+
+    #[test]
+    fn unsupported_noclobber_hands_the_temp_file_back() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("a.env");
+        for error in [
+            std::io::Error::from(ErrorKind::Unsupported),
+            std::io::Error::from(ErrorKind::PermissionDenied),
+        ] {
+            let temp = NamedTempFile::new_in(dir.path()).unwrap();
+            let temp_path = temp.path().to_path_buf();
+            let error = PersistError { error, file: temp };
+            let reclaimed = retry_without_noclobber(&target, error).unwrap();
+            assert_eq!(reclaimed.path(), temp_path);
+            assert!(temp_path.exists());
+        }
+    }
+
+    #[test]
+    fn leaves_no_temp_files_on_conflict() {
+        let dir = tempdir().unwrap();
+        let path = file_with(dir.path(), "a.txt", "theirs");
+        let stale = version(&path);
+        assert_conflict(write_file(&path, "mine", None, false));
+        fs::write(&path, "agent wrote this").unwrap();
+        assert_conflict(write_file(&path, "mine", Some(&stale), false));
+        assert_eq!(entries(dir.path()), vec!["a.txt"]);
+    }
+
+    #[test]
+    fn write_contract_relied_on_by_the_frontend() {
+        let dir = tempdir().unwrap();
+        let path = file_with(dir.path(), "a.txt", "one");
+        assert_conflict(write_file(&path, "two", None, false));
+        let returned = write_file(&path, "two", Some(&version(&path)), false).unwrap();
+        assert_eq!(returned, version(&path));
+        let (nanos, size) = returned.rsplit_once('-').unwrap();
+        assert!(nanos.parse::<i128>().is_ok(), "{returned}");
+        assert_eq!(size, "3");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keeps_setuid_and_setgid_bits() {
+        for expected in [0o4755, 0o2755, 0o6755] {
+            let dir = tempdir().unwrap();
+            let path = file_with(dir.path(), "tool", "one");
+            set_mode(&path, expected);
+            write_file(&path, "two", Some(&version(&path)), false).unwrap();
+            assert_eq!(mode(&path), expected, "{expected:o}");
+            assert_eq!(fs::read_to_string(&path).unwrap(), "two");
+        }
     }
 
     #[cfg(unix)]
