@@ -95,7 +95,11 @@ export function dirtyFileTabIds(state: Pick<FilesSlice, 'fileBuffers'>): string[
 }
 
 const emptySearch: FileSearch = { query: '', status: 'idle', results: [], truncated: false, selected: 0 };
-const deletedFields = { disk: 'deleted', version: null, savedContent: '' } as const;
+const deletedFields = { disk: 'deleted', version: null } as const;
+
+function hasUserEdits(buffer: FileBuffer): boolean {
+  return buffer.view.kind === 'text' && buffer.content !== buffer.savedContent;
+}
 
 const watchCounts = new Map<string, number>();
 const watchChains = new Map<string, Promise<void>>();
@@ -301,9 +305,10 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     patchBuffer(tabId, deletedFields);
   };
 
-  const editedDuringRead = (buffer: FileBuffer, intent: ReadIntent) => {
-    if (intent.kind === 'load') return false;
-    return isFileDirty(buffer) && (intent.kind === 'silent' || buffer.content !== intent.snapshot);
+  const keepsUserText = (buffer: FileBuffer, intent: ReadIntent, fields: Partial<FileBuffer>) => {
+    if (intent.kind === 'load' || !hasUserEdits(buffer)) return false;
+    if (fields.view?.kind === 'text' && fields.content === buffer.content) return false;
+    return intent.kind === 'silent' || buffer.content !== intent.snapshot;
   };
 
   const readFromDisk = async (tabId: string, runtime: BufferRuntime, token: number, intent: ReadIntent): Promise<FileReloadResult> => {
@@ -315,19 +320,20 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       const file = await tauri.readProjectFile(buffer.projectId, buffer.path);
       const current = get().fileBuffers[tabId];
       if (!current || !isLatest()) return 'kept';
-      if (editedDuringRead(current, intent)) {
+      const fields = loadedFields(file, diskVersion ?? null);
+      if (keepsUserText(current, intent, fields)) {
         markChanged(tabId, runtime, 'version' in file ? file.version : diskVersion);
         return 'kept';
       }
       runtime.observedVersion = undefined;
-      patchBuffer(tabId, loadedFields(file, diskVersion ?? null));
+      patchBuffer(tabId, fields);
       return 'reloaded';
     } catch (error) {
       const current = get().fileBuffers[tabId];
       if (!current || !isLatest()) return 'kept';
       if (current.status === 'ready' && failureCode(error) === 'not_found') markDeleted(tabId, runtime);
       else if (!isFileDirty(current)) patchBuffer(tabId, { status: 'error', error: failureMessage(error) });
-      else if (diskVersion !== undefined) markChanged(tabId, runtime, diskVersion);
+      else if (diskVersion !== undefined && current.disk !== 'deleted') markChanged(tabId, runtime, diskVersion);
       return 'error';
     }
   };
@@ -342,9 +348,13 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       return;
     }
     const current = get().fileBuffers[tabId];
-    if (current?.status !== 'ready' || !isAlive(tabId, runtime) || diskVersion === current.version) return;
-    if (diskVersion === null) markDeleted(tabId, runtime);
-    else if (isFileDirty(current)) markChanged(tabId, runtime, diskVersion);
+    if (current?.status !== 'ready' || !isAlive(tabId, runtime)) return;
+    if (diskVersion === null) {
+      if (current.disk !== 'deleted') markDeleted(tabId, runtime);
+      return;
+    }
+    if (diskVersion === current.version) return;
+    if (current.disk !== 'deleted' && hasUserEdits(current)) markChanged(tabId, runtime, diskVersion);
     else await readFromDisk(tabId, runtime, runtime.readToken, { kind: 'silent', diskVersion });
   };
 
@@ -362,7 +372,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       return;
     }
     if (diskVersion !== undefined) runtime.observedVersion = diskVersion;
-    patchBuffer(tabId, { saveStatus: 'idle', disk: 'changed' });
+    patchBuffer(tabId, { saveStatus: 'idle', disk: 'changed', ...(buffer.version === null ? { savedContent: '' } : {}) });
   };
 
   const writeToDisk = async (tabId: string, runtime: BufferRuntime, force: boolean): Promise<FileSaveResult> => {

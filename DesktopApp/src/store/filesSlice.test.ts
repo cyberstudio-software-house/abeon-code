@@ -578,7 +578,7 @@ describe('filesSlice', () => {
       tauriMock.writeProjectFile.mockRejectedValueOnce(conflict).mockResolvedValueOnce('v5');
       tauriMock.projectFileVersion.mockResolvedValueOnce(null);
       await expect(state().saveFileBuffer(id)).resolves.toBe('conflict');
-      expect(buffer(id)).toMatchObject({ content: 'mine\n', savedContent: '', disk: 'deleted', version: null, saveStatus: 'idle' });
+      expect(buffer(id)).toMatchObject({ content: 'mine\n', savedContent: 'hello\n', disk: 'deleted', version: null, saveStatus: 'idle' });
       await expect(state().saveFileBuffer(id)).resolves.toBe('saved');
       expect(tauriMock.writeProjectFile).toHaveBeenLastCalledWith(1, 'src/a.ts', 'mine\n', null, false);
     });
@@ -682,7 +682,7 @@ describe('filesSlice', () => {
       const id = await openBuffer();
       tauriMock.projectFileVersion.mockResolvedValueOnce(null);
       await state().checkFilesOnDisk(1, 'src');
-      expect(buffer(id)).toMatchObject({ content: 'hello\n', savedContent: '', version: null, disk: 'deleted' });
+      expect(buffer(id)).toMatchObject({ content: 'hello\n', savedContent: 'hello\n', version: null, disk: 'deleted' });
       expect(isFileDirty(buffer(id))).toBe(true);
       state().keepFileBuffer(id);
       expect(buffer(id).disk).toBe('deleted');
@@ -693,25 +693,95 @@ describe('filesSlice', () => {
       expect(isFileDirty(buffer(id))).toBe(false);
     });
 
-    it('stays dirty when the deleted file comes back, so keeping my content saves it', async () => {
+    it.each([
+      ['different content', textFile('agent\n', 'v7')],
+      ['identical content', textFile('hello\n', 'v7')],
+    ])('silently reloads an unedited deleted buffer when its file comes back with %s', async (_label, file) => {
       const id = await openBuffer();
       tauriMock.projectFileVersion.mockResolvedValueOnce(null);
       await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id).disk).toBe('deleted');
+      expect(dirtyFileTabIds(state())).toEqual([id]);
       tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
+      tauriMock.readProjectFile.mockResolvedValueOnce(file);
       await state().checkFilesOnDisk(1, 'src');
-      expect(buffer(id)).toMatchObject({ content: 'hello\n', disk: 'changed', version: null });
+      const text = file.kind === 'text' ? file.content : '';
+      expect(buffer(id)).toMatchObject({ content: text, savedContent: text, version: 'v7', disk: 'same' });
+      expect(dirtyFileTabIds(state())).toEqual([]);
+    });
+
+    it('keeps edited text when the deleted file comes back with other content, so keeping it saves it', async () => {
+      const id = await openBuffer();
+      state().editFileBuffer(id, 'mine\n');
+      tauriMock.projectFileVersion.mockResolvedValueOnce(null);
+      await state().checkFilesOnDisk(1, 'src');
+      tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('agent\n', 'v7'));
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id)).toMatchObject({ content: 'mine\n', savedContent: 'hello\n', disk: 'changed', version: null });
       expect(isFileDirty(buffer(id))).toBe(true);
-      expect(tauriMock.readProjectFile).toHaveBeenCalledTimes(1);
       state().keepFileBuffer(id);
       expect(buffer(id)).toMatchObject({ disk: 'same', version: 'v7' });
       expect(isFileDirty(buffer(id))).toBe(true);
       tauriMock.writeProjectFile.mockResolvedValueOnce('v8');
       await expect(state().saveFileBuffer(id)).resolves.toBe('saved');
-      expect(tauriMock.writeProjectFile).toHaveBeenCalledWith(1, 'src/a.ts', 'hello\n', 'v7', false);
+      expect(tauriMock.writeProjectFile).toHaveBeenCalledWith(1, 'src/a.ts', 'mine\n', 'v7', false);
       expect(isFileDirty(buffer(id))).toBe(false);
     });
 
-    it('stays dirty when saving a deleted file conflicts because it came back, so force writes it', async () => {
+    it('keeps text edited while the file was deleted when the file comes back', async () => {
+      const id = await openBuffer();
+      tauriMock.projectFileVersion.mockResolvedValueOnce(null);
+      await state().checkFilesOnDisk(1, 'src');
+      state().editFileBuffer(id, 'mine\n');
+      tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('hello\n', 'v7'));
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id)).toMatchObject({ content: 'mine\n', disk: 'changed' });
+      expect(isFileDirty(buffer(id))).toBe(true);
+    });
+
+    it('adopts a file that comes back with exactly the edited text, taking its line endings and BOM', async () => {
+      const id = await openBuffer();
+      state().editFileBuffer(id, 'mine\n');
+      tauriMock.projectFileVersion.mockResolvedValueOnce(null);
+      await state().checkFilesOnDisk(1, 'src');
+      tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('\uFEFFmine\r\n', 'v7'));
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id)).toMatchObject({
+        content: 'mine\n', savedContent: 'mine\n', version: 'v7', disk: 'same', eol: 'crlf', hasBom: true,
+      });
+      expect(isFileDirty(buffer(id))).toBe(false);
+    });
+
+    it('marks a changed buffer deleted again when its file goes missing again', async () => {
+      const id = await openBuffer();
+      state().editFileBuffer(id, 'mine\n');
+      tauriMock.projectFileVersion.mockResolvedValueOnce(null);
+      await state().checkFilesOnDisk(1, 'src');
+      tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('agent\n', 'v7'));
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id)).toMatchObject({ disk: 'changed', version: null });
+      tauriMock.projectFileVersion.mockResolvedValueOnce(null);
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id)).toMatchObject({ content: 'mine\n', disk: 'deleted', version: null });
+      expect(isFileDirty(buffer(id))).toBe(true);
+    });
+
+    it('keeps a deleted buffer marked deleted when the file that came back cannot be read', async () => {
+      const id = await openBuffer();
+      tauriMock.projectFileVersion.mockResolvedValueOnce(null);
+      await state().checkFilesOnDisk(1, 'src');
+      tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
+      tauriMock.readProjectFile.mockRejectedValueOnce({ code: 'io', message: 'permission denied' });
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id)).toMatchObject({ status: 'ready', content: 'hello\n', disk: 'deleted', version: null });
+      expect(isFileDirty(buffer(id))).toBe(true);
+    });
+
+    it('stays dirty when saving an unedited deleted file conflicts because it came back, so force writes it', async () => {
       const id = await openBuffer();
       tauriMock.projectFileVersion.mockResolvedValueOnce(null);
       await state().checkFilesOnDisk(1, 'src');
@@ -719,6 +789,10 @@ describe('filesSlice', () => {
       tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
       await expect(state().saveFileBuffer(id)).resolves.toBe('conflict');
       expect(buffer(id)).toMatchObject({ content: 'hello\n', disk: 'changed' });
+      expect(isFileDirty(buffer(id))).toBe(true);
+      tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id).disk).toBe('changed');
       expect(isFileDirty(buffer(id))).toBe(true);
       await expect(state().saveFileBuffer(id, { force: true })).resolves.toBe('saved');
       expect(tauriMock.writeProjectFile).toHaveBeenLastCalledWith(1, 'src/a.ts', 'hello\n', null, true);
@@ -834,7 +908,7 @@ describe('filesSlice', () => {
       tauriMock.projectFileVersion.mockResolvedValueOnce('v2');
       tauriMock.readProjectFile.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src/a.ts' });
       await state().checkFilesOnDisk(1, 'src');
-      expect(buffer(id)).toMatchObject({ status: 'ready', content: 'hello\n', savedContent: '', disk: 'deleted', version: null });
+      expect(buffer(id)).toMatchObject({ status: 'ready', content: 'hello\n', savedContent: 'hello\n', disk: 'deleted', version: null });
     });
 
     it('checks only ready buffers of the changed directory', async () => {
@@ -953,7 +1027,7 @@ describe('filesSlice', () => {
       state().editFileBuffer(id, 'mine\n');
       tauriMock.readProjectFile.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src/a.ts' });
       await expect(state().reloadFileBuffer(id)).resolves.toBe('error');
-      expect(buffer(id)).toMatchObject({ status: 'ready', content: 'mine\n', savedContent: '', disk: 'deleted', version: null });
+      expect(buffer(id)).toMatchObject({ status: 'ready', content: 'mine\n', savedContent: 'hello\n', disk: 'deleted', version: null });
       expect(isFileDirty(buffer(id))).toBe(true);
     });
 
