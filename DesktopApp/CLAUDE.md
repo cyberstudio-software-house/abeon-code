@@ -14,8 +14,8 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 ## Folder map
 
 ### Frontend (`src/`)
-- `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `panesSlice`, `actionsSlice`, `gitSlice`, `terminalDrawersSlice`, `notesSlice`. Composed in `store/index.ts`.
-- `lib/settingsCategories.ts` — settings categories (groups, labels, icons, search keywords), `filterSettingsCategories` and the "Terminal is new" flag; `lib/terminalAppearance.ts` — terminal fonts, palettes and xterm option builders; `lib/toolStatus.ts` — pairs tool-use blocks with their results for the history view; `lib/activity.ts` — session activity labels and colours (amber = running, blue = waiting for you).
+- `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `panesSlice`, `actionsSlice`, `gitSlice`, `terminalDrawersSlice`, `notesSlice`, `filesSlice`. Composed in `store/index.ts`.
+- `lib/settingsCategories.ts` — settings categories (groups, labels, icons, search keywords), `filterSettingsCategories` and the "Terminal is new" flag; `lib/terminalAppearance.ts` — terminal fonts, palettes and xterm option builders; `lib/toolStatus.ts` — pairs tool-use blocks with their results for the history view; `lib/activity.ts` — session activity labels and colours (amber = running, blue = waiting for you); `lib/fileText.ts` (file tab ids, path helpers, BOM/EOL decode and encode), `lib/useFilesSync.ts` (directory-change listener) and `lib/fileGitStatus.ts` (git status by relative path) belong to the file browser.
 - `lib/tauri.ts` — **single typed wrapper** over `invoke()`/`listen()`. Every IPC call lives here; do not call `invoke` directly from components.
 - `types/` — TS types, several are ts-rs-generated from Rust (`PtyKind.ts`, `GitStatus.ts`, etc.) — do not edit by hand.
 - `components/`
@@ -25,18 +25,20 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
   - `center/` — middle column: `CenterPanel` → `PaneLayout` (renders the pane tree: one `PaneBar` and one card frame per pane, one `TabPanel` content layer per tab, `PaneResizers`, `PaneDragOverlay` + `usePaneDrag` for the tab-drag gesture). `HeaderProjectRow` (project groups of the focused pane, mounted in `AppHeader`) and `useTabBarActions` (close guards, rename, menus, detach) live here too. **Tabs and panes are managed here.** `TerminalDrawerChrome` + `useTerminalDrawerShortcuts` render the per-session terminal drawer (layers computed by `lib/paneLayers.ts`, geometry in `lib/drawerGeometry.ts`).
   - `right/` — right column: Git panel (`GitSection` with tabs: working-tree changes / commit history via `GitHistory` + `CommitDiffDialog`), Actions list, runnable scripts. `RightPanel` swaps in `NotesPanel` while `notesPanelOpen`.
   - `notes/` — notes: `NotesPanel` (right-column list/editor), `NoteTiles`, `NoteEditor` (shared by panel and tab), `NoteTabView` (the `note` tab). Store in `store/notesSlice.ts`, helpers in `lib/noteText.ts`, change sync in `lib/useNotesSync.ts`. See "Notes".
+  - `files/` — file browser: `FilesPanel` (right-column header, search box, tree or results), `FileTree`, `FileSearchResults`, `FileEntryMenu`, `FileTabView` (the `file` tab) and `CodeEditor` (the only CodeMirror import). Store in `store/filesSlice.ts`. See "File browser".
   - `terminal/TerminalView.tsx` — xterm wrapper for any PTY (claude, action, shell); `useTerminalAppearance.ts` feeds it the persisted appearance settings.
   - `history/` — session history viewer (markdown blocks).
   - `settings/` — the full-window settings view: `SettingsView` (search, nav column, page), `SettingsNav`, `controls.tsx` (shared `SettingsPage`/`SettingsSection`/`SettingsRow`, `Segmented`, `Switch`, `Stepper`, `SelectField`) and `categories/*` (one page per category, plus `TerminalPreview` and `CustomPaletteEditor`). See "Settings view".
-  - `dialogs/` — modal dialogs (`ConfirmDialog`, `AddProjectDialog`, `AddActionDialog`, `RestoreSessionsDialog`, ClickUp and diff dialogs).
+  - `dialogs/` — modal dialogs (`ConfirmDialog`, `AddProjectDialog`, `AddActionDialog`, `RestoreSessionsDialog`, `UnsavedFilesDialog` + `useUnsavedFilesPrompt`, ClickUp and diff dialogs).
   - `shared/` — `Icon`, `IconBtn`, `Kbd`.
 
 ### Backend (`src-tauri/src/`)
 - `diagnostics.rs` — log file redirect and lifecycle lines, see "Diagnostics log".
-- `commands/` — Tauri command handlers grouped by domain: `projects.rs`, `sessions.rs`, `pty.rs`, `actions.rs`, `git.rs`, `settings.rs`, `activity.rs`, `notes.rs`. Registered in `lib.rs`.
+- `commands/` — Tauri command handlers grouped by domain: `projects.rs`, `sessions.rs`, `pty.rs`, `actions.rs`, `git.rs`, `settings.rs`, `activity.rs`, `notes.rs`, `files.rs`. Registered in `lib.rs`.
 - `db/` — SQLite migrations + queries.
 - `pty/` — PTY spawning and lifecycle (claude / action / shell variants).
 - `sessions/` — session reading and watch; Claude Code JSONL format at top level, `sessions/codex/` holds the OpenAI Codex rollout adapter, and `sessions/opencode/` holds the read-only OpenCode SQLite adapter.
+- `files/` — file browser backend: `paths` (path safety), `listing` (directory listing + `IgnoreChecker`), `search`, `content` (read, classify, version), `write` (conflict-checked save), `watch` (shared directory watcher + dirty-file registry); `commands/files.rs` is the thin command layer. See "File browser".
 - `git/` — git2 wrappers: `mod.rs` (status + working-tree diff), `history.rs` (branches, log, commit detail, per-commit file diff).
 - `detectors/` — script detection (npm/cargo/etc).
 - `domain/` — shared structs (ts-rs derives live here).
@@ -68,16 +70,17 @@ keeping them in sync: it attaches orphaned tabs to the focused pane, drops unkno
 emptied panes and keeps `activeTabId === focusedLeaf.activeTabId`. Actions that open tabs therefore
 need to know nothing about panes.
 
-Five tab kinds:
+Six tab kinds:
 - `session` — Claude session, has `mode: 'history' | 'terminal'` (resume vs. live).
 - `action` — running script with `status: 'running' | 'exited'`.
 - `terminal` — bare shell PTY.
 - `providerPicker` — opens instead of a new session when more than one provider is enabled (see "Providers").
 - `note` — one note (`noteId`), title is the note's first line. Never a live process, so it closes without a guard (through `closeNoteTab` in `useTabBarActions`, which releases the draft), cannot be renamed, is deduped by `noteId` in `openNoteTab` (its id `note:<id>` is set when the tab opens and kept by `repointNoteTabs` after a recreate, so never look a tab up by `noteTabId(noteId)`) and is **not persisted** (`writeTabsToLocalStorage` saves only session tabs). See "Notes".
+- `file` — one project file (`path` relative to the project root, `title` = file name). Id is `file:<projectId>:<path>` (`fileTabId`), so `openFileTab` dedupes by project + path. Never a live process, **not persisted**, cannot be renamed (`canRename` excludes it) and travels through a detach as `path` only. A dirty one closes through `UnsavedFilesDialog`, not `ConfirmDialog`. See "File browser".
 
 Closing a tab with an active process (`session+terminal`, `action`, `terminal`) **must** route through
 the `ConfirmDialog` owned by `useTabBarActions.tsx`. Helpers there: `isActiveProcess()` +
-`closeWithGuard()`. Close triggers: X button, middle-click on tab, Ctrl/Cmd+W (global capture-phase
+`closeWithGuard()`, which first sends a dirty `file` tab through `useUnsavedFilesPrompt`. Close triggers: X button, middle-click on tab, Ctrl/Cmd+W (global capture-phase
 listener).
 
 ### Header project row and pane bar
@@ -357,6 +360,124 @@ Short plain-text notes, per project or global, edited in the right column (`Note
 - **Skills**: `cli/skill.rs` installs `abeon-open-session` and `abeon-notes` into
   `~/.claude/skills`; "Zainstaluj skill" in Settings reinstalls the wrapper first, then both skills,
   and shows the skills root directory.
+
+## File browser
+
+A „Pliki” button in `ProjectToolbar` turns the right column into a file tree of the active tab's
+project (`FilesPanel`, mutually exclusive with `NotesPanel`), with a search-by-name box. A file opens
+in a `file` tab: text in a CodeMirror editor, Markdown as a rendered preview with „Edytuj”/„Podgląd”,
+images read-only, binary/over 1 MiB as a message. Spec:
+`docs/superpowers/specs/2026-11-11-file-browser-design.md`; manual QA list:
+`docs/superpowers/specs/2026-11-11-file-browser-qa-checklist.md`.
+
+- **Path safety**: every command takes a project id and a path relative to `project.path`, never an
+  absolute one; the frontend never sees `project.path` for these calls. `files/paths.rs`
+  (`resolve_existing`, `resolve_for_write`) rejects `..`, absolute paths and symlinks that leave the
+  canonical root. A path component `.git` is refused in any letter case, also after symlink
+  resolution (the tree and search never list it). A write to a missing file canonicalises the parent.
+  Any new command that touches the disk must go through these two functions.
+- **Reading** (`files/content.rs`): non-regular files (FIFO, directory) are refused before `open`, so
+  a FIFO cannot hang the thread. The kinds are `text` (valid UTF-8, no NUL, ≤ 1 MiB), `image`
+  (png/jpg/jpeg/gif/webp/svg ≤ 10 MiB, sent as a data URL), `binary` and `tooLarge`. The `version`
+  is `<mtime nanos>-<size>`. The frontend decodes in `lib/fileText.ts`: a BOM is kept, CRLF is turned
+  into LF for the editor and the predominant ending (LF on a tie) is written back on save.
+- **Writing** (`files/write.rs`): `write_file(path, content, expected_version, force)`. A version
+  mismatch is `AppError::Conflict` (`code: 'conflict'` in the frontend) unless `force`; `None`
+  expected means "the file must not exist". Content over 1 MiB is refused in `commands/files.rs`.
+  Strategy: temp file in the same directory + fsync + rename, keeping permissions and group, by
+  default. **In place** (write from offset 0, then `set_len`, then fsync, opened with `O_NOFOLLOW`)
+  for a file with several hard links, owned by another user, in a non-writable directory or itself
+  not writable, and when temp creation or rename fails, so a single-file bind mount or a container's
+  `.env` keeps its inode. Exceptions: when that failure is a full disk or exceeded quota the save
+  fails and the original is untouched (falling back would truncate it), and a read-only file is
+  never replaced (`PermissionDenied`, also with `force`). A new file (saving a buffer whose file
+  was deleted) goes only through temp + rename. The version is re-checked right before the rename
+  and again on the opened handle for an in-place write.
+- **Listing and search** (`files/listing.rs`, `search.rs`): directories first, then files,
+  case-insensitive; `ignored` comes from `git2` (`IgnoreChecker`), with repository discovery capped
+  at the project root's parent. A project that is only a subfolder of a larger repository therefore
+  gets no ignore data (same as the Git panel). Search is by file name (a `/` in the query matches the
+  relative path), ranks exact name, prefix, other, then shorter path; it skips gitignored directories
+  but not ignored files (so `.env` is found), uses a built-in skip list outside a repository, does not
+  follow directory symlinks, and stops at 200 results or 200 000 visited entries (both set
+  `truncated`). The tree renders at most 2000 rows per directory (`TREE_RENDER_LIMIT`).
+- **Directory watches** (`files/watch.rs`): `FileWatches` owns **one** shared `notify` watcher. The
+  registry is keyed by (window label, project id, relative dir); the OS watch for an absolute
+  directory is added with the first live entry and removed with the last. Events are routed by path
+  and by parent directory, access events are ignored, and each entry has a fixed 150 ms throttle
+  before it emits `files://dir-changed` (`{ projectId, relDir }`) **to its own window only**
+  (`emit_to`). A removed or renamed directory marks its entries and the watched subdirectories below
+  it dead (they trigger once more, then stay silent); the next `watch` call for the same key
+  re-establishes them. A queue overflow (rescan) triggers every live entry. `drop_window` runs from
+  `WindowEvent::Destroyed` on `spawn_blocking`, never on the main thread. Only directories are
+  watched, non-recursively: a file tab watches its parent directory.
+- **Frontend watch counts** live in module-level Maps in `filesSlice.ts` behind
+  `retainDirWatch`/`releaseDirWatch` (not in store state): the panel retains the root and every
+  expanded directory of the attached project, every file buffer retains its directory, and the
+  Rust watch is set up or torn down only on the 0↔1 transitions (serialised per key by
+  `enqueueWatch`). A failed `watch` is remembered and retried on the next retain and after the next
+  successful listing of that directory. Collapsing a directory releases its expanded descendants too.
+  Switching the active tab to another project re-attaches the panel (`followFilesProject`).
+- **`useFilesSync`** (mounted in `AppShell` and `DetachedShell`) listens with
+  `getCurrentWindow().listen`, not the global `listen`: a targeted `emit_to` reaches the global
+  listener of every window. On an event it reloads the loaded listing of that directory
+  (`reloadFileDir`, skipped when the entries are identical), schedules a 500 ms debounced
+  `refreshGit` while the panel is open (the tree colours come from `gitSlice`, not a new git
+  query; `gitStatusByPath`) and calls `checkFilesOnDisk` for the open buffers of that directory.
+- **Buffers** (`filesSlice.fileBuffers`, keyed by tab id, dropped by a `store/index.ts` subscriber
+  when the tab leaves `tabs[]`, so a buffer survives a pane move): one promise queue per tab
+  (`BufferRuntime.queue`) serialises load, save, reload and disk check, and the runtime object's
+  identity (`isAlive`) plus `readToken` turn stale work into a no-op after a close or a newer read.
+  This is why a save never raises its own „Plik zmienił się na dysku” bar: the disk check queued
+  behind it compares against the version the save just stored. `saveFileBuffer` returns
+  `saved | conflict | error | clean`; with `force` it never takes the clean shortcut.
+  `reloadFileBuffer` returns `reloaded | kept | error` (`kept`: the user typed meanwhile or the
+  tab was closed, so the disk text was not applied).
+- **Disk-change rules**: clean buffer, changed file → silent reload. Dirty buffer → `disk:
+  'changed'` bar with „Wczytaj ponownie” / „Zostaw moje” (`keepFileBuffer` adopts the observed
+  version). Deleted file → `disk: 'deleted'`, bar „Plik został usunięty”; edited text is kept,
+  and an **unedited** buffer whose file comes back (an agent switching branches, `git checkout`)
+  reloads silently without a bar. A deleted buffer with content counts as dirty (`isFileDirty`), so
+  closing it asks. Saving a deleted buffer whose path reappeared conflicts, stays dirty and shows
+  the conflict dialog; „Nadpisz” writes with `force`. Saving never creates parent directories.
+- **Dirty registry**: every window reports `dirtyFileTabIds(...).length` with `set_dirty_file_count`
+  (once at store init and on every `fileBuffers` change; `store/index.ts` remembers the count only
+  after the call succeeds, and failed calls are retried on the next change). Rust keeps it per window
+  label; `dirty_files_in_other_windows` sums the other **live** windows (the label list comes from
+  `webview_windows()`), so a count set after a window died never blocks an update.
+- **Editor** (`CodeEditor.tsx`): the only file that imports CodeMirror (`@codemirror/*`,
+  `@lezer/highlight`), loaded through `React.lazy` in `FileTabView`, so the app shell and every other
+  tab do not pay for it. Languages load lazily by file name (`@codemirror/language-data`; `.env*`
+  uses the legacy `properties` mode). `lineSeparator` is `"\n"` (the buffer is LF-normalised).
+  `Ctrl/Cmd+S` is a CodeMirror keymap entry, not a global listener. The theme is built from CSS
+  variables and re-built by a `MutationObserver` on `data-theme`. An external reload (the `value` prop
+  differing from the document) is applied as the minimal `diffRange` replacement, which keeps the
+  scroll position and caret, with `addToHistory: false` and the history compartment reset, so
+  Ctrl+Z after a reload cannot undo into the older text. **Tests mock `./CodeEditor`** (a textarea
+  with the same props) because jsdom cannot host CodeMirror; the real editor is covered only by
+  `CodeEditor.test.tsx`.
+- **Unsaved-file guard points**: `useUnsavedFilesPrompt` (hook returning `{ prompt(tabIds),
+  dialog }`, one prompt at a time) + `UnsavedFilesDialog` (Zapisz / Odrzuć zmiany / Anuluj; a failed
+  save keeps the dialog open). Used at: tab close (`closeWithGuard`), group detach
+  (`detachWithGuard` in `useTabBarActions`, **not** `lib/detachGroup.ts`), closing the main or a
+  detached window (`onCloseRequested` in both shells, **before** the notes settle step and the
+  live-process confirm), and the update (`holdForUnsavedFiles` in `AppShell`, before download and
+  again before relaunch, followed by the `dirtyFilesInOtherWindows` check that refuses with „Masz
+  niezapisane pliki w innym oknie…”; a failed check also holds the update). Files the user
+  discarded in the first pass are not asked about again unless their content changed. A new
+  code path that drops tabs or closes a window must add the guard.
+- **„Wstaw ścieżkę do sesji”** types the relative path plus a space into `activeAgentPtyId` and
+  refuses a path with control characters („Ścieżka zawiera niedozwolone znaki”): the bytes go to a
+  live terminal, so a name containing a newline or an escape sequence would be executed.
+- **Panel placement**: `RightPanel` mounts `FilesPanel` next to `NotesPanel` and hides the rest of
+  the column (`hidden` + `inert`) while either is open; `openFilesPanel` first awaits
+  `closeNotesPanel` (refused when the notes flush fails) and `openNotesPanel` closes the files panel.
+  A `store/index.ts` subscriber closes the panel when the last tab closes.
+- **Known limits**: no arrow-key navigation in the tree (Tab, Enter and Space only); search results
+  are not git-coloured; the project-subfolder-of-a-repo ignore gap above; on Windows the updater
+  exits inside `downloadAndInstall`, so the pre-relaunch dirty check does not run there; switching a
+  Markdown tab to preview unmounts the editor, which loses its undo history (the buffer is kept);
+  file tabs are not restored after a restart; no file operations (create, rename, delete).
 
 ## Supervisor agent
 
