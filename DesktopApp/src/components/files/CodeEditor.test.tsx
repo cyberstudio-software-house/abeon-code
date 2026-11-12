@@ -11,6 +11,12 @@ const mount = (value: string, onChange = vi.fn(), onSave = vi.fn()) => {
   return { editor, update, onChange, onSave };
 };
 
+const paste = (editor: EditorView, text: string) => {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { getData: (type: string) => (type === 'text/plain' ? text : '') } });
+  editor.contentDOM.dispatchEvent(event);
+};
+
 describe('CodeEditor', () => {
   it('applies an external value without reporting it back', () => {
     const { editor, update, onChange } = mount('hello\n');
@@ -58,6 +64,21 @@ describe('CodeEditor', () => {
     expect(editor.state.doc.toString()).toBe('a\rb\nc');
     update('new\r\nx');
     expect(editor.state.doc.toString()).toBe('new\r\nx');
+  });
+
+  it('turns pasted CRLF line breaks into LF and keeps a lone carriage return', () => {
+    const { editor, onChange } = mount('');
+    paste(editor, 'X=3\r\nY=4\r\n');
+    expect(editor.state.doc.toString()).toBe('X=3\nY=4\n');
+    expect(onChange).toHaveBeenLastCalledWith('X=3\nY=4\n');
+    paste(editor, 'a\rb');
+    expect(editor.state.doc.toString()).toBe('X=3\nY=4\na\rb');
+  });
+
+  it('runs dropped text through the same clipboard input filter', () => {
+    const { editor } = mount('');
+    const filters = editor.state.facet(EditorView.clipboardInputFilter);
+    expect(filters.reduce((text, filter) => filter(text, editor.state), 'one\r\ntwo\rthree')).toBe('one\ntwo\rthree');
   });
 
   it('calls onSave on Ctrl+S and prevents the browser default', () => {

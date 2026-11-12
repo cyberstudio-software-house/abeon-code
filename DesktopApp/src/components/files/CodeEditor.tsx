@@ -56,6 +56,8 @@ export function diffRange(oldText: string, newText: string): TextChange | null {
   return { from: prefix, to: oldText.length - suffix, insert: newText.slice(prefix, newText.length - suffix) };
 }
 
+const normalizeLineBreaks = (text: string) => text.replace(/\r\n/g, '\n');
+
 const isDarkTheme = () => document.documentElement.getAttribute('data-theme') === 'dark';
 
 const buildTheme = (dark: boolean): Extension => EditorView.theme({
@@ -123,6 +125,7 @@ export function CodeEditor({ value, path, onChange, onSave, focused, focusToken 
         doc: initialRef.current.value,
         extensions: [
           EditorState.lineSeparator.of('\n'),
+          EditorView.clipboardInputFilter.of(normalizeLineBreaks),
           lineNumbers(),
           undoHistory.of(history()),
           bracketMatching(),
