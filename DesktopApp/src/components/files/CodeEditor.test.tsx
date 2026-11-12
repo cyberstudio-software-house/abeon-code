@@ -54,6 +54,23 @@ describe('CodeEditor', () => {
     expect(view.container.firstElementChild).toHaveClass('font-mono');
   });
 
+  it('takes the keyboard back when the focus token changes while focused', () => {
+    const props = { value: 'a', path: 'notes.txt', onChange: vi.fn(), onSave: vi.fn(), focused: true };
+    const view = render(<CodeEditor {...props} focusToken={0} />);
+    const editor = EditorView.findFromDOM(view.container.querySelector('.cm-editor') as HTMLElement)!;
+    expect(editor.hasFocus).toBe(true);
+    const elsewhere = document.createElement('button');
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    expect(editor.hasFocus).toBe(false);
+
+    view.rerender(<CodeEditor {...props} focusToken={0} />);
+    expect(editor.hasFocus).toBe(false);
+    view.rerender(<CodeEditor {...props} focusToken={1} />);
+    expect(editor.hasFocus).toBe(true);
+    elsewhere.remove();
+  });
+
   it('reports a user change with the full text', () => {
     const { editor, onChange } = mount('hello\n');
     editor.dispatch({ changes: { from: 0, insert: 'X' } });

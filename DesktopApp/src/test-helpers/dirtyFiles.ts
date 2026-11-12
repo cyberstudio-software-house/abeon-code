@@ -8,6 +8,7 @@ export function mockFileIo() {
     { kind: 'text', content: 'saved', version: 'v1', size: 5, watch_dir: fileDir(relPath) }
   ));
   vi.spyOn(tauri, 'writeProjectFile').mockResolvedValue('v2');
+  vi.spyOn(tauri, 'projectFileVersion').mockResolvedValue('v1');
   vi.spyOn(tauri, 'watchProjectDir').mockResolvedValue(undefined);
   vi.spyOn(tauri, 'unwatchProjectDir').mockResolvedValue(undefined);
   vi.spyOn(tauri, 'setDirtyFileCount').mockResolvedValue(undefined);

@@ -57,10 +57,12 @@ describe('FileTree rendering', () => {
   });
 
   afterEach(() => {
-    useStore.setState({
-      closeFilesPanel: realState.closeFilesPanel,
-      fileTrees: {},
-      gitByProject: {},
+    act(() => {
+      useStore.setState({
+        closeFilesPanel: realState.closeFilesPanel,
+        fileTrees: {},
+        gitByProject: {},
+      });
     });
   });
 

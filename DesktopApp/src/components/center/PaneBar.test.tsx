@@ -33,6 +33,7 @@ import { useStore } from '../../store';
 import { PaneBar } from './PaneBar';
 import { createLeaf, insertBeside } from '../../lib/paneTree';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
+import { dirtyFileTabIds } from '../../store/filesSlice';
 import type { Tab } from '../../store/tabsSlice';
 import { tauri } from '../../lib/tauri';
 import { mockFileIo, seedCleanFileTab, seedDirtyFileTab } from '../../test-helpers/dirtyFiles';
@@ -623,6 +624,7 @@ describe('PaneBar unsaved file guard', () => {
     fireEvent.keyDown(document, { key: 'w', ctrlKey: true });
 
     expect(screen.queryByText('Niezapisane zmiany', { selector: 'h2' })).toBeNull();
+    expect(useStore.getState().tabs).toHaveLength(1);
     act(() => { useStore.getState().closeSettings(); });
   });
 
@@ -706,7 +708,7 @@ describe('PaneBar unsaved file guard', () => {
     it('does not ask about dirty files of another project', async () => {
       await seedFileWindow('clean');
       const other = await seedDirtyFileTab('src/b.ts', 2);
-      expect(other).toBeTruthy();
+      expect(dirtyFileTabIds(useStore.getState())).toContain(other);
       render(<PaneBar />);
 
       detachFromMenu();

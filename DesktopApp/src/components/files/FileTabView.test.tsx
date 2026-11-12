@@ -101,13 +101,33 @@ describe('FileTabView', () => {
     expect(await screen.findByLabelText('editor')).toHaveValue('x');
   });
 
-  it('shows the loading message while the lazy editor loads', async () => {
+  it('shows the editor fallback inside the loaded file view while the lazy editor loads', async () => {
+    vi.resetModules();
+    let release!: () => void;
+    const editorArrives = new Promise<void>((resolve) => { release = resolve; });
+    vi.doMock('./CodeEditor', async () => {
+      await editorArrives;
+      return { CodeEditor: ({ value }: { value: string }) => <textarea aria-label="editor" value={value} readOnly /> };
+    });
+    const { FileTabView: LazyFileTabView } = await import('./FileTabView');
+    const { useStore: lazyStore } = await import('../../store');
     const tab = makeTab('src/lazy.ts');
-    useStore.setState((s) => ({ tabs: [...s.tabs, tab] }));
+    lazyStore.setState((s) => ({ tabs: [...s.tabs, tab] }));
     tauriMock.readProjectFile.mockResolvedValueOnce(textFile('x'));
-    render(<FileTabView tab={tab} visible focused />);
+    render(<LazyFileTabView tab={tab} visible focused />);
+
+    await waitFor(() => expect(lazyStore.getState().fileBuffers[tab.id]?.status).toBe('ready'));
     expect(screen.getByText('Wczytywanie…')).toBeInTheDocument();
+    expect(screen.getByText('src/lazy.ts')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Zapisz/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText('editor')).not.toBeInTheDocument();
+
+    await act(async () => { release(); });
     expect(await screen.findByLabelText('editor')).toHaveValue('x');
+    expect(screen.queryByText('Wczytywanie…')).not.toBeInTheDocument();
+    cleanup();
+    lazyStore.getState().dropFileBuffer(tab.id);
+    vi.doUnmock('./CodeEditor');
   });
 
   it('focuses the editor only when the tab is visible and focused', async () => {
@@ -309,12 +329,22 @@ describe('FileTabView', () => {
       expect(screen.getByTestId('editor-mock').getAttribute('data-focus-token')).not.toBe(before);
     });
 
-    it('closes on Escape and releases its key listener once closed', async () => {
-      const { dialog } = await openConflict();
+    it('closes on Escape and removes every key listener it added', async () => {
+      const add = vi.spyOn(document, 'addEventListener');
       const remove = vi.spyOn(document, 'removeEventListener');
+      const { dialog } = await openConflict();
+      const isCaptureKeydown = ([type, , options]: unknown[]) => type === 'keydown' && (options as AddEventListenerOptions | undefined)?.capture === true;
+      const added = add.mock.calls.filter(isCaptureKeydown).map(([, listener]) => listener);
+      expect(added.length).toBeGreaterThan(0);
+      const removedBeforeClose = new Set(remove.mock.calls.filter(isCaptureKeydown).map(([, listener]) => listener));
+      const active = added.filter((listener) => !removedBeforeClose.has(listener));
+      expect(active).toHaveLength(1);
+
       fireEvent.keyDown(document, { key: 'Escape' });
+
       expect(dialog).not.toBeInTheDocument();
-      expect(remove.mock.calls.some(([type]) => type === 'keydown')).toBe(true);
+      expect(remove).toHaveBeenCalledWith('keydown', active[0], { capture: true });
+      add.mockRestore();
       remove.mockRestore();
     });
 
