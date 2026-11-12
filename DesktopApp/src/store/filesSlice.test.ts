@@ -1414,7 +1414,7 @@ describe('filesSlice', () => {
       expect(tauriMock.listProjectDir).toHaveBeenCalledWith(1, 'src');
     });
 
-    it('collapses re-checks requested while one runs into one follow-up run', async () => {
+    it('queues at most one re-check disk check per buffer', async () => {
       await openBuffer('src/a.ts');
       const version = deferred<string | null>();
       tauriMock.projectFileVersion.mockReturnValueOnce(version.promise);
@@ -1423,7 +1423,50 @@ describe('filesSlice', () => {
       expect(tauriMock.projectFileVersion).toHaveBeenCalledTimes(1);
       version.resolve('v1');
       await Promise.all(requests);
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledTimes(1);
+      await state().recheckFiles();
       expect(tauriMock.projectFileVersion).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps re-checking the other buffers and the panel while one buffer has a save that never finishes', async () => {
+      await state().openFilesPanel();
+      await flush();
+      const hung = await openBuffer('src/a.ts');
+      await openBuffer('lib/b.ts');
+      const write = deferred<string>();
+      tauriMock.writeProjectFile.mockReturnValueOnce(write.promise);
+      state().editFileBuffer(hung, 'mine\n');
+      void state().saveFileBuffer(hung);
+      await flush();
+      tauriMock.projectFileVersion.mockClear();
+      tauriMock.listProjectDir.mockClear();
+      const checkedPaths = () => tauriMock.projectFileVersion.mock.calls.map((call) => call[1]);
+
+      for (let run = 0; run < 3; run += 1) {
+        void state().recheckFiles();
+        await flush();
+      }
+
+      expect(checkedPaths()).toEqual(['lib/b.ts', 'lib/b.ts', 'lib/b.ts']);
+      expect(tauriMock.listProjectDir.mock.calls).toEqual([[1, ''], [1, ''], [1, '']]);
+      write.resolve('v2');
+      await flush();
+      expect(checkedPaths().filter((path) => path === 'src/a.ts')).toEqual(['src/a.ts']);
+    });
+
+    it('re-checks a tab reopened after its old buffer was dropped with a save that never finished', async () => {
+      const id = await openBuffer('src/a.ts');
+      tauriMock.writeProjectFile.mockReturnValueOnce(new Promise<string>(() => undefined));
+      state().editFileBuffer(id, 'mine\n');
+      void state().saveFileBuffer(id);
+      await flush();
+      void state().recheckFiles();
+      await flush();
+      state().dropFileBuffer(id);
+      await state().loadFileBuffer(id);
+      tauriMock.projectFileVersion.mockClear();
+      await state().recheckFiles();
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledWith(1, 'src/a.ts');
     });
 
     it('re-checks only the buffers while the panel is closed', async () => {

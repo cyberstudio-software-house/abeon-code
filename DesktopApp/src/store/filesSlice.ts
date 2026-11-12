@@ -130,9 +130,8 @@ const queuedWatchArms = new Set<string>();
 const panelWatches = new Map<number, Set<string>>();
 const listTokens = new Map<string, number>();
 const listingRuns = new Map<string, CoalescedRun>();
-const recheckRuns = new Map<string, CoalescedRun>();
 const bufferRuntimes = new Map<string, BufferRuntime>();
-const retryingBuffers = new Set<string>();
+const queuedDiskChecks = new WeakSet<BufferRuntime>();
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let watchHealthChanged: () => void = () => undefined;
 let searchToken = 0;
@@ -474,6 +473,12 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
 
   const buffersWithLostWatch = () => [...bufferRuntimes].filter(([, runtime]) => isLost(runtime.projectId, runtime.relDir));
 
+  const queueDiskCheck = (tabId: string, runtime: BufferRuntime): Promise<void> | null => {
+    if (queuedDiskChecks.has(runtime)) return null;
+    queuedDiskChecks.add(runtime);
+    return enqueue(runtime, () => compareWithDisk(tabId, runtime)).finally(() => queuedDiskChecks.delete(runtime));
+  };
+
   const needsRetry = () => get().filesPanelOpen && (failingPanelDirs().length > 0 || buffersWithLostWatch().length > 0);
 
   const retryFailing = () => {
@@ -481,11 +486,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     const projectId = attachedProjectId;
     if (get().filesPanelOpen) {
       if (projectId !== null) failingPanelDirs().forEach((relDir) => { void loadDir(projectId, relDir); });
-      for (const [tabId, runtime] of buffersWithLostWatch()) {
-        if (retryingBuffers.has(tabId)) continue;
-        retryingBuffers.add(tabId);
-        void enqueue(runtime, () => compareWithDisk(tabId, runtime)).finally(() => retryingBuffers.delete(tabId));
-      }
+      for (const [tabId, runtime] of buffersWithLostWatch()) void queueDiskCheck(tabId, runtime);
     }
     updateRetryTimer();
   };
@@ -750,14 +751,14 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       await Promise.all(checks);
     },
 
-    recheckFiles: () => coalesce(recheckRuns, '', async () => {
-      const checks = [...bufferRuntimes].map(([tabId, runtime]) => enqueue(runtime, () => compareWithDisk(tabId, runtime)));
+    recheckFiles: async () => {
+      const checks = [...bufferRuntimes].flatMap(([tabId, runtime]) => queueDiskCheck(tabId, runtime) ?? []);
       const projectId = attachedProjectId;
       const listings = get().filesPanelOpen && projectId !== null
         ? [...(panelWatches.get(projectId) ?? [])].map((relDir) => loadDir(projectId, relDir))
         : [];
       await Promise.all([...checks, ...listings]);
-    }),
+    },
 
     saveDirtyFiles: async (tabIds) => {
       const results = await Promise.all(tabIds.map((tabId) => get().saveFileBuffer(tabId)));
