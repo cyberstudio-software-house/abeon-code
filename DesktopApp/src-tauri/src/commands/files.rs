@@ -89,6 +89,12 @@ pub fn watch_project_dir(
 ) -> AppResult<()> {
     let root = project_root(&state, project_id)?;
     let abs_dir = resolve_existing(&root, &rel_path)?;
+    if !abs_dir.is_dir() {
+        return Err(AppError::InvalidPath {
+            path: rel_path,
+            reason: "not a directory".to_string(),
+        });
+    }
     state.file_watches.watch(
         window.app_handle(),
         window.label(),
