@@ -1,9 +1,11 @@
+use std::ffi::OsStr;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
 
 use crate::error::{AppError, AppResult};
 
 pub const GIT_DIR: &str = ".git";
+const IGNORABLE_CODE_POINTS: &[char] = &['\u{200b}', '\u{200c}', '\u{200d}', '\u{feff}'];
 
 pub fn resolve_existing(root: &Path, rel: &str) -> AppResult<PathBuf> {
     let relative = relative_path(rel)?;
@@ -65,10 +67,14 @@ fn relative_path(rel: &str) -> AppResult<PathBuf> {
     let mut relative = PathBuf::new();
     for component in Path::new(rel).components() {
         match component {
-            Component::Normal(name) if name.eq_ignore_ascii_case(GIT_DIR) => {
+            Component::Normal(name) if is_git_dir(name) => {
                 return Err(invalid(rel, "katalog .git jest niedostępny"));
             }
-            Component::Normal(name) => relative.push(name),
+            Component::Normal(name) => {
+                #[cfg(windows)]
+                ensure_windows_name(rel, name)?;
+                relative.push(name);
+            }
             Component::CurDir => {}
             Component::ParentDir => return Err(invalid(rel, "ścieżka nie może zawierać ..")),
             Component::RootDir | Component::Prefix(_) => {
@@ -85,11 +91,32 @@ fn ensure_inside(canonical_root: &Path, resolved: PathBuf, rel: &str) -> AppResu
         .map_err(|_| invalid(rel, "ścieżka wychodzi poza projekt"))?;
     if inner
         .components()
-        .any(|component| component.as_os_str().eq_ignore_ascii_case(GIT_DIR))
+        .any(|component| is_git_dir(component.as_os_str()))
     {
         return Err(invalid(rel, "katalog .git jest niedostępny"));
     }
     Ok(resolved)
+}
+
+fn is_git_dir(name: &OsStr) -> bool {
+    let visible: String = name
+        .to_string_lossy()
+        .chars()
+        .filter(|character| !IGNORABLE_CODE_POINTS.contains(character))
+        .collect();
+    visible.eq_ignore_ascii_case(GIT_DIR)
+}
+
+#[cfg(windows)]
+fn ensure_windows_name(rel: &str, name: &OsStr) -> AppResult<()> {
+    let name = name.to_string_lossy();
+    if name.contains(':') {
+        return Err(invalid(rel, "ścieżka nie może zawierać :"));
+    }
+    if name.ends_with('.') || name.ends_with(' ') {
+        return Err(invalid(rel, "nazwa nie może kończyć się kropką ani spacją"));
+    }
+    Ok(())
 }
 
 fn canonicalize(path: &Path, label: &str) -> AppResult<PathBuf> {
@@ -391,6 +418,56 @@ mod tests {
         fs::create_dir(root.path().join("links")).unwrap();
         symlink(&odd.join("f.txt"), &root.path().join("links/f.txt"));
         assert_eq!(watch_dir(root.path(), "links/f.txt"), "links");
+    }
+
+    #[test]
+    fn rejects_git_dir_hidden_by_ignorable_code_points() {
+        let root = tempfile::tempdir().unwrap();
+        for rel in [
+            ".git\u{200b}",
+            "\u{feff}.git/config",
+            ".g\u{200c}it/config",
+            "sub/.GIT\u{200d}/hooks/pre-commit",
+        ] {
+            assert_invalid(resolve_existing(root.path(), rel));
+            assert_invalid(resolve_for_write(root.path(), rel));
+        }
+        assert!(resolve_for_write(root.path(), "\u{200b}notes.txt").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_into_git_dir_hidden_by_ignorable_code_points() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join(".git\u{200b}")).unwrap();
+        fs::write(root.path().join(".git\u{200b}/config"), "x").unwrap();
+        symlink(Path::new(".git\u{200b}"), &root.path().join("hidden"));
+        for rel in ["hidden", "hidden/config"] {
+            assert_invalid(resolve_existing(root.path(), rel));
+            assert_invalid(resolve_for_write(root.path(), rel));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_prefixes_streams_and_trailing_dots() {
+        let root = tempfile::tempdir().unwrap();
+        for rel in [
+            "C:x",
+            "C:\\x",
+            "\\\\srv\\share\\x",
+            "a\\..\\..\\x",
+            "f.txt:s",
+            "dir\\f.txt::$DATA",
+            ".git.",
+            ".git ",
+            "a\\.GIT.\\config",
+            "notes.",
+        ] {
+            assert_invalid(resolve_existing(root.path(), rel));
+            assert_invalid(resolve_for_write(root.path(), rel));
+        }
+        assert!(resolve_for_write(root.path(), "notes.txt").is_ok());
     }
 
     #[test]
