@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import type { FilesDirChangedEvent } from '../types';
 
 import { useStore } from '../store';
 import { tauri } from './tauri';
-import { useFilesSync } from './useFilesSync';
+import { FILES_RECHECK_INTERVAL_MS, useFilesSync } from './useFilesSync';
 
 describe('useFilesSync', () => {
   let emit: (event: FilesDirChangedEvent) => void;
@@ -12,6 +12,7 @@ describe('useFilesSync', () => {
   const reloadFileDir = vi.fn().mockResolvedValue(undefined);
   const checkFilesOnDisk = vi.fn().mockResolvedValue(undefined);
   const refreshGit = vi.fn().mockResolvedValue(undefined);
+  const recheckFiles = vi.fn().mockResolvedValue(undefined);
 
   const listing = { status: 'ready' as const, entries: [] };
 
@@ -19,8 +20,9 @@ describe('useFilesSync', () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     useStore.setState({
-      reloadFileDir, checkFilesOnDisk, refreshGit,
+      reloadFileDir, checkFilesOnDisk, refreshGit, recheckFiles,
       filesPanelOpen: true,
+      tabs: [], activeTabId: null,
       fileTrees: { 1: { expanded: [], listings: { '': listing, src: listing } } },
     });
     vi.spyOn(tauri, 'onFilesDirChanged').mockImplementation(async (cb) => {
@@ -90,5 +92,44 @@ describe('useFilesSync', () => {
     expect(unlisten).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(600);
     expect(refreshGit).not.toHaveBeenCalled();
+  });
+
+  it('re-checks the files when the window regains focus, at most once per interval plus one trailing run', async () => {
+    await mount();
+    window.dispatchEvent(new Event('focus'));
+    expect(recheckFiles).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(100);
+    window.dispatchEvent(new Event('focus'));
+    window.dispatchEvent(new Event('focus'));
+    expect(recheckFiles).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(FILES_RECHECK_INTERVAL_MS - 100);
+    expect(recheckFiles).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(FILES_RECHECK_INTERVAL_MS * 3);
+    expect(recheckFiles).toHaveBeenCalledTimes(2);
+    window.dispatchEvent(new Event('focus'));
+    expect(recheckFiles).toHaveBeenCalledTimes(3);
+  });
+
+  it('re-checks the files when a file tab becomes active, not for other tabs', async () => {
+    const terminal = { kind: 'terminal' as const, id: 'term', projectId: 1, title: 't' };
+    const file = { kind: 'file' as const, id: 'file:1:a.ts', projectId: 1, path: 'a.ts', title: 'a.ts' };
+    useStore.setState({ tabs: [terminal, file], activeTabId: null });
+    await mount();
+    act(() => { useStore.setState({ activeTabId: 'term' }); });
+    expect(recheckFiles).not.toHaveBeenCalled();
+    act(() => { useStore.setState({ activeTabId: 'file:1:a.ts' }); });
+    expect(recheckFiles).toHaveBeenCalledTimes(1);
+    act(() => { useStore.setState({ filesPanelOpen: false }); });
+    expect(recheckFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops the re-check triggers on unmount', async () => {
+    const hook = await mount();
+    window.dispatchEvent(new Event('focus'));
+    window.dispatchEvent(new Event('focus'));
+    hook.unmount();
+    await vi.advanceTimersByTimeAsync(FILES_RECHECK_INTERVAL_MS * 2);
+    window.dispatchEvent(new Event('focus'));
+    expect(recheckFiles).toHaveBeenCalledTimes(1);
   });
 });

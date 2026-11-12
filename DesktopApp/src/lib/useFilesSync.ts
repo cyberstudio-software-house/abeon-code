@@ -3,12 +3,15 @@ import { useStore } from '../store';
 import { tauri } from './tauri';
 
 export const GIT_REFRESH_DEBOUNCE_MS = 500;
+export const FILES_RECHECK_INTERVAL_MS = 2000;
 
 export function useFilesSync() {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | null = null;
     const gitTimers = new Map<number, ReturnType<typeof setTimeout>>();
+    let recheckCooldown: ReturnType<typeof setTimeout> | null = null;
+    let recheckQueued = false;
 
     const scheduleGitRefresh = (projectId: number) => {
       const pending = gitTimers.get(projectId);
@@ -17,6 +20,20 @@ export function useFilesSync() {
         gitTimers.delete(projectId);
         useStore.getState().refreshGit(projectId).catch(() => undefined);
       }, GIT_REFRESH_DEBOUNCE_MS));
+    };
+
+    const recheckFiles = () => {
+      if (recheckCooldown !== null) {
+        recheckQueued = true;
+        return;
+      }
+      useStore.getState().recheckFiles().catch(() => undefined);
+      recheckCooldown = setTimeout(() => {
+        recheckCooldown = null;
+        if (!recheckQueued) return;
+        recheckQueued = false;
+        recheckFiles();
+      }, FILES_RECHECK_INTERVAL_MS);
     };
 
     const start = async () => {
@@ -35,9 +52,18 @@ export function useFilesSync() {
     };
     void start();
 
+    const stopTabListener = useStore.subscribe((state, prev) => {
+      if (state.activeTabId === prev.activeTabId) return;
+      if (state.tabs.find((tab) => tab.id === state.activeTabId)?.kind === 'file') recheckFiles();
+    });
+    window.addEventListener('focus', recheckFiles);
+
     return () => {
       disposed = true;
       if (unlisten) unlisten();
+      stopTabListener();
+      window.removeEventListener('focus', recheckFiles);
+      if (recheckCooldown !== null) clearTimeout(recheckCooldown);
       gitTimers.forEach((timer) => clearTimeout(timer));
       gitTimers.clear();
     };

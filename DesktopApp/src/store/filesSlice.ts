@@ -66,6 +66,7 @@ export type FilesSlice = {
   keepFileBuffer: (tabId: string) => void;
   dropFileBuffer: (tabId: string) => void;
   checkFilesOnDisk: (projectId: number, relDir: string) => Promise<void>;
+  recheckFiles: () => Promise<void>;
   saveDirtyFiles: (tabIds: string[]) => Promise<FileSaveFailure[]>;
 };
 
@@ -105,6 +106,7 @@ function hasUserEdits(buffer: FileBuffer): boolean {
 const watchCounts = new Map<string, number>();
 const watchChains = new Map<string, Promise<void>>();
 const failedWatches = new Set<string>();
+const queuedWatchArms = new Set<string>();
 const panelWatches = new Map<number, Set<string>>();
 const listTokens = new Map<string, number>();
 const bufferRuntimes = new Map<string, BufferRuntime>();
@@ -193,13 +195,26 @@ async function establishWatch(projectId: number, relDir: string) {
   }
 }
 
-function retryFailedWatch(projectId: number, relDir: string) {
+const isWatchHeld = (key: string) => (watchCounts.get(key) ?? 0) > 0;
+
+function armWatch(projectId: number, relDir: string) {
   const key = dirKey(projectId, relDir);
-  if (!failedWatches.has(key)) return;
+  if (!isWatchHeld(key) || queuedWatchArms.has(key)) return;
+  queuedWatchArms.add(key);
   enqueueWatch(key, async () => {
-    if (!failedWatches.has(key) || (watchCounts.get(key) ?? 0) === 0) return;
+    queuedWatchArms.delete(key);
+    if (!isWatchHeld(key)) return;
     await establishWatch(projectId, relDir);
   });
+}
+
+function retryFailedWatch(projectId: number, relDir: string) {
+  if (failedWatches.has(dirKey(projectId, relDir))) armWatch(projectId, relDir);
+}
+
+function markWatchLost(projectId: number, relDir: string) {
+  const key = dirKey(projectId, relDir);
+  if (isWatchHeld(key)) failedWatches.add(key);
 }
 
 function cancelSearch() {
@@ -240,8 +255,9 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
           listings: { ...tree.listings, [relDir]: { status: 'ready', entries } },
         }));
       }
-      retryFailedWatch(projectId, relDir);
-    } catch {
+      armWatch(projectId, relDir);
+    } catch (error) {
+      if (failureCode(error) === 'not_found') markWatchLost(projectId, relDir);
       if (listTokens.get(key) !== token) return;
       patchTree(projectId, (tree) => ({
         ...tree,
@@ -345,8 +361,11 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     let diskVersion: string | null;
     try {
       diskVersion = await tauri.projectFileVersion(buffer.projectId, buffer.path);
-    } catch {
-      return;
+      armWatch(runtime.projectId, runtime.relDir);
+    } catch (error) {
+      if (failureCode(error) !== 'not_found') return;
+      markWatchLost(runtime.projectId, runtime.relDir);
+      diskVersion = null;
     }
     const current = get().fileBuffers[tabId];
     if (current?.status !== 'ready' || !isAlive(tabId, runtime)) return;
@@ -579,6 +598,21 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
           return runtime ? enqueue(runtime, () => compareWithDisk(buffer.tabId, runtime)) : undefined;
         });
       await Promise.all(checks);
+    },
+
+    recheckFiles: async () => {
+      const state = get();
+      const bufferDirs = new Map<string, { projectId: number; relDir: string }>();
+      for (const buffer of Object.values(state.fileBuffers)) {
+        const relDir = fileDir(buffer.path);
+        bufferDirs.set(dirKey(buffer.projectId, relDir), { projectId: buffer.projectId, relDir });
+      }
+      const checks = [...bufferDirs.values()].map(({ projectId, relDir }) => state.checkFilesOnDisk(projectId, relDir));
+      const projectId = attachedProjectId;
+      const listings = state.filesPanelOpen && projectId !== null
+        ? [...(panelWatches.get(projectId) ?? [])].map((relDir) => loadDir(projectId, relDir))
+        : [];
+      await Promise.all([...checks, ...listings]);
     },
 
     saveDirtyFiles: async (tabIds) => {

@@ -56,6 +56,11 @@ const tabsOf = (...projectIds: number[]) => projectIds.map((projectId) => ({
   kind: 'terminal' as const, id: `tab-${projectId}`, projectId, title: 't',
 }));
 
+const toggleAndSettle = async (projectId: number, relDir: string) => {
+  await useStore.getState().toggleFileDir(projectId, relDir);
+  await flush();
+};
+
 describe('filesSlice', () => {
   const originalCloseNotesPanel = useStore.getState().closeNotesPanel;
 
@@ -262,20 +267,77 @@ describe('filesSlice', () => {
     expect(tauriMock.unwatchProjectDir).not.toHaveBeenCalledWith(1, 'ab');
   });
 
-  it('retries a failed watch once after a successful load of the directory', async () => {
+  it('arms the watch of a held directory again after every successful listing', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     tauriMock.watchProjectDir.mockRejectedValueOnce(new Error('no watch'));
+    const listing = deferred<FileEntry[]>();
+    tauriMock.listProjectDir.mockReturnValueOnce(listing.promise);
     await state().openFilesPanel();
     await flush();
     expect(warn).toHaveBeenCalledWith('[files] watch failed', '.');
     expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(1);
-    await state().reloadFileDir(1, '');
+    listing.resolve([]);
     await flush();
     expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(2);
     await state().reloadFileDir(1, '');
     await flush();
-    expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(2);
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(3);
+    expect(tauriMock.watchProjectDir).toHaveBeenLastCalledWith(1, '');
     warn.mockRestore();
+  });
+
+  it('re-arms an expanded directory that was deleted and recreated once it lists again', async () => {
+    await state().openFilesPanel();
+    await toggleAndSettle(1, 'src');
+    tauriMock.watchProjectDir.mockClear();
+    tauriMock.listProjectDir.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src' });
+    await state().reloadFileDir(1, 'src');
+    await flush();
+    expect(state().fileTrees[1].listings.src.status).toBe('error');
+    expect(tauriMock.watchProjectDir).not.toHaveBeenCalled();
+    tauriMock.listProjectDir.mockResolvedValueOnce([entry('index.ts')]);
+    await state().reloadFileDir(1, 'src');
+    await flush();
+    expect(state().fileTrees[1].listings.src).toEqual({ status: 'ready', entries: [entry('index.ts')] });
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(1);
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledWith(1, 'src');
+  });
+
+  it('marks a directory whose listing finds it gone so the next holder arms its watch again', async () => {
+    await state().openFilesPanel();
+    await toggleAndSettle(1, 'src');
+    tauriMock.listProjectDir.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src' });
+    await state().reloadFileDir(1, 'src');
+    await flush();
+    tauriMock.watchProjectDir.mockClear();
+    state().retainDirWatch(1, 'src');
+    await flush();
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledWith(1, 'src');
+    state().releaseDirWatch(1, 'src');
+    await flush();
+  });
+
+  it('queues one watch call per directory while one is still waiting', async () => {
+    await state().openFilesPanel();
+    await toggleAndSettle(1, 'src');
+    const blocked = deferred<undefined>();
+    tauriMock.watchProjectDir.mockClear();
+    tauriMock.watchProjectDir.mockReturnValueOnce(blocked.promise);
+    await state().reloadFileDir(1, 'src');
+    await flush();
+    await state().reloadFileDir(1, 'src');
+    await state().reloadFileDir(1, 'src');
+    await flush();
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(1);
+    blocked.resolve(undefined);
+    await flush();
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not arm the watch of a directory nobody holds after a listing', async () => {
+    await state().reloadFileDir(1, 'src');
+    await flush();
+    expect(tauriMock.watchProjectDir).not.toHaveBeenCalled();
   });
 
   it('retries a failed watch on the next retain of the directory', async () => {
@@ -920,6 +982,112 @@ describe('filesSlice', () => {
       tauriMock.readProjectFile.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src/a.ts' });
       await state().checkFilesOnDisk(1, 'src');
       expect(buffer(id)).toMatchObject({ status: 'ready', content: 'hello\n', savedContent: 'hello\n', disk: 'deleted', version: null });
+    });
+
+    it('marks the buffer deleted when the version check finds its directory gone', async () => {
+      const clean = await openBuffer('src/a.ts');
+      const edited = await openBuffer('src/b.ts');
+      state().editFileBuffer(edited, 'mine\n');
+      tauriMock.projectFileVersion.mockRejectedValue({ code: 'not_found', message: 'not found: src/a.ts' });
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(clean)).toMatchObject({ status: 'ready', content: 'hello\n', disk: 'deleted', version: null });
+      expect(buffer(edited)).toMatchObject({ status: 'ready', content: 'mine\n', disk: 'deleted', version: null });
+      expect(isFileDirty(buffer(clean))).toBe(true);
+      expect(isFileDirty(buffer(edited))).toBe(true);
+    });
+
+    it('reloads an unedited buffer silently when its deleted directory comes back', async () => {
+      const id = await openBuffer('src/a.ts');
+      tauriMock.projectFileVersion.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src/a.ts' });
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id).disk).toBe('deleted');
+      tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('agent\n', 'v7'));
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id)).toMatchObject({ content: 'agent\n', savedContent: 'agent\n', version: 'v7', disk: 'same' });
+    });
+
+    it('leaves the buffer alone when the version check fails for another reason', async () => {
+      const id = await openBuffer('src/a.ts');
+      const before = buffer(id);
+      tauriMock.projectFileVersion.mockRejectedValueOnce({ code: 'io', message: 'permission denied' });
+      await state().checkFilesOnDisk(1, 'src');
+      expect(buffer(id)).toBe(before);
+    });
+
+    it('arms the watch of the buffer directory again after a successful version check', async () => {
+      const id = await openBuffer('src/a.ts');
+      await flush();
+      expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(1);
+      await state().checkFilesOnDisk(1, 'src');
+      await flush();
+      expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(2);
+      expect(tauriMock.watchProjectDir).toHaveBeenLastCalledWith(1, 'src');
+      tauriMock.projectFileVersion.mockResolvedValueOnce(null);
+      await state().checkFilesOnDisk(1, 'src');
+      await flush();
+      expect(buffer(id).disk).toBe('deleted');
+      expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(3);
+    });
+
+    it('marks the directory for a new watch when the version check finds it gone', async () => {
+      await openBuffer('src/a.ts');
+      await flush();
+      tauriMock.projectFileVersion.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src/a.ts' });
+      await state().checkFilesOnDisk(1, 'src');
+      await flush();
+      expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(1);
+      await openBuffer('src/b.ts');
+      await flush();
+      expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(2);
+      expect(tauriMock.watchProjectDir).toHaveBeenLastCalledWith(1, 'src');
+    });
+
+    it('checks every open buffer directory and re-lists the panel directories on a re-check', async () => {
+      await state().openFilesPanel();
+      await toggleAndSettle(1, 'src');
+      await openBuffer('src/a.ts');
+      await openBuffer('lib/b.ts');
+      const other = addFileTab('docs/c.md', 2);
+      await state().loadFileBuffer(other);
+      tauriMock.listProjectDir.mockClear();
+      await state().recheckFiles();
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledTimes(3);
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledWith(1, 'src/a.ts');
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledWith(1, 'lib/b.ts');
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledWith(2, 'docs/c.md');
+      expect(tauriMock.listProjectDir).toHaveBeenCalledTimes(2);
+      expect(tauriMock.listProjectDir).toHaveBeenCalledWith(1, '');
+      expect(tauriMock.listProjectDir).toHaveBeenCalledWith(1, 'src');
+    });
+
+    it('re-checks only the buffers while the panel is closed', async () => {
+      await openBuffer('src/a.ts');
+      await state().recheckFiles();
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledWith(1, 'src/a.ts');
+      expect(tauriMock.listProjectDir).not.toHaveBeenCalled();
+    });
+
+    it('lets a re-check bring back a tab and an expanded directory that were deleted and recreated', async () => {
+      await state().openFilesPanel();
+      await toggleAndSettle(1, 'src');
+      const id = await openBuffer('src/a.ts');
+      tauriMock.listProjectDir.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src' });
+      tauriMock.projectFileVersion.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src/a.ts' });
+      await state().reloadFileDir(1, 'src');
+      await state().checkFilesOnDisk(1, 'src');
+      await flush();
+      expect(state().fileTrees[1].listings.src.status).toBe('error');
+      expect(buffer(id).disk).toBe('deleted');
+      tauriMock.watchProjectDir.mockClear();
+      tauriMock.listProjectDir.mockResolvedValue([entry('a.ts')]);
+      tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('agent\n', 'v7'));
+      await state().recheckFiles();
+      await flush();
+      expect(state().fileTrees[1].listings.src).toEqual({ status: 'ready', entries: [entry('a.ts')] });
+      expect(buffer(id)).toMatchObject({ content: 'agent\n', version: 'v7', disk: 'same' });
+      expect(tauriMock.watchProjectDir).toHaveBeenCalledWith(1, 'src');
     });
 
     it('checks only ready buffers of the changed directory', async () => {
