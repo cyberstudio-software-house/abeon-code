@@ -242,6 +242,7 @@ describe('filesSlice', () => {
   });
 
   it('retains expanded directories again when the panel reopens', async () => {
+    tauriMock.listProjectDir.mockImplementation(async (_projectId: number, relDir: string) => (relDir === '' ? [entry('src', 'dir')] : []));
     await state().openFilesPanel();
     await flush();
     await state().toggleFileDir(1, 'src');
@@ -288,6 +289,55 @@ describe('filesSlice', () => {
     expect(tauriMock.unwatchProjectDir).toHaveBeenCalledWith(1, 'a');
     expect(tauriMock.unwatchProjectDir).toHaveBeenCalledWith(1, 'a/b');
     expect(state().fileTrees[1].listings['a/b'].entries).toEqual([entry('x.ts')]);
+  });
+
+  describe('pruning expanded directories', () => {
+    const expandSrcAndDeep = async () => {
+      tauriMock.listProjectDir.mockImplementation(async (_projectId: number, relDir: string) => ({
+        '': [entry('src', 'dir'), entry('lib', 'dir')],
+        src: [entry('deep', 'dir')],
+        'src/deep': [entry('x.ts')],
+        lib: [],
+      } as Record<string, FileEntry[]>)[relDir] ?? []);
+      await state().openFilesPanel();
+      await flush();
+      await toggleAndSettle(1, 'src');
+      await toggleAndSettle(1, 'src/deep');
+      await toggleAndSettle(1, 'lib');
+      expect(state().fileTrees[1].expanded).toEqual(['src', 'src/deep', 'lib']);
+      tauriMock.unwatchProjectDir.mockClear();
+    };
+
+    it('drops a directory and its expanded descendants once the parent listing no longer has it, releasing their holds', async () => {
+      await expandSrcAndDeep();
+      tauriMock.listProjectDir.mockResolvedValueOnce([entry('lib', 'dir')]);
+      await state().reloadFileDir(1, '');
+      await flush();
+      expect(state().fileTrees[1].expanded).toEqual(['lib']);
+      expect(tauriMock.unwatchProjectDir.mock.calls).toEqual([[1, 'src'], [1, 'src/deep']]);
+      tauriMock.listProjectDir.mockClear();
+      await state().recheckFiles();
+      expect(tauriMock.listProjectDir.mock.calls.map((call) => call[1]).sort()).toEqual(['', 'lib']);
+    });
+
+    it('drops an expanded directory that became a file', async () => {
+      await expandSrcAndDeep();
+      tauriMock.listProjectDir.mockResolvedValueOnce([entry('deep')]);
+      await state().reloadFileDir(1, 'src');
+      await flush();
+      expect(state().fileTrees[1].expanded).toEqual(['src', 'lib']);
+      expect(tauriMock.unwatchProjectDir.mock.calls).toEqual([[1, 'src/deep']]);
+    });
+
+    it('keeps expanded directories that are still listed and keeps all of them when a listing fails', async () => {
+      await expandSrcAndDeep();
+      await state().reloadFileDir(1, '');
+      tauriMock.listProjectDir.mockRejectedValueOnce({ code: 'io', message: 'denied' });
+      await state().reloadFileDir(1, 'src');
+      await flush();
+      expect(state().fileTrees[1].expanded).toEqual(['src', 'src/deep', 'lib']);
+      expect(tauriMock.unwatchProjectDir).not.toHaveBeenCalled();
+    });
   });
 
   it('does not release a sibling whose name only shares a prefix', async () => {

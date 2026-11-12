@@ -20,10 +20,10 @@ export function FilesPanel() {
     inputRef.current?.focus();
   }, []);
 
-  const showMenu = (event: MouseEvent, path: string) => {
+  const showMenu = useCallback((event: MouseEvent, path: string) => {
     event.preventDefault();
     setMenu({ x: event.clientX, y: event.clientY, path });
-  };
+  }, []);
 
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (projectId === null) return;

@@ -314,6 +314,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
           listings: { ...tree.listings, [relDir]: { status: 'ready', entries } },
         }));
       }
+      pruneExpanded(projectId, relDir, entries);
       armWatch(projectId, relDir);
     } catch (error) {
       if (failureCode(error) === 'not_found') markWatchLost(projectId, relDir);
@@ -347,6 +348,16 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
 
   const panelReleaseProject = (projectId: number) => {
     for (const relDir of [...(panelWatches.get(projectId) ?? [])]) panelRelease(projectId, relDir);
+  };
+
+  const pruneExpanded = (projectId: number, relDir: string, entries: FileEntry[]) => {
+    const listed = new Set(entries.filter((entry) => entry.kind === 'dir').map((entry) => childPath(relDir, entry.name)));
+    const expanded = get().fileTrees[projectId]?.expanded ?? [];
+    const gone = expanded.filter((dir) => fileDir(dir) === relDir && !listed.has(dir));
+    if (gone.length === 0) return;
+    const removed = expanded.filter((dir) => gone.some((root) => dir === root || dir.startsWith(`${root}/`)));
+    patchTree(projectId, (tree) => ({ ...tree, expanded: tree.expanded.filter((dir) => !removed.includes(dir)) }));
+    removed.forEach((dir) => panelRelease(projectId, dir));
   };
 
   const attachProject = (projectId: number) => {
