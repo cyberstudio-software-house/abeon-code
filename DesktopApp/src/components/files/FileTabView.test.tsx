@@ -20,8 +20,8 @@ vi.mock('../../lib/tauri', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
 
 vi.mock('./CodeEditor', () => ({
-  CodeEditor: (props: { value: string; path: string; onChange: (value: string) => void; onSave: () => void; focused: boolean }) => (
-    <div data-testid="editor-mock" data-path={props.path} data-focused={String(props.focused)}>
+  CodeEditor: (props: { value: string; path: string; onChange: (value: string) => void; onSave: () => void; focused: boolean; focusToken?: number }) => (
+    <div data-testid="editor-mock" data-path={props.path} data-focused={String(props.focused)} data-focus-token={String(props.focusToken)}>
       <textarea aria-label="editor" value={props.value} onChange={(event) => props.onChange(event.target.value)} />
       <button type="button" onClick={props.onSave}>mock-save</button>
     </div>
@@ -30,7 +30,7 @@ vi.mock('./CodeEditor', () => ({
 
 import { toast } from 'sonner';
 import { useStore } from '../../store';
-import { fileName, fileTabId } from '../../lib/fileText';
+import { fileName, fileTabId, isMarkdownPath } from '../../lib/fileText';
 import type { Tab } from '../../store/tabsSlice';
 import { TabItem } from '../center/TabItem';
 import { FileTabView } from './FileTabView';
@@ -51,6 +51,7 @@ async function open(path: string, file: FileContent, props: { visible?: boolean;
   tauriMock.readProjectFile.mockResolvedValueOnce(file);
   const view = render(<FileTabView tab={tab} visible={props.visible ?? true} focused={props.focused ?? true} />);
   await waitFor(() => expect(state().fileBuffers[tab.id]?.status).not.toBe('loading'));
+  if (file.kind === 'text' && !isMarkdownPath(path)) await screen.findByLabelText('editor');
   return { tab, ...view };
 }
 
@@ -95,6 +96,15 @@ describe('FileTabView', () => {
     expect(await screen.findByLabelText('editor')).toHaveValue('x');
   });
 
+  it('shows the loading message while the lazy editor loads', async () => {
+    const tab = makeTab('src/lazy.ts');
+    useStore.setState((s) => ({ tabs: [...s.tabs, tab] }));
+    tauriMock.readProjectFile.mockResolvedValueOnce(textFile('x'));
+    render(<FileTabView tab={tab} visible focused />);
+    expect(screen.getByText('Wczytywanie…')).toBeInTheDocument();
+    expect(await screen.findByLabelText('editor')).toHaveValue('x');
+  });
+
   it('focuses the editor only when the tab is visible and focused', async () => {
     const { unmount } = await open('src/a.ts', textFile('a'), { visible: false, focused: true });
     expect(screen.getByTestId('editor-mock')).toHaveAttribute('data-focused', 'false');
@@ -111,7 +121,7 @@ describe('FileTabView', () => {
     expect(screen.queryByRole('button', { name: 'Podgląd' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edytuj' }));
-    expect(screen.getByLabelText('editor')).toHaveValue('# Title\n\nbody text\n');
+    expect(await screen.findByLabelText('editor')).toHaveValue('# Title\n\nbody text\n');
     expect(screen.queryByRole('button', { name: 'Edytuj' })).not.toBeInTheDocument();
 
     edit('# Edited heading\n');
@@ -281,6 +291,23 @@ describe('FileTabView', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Wczytaj ponownie' }));
       await waitFor(() => expect(screen.getByLabelText('editor')).toHaveValue('theirs\n'));
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('focuses Anuluj when it opens and hands the keyboard back to the editor when it closes', async () => {
+      const { dialog } = await openConflict();
+      expect(within(dialog).getByRole('button', { name: 'Anuluj' })).toHaveFocus();
+      const before = screen.getByTestId('editor-mock').getAttribute('data-focus-token');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Anuluj' }));
+      expect(screen.getByTestId('editor-mock').getAttribute('data-focus-token')).not.toBe(before);
+    });
+
+    it('closes on Escape and releases its key listener once closed', async () => {
+      const { dialog } = await openConflict();
+      const remove = vi.spyOn(document, 'removeEventListener');
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(dialog).not.toBeInTheDocument();
+      expect(remove.mock.calls.some(([type]) => type === 'keydown')).toBe(true);
+      remove.mockRestore();
     });
 
     it('cancels without writing', async () => {

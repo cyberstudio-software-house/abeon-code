@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useStore } from '../../store';
 import { isFileDirty } from '../../store/filesSlice';
@@ -6,7 +6,7 @@ import type { Tab } from '../../store/tabsSlice';
 import { fileName, isMarkdownPath } from '../../lib/fileText';
 import { Markdown } from '../history/Markdown';
 import { Kbd } from '../shared/Kbd';
-import { CodeEditor } from './CodeEditor';
+import { formatBinding } from '../../lib/shortcuts';
 
 type Props = {
   tab: Extract<Tab, { kind: 'file' }>;
@@ -14,7 +14,10 @@ type Props = {
   focused: boolean;
 };
 
+const CodeEditor = lazy(() => import('./CodeEditor').then(module => ({ default: module.CodeEditor })));
+
 const SAVED_FLASH_MS = 2000;
+const SAVE_HINT = formatBinding('mod+s');
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -37,6 +40,10 @@ function DiskBar({ message, hint, children }: { message: string; hint?: string; 
 }
 
 function ConflictDialog({ onOverwrite, onReload, onCancel }: { onOverwrite: () => void; onReload: () => void; onCancel: () => void }) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    cancelRef.current?.focus();
+  }, []);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); onCancel(); }
@@ -50,7 +57,7 @@ function ConflictDialog({ onOverwrite, onReload, onCancel }: { onOverwrite: () =
         <h2 className="mb-2 text-[14px] font-semibold">Plik zmienił się na dysku</h2>
         <p className="mb-4 text-[13px] text-fg-secondary">Zapis nadpisze zmiany wprowadzone poza edytorem.</p>
         <div className="flex justify-end gap-2">
-          <button type="button" onClick={onCancel} className="btn-secondary">Anuluj</button>
+          <button ref={cancelRef} type="button" onClick={onCancel} className="btn-secondary">Anuluj</button>
           <button type="button" onClick={onReload} className="btn-secondary">Wczytaj ponownie</button>
           <button type="button" onClick={onOverwrite} className="btn-danger">Nadpisz</button>
         </div>
@@ -69,6 +76,7 @@ export function FileTabView({ tab, visible, focused }: Props) {
   const buffer = useStore(state => state.fileBuffers[tab.id]);
   const [conflictOpen, setConflictOpen] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [focusToken, setFocusToken] = useState(0);
   const saveStatus = buffer?.saveStatus;
 
   useEffect(() => {
@@ -85,17 +93,22 @@ export function FileTabView({ tab, visible, focused }: Props) {
     return () => clearTimeout(timer);
   }, [saveStatus]);
 
+  const closeConflict = () => {
+    setConflictOpen(false);
+    setFocusToken(token => token + 1);
+  };
+
   const save = async () => {
     if ((await saveFileBuffer(tab.id)) === 'conflict') setConflictOpen(true);
   };
 
   const overwrite = () => {
-    setConflictOpen(false);
+    closeConflict();
     void saveFileBuffer(tab.id, { force: true });
   };
 
   const reload = async () => {
-    setConflictOpen(false);
+    closeConflict();
     if ((await reloadFileBuffer(tab.id)) === 'error') toast.error('Nie udało się wczytać pliku ponownie');
   };
 
@@ -158,7 +171,7 @@ export function FileTabView({ tab, visible, focused }: Props) {
           )}
           <button type="button" className="btn-primary" disabled={!canSave} onClick={() => void save()}>
             Zapisz
-            <Kbd>Ctrl+S</Kbd>
+            <Kbd>{SAVE_HINT}</Kbd>
           </button>
         </span>
       </div>
@@ -177,16 +190,19 @@ export function FileTabView({ tab, visible, focused }: Props) {
             </div>
           </div>
         ) : (
-          <CodeEditor
-            value={buffer.content}
-            path={buffer.path}
-            onChange={content => editFileBuffer(tab.id, content)}
-            onSave={() => void save()}
-            focused={visible && focused}
-          />
+          <Suspense fallback={<CenteredMessage>Wczytywanie…</CenteredMessage>}>
+            <CodeEditor
+              value={buffer.content}
+              path={buffer.path}
+              onChange={content => editFileBuffer(tab.id, content)}
+              onSave={() => void save()}
+              focused={visible && focused}
+              focusToken={focusToken}
+            />
+          </Suspense>
         )}
       </div>
-      {conflictOpen && <ConflictDialog onOverwrite={overwrite} onReload={() => void reload()} onCancel={() => setConflictOpen(false)} />}
+      {conflictOpen && <ConflictDialog onOverwrite={overwrite} onReload={() => void reload()} onCancel={closeConflict} />}
     </div>
   );
 }

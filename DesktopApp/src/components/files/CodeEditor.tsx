@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Annotation, Compartment, EditorSelection, EditorState, Transaction, type Extension } from '@codemirror/state';
+import { Annotation, Compartment, EditorState, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { search, searchKeymap } from '@codemirror/search';
@@ -14,6 +14,7 @@ type Props = {
   onChange: (value: string) => void;
   onSave: () => void;
   focused: boolean;
+  focusToken?: number;
 };
 
 const MONO_FONT = "'Geist Mono', ui-monospace, monospace";
@@ -36,6 +37,24 @@ const highlightStyle = HighlightStyle.define([
 ]);
 
 const externalChange = Annotation.define<boolean>();
+
+export type TextChange = { from: number; to: number; insert: string };
+
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+
+export function diffRange(oldText: string, newText: string): TextChange | null {
+  if (oldText === newText) return null;
+  const limit = Math.min(oldText.length, newText.length);
+  let prefix = 0;
+  while (prefix < limit && oldText.charCodeAt(prefix) === newText.charCodeAt(prefix)) prefix += 1;
+  if (prefix > 0 && isHighSurrogate(oldText.charCodeAt(prefix - 1))) prefix -= 1;
+  let suffix = 0;
+  const suffixLimit = limit - prefix;
+  while (suffix < suffixLimit && oldText.charCodeAt(oldText.length - 1 - suffix) === newText.charCodeAt(newText.length - 1 - suffix)) suffix += 1;
+  if (suffix > 0 && isLowSurrogate(oldText.charCodeAt(oldText.length - suffix))) suffix -= 1;
+  return { from: prefix, to: oldText.length - suffix, insert: newText.slice(prefix, newText.length - suffix) };
+}
 
 const isDarkTheme = () => document.documentElement.getAttribute('data-theme') === 'dark';
 
@@ -80,11 +99,12 @@ async function loadLanguage(path: string): Promise<Extension | null> {
   return description ? description.load() : null;
 }
 
-export function CodeEditor({ value, path, onChange, onSave, focused }: Props) {
+export function CodeEditor({ value, path, onChange, onSave, focused, focusToken }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const languageRef = useRef(new Compartment());
   const themeRef = useRef(new Compartment());
+  const historyRef = useRef(new Compartment());
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
   const initialRef = useRef({ value, focused });
@@ -96,6 +116,7 @@ export function CodeEditor({ value, path, onChange, onSave, focused }: Props) {
     if (!container) return;
     const language = languageRef.current;
     const theme = themeRef.current;
+    const undoHistory = historyRef.current;
     const view = new EditorView({
       parent: container,
       state: EditorState.create({
@@ -103,7 +124,7 @@ export function CodeEditor({ value, path, onChange, onSave, focused }: Props) {
         extensions: [
           EditorState.lineSeparator.of('\n'),
           lineNumbers(),
-          history(),
+          undoHistory.of(history()),
           bracketMatching(),
           search({ top: true }),
           syntaxHighlighting(highlightStyle),
@@ -138,14 +159,14 @@ export function CodeEditor({ value, path, onChange, onSave, focused }: Props) {
   useEffect(() => {
     const view = viewRef.current;
     if (!view || view.state.doc.toString() === value) return;
-    const { anchor, head } = view.state.selection.main;
-    const scrollTop = view.scrollDOM.scrollTop;
+    const change = diffRange(view.state.doc.toString(), value);
+    if (!change) return;
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: value },
-      selection: EditorSelection.single(Math.min(anchor, value.length), Math.min(head, value.length)),
+      changes: change,
+      effects: historyRef.current.reconfigure([]),
       annotations: [externalChange.of(true), Transaction.addToHistory.of(false)],
     });
-    view.scrollDOM.scrollTop = scrollTop;
+    view.dispatch({ effects: historyRef.current.reconfigure(history()) });
   }, [value]);
 
   useEffect(() => {
@@ -154,13 +175,15 @@ export function CodeEditor({ value, path, onChange, onSave, focused }: Props) {
       const view = viewRef.current;
       if (cancelled || !view) return;
       view.dispatch({ effects: languageRef.current.reconfigure(extension ?? []) });
-    }).catch(() => undefined);
+    }).catch(() => {
+      console.warn('[files] language load failed', fileName(path));
+    });
     return () => { cancelled = true; };
   }, [path]);
 
   useEffect(() => {
     if (focused) viewRef.current?.focus();
-  }, [focused]);
+  }, [focused, focusToken]);
 
   return <div ref={containerRef} className="h-full min-h-0" />;
 }

@@ -1,0 +1,124 @@
+import { describe, expect, it, vi } from 'vitest';
+import { render } from '@testing-library/react';
+import { EditorView } from '@codemirror/view';
+import { undo } from '@codemirror/commands';
+import { CodeEditor, diffRange } from './CodeEditor';
+
+const mount = (value: string, onChange = vi.fn(), onSave = vi.fn()) => {
+  const view = render(<CodeEditor value={value} path="notes.txt" onChange={onChange} onSave={onSave} focused={false} />);
+  const editor = EditorView.findFromDOM(view.container.querySelector('.cm-editor') as HTMLElement)!;
+  const update = (next: string) => view.rerender(<CodeEditor value={next} path="notes.txt" onChange={onChange} onSave={onSave} focused={false} />);
+  return { editor, update, onChange, onSave };
+};
+
+describe('CodeEditor', () => {
+  it('applies an external value without reporting it back', () => {
+    const { editor, update, onChange } = mount('hello\n');
+    update('theirs\nsecond\n');
+    expect(editor.state.doc.toString()).toBe('theirs\nsecond\n');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('reports a user change with the full text', () => {
+    const { editor, onChange } = mount('hello\n');
+    editor.dispatch({ changes: { from: 0, insert: 'X' } });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith('Xhello\n');
+  });
+
+  it('keeps the same view across external updates', () => {
+    const { editor, update } = mount('a');
+    update('b');
+    update('c');
+    expect(editor.state.doc.toString()).toBe('c');
+    expect(editor.dom.isConnected).toBe(true);
+  });
+
+  it('has nothing to undo after an external change', () => {
+    const { editor, update, onChange } = mount('hello world\n');
+    editor.dispatch({ changes: { from: 6, to: 11, insert: '' } });
+    onChange.mockClear();
+    update('theirs from disk\nsecond line\n');
+    expect(undo(editor)).toBe(false);
+    expect(editor.state.doc.toString()).toBe('theirs from disk\nsecond line\n');
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('can undo user edits made after an external change', () => {
+    const { editor, update } = mount('a\n');
+    update('b\n');
+    editor.dispatch({ changes: { from: 0, insert: 'X' } });
+    expect(undo(editor)).toBe(true);
+    expect(editor.state.doc.toString()).toBe('b\n');
+  });
+
+  it('keeps a lone carriage return and CRLF inside the document text', () => {
+    const { editor, update } = mount('a\rb\nc');
+    expect(editor.state.doc.lines).toBe(2);
+    expect(editor.state.doc.toString()).toBe('a\rb\nc');
+    update('new\r\nx');
+    expect(editor.state.doc.toString()).toBe('new\r\nx');
+  });
+
+  it('calls onSave on Ctrl+S and prevents the browser default', () => {
+    const { editor, onSave } = mount('a');
+    const event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, bubbles: true, cancelable: true });
+    editor.contentDOM.dispatchEvent(event);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('does not swallow keys it does not handle', () => {
+    const { editor } = mount('a');
+    const seen = vi.fn();
+    document.addEventListener('keydown', seen);
+    const event = new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true, cancelable: true });
+    editor.contentDOM.dispatchEvent(event);
+    document.removeEventListener('keydown', seen);
+    expect(seen).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('diffRange', () => {
+  it('returns null for identical texts', () => {
+    expect(diffRange('same\n', 'same\n')).toBeNull();
+  });
+
+  it('finds an appended tail', () => {
+    expect(diffRange('abc', 'abcdef')).toEqual({ from: 3, to: 3, insert: 'def' });
+  });
+
+  it('finds a removed tail', () => {
+    expect(diffRange('abcdef', 'abc')).toEqual({ from: 3, to: 6, insert: '' });
+  });
+
+  it('finds a prepended head', () => {
+    expect(diffRange('def', 'abcdef')).toEqual({ from: 0, to: 0, insert: 'abc' });
+  });
+
+  it('finds the differing middle', () => {
+    expect(diffRange('one\ntwo\nthree\n', 'one\n2\nthree\n')).toEqual({ from: 4, to: 7, insert: '2' });
+  });
+
+  it('never overlaps prefix and suffix on repeated characters', () => {
+    expect(diffRange('aaa', 'aaaa')).toEqual({ from: 3, to: 3, insert: 'a' });
+    expect(diffRange('aaaa', 'aa')).toEqual({ from: 2, to: 4, insert: '' });
+  });
+
+  it('replaces a whole different text', () => {
+    expect(diffRange('abc', 'xyz')).toEqual({ from: 0, to: 3, insert: 'xyz' });
+  });
+
+  it('does not split a surrogate pair', () => {
+    const change = diffRange('a\u{1F600}b', 'a\u{1F601}b')!;
+    expect(change).toEqual({ from: 1, to: 3, insert: '\u{1F601}' });
+  });
+
+  it('reconstructs the new text when applied', () => {
+    const pairs: [string, string][] = [['', 'x'], ['x', ''], ['hello world\n', 'theirs\n'], ['a\rb', 'a\r\nb']];
+    for (const [oldText, newText] of pairs) {
+      const change = diffRange(oldText, newText)!;
+      expect(oldText.slice(0, change.from) + change.insert + oldText.slice(change.to)).toBe(newText);
+    }
+  });
+});
