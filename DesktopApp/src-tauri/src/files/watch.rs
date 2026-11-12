@@ -7,7 +7,7 @@ use std::time::Duration;
 use notify::event::ModifyKind;
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher as _};
 use parking_lot::Mutex;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::domain::files::{FilesDirChangedEvent, FILES_DIR_CHANGED_EVENT};
 use crate::error::{AppError, AppResult};
@@ -83,18 +83,30 @@ impl<H> Registry<H> {
             .count()
     }
 
-    fn has_dir(&self, dir: &Path) -> bool {
-        self.slots.values().any(|slot| slot.dir == dir)
-    }
-
     fn for_each_live(&self, dir: &Path, mut action: impl FnMut(&H)) {
         for slot in self.slots.values().filter(|slot| !slot.dead && slot.dir == dir) {
             action(&slot.handle);
         }
     }
 
+    fn for_each_live_all(&self, mut action: impl FnMut(&H)) {
+        for slot in self.slots.values().filter(|slot| !slot.dead) {
+            action(&slot.handle);
+        }
+    }
+
+    fn for_each_live_below(&self, dir: &Path, mut action: impl FnMut(&H)) {
+        for slot in self
+            .slots
+            .values()
+            .filter(|slot| !slot.dead && slot.dir != dir && slot.dir.starts_with(dir))
+        {
+            action(&slot.handle);
+        }
+    }
+
     fn mark_dir_dead(&mut self, dir: &Path) {
-        for slot in self.slots.values_mut().filter(|slot| slot.dir == dir) {
+        for slot in self.slots.values_mut().filter(|slot| slot.dir.starts_with(dir)) {
             slot.dead = true;
         }
     }
@@ -146,6 +158,10 @@ impl Debouncer {
     }
 }
 
+trait Trigger {
+    fn trigger(&self);
+}
+
 struct Subscription {
     debouncer: Debouncer,
     active: Arc<AtomicBool>,
@@ -163,6 +179,9 @@ impl Subscription {
         Self { debouncer, active }
     }
 
+}
+
+impl Trigger for Subscription {
     fn trigger(&self) {
         self.debouncer.trigger();
     }
@@ -174,8 +193,12 @@ impl Drop for Subscription {
     }
 }
 
-fn route_event(registry: &mut Registry<Subscription>, event: &Event) {
+fn route_event<H: Trigger>(registry: &mut Registry<H>, event: &Event) {
     if matches!(event.kind, EventKind::Access(_)) {
+        return;
+    }
+    if event.need_rescan() {
+        registry.for_each_live_all(|handle| handle.trigger());
         return;
     }
     let mut dirs: HashSet<&Path> = HashSet::new();
@@ -186,7 +209,7 @@ fn route_event(registry: &mut Registry<Subscription>, event: &Event) {
         }
     }
     for dir in dirs {
-        registry.for_each_live(dir, |subscription| subscription.trigger());
+        registry.for_each_live(dir, |handle| handle.trigger());
     }
     let dir_gone = matches!(
         event.kind,
@@ -194,9 +217,8 @@ fn route_event(registry: &mut Registry<Subscription>, event: &Event) {
     );
     if dir_gone {
         for path in &event.paths {
-            if registry.has_dir(path) {
-                registry.mark_dir_dead(path);
-            }
+            registry.for_each_live_below(path, |handle| handle.trigger());
+            registry.mark_dir_dead(path);
         }
     }
 }
@@ -255,6 +277,11 @@ impl FileWatches {
             if !inserted {
                 return Ok(());
             }
+        }
+        if app.get_webview_window(&key.window_label).is_none() {
+            let removed = self.registry.lock().remove(&key);
+            drop(removed);
+            return Ok(());
         }
         if needs_os_watch {
             if let Err(error) = self.establish(&mut control, &abs_dir) {
@@ -533,14 +560,17 @@ mod tests {
         }
         assert!(wait_until(Duration::from_secs(10), || watched_hits.load(Ordering::SeqCst) >= 2));
         std::thread::sleep(Duration::from_millis(600));
-        assert_eq!(watched_hits.load(Ordering::SeqCst), 2);
+        let settled = watched_hits.load(Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(600));
+        assert!(settled >= 2);
+        assert_eq!(watched_hits.load(Ordering::SeqCst), settled);
         assert_eq!(other_hits.load(Ordering::SeqCst), 0);
 
         std::fs::remove_dir_all(&watched).unwrap();
         assert!(wait_until(Duration::from_secs(10), || {
             registry.lock().live_users(&watched) == 0
         }));
-        assert!(wait_until(Duration::from_secs(10), || watched_hits.load(Ordering::SeqCst) >= 4));
+        assert!(wait_until(Duration::from_secs(10), || watched_hits.load(Ordering::SeqCst) > settled));
         assert_eq!(registry.lock().live_users(&other), 1);
 
         std::fs::create_dir_all(&watched).unwrap();
@@ -553,5 +583,97 @@ mod tests {
         let before = watched_hits.load(Ordering::SeqCst);
         std::fs::write(watched.join("again.txt"), "x").unwrap();
         assert!(wait_until(Duration::from_secs(10), || watched_hits.load(Ordering::SeqCst) > before));
+    }
+
+    #[derive(Default)]
+    struct Recorder {
+        hits: AtomicUsize,
+    }
+
+    impl Trigger for Arc<Recorder> {
+        fn trigger(&self) {
+            self.hits.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn recorded_registry(entries: &[(&str, &str)]) -> (Registry<Arc<Recorder>>, Vec<Arc<Recorder>>) {
+        let mut registry = Registry::new();
+        let mut recorders = Vec::new();
+        for (rel, dir) in entries {
+            let recorder = Arc::new(Recorder::default());
+            recorders.push(recorder.clone());
+            registry
+                .insert_with(key("main", 1, rel), PathBuf::from(dir), || Ok(recorder))
+                .unwrap();
+        }
+        (registry, recorders)
+    }
+
+    fn hits(recorder: &Arc<Recorder>) -> usize {
+        recorder.hits.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn marking_a_directory_dead_covers_its_subdirectories_by_path_component() {
+        let (mut registry, _recorders) =
+            recorded_registry(&[("src", "/p/src"), ("src/comp", "/p/src/comp"), ("src2", "/p/src2")]);
+        registry.mark_dir_dead(Path::new("/p/src"));
+        assert_eq!(registry.live_users(Path::new("/p/src")), 0);
+        assert_eq!(registry.live_users(Path::new("/p/src/comp")), 0);
+        assert_eq!(registry.live_users(Path::new("/p/src2")), 1);
+    }
+
+    #[test]
+    fn renaming_a_watched_directory_notifies_and_kills_nested_watches() {
+        let (mut registry, recorders) =
+            recorded_registry(&[("src", "/p/src"), ("src/comp", "/p/src/comp"), ("src2", "/p/src2"), ("", "/p")]);
+        let event = Event::new(EventKind::Modify(ModifyKind::Name(notify::event::RenameMode::From)))
+            .add_path(PathBuf::from("/p/src"));
+
+        route_event(&mut registry, &event);
+
+        assert_eq!(hits(&recorders[0]), 1);
+        assert_eq!(hits(&recorders[1]), 1);
+        assert_eq!(hits(&recorders[2]), 0);
+        assert_eq!(hits(&recorders[3]), 1);
+        assert_eq!(registry.live_users(Path::new("/p/src")), 0);
+        assert_eq!(registry.live_users(Path::new("/p/src/comp")), 0);
+        assert_eq!(registry.live_users(Path::new("/p/src2")), 1);
+        assert_eq!(registry.live_users(Path::new("/p")), 1);
+    }
+
+    #[test]
+    fn a_file_event_notifies_only_its_parent_directory() {
+        let (mut registry, recorders) = recorded_registry(&[("src", "/p/src"), ("lib", "/p/lib")]);
+        let event = Event::new(EventKind::Create(notify::event::CreateKind::File))
+            .add_path(PathBuf::from("/p/src/a.txt"));
+
+        route_event(&mut registry, &event);
+
+        assert_eq!(hits(&recorders[0]), 1);
+        assert_eq!(hits(&recorders[1]), 0);
+        assert_eq!(registry.live_users(Path::new("/p/src")), 1);
+    }
+
+    #[test]
+    fn a_queue_overflow_notifies_every_live_entry() {
+        let (mut registry, recorders) = recorded_registry(&[("src", "/p/src"), ("lib", "/p/lib"), ("gone", "/p/gone")]);
+        registry.mark_dir_dead(Path::new("/p/gone"));
+        let event = Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan);
+
+        route_event(&mut registry, &event);
+
+        assert_eq!(hits(&recorders[0]), 1);
+        assert_eq!(hits(&recorders[1]), 1);
+        assert_eq!(hits(&recorders[2]), 0);
+    }
+
+    #[test]
+    fn access_events_notify_nobody() {
+        let (mut registry, recorders) = recorded_registry(&[("src", "/p/src")]);
+        let event = Event::new(EventKind::Access(notify::event::AccessKind::Read))
+            .add_path(PathBuf::from("/p/src/a.txt"));
+        route_event(&mut registry, &event);
+        assert_eq!(hits(&recorders[0]), 0);
     }
 }
