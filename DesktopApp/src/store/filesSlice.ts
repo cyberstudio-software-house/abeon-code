@@ -38,6 +38,7 @@ const emptySearch: FileSearch = { query: '', status: 'idle', results: [], trunca
 
 const watchCounts = new Map<string, number>();
 const watchChains = new Map<string, Promise<void>>();
+const failedWatches = new Set<string>();
 const panelWatches = new Map<number, Set<string>>();
 const listTokens = new Map<string, number>();
 let searchToken = 0;
@@ -55,6 +56,34 @@ function nextListToken(key: string): number {
 function enqueueWatch(key: string, task: () => Promise<void>) {
   const next = (watchChains.get(key) ?? Promise.resolve()).then(task).catch(() => undefined);
   watchChains.set(key, next);
+}
+
+function sameEntries(left: FileEntry[], right: FileEntry[]): boolean {
+  return left.length === right.length
+    && left.every((entry, index) => {
+      const other = right[index];
+      return entry.name === other.name && entry.kind === other.kind && entry.ignored === other.ignored;
+    });
+}
+
+async function establishWatch(projectId: number, relDir: string) {
+  const key = dirKey(projectId, relDir);
+  try {
+    await tauri.watchProjectDir(projectId, relDir);
+    failedWatches.delete(key);
+  } catch {
+    failedWatches.add(key);
+    console.warn('[files] watch failed', relDir || '.');
+  }
+}
+
+function retryFailedWatch(projectId: number, relDir: string) {
+  const key = dirKey(projectId, relDir);
+  if (!failedWatches.has(key)) return;
+  enqueueWatch(key, async () => {
+    if (!failedWatches.has(key) || (watchCounts.get(key) ?? 0) === 0) return;
+    await establishWatch(projectId, relDir);
+  });
 }
 
 function cancelSearch() {
@@ -88,10 +117,14 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     try {
       const entries = await tauri.listProjectDir(projectId, relDir);
       if (listTokens.get(key) !== token) return;
-      patchTree(projectId, (tree) => ({
-        ...tree,
-        listings: { ...tree.listings, [relDir]: { status: 'ready', entries } },
-      }));
+      const current = get().fileTrees[projectId]?.listings[relDir];
+      if (current?.status !== 'ready' || !sameEntries(current.entries, entries)) {
+        patchTree(projectId, (tree) => ({
+          ...tree,
+          listings: { ...tree.listings, [relDir]: { status: 'ready', entries } },
+        }));
+      }
+      retryFailedWatch(projectId, relDir);
     } catch {
       if (listTokens.get(key) !== token) return;
       patchTree(projectId, (tree) => ({
@@ -170,8 +203,10 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     toggleFileDir: async (projectId, relDir) => {
       const expanded = get().fileTrees[projectId]?.expanded ?? [];
       if (expanded.includes(relDir)) {
-        patchTree(projectId, (tree) => ({ ...tree, expanded: tree.expanded.filter((dir) => dir !== relDir) }));
-        panelRelease(projectId, relDir);
+        const hidden = (dir: string) => dir === relDir || (relDir === '' ? true : dir.startsWith(`${relDir}/`));
+        const collapsed = expanded.filter(hidden);
+        patchTree(projectId, (tree) => ({ ...tree, expanded: tree.expanded.filter((dir) => !hidden(dir)) }));
+        collapsed.forEach((dir) => panelRelease(projectId, dir));
         return;
       }
       patchTree(projectId, (tree) => ({ ...tree, expanded: [...tree.expanded, relDir] }));
@@ -218,7 +253,8 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       const key = dirKey(projectId, relDir);
       const count = watchCounts.get(key) ?? 0;
       watchCounts.set(key, count + 1);
-      if (count === 0) enqueueWatch(key, () => tauri.watchProjectDir(projectId, relDir));
+      if (count === 0) enqueueWatch(key, () => establishWatch(projectId, relDir));
+      else retryFailedWatch(projectId, relDir);
     },
 
     releaseDirWatch: (projectId, relDir) => {
@@ -230,6 +266,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
         return;
       }
       watchCounts.delete(key);
+      failedWatches.delete(key);
       enqueueWatch(key, () => tauri.unwatchProjectDir(projectId, relDir));
     },
 

@@ -6,9 +6,7 @@ import { FileSearchResults } from './FileSearchResults';
 import { FileTree } from './FileTree';
 
 export function FilesPanel() {
-  const tabs = useStore(state => state.tabs);
-  const activeTabId = useStore(state => state.activeTabId);
-  const projectId = tabs.find(tab => tab.id === activeTabId)?.projectId ?? null;
+  const projectId = useStore(state => state.tabs.find(tab => tab.id === state.activeTabId)?.projectId ?? null);
   const query = useStore(state => state.fileSearch.query);
   const closeFilesPanel = useStore(state => state.closeFilesPanel);
   const setFileSearchQuery = useStore(state => state.setFileSearchQuery);
@@ -33,8 +31,8 @@ export function FilesPanel() {
       event.preventDefault();
       moveFileSearchSelection(event.key === 'ArrowDown' ? 1 : -1);
     } else if (event.key === 'Enter') {
-      const { results, selected } = useStore.getState().fileSearch;
-      if (results[selected] !== undefined) openFileTab(projectId, results[selected]);
+      const { results, selected, status } = useStore.getState().fileSearch;
+      if (status !== 'loading' && results[selected] !== undefined) openFileTab(projectId, results[selected]);
     } else if (event.key === 'Escape' && query !== '') {
       event.preventDefault();
       setFileSearchQuery(projectId, '');

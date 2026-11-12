@@ -19,26 +19,30 @@ vi.mock('../../lib/tauri', async (importOriginal) => {
 vi.mock('sonner', () => ({ toast: toastMock }));
 
 import { useStore } from '../../store';
+import { FILE_SEARCH_DEBOUNCE_MS } from '../../store/filesSlice';
 import { FilesPanel } from './FilesPanel';
 
 const entry = (name: string, kind: 'dir' | 'file' = 'file', ignored = false): FileEntry => ({ name, kind, ignored });
 const ready = (entries: FileEntry[]) => ({ status: 'ready' as const, entries });
 
 const openFileTab = vi.fn();
-const closeFilesPanel = vi.fn();
+const realCloseFilesPanel = useStore.getState().closeFilesPanel;
+const realOpenFileTab = useStore.getState().openFileTab;
 
 function seed(listings: Record<string, ReturnType<typeof ready> | { status: 'error' | 'loading'; entries: FileEntry[] }>, expanded: string[] = [], extra: Record<string, unknown> = {}) {
   useStore.setState({
-    filesPanelOpen: true,
+    filesPanelOpen: false,
     tabs: [{ kind: 'terminal', id: 'tab-1', projectId: 1, title: 't' }],
     activeTabId: 'tab-1',
-    fileTrees: { 1: { expanded, listings } },
-    fileSearch: { query: '', status: 'idle', results: [], truncated: false, selected: 0 },
     gitByProject: {},
     activeAgentPtyId: null,
     openFileTab,
-    closeFilesPanel,
     ...extra,
+  });
+  useStore.setState({
+    filesPanelOpen: true,
+    fileTrees: { 1: { expanded, listings } },
+    fileSearch: { query: '', status: 'idle', results: [], truncated: false, selected: 0 },
   });
 }
 
@@ -46,6 +50,8 @@ const encode = (text: string) => btoa(unescape(encodeURIComponent(text)));
 
 describe('FilesPanel', () => {
   beforeEach(() => {
+    realCloseFilesPanel();
+    useStore.setState({ openFileTab: realOpenFileTab });
     vi.clearAllMocks();
     tauriMock.listProjectDir.mockResolvedValue([]);
     tauriMock.searchProjectFiles.mockResolvedValue({ results: [], truncated: false });
@@ -56,11 +62,14 @@ describe('FilesPanel', () => {
   });
 
   afterEach(() => {
-    act(() => useStore.getState().closeFilesPanel());
+    vi.useRealTimers();
+    act(() => realCloseFilesPanel());
+    useStore.setState({ openFileTab: realOpenFileTab });
   });
 
   it('renders the header, a focused search box and a close button', () => {
-    seed({ '': ready([]) });
+    const closeFilesPanel = vi.fn();
+    seed({ '': ready([]) }, [], { closeFilesPanel });
     render(<FilesPanel />);
     expect(screen.getByText('Pliki')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Szukaj pliku…')).toHaveFocus();
@@ -68,7 +77,7 @@ describe('FilesPanel', () => {
     expect(closeFilesPanel).toHaveBeenCalledTimes(1);
   });
 
-  it('renders directories before files and dims ignored entries', () => {
+  it('renders the entries in the order the backend returned them and dims ignored ones', () => {
     seed({ '': ready([entry('src', 'dir'), entry('target', 'dir', true), entry('a.ts'), entry('.env', 'file', true)]) });
     render(<FilesPanel />);
     const rows = screen.getAllByRole('treeitem');
@@ -161,14 +170,21 @@ describe('FilesPanel', () => {
   });
 
   describe('search', () => {
-    const type = (value: string) => fireEvent.change(screen.getByPlaceholderText('Szukaj pliku…'), { target: { value } });
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    const type = async (value: string) => {
+      fireEvent.change(screen.getByPlaceholderText('Szukaj pliku…'), { target: { value } });
+      await act(() => vi.advanceTimersByTimeAsync(FILE_SEARCH_DEBOUNCE_MS));
+    };
 
     it('replaces the tree with a flat list showing the directory under each name', async () => {
       tauriMock.searchProjectFiles.mockResolvedValue({ results: ['src/lib/a.ts', 'b.ts'], truncated: false });
       seed({ '': ready([entry('src', 'dir')]) });
       render(<FilesPanel />);
-      type('a');
-      const first = await screen.findByRole('option', { name: /a\.ts/ });
+      await type('a');
+      const first = screen.getByRole('option', { name: /a\.ts/ });
       expect(tauriMock.searchProjectFiles).toHaveBeenCalledWith(1, 'a');
       expect(within(first).getByText('src/lib')).toBeInTheDocument();
       expect(screen.getAllByRole('option')).toHaveLength(2);
@@ -179,8 +195,7 @@ describe('FilesPanel', () => {
       tauriMock.searchProjectFiles.mockResolvedValue({ results: ['a.ts', 'src/b.ts'], truncated: false });
       seed({ '': ready([]) });
       render(<FilesPanel />);
-      type('ts');
-      await screen.findByRole('option', { name: /b\.ts/ });
+      await type('ts');
       const input = screen.getByPlaceholderText('Szukaj pliku…');
       fireEvent.keyDown(input, { key: 'ArrowDown' });
       expect(screen.getByRole('option', { name: /b\.ts/ })).toHaveAttribute('aria-selected', 'true');
@@ -188,12 +203,27 @@ describe('FilesPanel', () => {
       expect(openFileTab).toHaveBeenCalledWith(1, 'src/b.ts');
     });
 
+    it('ignores Enter while a new query is still loading', async () => {
+      tauriMock.searchProjectFiles.mockResolvedValueOnce({ results: ['old.ts'], truncated: false });
+      seed({ '': ready([]) });
+      render(<FilesPanel />);
+      await type('o');
+      const input = screen.getByPlaceholderText('Szukaj pliku…');
+      fireEvent.change(input, { target: { value: 'ol' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(openFileTab).not.toHaveBeenCalled();
+      tauriMock.searchProjectFiles.mockResolvedValueOnce({ results: ['new.ts'], truncated: false });
+      await act(() => vi.advanceTimersByTimeAsync(FILE_SEARCH_DEBOUNCE_MS));
+      fireEvent.keyDown(input, { key: 'Enter' });
+      expect(openFileTab).toHaveBeenCalledWith(1, 'new.ts');
+    });
+
     it('opens a result on click', async () => {
       tauriMock.searchProjectFiles.mockResolvedValue({ results: ['a.ts'], truncated: false });
       seed({ '': ready([]) });
       render(<FilesPanel />);
-      type('a');
-      fireEvent.click(await screen.findByRole('option', { name: /a\.ts/ }));
+      await type('a');
+      fireEvent.click(screen.getByRole('option', { name: /a\.ts/ }));
       expect(openFileTab).toHaveBeenCalledWith(1, 'a.ts');
     });
 
@@ -201,8 +231,8 @@ describe('FilesPanel', () => {
       tauriMock.searchProjectFiles.mockResolvedValue({ results: ['a.ts'], truncated: false });
       seed({ '': ready([entry('src', 'dir')]) });
       render(<FilesPanel />);
-      type('a');
-      await screen.findByRole('option', { name: /a\.ts/ });
+      await type('a');
+      expect(screen.getByRole('option', { name: /a\.ts/ })).toBeInTheDocument();
       fireEvent.keyDown(screen.getByPlaceholderText('Szukaj pliku…'), { key: 'Escape' });
       expect(screen.getByPlaceholderText('Szukaj pliku…')).toHaveValue('');
       expect(screen.getByRole('treeitem', { name: /src/ })).toBeInTheDocument();
@@ -212,24 +242,35 @@ describe('FilesPanel', () => {
     it('says when nothing matches', async () => {
       seed({ '': ready([]) });
       render(<FilesPanel />);
-      type('zzz');
-      expect(await screen.findByText('Brak wyników')).toBeInTheDocument();
+      await type('zzz');
+      expect(screen.getByText('Brak wyników')).toBeInTheDocument();
     });
 
     it('says when the results were cut', async () => {
       tauriMock.searchProjectFiles.mockResolvedValue({ results: ['a.ts'], truncated: true });
       seed({ '': ready([]) });
       render(<FilesPanel />);
-      type('a');
-      expect(await screen.findByText('pokazano pierwsze 200')).toBeInTheDocument();
+      await type('a');
+      expect(screen.getByText('pokazano pierwsze 200')).toBeInTheDocument();
     });
 
     it('shows a failed search', async () => {
       tauriMock.searchProjectFiles.mockRejectedValue(new Error('boom'));
       seed({ '': ready([]) });
       render(<FilesPanel />);
-      type('a');
-      await waitFor(() => expect(screen.getByText('Nie udało się wyszukać plików')).toBeInTheDocument());
+      await type('a');
+      expect(screen.getByText('Nie udało się wyszukać plików')).toBeInTheDocument();
+    });
+
+    it('offers the context menu on results', async () => {
+      tauriMock.searchProjectFiles.mockResolvedValue({ results: ['src/a.ts'], truncated: false });
+      seed({ '': ready([]) });
+      render(<FilesPanel />);
+      await type('a');
+      fireEvent.contextMenu(screen.getByRole('option', { name: /a\.ts/ }));
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Kopiuj ścieżkę' }));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      expect(tauriMock.writeClipboardText).toHaveBeenCalledWith('src/a.ts');
     });
   });
 
@@ -265,6 +306,17 @@ describe('FilesPanel', () => {
       expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     });
 
+    it('refuses to type a path with control characters and says so', async () => {
+      seed({ '': ready([entry('bad\rname.ts'), entry('ok.ts')]) }, [], { activeAgentPtyId: 'pty-1' });
+      render(<FilesPanel />);
+      fireEvent.contextMenu(screen.getAllByRole('treeitem')[0]);
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Wstaw ścieżkę do sesji' }));
+      await act(() => Promise.resolve());
+      expect(tauriMock.ptyWrite).not.toHaveBeenCalled();
+      expect(toastMock.error).toHaveBeenCalledWith('Ścieżka zawiera niedozwolone znaki');
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    });
+
     it('closes on Escape and on an outside click', () => {
       seed({ '': ready([entry('a.ts')]) });
       render(<FilesPanel />);
@@ -274,16 +326,6 @@ describe('FilesPanel', () => {
       openMenu(/a\.ts/);
       fireEvent.mouseDown(document.body);
       expect(screen.queryByRole('menu')).not.toBeInTheDocument();
-    });
-
-    it('offers the menu on search results too', async () => {
-      tauriMock.searchProjectFiles.mockResolvedValue({ results: ['src/a.ts'], truncated: false });
-      seed({ '': ready([]) });
-      render(<FilesPanel />);
-      fireEvent.change(screen.getByPlaceholderText('Szukaj pliku…'), { target: { value: 'a' } });
-      fireEvent.contextMenu(await screen.findByRole('option', { name: /a\.ts/ }));
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Kopiuj ścieżkę' }));
-      await waitFor(() => expect(tauriMock.writeClipboardText).toHaveBeenCalledWith('src/a.ts'));
     });
   });
 });

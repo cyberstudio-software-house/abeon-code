@@ -206,6 +206,89 @@ describe('filesSlice', () => {
     expect(tauriMock.searchProjectFiles).not.toHaveBeenCalled();
   });
 
+  it('collapsing a directory also releases its expanded descendants and keeps their listings', async () => {
+    await state().openFilesPanel();
+    await flush();
+    tauriMock.listProjectDir.mockResolvedValue([entry('x.ts')]);
+    await state().toggleFileDir(1, 'a');
+    await state().toggleFileDir(1, 'a/b');
+    expect(state().fileTrees[1].expanded).toEqual(['a', 'a/b']);
+    await state().toggleFileDir(1, 'a');
+    await flush();
+    expect(state().fileTrees[1].expanded).toEqual([]);
+    expect(tauriMock.unwatchProjectDir).toHaveBeenCalledWith(1, 'a');
+    expect(tauriMock.unwatchProjectDir).toHaveBeenCalledWith(1, 'a/b');
+    expect(state().fileTrees[1].listings['a/b'].entries).toEqual([entry('x.ts')]);
+  });
+
+  it('does not release a sibling whose name only shares a prefix', async () => {
+    await state().openFilesPanel();
+    await flush();
+    await state().toggleFileDir(1, 'a');
+    await state().toggleFileDir(1, 'ab');
+    await state().toggleFileDir(1, 'a');
+    await flush();
+    expect(state().fileTrees[1].expanded).toEqual(['ab']);
+    expect(tauriMock.unwatchProjectDir).not.toHaveBeenCalledWith(1, 'ab');
+  });
+
+  it('retries a failed watch once after a successful load of the directory', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    tauriMock.watchProjectDir.mockRejectedValueOnce(new Error('no watch'));
+    await state().openFilesPanel();
+    await flush();
+    expect(warn).toHaveBeenCalledWith('[files] watch failed', '.');
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(1);
+    await state().reloadFileDir(1, '');
+    await flush();
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(2);
+    await state().reloadFileDir(1, '');
+    await flush();
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
+
+  it('retries a failed watch on the next retain of the directory', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    tauriMock.watchProjectDir.mockRejectedValueOnce(new Error('no watch'));
+    state().retainDirWatch(1, 'src');
+    await flush();
+    state().retainDirWatch(1, 'src');
+    await flush();
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(2);
+    state().releaseDirWatch(1, 'src');
+    state().releaseDirWatch(1, 'src');
+    await flush();
+    warn.mockRestore();
+  });
+
+  it('does not retry a failed watch once the directory is released', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    tauriMock.watchProjectDir.mockRejectedValueOnce(new Error('no watch'));
+    state().retainDirWatch(1, 'src');
+    await flush();
+    state().releaseDirWatch(1, 'src');
+    await flush();
+    await state().reloadFileDir(1, 'src');
+    await flush();
+    expect(tauriMock.watchProjectDir).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it('leaves the store untouched when a reload returns the same entries', async () => {
+    tauriMock.listProjectDir.mockResolvedValue([entry('src', 'dir'), entry('a.txt')]);
+    await state().openFilesPanel();
+    await flush();
+    const before = state().fileTrees;
+    tauriMock.listProjectDir.mockResolvedValue([entry('src', 'dir'), entry('a.txt')]);
+    await state().reloadFileDir(1, '');
+    expect(state().fileTrees).toBe(before);
+    tauriMock.listProjectDir.mockResolvedValue([entry('src', 'dir'), entry('a.txt', 'file', true)]);
+    await state().reloadFileDir(1, '');
+    expect(state().fileTrees).not.toBe(before);
+    expect(state().fileTrees[1].listings[''].entries[1].ignored).toBe(true);
+  });
+
   it('debounces the search and drops a stale response', async () => {
     state().setFileSearchQuery(1, 'a');
     state().setFileSearchQuery(1, 'ab');

@@ -6,6 +6,7 @@ import { Icon } from '../shared/Icon';
 
 const MENU_WIDTH = 208;
 const MENU_HEIGHT = 84;
+const CONTROL_CHARACTERS = /[\x00-\x1f\x7f]/;
 
 export type FileEntryMenuTarget = { x: number; y: number; path: string };
 
@@ -45,6 +46,10 @@ export function FileEntryMenu({ target, onClose }: Props) {
   const insertPath = async () => {
     if (!activeAgentPtyId) return;
     onClose();
+    if (CONTROL_CHARACTERS.test(target.path)) {
+      toast.error('Ścieżka zawiera niedozwolone znaki');
+      return;
+    }
     try {
       await tauri.ptyWrite(activeAgentPtyId, btoa(unescape(encodeURIComponent(`${target.path} `))));
     } catch {
