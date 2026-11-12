@@ -8,7 +8,6 @@ import { RightPanel } from '../right/RightPanel';
 import { TabSwitcher } from '../center/TabSwitcher';
 import { ProjectLauncher } from '../center/ProjectLauncher';
 import { freezeTabPersistence, useStore } from '../../store';
-import { hasNotesToSettle } from '../../store/notesSlice';
 import { dirtyFileTabIds, isFileDirty } from '../../store/filesSlice';
 import { matchesShortcut } from '../../lib/shortcuts';
 import { tauri } from '../../lib/tauri';
@@ -32,7 +31,7 @@ import { UpdateDialog } from '../dialogs/UpdateDialog';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { useUnsavedFilesPrompt } from '../dialogs/useUnsavedFilesPrompt';
 import { RestoreSessionsDialog } from '../dialogs/RestoreSessionsDialog';
-import { isTabLiveProcess } from '../../lib/tabProcess';
+import { useWindowCloseGuard } from './useWindowCloseGuard';
 import { SettingsView } from '../settings/SettingsView';
 
 const LEFT_MIN = 200;
@@ -70,11 +69,10 @@ export function AppShell() {
       .map(t => ({ id: t.id, title: t.title, projectName: projects.find(p => p.id === t.projectId)?.name ?? null })),
     [tabs, pendingResumeTabIds, projects],
   );
-  const [confirmingClose, setConfirmingClose] = useState(false);
-  const [confirmingNotesLoss, setConfirmingNotesLoss] = useState(false);
   const startActivityPolling = useStore(s => s.startActivityPolling);
   const stopActivityPolling = useStore(s => s.stopActivityPolling);
   const { prompt: promptUnsavedFiles, dialog: unsavedFilesDialog } = useUnsavedFilesPrompt();
+  const { confirmingClose, cancelClose, notesLossDialog } = useWindowCloseGuard(promptUnsavedFiles);
 
   usePresenceReporter();
   useSupervisorSnapshot();
@@ -209,49 +207,6 @@ export function AppShell() {
     for (const sessionId of visibleSessionIds(state.layout, state.tabs)) state.clearAttention(sessionId);
   }, [activeTabId, layout]);
 
-  const continueClose = useCallback(() => {
-    const state = useStore.getState();
-    if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
-      setConfirmingClose(true);
-    } else {
-      void getCurrentWebviewWindow().destroy();
-    }
-  }, []);
-
-  const settleNotesThenContinue = useCallback(() => {
-    void useStore.getState().settleNoteDraftsForExit()
-      .catch(() => false)
-      .then(saved => (saved ? continueClose() : setConfirmingNotesLoss(true)));
-  }, [continueClose]);
-
-  const continueAfterFiles = useCallback(() => {
-    if (hasNotesToSettle(useStore.getState())) settleNotesThenContinue();
-    else continueClose();
-  }, [continueClose, settleNotesThenContinue]);
-
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    getCurrentWebviewWindow().onCloseRequested((event) => {
-      const state = useStore.getState();
-      const dirtyFileIds = dirtyFileTabIds(state);
-      if (dirtyFileIds.length > 0) {
-        event.preventDefault();
-        void promptUnsavedFiles(dirtyFileIds).then(proceed => { if (proceed) continueAfterFiles(); });
-        return;
-      }
-      if (hasNotesToSettle(state)) {
-        event.preventDefault();
-        settleNotesThenContinue();
-        return;
-      }
-      if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
-        event.preventDefault();
-        setConfirmingClose(true);
-      }
-    }).then(fn => { unlisten = fn; });
-    return () => { if (unlisten) unlisten(); };
-  }, [continueAfterFiles, settleNotesThenContinue, promptUnsavedFiles]);
-
   const confirmClose = () => {
     const state = useStore.getState();
     freezeTabPersistence();
@@ -372,23 +327,12 @@ export function AppShell() {
           onDismiss={dismissPendingResume}
         />
       )}
-      {confirmingNotesLoss && (
-        <ConfirmDialog
-          title="Nie udało się zapisać notatki"
-          message="Zamknięcie okna spowoduje utratę niezapisanej treści notatki."
-          confirmLabel="Zamknij mimo to"
-          onCancel={() => setConfirmingNotesLoss(false)}
-          onConfirm={() => {
-            setConfirmingNotesLoss(false);
-            continueClose();
-          }}
-        />
-      )}
+      {notesLossDialog}
       {confirmingClose && (
         <ConfirmDialog
           title="Zamknąć AbeonCode?"
           message="Zamknięcie okna zakończy działające w nim procesy."
-          onCancel={() => setConfirmingClose(false)}
+          onCancel={cancelClose}
           onConfirm={confirmClose}
         />
       )}

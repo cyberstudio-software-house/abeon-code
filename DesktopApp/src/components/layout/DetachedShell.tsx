@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect } from 'react';
 import { flushSync } from 'react-dom';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { PaneLayout } from '../center/PaneLayout';
@@ -7,13 +7,11 @@ import { AppHeader } from './AppHeader';
 import { DragHandle, clamp } from './DragHandle';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { useUnsavedFilesPrompt } from '../dialogs/useUnsavedFilesPrompt';
+import { useWindowCloseGuard } from './useWindowCloseGuard';
 import { useStore, adoptedActions } from '../../store';
-import { hasNotesToSettle } from '../../store/notesSlice';
-import { dirtyFileTabIds } from '../../store/filesSlice';
 import { tauri } from '../../lib/tauri';
 import { processManager } from '../../lib/processManager';
 import { formatWindowTitle } from '../../lib/windowTitle';
-import { isTabLiveProcess } from '../../lib/tabProcess';
 import { visibleSessionIds } from '../../lib/visibleTabs';
 import type { WindowMode } from '../../lib/windowMode';
 import { usePresenceReporter } from '../../lib/usePresenceReporter';
@@ -40,9 +38,11 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
     return tab ? (s.projects.find(p => p.id === tab.projectId)?.name ?? null) : null;
   });
 
-  const [confirming, setConfirming] = useState(false);
-  const [confirmingNotesLoss, setConfirmingNotesLoss] = useState(false);
   const { prompt: promptUnsavedFiles, dialog: unsavedFilesDialog } = useUnsavedFilesPrompt();
+  // Closing the window ends every session in it. Prompt when any PTY is live; the
+  // confirm path unmounts the pane layers (flushSync) so TerminalView's cleanup
+  // kills the PTYs before the window closes — otherwise the processes orphan.
+  const { confirmingClose, cancelClose, notesLossDialog } = useWindowCloseGuard(promptUnsavedFiles);
 
   usePresenceReporter();
   useSupervisorSnapshot();
@@ -84,53 +84,6 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
     void adoptedActions.then(() => tauri.emitDetachReady(getCurrentWebviewWindow().label));
   }, [isGroup]);
 
-  const continueClose = useCallback(() => {
-    const state = useStore.getState();
-    if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
-      setConfirming(true);
-    } else {
-      void getCurrentWebviewWindow().destroy();
-    }
-  }, []);
-
-  const settleNotesThenContinue = useCallback(() => {
-    void useStore.getState().settleNoteDraftsForExit()
-      .catch(() => false)
-      .then(saved => (saved ? continueClose() : setConfirmingNotesLoss(true)));
-  }, [continueClose]);
-
-  const continueAfterFiles = useCallback(() => {
-    if (hasNotesToSettle(useStore.getState())) settleNotesThenContinue();
-    else continueClose();
-  }, [continueClose, settleNotesThenContinue]);
-
-  // Closing the window ends every session in it. Prompt when any PTY is live; the
-  // confirm path unmounts the pane layers (flushSync) so TerminalView's cleanup
-  // kills the PTYs before the window closes — otherwise the processes orphan.
-  useEffect(() => {
-    const win = getCurrentWebviewWindow();
-    let unlisten: (() => void) | null = null;
-    win.onCloseRequested((event) => {
-      const state = useStore.getState();
-      const dirtyFileIds = dirtyFileTabIds(state);
-      if (dirtyFileIds.length > 0) {
-        event.preventDefault();
-        void promptUnsavedFiles(dirtyFileIds).then(proceed => { if (proceed) continueAfterFiles(); });
-        return;
-      }
-      if (hasNotesToSettle(state)) {
-        event.preventDefault();
-        settleNotesThenContinue();
-        return;
-      }
-      if (state.tabs.some(t => isTabLiveProcess(t, state.runningActions, state.drawers))) {
-        event.preventDefault();
-        setConfirming(true);
-      }
-    }).then(fn => { unlisten = fn; });
-    return () => { if (unlisten) unlisten(); };
-  }, [continueAfterFiles, settleNotesThenContinue, promptUnsavedFiles]);
-
   const onRightDrag = useCallback(
     (delta: number) => setRightWidth(clamp(rightWidth - delta, RIGHT_MIN, RIGHT_MAX)),
     [rightWidth, setRightWidth],
@@ -160,23 +113,12 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
           <RightPanel detached />
         </div>
       </div>
-      {confirmingNotesLoss && (
-        <ConfirmDialog
-          title="Nie udało się zapisać notatki"
-          message="Zamknięcie okna spowoduje utratę niezapisanej treści notatki."
-          confirmLabel="Zamknij mimo to"
-          onCancel={() => setConfirmingNotesLoss(false)}
-          onConfirm={() => {
-            setConfirmingNotesLoss(false);
-            continueClose();
-          }}
-        />
-      )}
-      {confirming && (
+      {notesLossDialog}
+      {confirmingClose && (
         <ConfirmDialog
           title={isGroup ? 'Zamknąć okno projektu?' : 'Zamknąć sesję?'}
           message="Zamknięcie okna zakończy działające w nim procesy."
-          onCancel={() => setConfirming(false)}
+          onCancel={cancelClose}
           onConfirm={confirmClose}
         />
       )}
