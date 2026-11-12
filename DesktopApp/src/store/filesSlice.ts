@@ -96,6 +96,13 @@ export function dirtyFileTabIds(state: Pick<FilesSlice, 'fileBuffers'>): string[
   return Object.values(state.fileBuffers).filter(isFileDirty).map((buffer) => buffer.tabId);
 }
 
+const fileSavedListeners = new Set<(projectId: number) => void>();
+
+export function onFileSaved(listener: (projectId: number) => void): () => void {
+  fileSavedListeners.add(listener);
+  return () => { fileSavedListeners.delete(listener); };
+}
+
 const emptySearch: FileSearch = { query: '', status: 'idle', results: [], truncated: false, selected: 0 };
 const deletedFields = { disk: 'deleted', version: null } as const;
 
@@ -411,6 +418,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
         runtime.observedVersion = undefined;
         patchBuffer(tabId, { savedContent: sent, version, disk: 'same', saveStatus: current.content === sent ? 'saved' : 'idle' });
       }
+      fileSavedListeners.forEach((listener) => listener(buffer.projectId));
       return 'saved';
     } catch (error) {
       const conflicted = failureCode(error) === 'conflict';

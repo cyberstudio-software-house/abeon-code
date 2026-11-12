@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useStore } from '../store';
+import { onFileSaved } from '../store/filesSlice';
 import { tauri } from './tauri';
 
 export const GIT_REFRESH_DEBOUNCE_MS = 500;
@@ -52,6 +53,7 @@ export function useFilesSync() {
     };
     void start();
 
+    const stopSaveListener = onFileSaved(scheduleGitRefresh);
     const stopTabListener = useStore.subscribe((state, prev) => {
       if (state.activeTabId === prev.activeTabId) return;
       if (state.tabs.find((tab) => tab.id === state.activeTabId)?.kind === 'file') recheckFiles();
@@ -61,6 +63,7 @@ export function useFilesSync() {
     return () => {
       disposed = true;
       if (unlisten) unlisten();
+      stopSaveListener();
       stopTabListener();
       window.removeEventListener('focus', recheckFiles);
       if (recheckCooldown !== null) clearTimeout(recheckCooldown);

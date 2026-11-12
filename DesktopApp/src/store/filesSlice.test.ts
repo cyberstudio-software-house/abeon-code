@@ -18,7 +18,7 @@ vi.mock('../lib/tauri', async (importOriginal) => {
 });
 
 import { useStore } from './index';
-import { FILE_SEARCH_DEBOUNCE_MS, dirtyFileTabIds, isFileDirty, type FileBuffer } from './filesSlice';
+import { FILE_SEARCH_DEBOUNCE_MS, dirtyFileTabIds, isFileDirty, onFileSaved, type FileBuffer } from './filesSlice';
 import { fileName, fileTabId } from '../lib/fileText';
 
 const state = () => useStore.getState();
@@ -579,6 +579,26 @@ describe('filesSlice', () => {
       expect(dirtyFileTabIds(state())).toEqual([]);
       state().editFileBuffer(id, 'again\n');
       expect(buffer(id).saveStatus).toBe('idle');
+    });
+
+    it('tells the save listeners about every save that reached the disk', async () => {
+      const listener = vi.fn();
+      const stop = onFileSaved(listener);
+      const id = await openBuffer();
+      await state().saveFileBuffer(id);
+      state().editFileBuffer(id, 'mine\n');
+      tauriMock.writeProjectFile.mockRejectedValueOnce({ code: 'io', message: 'disk full' });
+      await state().saveFileBuffer(id);
+      tauriMock.writeProjectFile.mockRejectedValueOnce(conflict);
+      await state().saveFileBuffer(id);
+      expect(listener).not.toHaveBeenCalled();
+      await state().saveFileBuffer(id, { force: true });
+      expect(listener).toHaveBeenCalledTimes(1);
+      expect(listener).toHaveBeenCalledWith(1);
+      stop();
+      state().editFileBuffer(id, 'again\n');
+      await state().saveFileBuffer(id);
+      expect(listener).toHaveBeenCalledTimes(1);
     });
 
     it('does not write a clean buffer', async () => {

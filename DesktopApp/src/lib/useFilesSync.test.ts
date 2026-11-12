@@ -2,6 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import type { FilesDirChangedEvent } from '../types';
 
+const saves = vi.hoisted(() => ({ listener: null as ((projectId: number) => void) | null }));
+
+vi.mock('../store/filesSlice', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../store/filesSlice')>();
+  return {
+    ...actual,
+    onFileSaved: (listener: (projectId: number) => void) => {
+      saves.listener = listener;
+      return () => { saves.listener = null; };
+    },
+  };
+});
+
 import { useStore } from '../store';
 import { tauri } from './tauri';
 import { FILES_RECHECK_INTERVAL_MS, useFilesSync } from './useFilesSync';
@@ -94,6 +107,26 @@ describe('useFilesSync', () => {
     expect(refreshGit).not.toHaveBeenCalled();
   });
 
+  it('refreshes git 500 ms after a save, also while the panel is closed', async () => {
+    useStore.setState({ filesPanelOpen: false });
+    await mount();
+    saves.listener?.(1);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(refreshGit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(refreshGit).toHaveBeenCalledTimes(1);
+    expect(refreshGit).toHaveBeenCalledWith(1);
+  });
+
+  it('refreshes git once for a save and the directory event it causes', async () => {
+    await mount();
+    saves.listener?.(1);
+    await vi.advanceTimersByTimeAsync(150);
+    emit({ projectId: 1, relDir: 'src' });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(refreshGit).toHaveBeenCalledTimes(1);
+  });
+
   it('re-checks the files when the window regains focus, at most once per interval plus one trailing run', async () => {
     await mount();
     window.dispatchEvent(new Event('focus'));
@@ -123,11 +156,12 @@ describe('useFilesSync', () => {
     expect(recheckFiles).toHaveBeenCalledTimes(1);
   });
 
-  it('stops the re-check triggers on unmount', async () => {
+  it('stops the re-check triggers and the save listener on unmount', async () => {
     const hook = await mount();
     window.dispatchEvent(new Event('focus'));
     window.dispatchEvent(new Event('focus'));
     hook.unmount();
+    expect(saves.listener).toBeNull();
     await vi.advanceTimersByTimeAsync(FILES_RECHECK_INTERVAL_MS * 2);
     window.dispatchEvent(new Event('focus'));
     expect(recheckFiles).toHaveBeenCalledTimes(1);
