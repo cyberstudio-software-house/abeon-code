@@ -17,6 +17,7 @@ import type { WindowMode } from '../../lib/windowMode';
 import { usePresenceReporter } from '../../lib/usePresenceReporter';
 import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
 import { useNotesSync } from '../../lib/useNotesSync';
+import { useFilesSync } from '../../lib/useFilesSync';
 
 const RIGHT_MIN = 220;
 const RIGHT_MAX = 480;
@@ -43,6 +44,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
   usePresenceReporter();
   useSupervisorSnapshot();
   useNotesSync();
+  useFilesSync();
 
   useEffect(() => { void loadProjects(); }, [loadProjects]);
 

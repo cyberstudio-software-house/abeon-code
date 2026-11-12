@@ -237,7 +237,10 @@ export const createNotesSlice: StateCreator<AppState, [], [], NotesSlice> = (set
     notesLists: {},
     noteDrafts: {},
 
-    openNotesPanel: () => set({ notesPanelOpen: true }),
+    openNotesPanel: () => {
+      get().closeFilesPanel();
+      set({ notesPanelOpen: true });
+    },
 
     closeNotesPanel: async () => {
       if (panelDraftKey() === null) {

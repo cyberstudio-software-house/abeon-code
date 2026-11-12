@@ -12,6 +12,7 @@ import { createGitSlice, type GitSlice } from './gitSlice';
 import { createClickUpSlice, type ClickUpSlice } from './clickupSlice';
 import { createPanesSlice, ROOT_PANE_ID, type PanesSlice } from './panesSlice';
 import { createNotesSlice, type NotesSlice } from './notesSlice';
+import { createFilesSlice, type FilesSlice } from './filesSlice';
 import { createTerminalDrawersSlice, type TerminalDrawersSlice } from './terminalDrawersSlice';
 import {
   clampTerminalFontSize, isTerminalColors, isTerminalCursorStyle, isTerminalFontId, isTerminalLineHeight,
@@ -35,7 +36,7 @@ import type { Provider, SupervisorLevel } from '../types';
 import { isProvider } from '../lib/providers';
 import { migrateClaudeModelSettings } from '../lib/models';
 
-export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice & TerminalDrawersSlice & SupervisorSlice & NotesSlice;
+export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice & TerminalDrawersSlice & SupervisorSlice & NotesSlice & FilesSlice;
 
 export const useStore = create<AppState>()((...a) => ({
   ...createSettingsSlice(...a),
@@ -49,6 +50,7 @@ export const useStore = create<AppState>()((...a) => ({
   ...createTerminalDrawersSlice(...a),
   ...createSupervisorSlice(...a),
   ...createNotesSlice(...a),
+  ...createFilesSlice(...a),
 }));
 
 const PERSIST_KEY = 'abeoncode.settings';
@@ -663,6 +665,11 @@ useStore.subscribe((state) => {
   const tabJustCleared = state.activeTabId === null && prevNotesActiveTabId !== null;
   prevNotesActiveTabId = state.activeTabId;
   if (tabJustCleared && state.notesPanelOpen) void state.closeNotesPanel();
+  if (tabJustCleared && state.filesPanelOpen) state.closeFilesPanel();
+});
+
+useStore.subscribe((state, prev) => {
+  if (state.filesPanelOpen && state.activeTabId !== prev.activeTabId) state.followFilesProject();
 });
 
 // --- Subscribe: on any state change, diff + write localStorage + SQLite ---

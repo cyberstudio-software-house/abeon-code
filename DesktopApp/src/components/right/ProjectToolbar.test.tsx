@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 type MockState = Record<string, unknown>;
 let mockState: MockState;
 
-const { openTerminal, openNotesPanel, openProjectInEditor, toastError } = vi.hoisted(() => ({
+const { openTerminal, openNotesPanel, openFilesPanel, openProjectInEditor, toastError } = vi.hoisted(() => ({
   openTerminal: vi.fn(),
   openNotesPanel: vi.fn(),
+  openFilesPanel: vi.fn(),
   openProjectInEditor: vi.fn(),
   toastError: vi.fn(),
 }));
@@ -30,6 +31,7 @@ function baseState(overrides: Partial<MockState> = {}): MockState {
     activeTabId: 'tab-4',
     openTerminal,
     openNotesPanel,
+    openFilesPanel,
     ...overrides,
   };
 }
@@ -55,9 +57,20 @@ describe('ProjectToolbar', () => {
     expect(openNotesPanel).toHaveBeenCalledTimes(1);
   });
 
-  it('renders the three actions without a pressed state', () => {
+  it('opens the files panel', () => {
     render(<ProjectToolbar />);
-    for (const name of ['Terminal', 'Edytor', 'Notatki']) {
+    fireEvent.click(screen.getByRole('button', { name: 'Pliki' }));
+    expect(openFilesPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it('lays the four actions out in four columns', () => {
+    render(<ProjectToolbar />);
+    expect(screen.getByRole('group', { name: 'Otwórz projekt w' })).toHaveClass('grid-cols-4');
+  });
+
+  it('renders the four actions without a pressed state', () => {
+    render(<ProjectToolbar />);
+    for (const name of ['Terminal', 'Edytor', 'Notatki', 'Pliki']) {
       expect(screen.getByRole('button', { name })).not.toHaveAttribute('aria-pressed');
     }
   });

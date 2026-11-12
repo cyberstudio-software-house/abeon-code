@@ -29,6 +29,7 @@ export function ProjectToolbar() {
   const project = projectId != null ? projects.find(item => item.id === projectId) ?? null : null;
   const openTerminal = useStore(state => state.openTerminal);
   const openNotesPanel = useStore(state => state.openNotesPanel);
+  const openFilesPanel = useStore(state => state.openFilesPanel);
 
   if (!project) return null;
 
@@ -39,7 +40,7 @@ export function ProjectToolbar() {
   };
 
   return (
-    <div role="group" aria-label="Otwórz projekt w" className="grid shrink-0 grid-cols-3 gap-0.5 rounded-[10px] border border-border bg-sunken p-[3px]">
+    <div role="group" aria-label="Otwórz projekt w" className="grid shrink-0 grid-cols-4 gap-0.5 rounded-[10px] border border-border bg-sunken p-[3px]">
       <ToolbarButton
         icon="terminal"
         label="Terminal"
@@ -54,6 +55,11 @@ export function ProjectToolbar() {
         icon="notebook"
         label="Notatki"
         onClick={openNotesPanel}
+      />
+      <ToolbarButton
+        icon="folder"
+        label="Pliki"
+        onClick={() => void openFilesPanel()}
       />
     </div>
   );

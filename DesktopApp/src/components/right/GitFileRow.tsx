@@ -8,6 +8,8 @@ const STATUS_COLOR: Record<string, string> = {
   '?': 'text-muted',
 };
 
+export const gitStatusColor = (status: string) => STATUS_COLOR[status] ?? 'text-muted';
+
 type Props = {
   file: GitFile;
   active?: boolean;
@@ -21,7 +23,7 @@ export function GitFileRow({ file, active, onClick }: Props) {
       onClick={onClick}
       className={`w-full h-7 flex items-center gap-2 px-1.5 rounded-md hover:bg-bg-elev-2 transition-colors text-left ${active ? 'bg-bg-elev-2' : ''}`}
     >
-      <span className={`font-mono text-[11px] w-3.5 font-medium ${STATUS_COLOR[file.status] ?? 'text-muted'}`}>
+      <span className={`font-mono text-[11px] w-3.5 font-medium ${gitStatusColor(file.status)}`}>
         {file.status}
       </span>
       <span className="flex-1 min-w-0 font-mono text-[12px] text-fg path-ellipsis">

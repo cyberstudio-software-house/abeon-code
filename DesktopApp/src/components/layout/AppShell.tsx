@@ -21,6 +21,7 @@ import { usePresenceReporter } from '../../lib/usePresenceReporter';
 import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
 import { useSupervisorAutoOpen } from '../../lib/useSupervisorAutoOpen';
 import { useNotesSync } from '../../lib/useNotesSync';
+import { useFilesSync } from '../../lib/useFilesSync';
 import { SupervisorPanel } from '../supervisor/SupervisorPanel';
 import { openProjectPath } from '../../lib/openProject';
 import { AppHeader } from './AppHeader';
@@ -72,6 +73,7 @@ export function AppShell() {
   useSupervisorSnapshot();
   useSupervisorAutoOpen();
   useNotesSync();
+  useFilesSync();
 
   useEffect(() => {
     startActivityPolling();
