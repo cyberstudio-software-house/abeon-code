@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useStore } from '../../store';
-import { isFileDirty } from '../../store/filesSlice';
+import { isFileDirty, type FileBufferView } from '../../store/filesSlice';
 import type { Tab } from '../../store/tabsSlice';
 import { fileName, isMarkdownPath } from '../../lib/fileText';
 import { Markdown } from '../history/Markdown';
@@ -35,6 +35,20 @@ function DiskBar({ message, hint, children }: { message: string; hint?: string; 
       <span className="font-medium text-warn">{message}</span>
       {hint && <span className="text-muted">{hint}</span>}
       <span className="ml-auto flex items-center gap-2">{children}</span>
+    </div>
+  );
+}
+
+function NonTextView({ view, path }: { view: Exclude<FileBufferView, { kind: 'text' }>; path: string }) {
+  if (view.kind === 'tooLarge') {
+    return <CenteredMessage>{`Plik jest za duży, aby go otworzyć (${formatSize(view.size)})`}</CenteredMessage>;
+  }
+  if (view.kind === 'binary') {
+    return <CenteredMessage>{`Plik binarny (${formatSize(view.size)})`}</CenteredMessage>;
+  }
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center overflow-hidden bg-bg p-4">
+      <img src={view.dataUrl} alt={fileName(path)} className="max-h-full max-w-full object-contain" />
     </div>
   );
 }
@@ -130,16 +144,13 @@ export function FileTabView({ tab, visible, focused }: Props) {
 
   const { view } = buffer;
 
-  if (view.kind === 'tooLarge') {
-    return <CenteredMessage>{`Plik jest za duży, aby go otworzyć (${formatSize(view.size)})`}</CenteredMessage>;
-  }
-  if (view.kind === 'binary') {
-    return <CenteredMessage>{`Plik binarny (${formatSize(view.size)})`}</CenteredMessage>;
-  }
-  if (view.kind === 'image') {
+  if (view.kind !== 'text') {
     return (
-      <div className="flex h-full min-h-0 items-center justify-center overflow-hidden bg-bg p-4">
-        <img src={view.dataUrl} alt={fileName(buffer.path)} className="max-h-full max-w-full object-contain" />
+      <div className="flex h-full min-h-0 flex-col">
+        {buffer.disk === 'deleted' && <DiskBar message="Plik został usunięty" />}
+        <div className="min-h-0 flex-1">
+          <NonTextView view={view} path={buffer.path} />
+        </div>
       </div>
     );
   }

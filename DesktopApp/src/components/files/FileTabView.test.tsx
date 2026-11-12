@@ -354,6 +354,21 @@ describe('FileTabView', () => {
     expect(screen.queryByLabelText('editor')).not.toBeInTheDocument();
   });
 
+  it.each([
+    ['an image', 'assets/logo.png', { kind: 'image', data_url: 'data:image/png;base64,AAAA', version: 'v1', size: 4 }],
+    ['a binary file', 'tool.bin', { kind: 'binary', size: 2048 }],
+    ['a too large file', 'big.log', { kind: 'tooLarge', size: 1_572_864 }],
+  ] as const)('shows the deleted bar for %s without offering to save it', async (_label, path, file) => {
+    const { tab } = await open(path, file);
+    expect(screen.queryByText('Plik został usunięty')).not.toBeInTheDocument();
+    act(() => {
+      useStore.setState((s) => ({ fileBuffers: { ...s.fileBuffers, [tab.id]: { ...s.fileBuffers[tab.id], disk: 'deleted', version: null } } }));
+    });
+    expect(screen.getByText('Plik został usunięty')).toBeInTheDocument();
+    expect(screen.queryByText('Zapis utworzy go ponownie.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Zapisz/ })).not.toBeInTheDocument();
+  });
+
   it('shows the load error with a retry that loads the file again', async () => {
     const tab = makeTab('src/a.ts');
     useStore.setState((s) => ({ tabs: [...s.tabs, tab] }));
