@@ -11,6 +11,7 @@ function SwitcherIcon({ tab }: { tab: Tab }) {
   if (tab.kind === 'terminal') return <>$</>;
   if (tab.kind === 'providerPicker') return <>+</>;
   if (tab.kind === 'note') return <>✎</>;
+  if (tab.kind === 'file') return <>▤</>;
   return <>▶</>;
 }
 

@@ -3,6 +3,7 @@ import { useStore } from './index';
 import { findLeaf } from '../lib/paneTree';
 import { noteTabId, sessionTabFromMode, tabsFromGroupMode } from './tabsSlice';
 import type { GroupWindowMode } from '../lib/windowMode';
+import { fileTabId } from '../lib/fileText';
 
 describe('tabsSlice mruOrder', () => {
   beforeEach(() => {
@@ -459,6 +460,61 @@ describe('tabsFromGroupMode with notes', () => {
       tabs: [{ kind: 'note', id: 'note:5', noteId: 5, title: 'X' }],
     };
     expect(tabsFromGroupMode(mode)).toEqual([{ kind: 'note', id: 'note:5', projectId: 5, noteId: 5, title: 'X' }]);
+  });
+});
+
+describe('file tabs', () => {
+  beforeEach(() => {
+    useStore.setState({ tabs: [], activeTabId: null, mruOrder: [], navHistory: [], navIndex: 0 });
+  });
+
+  it('openFileTab adds the tab, activates it and returns its id', () => {
+    const id = useStore.getState().openFileTab(1, 'src/a.ts');
+    const s = useStore.getState();
+    expect(id).toBe('file:1:src/a.ts');
+    expect(s.tabs).toEqual([{ kind: 'file', id: 'file:1:src/a.ts', projectId: 1, path: 'src/a.ts', title: 'a.ts' }]);
+    expect(s.activeTabId).toBe(id);
+    expect(s.mruOrder[0]).toBe(id);
+  });
+
+  it('openFileTab dedupes and re-activates', () => {
+    useStore.getState().openFileTab(1, 'src/a.ts');
+    useStore.getState().openFileTab(1, 'src/b.ts');
+    useStore.getState().openFileTab(1, 'src/a.ts');
+    const s = useStore.getState();
+    expect(s.tabs.map(t => t.id)).toEqual(['file:1:src/a.ts', 'file:1:src/b.ts']);
+    expect(s.activeTabId).toBe('file:1:src/a.ts');
+  });
+
+  it('treats the same path in another project as a different tab', () => {
+    useStore.getState().openFileTab(1, 'src/a.ts');
+    useStore.getState().openFileTab(2, 'src/a.ts');
+    expect(useStore.getState().tabs.map(t => t.id)).toEqual([fileTabId(1, 'src/a.ts'), fileTabId(2, 'src/a.ts')]);
+  });
+
+  it('closes the supervisor panel', () => {
+    useStore.setState({ supervisorPanelOpen: true });
+    useStore.getState().openFileTab(1, 'a.ts');
+    expect(useStore.getState().supervisorPanelOpen).toBe(false);
+  });
+
+  it('is not written to the persisted tabs', () => {
+    localStorage.removeItem('abeoncode.tabs');
+    useStore.getState().openFileTab(1, 'src/a.ts');
+    const raw = localStorage.getItem('abeoncode.tabs');
+    expect(raw).not.toBeNull();
+    expect(raw).not.toContain('file:1:src/a.ts');
+    expect(JSON.parse(raw as string).tabs).toEqual([]);
+  });
+
+  it('tabsFromGroupMode restores a file descriptor with the window project id', () => {
+    const mode: GroupWindowMode = {
+      view: 'group',
+      projectId: 7,
+      activeTabId: 'file:7:src/a.ts',
+      tabs: [{ kind: 'file', id: 'file:7:src/a.ts', path: 'src/a.ts', title: 'a.ts' }],
+    };
+    expect(tabsFromGroupMode(mode)).toEqual([{ kind: 'file', id: 'file:7:src/a.ts', projectId: 7, path: 'src/a.ts', title: 'a.ts' }]);
   });
 });
 

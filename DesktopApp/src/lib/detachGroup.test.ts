@@ -83,6 +83,13 @@ describe('buildDetachPayload with notes', () => {
   });
 });
 
+describe('buildDetachPayload with files', () => {
+  it('buildDetachPayload keeps file tabs', () => {
+    const fileTab: Tab = { kind: 'file', id: 'file:5:src/a.ts', projectId: 5, path: 'src/a.ts', title: 'a.ts' };
+    expect(buildDetachPayload([fileTab], runningActions)).toEqual([{ kind: 'file', id: 'file:5:src/a.ts', path: 'src/a.ts', title: 'a.ts' }]);
+  });
+});
+
 describe('detachProjectGroup', () => {
   let readyCb: (label: string) => void = () => {};
 

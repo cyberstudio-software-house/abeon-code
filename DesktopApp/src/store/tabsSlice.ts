@@ -7,13 +7,15 @@ import type { AppState } from './index';
 import { pushNav, stepBack, stepForward, pruneNav } from '../lib/navHistory';
 import { findLeaf } from '../lib/paneTree';
 import { promptTabTitle } from '../lib/promptTitle';
+import { fileName, fileTabId } from '../lib/fileText';
 
 export type Tab =
   | { kind: 'session'; id: string; projectId: number; sessionId: string; linkedSessionId?: string; ptyId?: string; title: string; mode: 'history' | 'terminal'; fresh?: boolean; preview?: boolean; provider?: Provider; viewingSubagentId?: string; initialPrompt?: string }
   | { kind: 'action'; id: string; projectId: number; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number }
   | { kind: 'terminal'; id: string; projectId: number; title: string }
   | { kind: 'providerPicker'; id: string; projectId: number; title: string }
-  | { kind: 'note'; id: string; projectId: number; noteId: number; title: string };
+  | { kind: 'note'; id: string; projectId: number; noteId: number; title: string }
+  | { kind: 'file'; id: string; projectId: number; path: string; title: string };
 
 export type TabsSlice = {
   tabs: Tab[];
@@ -30,6 +32,7 @@ export type TabsSlice = {
   openNewSessionTab: (projectId: number) => void;
   openNewTerminalTab: (projectId: number) => void;
   openNoteTab: (noteId: number, projectId: number, title: string) => void;
+  openFileTab: (projectId: number, path: string) => string;
   startSessionTab: (projectId: number, provider: Provider) => void;
   startBackgroundSessionTab: (projectId: number, initialPrompt: string) => string;
   consumeInitialPrompt: (tabId: string) => void;
@@ -104,6 +107,9 @@ export function tabsFromGroupMode(mode: GroupWindowMode): Tab[] {
     }
     if (t.kind === 'note') {
       return { kind: 'note', id: t.id, projectId: mode.projectId, noteId: t.noteId, title: t.title };
+    }
+    if (t.kind === 'file') {
+      return { kind: 'file', id: t.id, projectId: mode.projectId, path: t.path, title: t.title };
     }
     return { kind: 'providerPicker', id: t.id, projectId: mode.projectId, title: t.title };
   });
@@ -255,6 +261,18 @@ export const createTabsSlice: StateCreator<TabsSlice & SettingsSlice & Superviso
       ...withNav(get, id),
       ...closedSupervisorPanel,
     });
+  },
+  openFileTab: (projectId, path) => {
+    const id = fileTabId(projectId, path);
+    const exists = get().tabs.some(t => t.id === id);
+    set({
+      tabs: exists ? get().tabs : [...get().tabs, { kind: 'file', id, projectId, path, title: fileName(path) }],
+      activeTabId: id,
+      mruOrder: moveToFront(get().mruOrder, id),
+      ...withNav(get, id),
+      ...closedSupervisorPanel,
+    });
+    return id;
   },
   setSessionMode: (tabId, mode) => set({
     tabs: get().tabs.map(t => t.id === tabId && t.kind === 'session' ? withSessionMode(t, mode) : t),

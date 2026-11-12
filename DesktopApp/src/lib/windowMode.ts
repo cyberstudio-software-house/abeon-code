@@ -6,7 +6,8 @@ export type DetachedTab =
   | { kind: 'action'; id: string; actionId: number; title: string; status: 'running' | 'exited'; exitCode?: number; ptyId?: string }
   | { kind: 'terminal'; id: string; title: string }
   | { kind: 'providerPicker'; id: string; title: string }
-  | { kind: 'note'; id: string; noteId: number; title: string };
+  | { kind: 'note'; id: string; noteId: number; title: string }
+  | { kind: 'file'; id: string; path: string; title: string };
 
 export type SessionWindowMode = {
   view: 'session';

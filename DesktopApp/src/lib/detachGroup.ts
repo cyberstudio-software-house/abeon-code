@@ -80,6 +80,9 @@ export function buildDetachPayload(tabs: Tab[], runningActions: ActionMap): Deta
     if (tab.kind === 'note') {
       return { kind: 'note', id: tab.id, noteId: tab.noteId, title: tab.title };
     }
+    if (tab.kind === 'file') {
+      return { kind: 'file', id: tab.id, path: tab.path, title: tab.title };
+    }
     return { kind: 'providerPicker', id: tab.id, title: tab.title };
   });
 }

@@ -164,7 +164,7 @@ export function useTabBarActions(
             <TabContextMenu
               canDetach={ctxMenu.tab.kind === 'session' && detachedProjectId == null}
               canDetachGroup={detachedProjectId == null}
-              canRename={ctxMenu.tab.kind !== 'note'}
+              canRename={ctxMenu.tab.kind !== 'note' && ctxMenu.tab.kind !== 'file'}
               onDetach={() => {
                 if (ctxMenu.tab.kind !== 'session') return;
                 void detachSessionTab(ctxMenu.tab, id => {

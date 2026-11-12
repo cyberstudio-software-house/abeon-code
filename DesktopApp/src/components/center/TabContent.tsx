@@ -113,5 +113,12 @@ export function TabPanel({ tab, visible, focused = true, takeFocus, focusToken, 
       </div>
     );
   }
+  if (tab.kind === 'file') {
+    return (
+      <div className={layer(visible)}>
+        <div data-file-tab={tab.id} />
+      </div>
+    );
+  }
   return null;
 }
