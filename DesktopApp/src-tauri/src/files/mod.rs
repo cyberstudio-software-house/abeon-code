@@ -20,3 +20,12 @@ pub const FALLBACK_SKIP_DIRS: &[&str] = &[
 ];
 pub const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdx"];
 pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg"];
+pub const IMAGE_TYPES: &[(&str, &str)] = &[
+    ("png", "image/png"),
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("gif", "image/gif"),
+    ("webp", "image/webp"),
+    ("svg", "image/svg+xml"),
+];
+pub const NOT_REGULAR_FILE: &str = "to nie jest zwykły plik";

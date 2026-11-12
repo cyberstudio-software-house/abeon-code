@@ -330,19 +330,19 @@ describe('FileTabView', () => {
   });
 
   it('shows a message with the size for a file that is too large', async () => {
-    await open('big.log', { kind: 'tooLarge', size: 1_572_864 });
+    await open('big.log', { kind: 'tooLarge', version: 'v1', size: 1_572_864 });
     expect(screen.getByText('Plik jest za duży, aby go otworzyć (1.5 MB)')).toBeInTheDocument();
     expect(screen.queryByLabelText('editor')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Zapisz/ })).not.toBeInTheDocument();
   });
 
   it('shows a message with the size for a binary file', async () => {
-    await open('tool.bin', { kind: 'binary', size: 2048 });
+    await open('tool.bin', { kind: 'binary', version: 'v1', size: 2048 });
     expect(screen.getByText('Plik binarny (2.0 KB)')).toBeInTheDocument();
   });
 
   it('formats small sizes in bytes', async () => {
-    await open('tool.bin', { kind: 'binary', size: 512 });
+    await open('tool.bin', { kind: 'binary', version: 'v1', size: 512 });
     expect(screen.getByText('Plik binarny (512 B)')).toBeInTheDocument();
   });
 
@@ -356,8 +356,8 @@ describe('FileTabView', () => {
 
   it.each([
     ['an image', 'assets/logo.png', { kind: 'image', data_url: 'data:image/png;base64,AAAA', version: 'v1', size: 4 }],
-    ['a binary file', 'tool.bin', { kind: 'binary', size: 2048 }],
-    ['a too large file', 'big.log', { kind: 'tooLarge', size: 1_572_864 }],
+    ['a binary file', 'tool.bin', { kind: 'binary', version: 'v1', size: 2048 }],
+    ['a too large file', 'big.log', { kind: 'tooLarge', version: 'v1', size: 1_572_864 }],
   ] as const)('shows the deleted bar for %s without offering to save it', async (_label, path, file) => {
     const { tab } = await open(path, file);
     expect(screen.queryByText('Plik został usunięty')).not.toBeInTheDocument();

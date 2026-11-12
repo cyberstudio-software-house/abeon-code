@@ -7,7 +7,7 @@ use base64::Engine;
 
 use crate::domain::files::FileContent;
 use crate::error::{AppError, AppResult};
-use crate::files::{IMAGE_EXTENSIONS, MAX_IMAGE_BYTES, MAX_TEXT_BYTES};
+use crate::files::{IMAGE_TYPES, MAX_IMAGE_BYTES, MAX_TEXT_BYTES, NOT_REGULAR_FILE};
 
 pub fn file_version(path: &Path) -> AppResult<Option<String>> {
     match std::fs::metadata(path) {
@@ -18,32 +18,26 @@ pub fn file_version(path: &Path) -> AppResult<Option<String>> {
 }
 
 pub fn read_file(path: &Path) -> AppResult<FileContent> {
-    let display = path.to_string_lossy().into_owned();
-    let not_found = |error: std::io::Error| match error.kind() {
-        ErrorKind::NotFound => AppError::NotFound(display.clone()),
-        _ => AppError::from(error),
-    };
-    if !std::fs::metadata(path).map_err(not_found)?.is_file() {
-        return Err(AppError::InvalidPath {
-            path: display,
-            reason: "to nie jest zwykły plik".to_string(),
-        });
-    }
-    let mut file = File::open(path).map_err(|error| match error.kind() {
-        ErrorKind::NotFound => AppError::NotFound(display.clone()),
-        _ => AppError::from(error),
-    })?;
+    let metadata = std::fs::metadata(path).map_err(|error| open_error(path, error))?;
+    ensure_regular(path, &metadata)?;
+    let file = File::open(path).map_err(|error| open_error(path, error))?;
+    read_opened(path, file)
+}
+
+fn read_opened(path: &Path, mut file: File) -> AppResult<FileContent> {
     let metadata = file.metadata()?;
+    ensure_regular(path, &metadata)?;
     let size = metadata.len();
     let version = version_of(&metadata)?;
 
     if let Some(mime) = image_mime(path) {
         if size > MAX_IMAGE_BYTES {
-            return Ok(FileContent::TooLarge { size });
+            return Ok(FileContent::TooLarge { version, size });
         }
         let bytes = read_limited(&mut file, MAX_IMAGE_BYTES)?;
         if bytes.len() as u64 > MAX_IMAGE_BYTES {
             return Ok(FileContent::TooLarge {
+                version,
                 size: bytes.len() as u64,
             });
         }
@@ -56,16 +50,17 @@ pub fn read_file(path: &Path) -> AppResult<FileContent> {
     }
 
     if size > MAX_TEXT_BYTES {
-        return Ok(FileContent::TooLarge { size });
+        return Ok(FileContent::TooLarge { version, size });
     }
     let bytes = read_limited(&mut file, MAX_TEXT_BYTES)?;
     if bytes.len() as u64 > MAX_TEXT_BYTES {
         return Ok(FileContent::TooLarge {
+            version,
             size: bytes.len() as u64,
         });
     }
     if bytes.contains(&0) {
-        return Ok(FileContent::Binary { size });
+        return Ok(FileContent::Binary { version, size });
     }
     match String::from_utf8(bytes) {
         Ok(content) => Ok(FileContent::Text {
@@ -73,16 +68,32 @@ pub fn read_file(path: &Path) -> AppResult<FileContent> {
             version,
             size,
         }),
-        Err(_) => Ok(FileContent::Binary { size }),
+        Err(_) => Ok(FileContent::Binary { version, size }),
+    }
+}
+
+fn ensure_regular(path: &Path, metadata: &Metadata) -> AppResult<()> {
+    if metadata.is_file() {
+        return Ok(());
+    }
+    Err(AppError::InvalidPath {
+        path: path.to_string_lossy().into_owned(),
+        reason: NOT_REGULAR_FILE.to_string(),
+    })
+}
+
+fn open_error(path: &Path, error: std::io::Error) -> AppError {
+    match error.kind() {
+        ErrorKind::NotFound => AppError::NotFound(path.to_string_lossy().into_owned()),
+        _ => AppError::from(error),
     }
 }
 
 pub(crate) fn version_of(metadata: &Metadata) -> AppResult<String> {
-    let nanos = metadata
-        .modified()?
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
+    let nanos = match metadata.modified()?.duration_since(UNIX_EPOCH) {
+        Ok(after) => after.as_nanos() as i128,
+        Err(before) => -(before.duration().as_nanos() as i128),
+    };
     Ok(format!("{nanos}-{}", metadata.len()))
 }
 
@@ -94,24 +105,17 @@ fn read_limited(file: &mut File, limit: u64) -> AppResult<Vec<u8>> {
 
 fn image_mime(path: &Path) -> Option<&'static str> {
     let extension = path.extension()?.to_string_lossy().to_ascii_lowercase();
-    if !IMAGE_EXTENSIONS.contains(&extension.as_str()) {
-        return None;
-    }
-    Some(match extension.as_str() {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        _ => return None,
-    })
+    IMAGE_TYPES
+        .iter()
+        .find(|(known, _)| *known == extension)
+        .map(|(_, mime)| *mime)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::error::AppError;
-    use crate::files::MAX_TEXT_BYTES;
+    use crate::files::{IMAGE_EXTENSIONS, MAX_TEXT_BYTES};
     use filetime::{set_file_mtime, FileTime};
     use tempfile::tempdir;
 
@@ -153,18 +157,34 @@ mod tests {
         }
     }
 
+    fn version(path: &Path) -> String {
+        file_version(path).unwrap().unwrap()
+    }
+
     #[test]
     fn nul_byte_is_binary() {
         let dir = tempdir().unwrap();
         let path = write(dir.path(), "a.bin", b"ab\0cd");
-        assert_eq!(read_file(&path).unwrap(), FileContent::Binary { size: 5 });
+        assert_eq!(
+            read_file(&path).unwrap(),
+            FileContent::Binary {
+                version: version(&path),
+                size: 5
+            }
+        );
     }
 
     #[test]
     fn invalid_utf8_is_binary() {
         let dir = tempdir().unwrap();
         let path = write(dir.path(), "a.dat", &[0xff, 0xfe, 0xfd]);
-        assert_eq!(read_file(&path).unwrap(), FileContent::Binary { size: 3 });
+        assert_eq!(
+            read_file(&path).unwrap(),
+            FileContent::Binary {
+                version: version(&path),
+                size: 3
+            }
+        );
     }
 
     #[test]
@@ -175,6 +195,7 @@ mod tests {
         assert_eq!(
             read_file(&path).unwrap(),
             FileContent::TooLarge {
+                version: version(&path),
                 size: MAX_TEXT_BYTES + 1
             }
         );
@@ -229,8 +250,65 @@ mod tests {
         assert_eq!(
             read_file(&path).unwrap(),
             FileContent::TooLarge {
+                version: version(&path),
                 size: crate::files::MAX_IMAGE_BYTES + 1
             }
+        );
+    }
+
+    fn mime_of(name: &str) -> String {
+        let dir = tempdir().unwrap();
+        let path = write(dir.path(), name, &[1, 2, 3]);
+        match read_file(&path).unwrap() {
+            FileContent::Image { data_url, .. } => data_url
+                .strip_prefix("data:")
+                .and_then(|rest| rest.split_once(';'))
+                .map(|(mime, _)| mime.to_string())
+                .unwrap(),
+            other => panic!("expected image for {name}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn image_mime_types() {
+        assert_eq!(mime_of("a.jpg"), "image/jpeg");
+        assert_eq!(mime_of("a.JPEG"), "image/jpeg");
+        assert_eq!(mime_of("a.gif"), "image/gif");
+        assert_eq!(mime_of("a.webp"), "image/webp");
+        assert_eq!(mime_of("a.png"), "image/png");
+        assert_eq!(mime_of("a.svg"), "image/svg+xml");
+    }
+
+    #[test]
+    fn image_extensions_match_the_mime_table() {
+        let from_table: Vec<&str> = IMAGE_TYPES
+            .iter()
+            .map(|(extension, _)| *extension)
+            .collect();
+        assert_eq!(from_table, IMAGE_EXTENSIONS);
+    }
+
+    #[test]
+    fn pre_epoch_mtime_keeps_its_sign() {
+        let dir = tempdir().unwrap();
+        let path = write(dir.path(), "old.txt", b"one");
+        set_file_mtime(&path, FileTime::from_unix_time(-1, 0)).unwrap();
+        assert_eq!(version(&path), "-1000000000-3");
+        set_file_mtime(&path, FileTime::from_unix_time(-2, 500_000_000)).unwrap();
+        assert_eq!(version(&path), "-1500000000-3");
+        set_file_mtime(&path, FileTime::from_unix_time(-3, 0)).unwrap();
+        assert_ne!(version(&path), "-1500000000-3");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opened_handle_that_is_not_a_file_is_invalid_path() {
+        let dir = tempdir().unwrap();
+        let handle = File::open(dir.path()).unwrap();
+        let error = read_opened(dir.path(), handle).unwrap_err();
+        assert!(
+            matches!(&error, AppError::InvalidPath { reason, .. } if reason == NOT_REGULAR_FILE),
+            "{error:?}"
         );
     }
 
@@ -277,7 +355,14 @@ mod tests {
         let path = dir.path().join("pipe");
         let c_path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
         assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o644) }, 0);
-        let error = read_file(&path).unwrap_err();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(read_file(&path));
+        });
+        let error = receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("reading a FIFO must not block")
+            .unwrap_err();
         assert!(matches!(error, AppError::InvalidPath { .. }), "{error:?}");
     }
 

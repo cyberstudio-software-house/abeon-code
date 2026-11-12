@@ -467,8 +467,8 @@ describe('filesSlice', () => {
 
     it.each([
       ['an image', 'img/logo.png', { kind: 'image', data_url: 'data:image/png;base64,AA==', version: 'v1', size: 1 }, { kind: 'image', dataUrl: 'data:image/png;base64,AA==' }, 'v1'],
-      ['a binary file', 'bin/app', { kind: 'binary', size: 42 }, { kind: 'binary', size: 42 }, null],
-      ['a too large file', 'logs/big.log', { kind: 'tooLarge', size: 2_000_000 }, { kind: 'tooLarge', size: 2_000_000 }, null],
+      ['a binary file', 'bin/app', { kind: 'binary', version: 'b1', size: 42 }, { kind: 'binary', size: 42 }, 'b1'],
+      ['a too large file', 'logs/big.log', { kind: 'tooLarge', version: 'l1', size: 2_000_000 }, { kind: 'tooLarge', size: 2_000_000 }, 'l1'],
     ] as const)('loads %s without text content', async (_label, path, file, view, version) => {
       const id = await openBuffer(path, file);
       expect(buffer(id)).toMatchObject({ status: 'ready', view, content: '', savedContent: '', version, disk: 'same' });
@@ -1125,9 +1125,9 @@ describe('filesSlice', () => {
     });
 
     it('reloads a binary file once per new version on disk and notices its deletion', async () => {
-      const id = await openBuffer('bin/app', { kind: 'binary', size: 1 });
+      const id = await openBuffer('bin/app', { kind: 'binary', version: 'x0', size: 1 });
       tauriMock.projectFileVersion.mockResolvedValue('x1');
-      tauriMock.readProjectFile.mockResolvedValue({ kind: 'binary', size: 2 });
+      tauriMock.readProjectFile.mockResolvedValue({ kind: 'binary', version: 'x1', size: 2 });
       await state().checkFilesOnDisk(1, 'bin');
       expect(buffer(id)).toMatchObject({ view: { kind: 'binary', size: 2 }, version: 'x1' });
       await state().checkFilesOnDisk(1, 'bin');

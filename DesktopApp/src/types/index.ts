@@ -51,4 +51,5 @@ export type { FileEntryKind } from './FileEntryKind';
 export type { FileEntry } from './FileEntry';
 export type { FileSearchResponse } from './FileSearchResponse';
 export type { FileContent } from './FileContent';
+export type { FileReadResponse } from './FileReadResponse';
 export type { FilesDirChangedEvent } from './FilesDirChangedEvent';

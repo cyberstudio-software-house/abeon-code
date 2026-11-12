@@ -161,7 +161,7 @@ function emptyBuffer(tab: FileTab): FileBuffer {
   };
 }
 
-function loadedFields(file: FileContent, diskVersion: string | null): Partial<FileBuffer> {
+function loadedFields(file: FileContent): Partial<FileBuffer> {
   const fresh = { status: 'ready' as const, error: undefined, saveStatus: 'idle' as const, saveError: undefined, disk: 'same' as const };
   if (file.kind === 'text') {
     const { text, eol, hasBom } = decodeFileText(file.content);
@@ -169,7 +169,7 @@ function loadedFields(file: FileContent, diskVersion: string | null): Partial<Fi
   }
   const blank = { ...fresh, content: '', savedContent: '', eol: 'lf' as const, hasBom: false };
   if (file.kind === 'image') return { ...blank, view: { kind: 'image', dataUrl: file.data_url }, version: file.version };
-  return { ...blank, view: { kind: file.kind, size: file.size }, version: diskVersion };
+  return { ...blank, view: { kind: file.kind, size: file.size }, version: file.version };
 }
 
 function nextListToken(key: string): number {
@@ -344,7 +344,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       const file = await tauri.readProjectFile(buffer.projectId, buffer.path);
       const current = get().fileBuffers[tabId];
       if (!current || !isLatest()) return 'kept';
-      const fields = loadedFields(file, diskVersion ?? null);
+      const fields = loadedFields(file);
       if (keepsUserText(current, intent, fields)) {
         markChanged(tabId, runtime, 'version' in file ? file.version : diskVersion);
         return 'kept';

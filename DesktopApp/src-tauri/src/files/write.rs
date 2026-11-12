@@ -6,6 +6,7 @@ use tempfile::{NamedTempFile, PersistError};
 
 use crate::error::{AppError, AppResult};
 use crate::files::content::version_of;
+use crate::files::NOT_REGULAR_FILE;
 
 pub fn write_file(
     path: &Path,
@@ -141,7 +142,7 @@ fn regular_file(path: &Path) -> AppResult<Option<Metadata>> {
         Ok(metadata) if metadata.is_file() => Ok(Some(metadata)),
         Ok(_) => Err(AppError::InvalidPath {
             path: display(path),
-            reason: "to nie jest zwykły plik".to_string(),
+            reason: NOT_REGULAR_FILE.to_string(),
         }),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
         Err(error) => Err(error.into()),

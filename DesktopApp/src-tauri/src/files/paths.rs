@@ -35,6 +35,32 @@ pub fn resolve_for_write(root: &Path, rel: &str) -> AppResult<PathBuf> {
     }
 }
 
+pub fn watch_dir_of(root: &Path, rel: &str, resolved: &Path) -> String {
+    std::fs::canonicalize(root)
+        .ok()
+        .and_then(|canonical_root| {
+            let dir = resolved.parent()?.strip_prefix(canonical_root).ok()?;
+            slash_joined(dir)
+        })
+        .unwrap_or_else(|| requested_dir(rel))
+}
+
+fn slash_joined(path: &Path) -> Option<String> {
+    let parts: Option<Vec<&str>> = path
+        .components()
+        .map(|component| component.as_os_str().to_str())
+        .collect();
+    parts.map(|parts| parts.join("/"))
+}
+
+fn requested_dir(rel: &str) -> String {
+    let parts: Vec<&str> = rel
+        .split('/')
+        .filter(|part| !part.is_empty() && *part != ".")
+        .collect();
+    parts[..parts.len().saturating_sub(1)].join("/")
+}
+
 fn relative_path(rel: &str) -> AppResult<PathBuf> {
     let mut relative = PathBuf::new();
     for component in Path::new(rel).components() {
@@ -308,6 +334,63 @@ mod tests {
             assert_invalid(resolve_for_write(root.path(), rel));
         }
         assert_invalid(resolve_for_write(root.path(), "upper-link/new"));
+    }
+
+    fn watch_dir(root: &Path, rel: &str) -> String {
+        watch_dir_of(root, rel, &resolve_existing(root, rel).unwrap())
+    }
+
+    #[test]
+    fn watch_dir_is_the_directory_of_the_resolved_file() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("src/deep")).unwrap();
+        fs::write(root.path().join("a.txt"), "x").unwrap();
+        fs::write(root.path().join("src/a.ts"), "x").unwrap();
+        fs::write(root.path().join("src/deep/x"), "x").unwrap();
+        assert_eq!(watch_dir(root.path(), "a.txt"), "");
+        assert_eq!(watch_dir(root.path(), "src/a.ts"), "src");
+        assert_eq!(watch_dir(root.path(), "./src/deep/x"), "src/deep");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watch_dir_follows_symlinks_to_where_the_bytes_live() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("config")).unwrap();
+        fs::create_dir_all(root.path().join("real")).unwrap();
+        fs::create_dir_all(root.path().join("sub")).unwrap();
+        fs::write(root.path().join("config/real.env"), "x").unwrap();
+        fs::write(root.path().join("real/f.txt"), "x").unwrap();
+        fs::write(root.path().join("top.txt"), "x").unwrap();
+        symlink(Path::new("config/real.env"), &root.path().join("link.env"));
+        symlink(Path::new("real"), &root.path().join("alias"));
+        symlink(Path::new("../top.txt"), &root.path().join("sub/top-link"));
+        assert_eq!(watch_dir(root.path(), "link.env"), "config");
+        assert_eq!(watch_dir(root.path(), "alias/f.txt"), "real");
+        assert_eq!(watch_dir(root.path(), "sub/top-link"), "");
+    }
+
+    #[test]
+    fn watch_dir_falls_back_to_the_requested_directory() {
+        let root = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        let outside = elsewhere.path().join("x.txt");
+        assert_eq!(watch_dir_of(root.path(), "a/b.txt", &outside), "a");
+        assert_eq!(watch_dir_of(root.path(), "./b.txt", &outside), "");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watch_dir_with_a_non_utf8_target_directory_falls_back() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let odd = root.path().join(std::ffi::OsStr::from_bytes(&[b'd', 0xff]));
+        fs::create_dir(&odd).unwrap();
+        fs::write(odd.join("f.txt"), "x").unwrap();
+        fs::create_dir(root.path().join("links")).unwrap();
+        symlink(&odd.join("f.txt"), &root.path().join("links/f.txt"));
+        assert_eq!(watch_dir(root.path(), "links/f.txt"), "links");
     }
 
     #[test]

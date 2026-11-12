@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound, FileEntry, FileSearchResponse, FileContent, FilesDirChangedEvent } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound, FileEntry, FileSearchResponse, FileReadResponse, FilesDirChangedEvent } from '../types';
 import type { NotesChangedEvent } from '../types/NotesChangedEvent';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
@@ -51,7 +51,7 @@ export const tauri = {
   searchProjectFiles: (projectId: number, query: string) =>
     invoke<FileSearchResponse>('search_project_files', { projectId, query }),
   readProjectFile: (projectId: number, relPath: string) =>
-    invoke<FileContent>('read_project_file', { projectId, relPath }),
+    invoke<FileReadResponse>('read_project_file', { projectId, relPath }),
   projectFileVersion: (projectId: number, relPath: string) =>
     invoke<string | null>('project_file_version', { projectId, relPath }),
   writeProjectFile: (projectId: number, relPath: string, content: string, expectedVersion: string | null, force: boolean) =>

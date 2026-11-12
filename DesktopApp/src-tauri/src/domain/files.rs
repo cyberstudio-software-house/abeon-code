@@ -43,13 +43,23 @@ pub enum FileContent {
         size: u64,
     },
     Binary {
+        version: String,
         #[ts(type = "number")]
         size: u64,
     },
     TooLarge {
+        version: String,
         #[ts(type = "number")]
         size: u64,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, export_to = "../../src/types/")]
+pub struct FileReadResponse {
+    #[serde(flatten)]
+    pub content: FileContent,
+    pub watch_dir: String,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
