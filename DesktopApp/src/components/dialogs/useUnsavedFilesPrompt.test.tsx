@@ -19,22 +19,29 @@ function Harness({ tabIds }: { tabIds: string[] }) {
 }
 
 const conflict = { code: 'conflict', message: 'conflict: src/b.ts' };
+const conflictText = (paths: string) =>
+  `Nie udało się zapisać: ${paths}. Plik zmienił się na dysku — otwórz zakładkę i wybierz „Nadpisz” albo „Wczytaj ponownie”.`;
 
 describe('useUnsavedFilesPrompt', () => {
   let a: string;
   let b: string;
 
+  const resetFiles = () => {
+    Object.keys(useStore.getState().fileBuffers).forEach((id) => useStore.getState().dropFileBuffer(id));
+    useStore.setState({ tabs: [], fileBuffers: {} });
+  };
+
   beforeEach(async () => {
     vi.clearAllMocks();
     outcome = null;
-    useStore.setState({ tabs: [], fileBuffers: {} });
+    resetFiles();
     mockFileIo();
     a = await seedDirtyFileTab('src/a.ts');
     b = await seedDirtyFileTab('src/b.ts');
   });
 
   afterEach(() => {
-    useStore.setState({ tabs: [], fileBuffers: {} });
+    resetFiles();
   });
 
   const ask = (tabIds: string[]) => {
@@ -78,7 +85,7 @@ describe('useUnsavedFilesPrompt', () => {
     expect(screen.queryByText('Niezapisane zmiany')).toBeNull();
   });
 
-  it('stays open with the error and no longer lists the files that did save', async () => {
+  it('stays open, names the file that changed on disk and no longer lists the files that did save', async () => {
     vi.spyOn(tauri, 'writeProjectFile').mockImplementation(async (_project, path) => {
       if (path === 'src/b.ts') throw conflict;
       return 'v2';
@@ -87,23 +94,102 @@ describe('useUnsavedFilesPrompt', () => {
 
     fireEvent.click(screen.getByText('Zapisz'));
 
-    expect(await screen.findByText('Nie udało się zapisać wszystkich plików.')).toBeTruthy();
+    expect(await screen.findByRole('alert')).toHaveTextContent(conflictText('src/b.ts'));
+    expect(screen.queryByText('Nie udało się zapisać wszystkich plików.')).toBeNull();
     expect(screen.queryByText('src/a.ts')).toBeNull();
     expect(screen.getByText('src/b.ts')).toBeTruthy();
     expect(screen.getByText('Zapisz').closest('button')).not.toBeDisabled();
     await act(async () => {});
   });
 
-  it('keeps the buttons disabled while the save is in flight', async () => {
+  it('names every conflicting file', async () => {
+    vi.spyOn(tauri, 'writeProjectFile').mockRejectedValue(conflict);
+    ask([a, b]);
+
+    fireEvent.click(screen.getByText('Zapisz'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(conflictText('src/a.ts, src/b.ts'));
+    await act(async () => {});
+  });
+
+  it('keeps the generic text for a save that fails for another reason', async () => {
+    vi.spyOn(tauri, 'writeProjectFile').mockRejectedValue({ code: 'io', message: 'disk full' });
+    ask([a]);
+
+    fireEvent.click(screen.getByText('Zapisz'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/^Nie udało się zapisać wszystkich plików\.$/);
+    await act(async () => {});
+  });
+
+  it('shows both texts when one file conflicts and another fails', async () => {
+    vi.spyOn(tauri, 'writeProjectFile').mockImplementation(async (_project, path) => {
+      throw path === 'src/b.ts' ? conflict : { code: 'io', message: 'disk full' };
+    });
+    ask([a, b]);
+
+    fireEvent.click(screen.getByText('Zapisz'));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(conflictText('src/b.ts'));
+    expect(alert).toHaveTextContent('Nie udało się zapisać wszystkich plików.');
+    await act(async () => {});
+  });
+
+  it('disables saving and discarding but not cancelling while the save is in flight', async () => {
     let release!: (version: string) => void;
     vi.spyOn(tauri, 'writeProjectFile').mockImplementation(() => new Promise<string>(resolve => { release = resolve; }));
     ask([a]);
 
     fireEvent.click(screen.getByText('Zapisz'));
 
-    await waitFor(() => expect(screen.getByText('Anuluj').closest('button')).toBeDisabled());
-    expect(screen.getByText('Odrzuć zmiany').closest('button')).toBeDisabled();
+    await waitFor(() => expect(screen.getByText('Odrzuć zmiany').closest('button')).toBeDisabled());
+    expect(screen.getByText('Zapisz').closest('button')).toBeDisabled();
+    expect(screen.getByText('Anuluj').closest('button')).not.toBeDisabled();
     await act(async () => { release('v2'); });
+    await expect(outcome).resolves.toBe(true);
+  });
+
+  it('cancels while saving, keeps the action stopped and ignores the late save result', async () => {
+    let release!: (version: string) => void;
+    vi.spyOn(tauri, 'writeProjectFile').mockImplementation(() => new Promise<string>(resolve => { release = resolve; }));
+    ask([a]);
+    const first = outcome;
+
+    fireEvent.click(screen.getByText('Zapisz'));
+    await waitFor(() => expect(screen.getByText('Odrzuć zmiany').closest('button')).toBeDisabled());
+    fireEvent.click(screen.getByText('Anuluj'));
+
+    await expect(first).resolves.toBe(false);
+    expect(screen.queryByText('Niezapisane zmiany')).toBeNull();
+
+    fireEvent.click(screen.getByText('ask'));
+    const second = outcome;
+    expect(screen.getByText('Niezapisane zmiany')).toBeTruthy();
+    const settled = vi.fn();
+    void second!.then(settled);
+    await act(async () => { release('v2'); });
+
+    expect(settled).not.toHaveBeenCalled();
+    expect(screen.getByText('Niezapisane zmiany')).toBeTruthy();
+    fireEvent.click(screen.getByText('Anuluj'));
+    await expect(second).resolves.toBe(false);
+  });
+
+  it('opens again after a save that never finishes was cancelled with Escape, and discarding still proceeds', async () => {
+    vi.spyOn(tauri, 'writeProjectFile').mockImplementation(() => new Promise<string>(() => undefined));
+    ask([a]);
+    const first = outcome;
+
+    fireEvent.click(screen.getByText('Zapisz'));
+    await waitFor(() => expect(screen.getByText('Zapisz').closest('button')).toBeDisabled());
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await expect(first).resolves.toBe(false);
+
+    fireEvent.click(screen.getByText('ask'));
+    expect(screen.getByText('src/a.ts')).toBeTruthy();
+    expect(screen.getByText('Odrzuć zmiany').closest('button')).not.toBeDisabled();
+    fireEvent.click(screen.getByText('Odrzuć zmiany'));
     await expect(outcome).resolves.toBe(true);
   });
 

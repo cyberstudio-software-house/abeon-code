@@ -59,15 +59,19 @@ describe('UnsavedFilesDialog', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('disables all three buttons and ignores Escape while busy', () => {
-    const { onCancel } = renderDialog({ busy: true });
+  it('disables saving and discarding while busy but keeps Anuluj and Escape working', () => {
+    const { onCancel, onSave, onDiscard } = renderDialog({ busy: true });
 
     expect(screen.getByText('Zapisz').closest('button')).toBeDisabled();
     expect(screen.getByText('Odrzuć zmiany').closest('button')).toBeDisabled();
-    expect(screen.getByText('Anuluj').closest('button')).toBeDisabled();
+    expect(screen.getByText('Anuluj').closest('button')).not.toBeDisabled();
 
     fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onCancel).toHaveBeenCalledTimes(1);
 
-    expect(onCancel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText('Anuluj'));
+    expect(onCancel).toHaveBeenCalledTimes(2);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onDiscard).not.toHaveBeenCalled();
   });
 });

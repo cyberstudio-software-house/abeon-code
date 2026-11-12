@@ -18,11 +18,11 @@ export function UnsavedFilesDialog({ files, onSave, onDiscard, onCancel, busy = 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
-      if (!busy) onCancel();
+      onCancel();
     };
     document.addEventListener('keydown', onKeyDown, { capture: true });
     return () => document.removeEventListener('keydown', onKeyDown, { capture: true });
-  }, [onCancel, busy]);
+  }, [onCancel]);
   return (
     <div className="dialog-backdrop">
       <div role="dialog" aria-modal="true" className="dialog-panel p-5 w-[440px]">
@@ -43,7 +43,7 @@ export function UnsavedFilesDialog({ files, onSave, onDiscard, onCancel, busy = 
         </ul>
         {error && <p role="alert" className="text-[12px] text-danger mb-3">{error}</p>}
         <div className="flex justify-end gap-2">
-          <button onClick={onCancel} disabled={busy} className="btn-secondary">Anuluj</button>
+          <button onClick={onCancel} className="btn-secondary">Anuluj</button>
           <button onClick={onDiscard} disabled={busy} className="btn-danger">Odrzuć zmiany</button>
           <button ref={saveRef} onClick={onSave} disabled={busy} className="btn-primary">Zapisz</button>
         </div>

@@ -249,6 +249,7 @@ describe('AppShell lifecycle', () => {
       });
 
       afterEach(() => {
+        Object.keys(useStore.getState().fileBuffers).forEach(id => useStore.getState().dropFileBuffer(id));
         useStore.setState({ fileBuffers: {} });
       });
 
@@ -294,6 +295,25 @@ describe('AppShell lifecycle', () => {
         expect(tauri.writeProjectFile).not.toHaveBeenCalled();
       });
 
+      it('can still be closed after cancelling a save that never finishes', async () => {
+        vi.spyOn(tauri, 'writeProjectFile').mockImplementation(() => new Promise<string>(() => undefined));
+        render(<AppShell />);
+        closeRequest();
+
+        fireEvent.click(screen.getByText('Zapisz'));
+        await waitFor(() => expect(screen.getByText('Odrzuć zmiany').closest('button')).toBeDisabled());
+        fireEvent.click(screen.getByText('Anuluj'));
+
+        expect(dialogTitle()).toBeNull();
+        expect(destroy).not.toHaveBeenCalled();
+
+        closeRequest();
+        expect(dialogTitle()).toBeTruthy();
+        fireEvent.click(screen.getByText('Odrzuć zmiany'));
+
+        await waitFor(() => expect(destroy).toHaveBeenCalledTimes(1));
+      });
+
       it('keeps the window and the dialog when saving fails', async () => {
         vi.spyOn(tauri, 'writeProjectFile').mockRejectedValue({ code: 'conflict', message: 'conflict: src/a.ts' });
         render(<AppShell />);
@@ -301,7 +321,7 @@ describe('AppShell lifecycle', () => {
 
         fireEvent.click(screen.getByText('Zapisz'));
 
-        expect(await screen.findByText('Nie udało się zapisać wszystkich plików.')).toBeTruthy();
+        expect(await screen.findByText('Nie udało się zapisać: src/a.ts. Plik zmienił się na dysku — otwórz zakładkę i wybierz „Nadpisz” albo „Wczytaj ponownie”.')).toBeTruthy();
         expect(destroy).not.toHaveBeenCalled();
       });
 

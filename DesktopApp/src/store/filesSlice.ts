@@ -42,6 +42,7 @@ export type FileBuffer = {
 };
 export type FileSaveResult = 'saved' | 'conflict' | 'error' | 'clean';
 export type FileReloadResult = 'reloaded' | 'kept' | 'error';
+export type FileSaveFailure = { tabId: string; path: string; result: 'conflict' | 'error' };
 
 export type FilesSlice = {
   filesPanelOpen: boolean;
@@ -65,7 +66,7 @@ export type FilesSlice = {
   keepFileBuffer: (tabId: string) => void;
   dropFileBuffer: (tabId: string) => void;
   checkFilesOnDisk: (projectId: number, relDir: string) => Promise<void>;
-  saveDirtyFiles: (tabIds: string[]) => Promise<boolean>;
+  saveDirtyFiles: (tabIds: string[]) => Promise<FileSaveFailure[]>;
 };
 
 type FileTab = Extract<Tab, { kind: 'file' }>;
@@ -582,7 +583,11 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
 
     saveDirtyFiles: async (tabIds) => {
       const results = await Promise.all(tabIds.map((tabId) => get().saveFileBuffer(tabId)));
-      return results.every((result) => result === 'saved' || result === 'clean');
+      return tabIds.flatMap((tabId, index): FileSaveFailure[] => {
+        const result = results[index];
+        if (result === 'saved' || result === 'clean') return [];
+        return [{ tabId, path: get().fileBuffers[tabId]?.path ?? tabId, result }];
+      });
     },
   };
 };

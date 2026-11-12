@@ -542,7 +542,7 @@ describe('filesSlice', () => {
       first.resolve('v2');
       await expect(save1).resolves.toBe('saved');
       await expect(save2).resolves.toBe('error');
-      await expect(state().saveDirtyFiles([id])).resolves.toBe(false);
+      await expect(state().saveDirtyFiles([id])).resolves.toEqual([{ tabId: id, path: id, result: 'error' }]);
       expect(tauriMock.writeProjectFile).toHaveBeenCalledTimes(1);
     });
 
@@ -1191,20 +1191,28 @@ describe('filesSlice', () => {
       error.mockRestore();
     });
 
-    it('saves several files and reports false when one of them conflicts', async () => {
+    it('saves several files and reports which ones failed and why', async () => {
       const a = await openBuffer('src/a.ts');
       const b = await openBuffer('src/b.ts');
       const c = await openBuffer('src/c.ts');
+      const d = await openBuffer('src/d.ts');
       state().editFileBuffer(a, 'a2');
       state().editFileBuffer(b, 'b2');
-      tauriMock.writeProjectFile.mockImplementation((_projectId: number, path: string) =>
-        path === 'src/b.ts' ? Promise.reject(conflict) : Promise.resolve('v2'));
+      state().editFileBuffer(d, 'd2');
+      tauriMock.writeProjectFile.mockImplementation((_projectId: number, path: string) => {
+        if (path === 'src/b.ts') return Promise.reject(conflict);
+        if (path === 'src/d.ts') return Promise.reject({ code: 'io', message: 'disk full' });
+        return Promise.resolve('v2');
+      });
       tauriMock.projectFileVersion.mockResolvedValue('v9');
-      await expect(state().saveDirtyFiles([a, b, c])).resolves.toBe(false);
+      await expect(state().saveDirtyFiles([a, b, c, d])).resolves.toEqual([
+        { tabId: b, path: 'src/b.ts', result: 'conflict' },
+        { tabId: d, path: 'src/d.ts', result: 'error' },
+      ]);
       expect(isFileDirty(buffer(a))).toBe(false);
       expect(buffer(b)).toMatchObject({ content: 'b2', disk: 'changed' });
       state().editFileBuffer(c, 'c2');
-      await expect(state().saveDirtyFiles([a, c])).resolves.toBe(true);
+      await expect(state().saveDirtyFiles([a, c])).resolves.toEqual([]);
       expect(isFileDirty(buffer(c))).toBe(false);
     });
 

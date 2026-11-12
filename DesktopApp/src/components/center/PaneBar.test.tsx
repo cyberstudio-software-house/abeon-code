@@ -578,7 +578,7 @@ describe('PaneBar unsaved file guard', () => {
 
     fireEvent.click(screen.getByText('Zapisz'));
 
-    expect(await screen.findByText('Nie udało się zapisać wszystkich plików.')).toBeInTheDocument();
+    expect(await screen.findByText('Nie udało się zapisać: src/a.ts. Plik zmienił się na dysku — otwórz zakładkę i wybierz „Nadpisz” albo „Wczytaj ponownie”.')).toBeInTheDocument();
     expect(useStore.getState().tabs).toHaveLength(1);
   });
 
