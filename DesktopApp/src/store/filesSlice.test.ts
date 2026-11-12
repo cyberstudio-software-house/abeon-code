@@ -820,6 +820,17 @@ describe('filesSlice', () => {
       expect(tauriMock.writeProjectFile).toHaveBeenCalledWith(1, 'src/empty.txt', '', null, false);
     });
 
+    it('writes an emptied buffer on a forced save although it equals the saved content', async () => {
+      const id = await openBuffer('src/a.ts', textFile(''));
+      useStore.setState((s) => ({ fileBuffers: { ...s.fileBuffers, [id]: { ...s.fileBuffers[id], disk: 'changed' } } }));
+      expect(buffer(id)).toMatchObject({ content: '', savedContent: '', disk: 'changed' });
+      await expect(state().saveFileBuffer(id)).resolves.toBe('clean');
+      expect(tauriMock.writeProjectFile).not.toHaveBeenCalled();
+      tauriMock.writeProjectFile.mockResolvedValueOnce('v9');
+      await expect(state().saveFileBuffer(id, { force: true })).resolves.toBe('saved');
+      expect(tauriMock.writeProjectFile).toHaveBeenCalledWith(1, 'src/a.ts', '', 'v1', true);
+    });
+
     it('does nothing after its own save', async () => {
       const id = await openBuffer();
       state().editFileBuffer(id, 'mine\n');

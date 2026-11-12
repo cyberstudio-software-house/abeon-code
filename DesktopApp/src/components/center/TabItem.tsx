@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
 import { useStore } from '../../store';
 import { selectSessionActivity } from '../../store/sessionsSlice';
+import { isFileDirty } from '../../store/filesSlice';
 import { ACTIVITY_DOT, ACTIVITY_LABEL, activityPulses } from '../../lib/activity';
 import type { Tab } from '../../store/tabsSlice';
 import type { SessionActivity } from '../../types';
@@ -49,6 +50,15 @@ function TabMarker({ tab, actionColor }: { tab: Tab; actionColor?: string }) {
   if (tab.kind === 'note') return <Icon name="notebook" className={MARKER_ICON} />;
   if (tab.kind === 'file') return <Icon name="file" className={MARKER_ICON} />;
   return <span className={`w-1.5 h-1.5 shrink-0 rounded-full bg-current ${actionColor ?? 'text-muted'}`} />;
+}
+
+function DirtyFileMarker({ tabId }: { tabId: string }) {
+  const dirty = useStore(s => {
+    const buffer = s.fileBuffers[tabId];
+    return buffer !== undefined && isFileDirty(buffer);
+  });
+  if (!dirty) return null;
+  return <span className="shrink-0 text-accent" title="Niezapisane zmiany" aria-hidden="true">●</span>;
 }
 
 export type TabItemProps = {
@@ -121,6 +131,7 @@ export function TabItem({
           {tab.title}
         </span>
       )}
+      {tab.kind === 'file' && <DirtyFileMarker tabId={tab.id} />}
       <span
         role="button"
         aria-label="Zamknij tab"

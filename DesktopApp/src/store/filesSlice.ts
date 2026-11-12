@@ -379,7 +379,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     const buffer = get().fileBuffers[tabId];
     if (!buffer || !isAlive(tabId, runtime)) return 'error';
     if (buffer.status !== 'ready' || buffer.view.kind !== 'text') return 'clean';
-    if (buffer.content === buffer.savedContent && buffer.disk !== 'deleted') return 'clean';
+    if (!force && buffer.content === buffer.savedContent && buffer.disk !== 'deleted') return 'clean';
     const sent = buffer.content;
     patchBuffer(tabId, { saveStatus: 'saving', saveError: undefined });
     try {
