@@ -92,6 +92,29 @@ describe('checkForUpdate', () => {
     expect(plugin.download).toHaveBeenCalledTimes(2);
   });
 
+  it('installs only once, so a retry after a refusal before the relaunch does not install again', async () => {
+    const plugin = pluginUpdate(async () => undefined);
+    check.mockResolvedValue(plugin);
+    const update = await checkForUpdate();
+    await update!.download();
+    await update!.install();
+    await update!.install();
+    expect(plugin.install).toHaveBeenCalledTimes(1);
+  });
+
+  it('installs again after a failed install, without downloading again', async () => {
+    const plugin = pluginUpdate(async () => undefined);
+    plugin.install.mockRejectedValueOnce(new Error('pkexec dismissed'));
+    check.mockResolvedValue(plugin);
+    const update = await checkForUpdate();
+    await update!.download();
+    await expect(update!.install()).rejects.toThrow('pkexec dismissed');
+    await update!.download();
+    await update!.install();
+    expect(plugin.download).toHaveBeenCalledTimes(1);
+    expect(plugin.install).toHaveBeenCalledTimes(2);
+  });
+
   it('installs through the plugin and relaunches through the process plugin', async () => {
     const plugin = pluginUpdate(async () => undefined);
     check.mockResolvedValue(plugin);

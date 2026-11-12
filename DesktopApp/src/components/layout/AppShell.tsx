@@ -285,6 +285,8 @@ export function AppShell() {
       if (await holdForUnsavedFiles()) return;
       if (await holdForUnsavedNotes()) return;
       await update.install();
+      if (await holdForUnsavedFiles()) return;
+      if (await holdForUnsavedNotes()) return;
       await update.relaunch();
     } catch (err) {
       console.error('Update install failed', err);

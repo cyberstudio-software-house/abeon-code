@@ -22,6 +22,7 @@ export async function checkForUpdate(): Promise<AvailableUpdate | null> {
 
   const u = update;
   let downloading: Promise<void> | null = null;
+  let installing: Promise<void> | null = null;
   return {
     version: u.version,
     notes: u.body ?? '',
@@ -43,7 +44,13 @@ export async function checkForUpdate(): Promise<AvailableUpdate | null> {
       }
       return downloading;
     },
-    install: () => u.install(),
+    install: () => {
+      installing ??= u.install().catch((err: unknown) => {
+        installing = null;
+        throw err;
+      });
+      return installing;
+    },
     relaunch,
   };
 }
