@@ -163,8 +163,9 @@ marks into `pendingResumeTabIds`, and `AppShell` shows `RestoreSessionsDialog` f
 
 ### Closing the main window
 
-`AppShell` mirrors the detached-window close guard: `onCloseRequested` prompts while any tab holds a
-live process. The confirm path calls `freezeTabPersistence()` **before** it drops the tabs. Dropping
+`AppShell` and `DetachedShell` share one close guard (`layout/useWindowCloseGuard.tsx`):
+`onCloseRequested` asks about unsaved files, settles notes, then prompts while any tab holds a live
+process. The main window's confirm path calls `freezeTabPersistence()` **before** it drops the tabs. Dropping
 them is what kills the PTYs, and an unfrozen persistence subscriber would save the emptied list and
 erase the `live` marks the next start needs.
 
@@ -375,14 +376,23 @@ images read-only, binary/over 1 MiB as a message. Spec:
 - **Path safety**: every command takes a project id and a path relative to `project.path`, never an
   absolute one; the frontend never sees `project.path` for these calls. `files/paths.rs`
   (`resolve_existing`, `resolve_for_write`) rejects `..`, absolute paths and symlinks that leave the
-  canonical root. A path component `.git` is refused in any letter case, also after symlink
-  resolution (the tree and search never list it). A write to a missing file canonicalises the parent.
-  Any new command that touches the disk must go through these two functions.
+  canonical root. A path component `.git` is refused in any letter case and also when spelled with
+  zero-width characters (U+200B–U+200D, U+FEFF), also after symlink resolution (the tree and search
+  never list it). On Windows a component containing `:` (alternate data streams) or ending in a dot
+  or a space is refused too (`cfg(windows)`, never run here). A write to a missing file
+  canonicalises the parent. Any new command that touches the disk must go through these two
+  functions.
 - **Reading** (`files/content.rs`): non-regular files (FIFO, directory) are refused before `open`, so
   a FIFO cannot hang the thread. The kinds are `text` (valid UTF-8, no NUL, ≤ 1 MiB), `image`
-  (png/jpg/jpeg/gif/webp/svg ≤ 10 MiB, sent as a data URL), `binary` and `tooLarge`. The `version`
-  is `<mtime nanos>-<size>`. The frontend decodes in `lib/fileText.ts`: a BOM is kept, CRLF is turned
-  into LF for the editor and the predominant ending (LF on a tie) is written back on save.
+  (png/jpg/jpeg/gif/webp/svg ≤ 10 MiB, sent as a data URL; `IMAGE_TYPES` is the one table),
+  `binary` and `tooLarge`. Every kind carries a `version` (`<mtime nanos>-<size>`, taken from the
+  opened handle; negative nanos for a pre-epoch mtime), so a binary or too-large buffer knows its
+  version from the first read. `read_project_file` returns that plus `watch_dir`
+  (`FileReadResponse`): the project-relative directory where the bytes really live — the target's
+  directory for a symlinked file, the real directory for a file reached through a symlinked
+  directory, the path's own directory otherwise. The frontend decodes in `lib/fileText.ts`: a BOM is
+  kept, CRLF is turned into LF for the editor and the predominant ending (LF on a tie) is written
+  back on save.
 - **Writing** (`files/write.rs`): `write_file(path, content, expected_version, force)`. A version
   mismatch is `AppError::Conflict` (`code: 'conflict'` in the frontend) unless `force`; `None`
   expected means "the file must not exist". Content over 1 MiB is refused in `commands/files.rs`.
@@ -393,18 +403,32 @@ images read-only, binary/over 1 MiB as a message. Spec:
   fails, so a single-file bind mount or a container's `.env` keeps its inode. Exceptions: when that
   failure is a full disk or exceeded quota the save fails and the original is untouched (falling
   back would truncate it), and a read-only file is never replaced (`PermissionDenied`, also with
-  `force`). A new file (saving a buffer whose file
-  was deleted) goes only through temp + rename. The version is re-checked right before the rename
-  and again on the opened handle for an in-place write.
+  `force`). A new file (saving a buffer whose file was deleted) goes only through temp + a
+  no-clobber rename, so a file that appeared meanwhile is a conflict and is never replaced. The
+  version is re-checked right before the rename and again on the opened handle for an in-place
+  write. Mode and group (setuid/setgid included) are copied after the content is written. The
+  returned version is the version of the bytes written, taken from the handle; on Windows it is
+  read from the path after the file is closed (`settled_version`), because the close may stamp a
+  new last-write time — that branch has never run on Windows.
 - **Listing and search** (`files/listing.rs`, `search.rs`): directories first, then files,
   case-insensitive; `ignored` comes from `git2` (`IgnoreChecker`), with repository discovery capped
   at the project root's parent. A project that is only a subfolder of a larger repository therefore
-  gets no ignore data (same as the Git panel). Search is by file name (a `/` in the query matches the
-  relative path), ranks exact name, prefix, other, then shorter path; it skips gitignored directories
-  but not ignored files (so `.env` is found), uses a built-in skip list outside a repository, does not
-  follow directory symlinks, stops walking after 200 000 visited entries, and returns the best 200 of
-  all matches it collected (`truncated` is set when there were more matches or the walk hit the
-  cap). The tree renders at most 2000 rows per directory (`TREE_RENDER_LIMIT`).
+  gets no ignore data (same as the Git panel). Listing a file is `invalid_path`. A repository that
+  fails to open (broken config) lists without ignore data and is logged once per repository path for
+  the life of the process. Search is by file name (a `/` in the query matches the relative path),
+  ranks exact name, prefix, other, then shorter path (ties by lowercase, then exact path); it skips
+  gitignored directories but not ignored files (so `.env` is found), uses a built-in skip list
+  outside a repository, does not follow directory symlinks, walks breadth-first (a capped walk keeps
+  shallow paths), stops after 200 000 visited entries, and returns the best 200 of all matches it
+  collected (`truncated` is set when there were more matches or the walk hit the cap). **Search
+  cancellation**: every request carries a per-window `sequence` (`filesSlice` counts up from
+  `Date.now()`, so a reloaded page starts above anything it sent before). `SearchGenerations` keeps
+  the newest sequence per window label; a walk stops at its next directory read once a higher
+  sequence arrives from the same window (it resolves with what it found and `truncated: true`), and a
+  request older than the newest one returns at once, empty and truncated. Clearing the query,
+  closing the panel or following another project sends a blank search with a higher sequence while
+  a walk may still run. The frontend keeps its debounce and its stale-response token. The tree
+  renders at most 2000 rows per directory (`TREE_RENDER_LIMIT`).
 - **Directory watches** (`files/watch.rs`): `FileWatches` owns **one** shared `notify` watcher. The
   registry is keyed by (window label, project id, relative dir); the OS watch for an absolute
   directory is added with the first live entry and removed with the last. Events are routed by path
@@ -415,32 +439,53 @@ images read-only, binary/over 1 MiB as a message. Spec:
   dead key it replaces the slot and re-adds the OS watch (`unwatch` first, so notify forgets the old
   inode); while the directory is still missing, `resolve_existing` refuses the call with
   `not_found` and the slot stays dead. The frontend makes these calls (see the re-arm rules below).
-  A queue overflow (rescan) triggers every live entry. `drop_window` runs from
-  `WindowEvent::Destroyed` on `spawn_blocking`, never on the main thread. Only directories are
-  watched, non-recursively: a file tab watches its parent directory.
+  A re-arm of a live slot needs no OS call. A queue overflow (rescan) triggers every live entry.
+  **Window generations**: the `Destroyed` hook calls `retire_window` synchronously (bumps the label's
+  generation) and then `drop_window(label, generation)` on `spawn_blocking`, never on the main
+  thread; the drop removes only slots and the dirty count recorded under that generation or
+  earlier, so a window re-created under the same label keeps the watches it set up before the
+  deferred drop ran. When a `watch` replaces a slot (a dead one or one of an older generation), the
+  replaced slot's directory goes through the same release as a removal (OS unwatch when no live slot
+  uses it), also when the new slot is dropped again or points elsewhere. On macOS every live entry is
+  triggered once after each OS-level watch or unwatch, because the shared FSEvents stream restarts
+  (never run on macOS). Only directories are watched, non-recursively: a file tab watches the
+  directory its bytes live in (`watch_dir`).
 - **Frontend watch counts** live in module-level Maps in `filesSlice.ts` behind
   `retainDirWatch`/`releaseDirWatch` (not in store state): the panel retains the root and every
-  expanded directory of the attached project, every file buffer retains its directory, and the
-  Rust watch is set up or torn down on the 0↔1 transitions (serialised per key by `enqueueWatch`).
+  expanded directory of the attached project, every file buffer retains its watch directory
+  (`BufferRuntime.relDir`: the path's directory until the first read, then the `watch_dir` each read
+  reports — a re-pointed link moves the hold exactly once, retain new before release old, and a read
+  that resolves after the buffer was dropped moves nothing), and the Rust watch is set up or torn
+  down on the 0↔1 transitions (serialised per key by `enqueueWatch`).
   **Re-arm**: because a deleted and recreated directory leaves a dead slot, `armWatch` calls
   `watchProjectDir` again for a held directory after every successful listing of it and after every
   successful version check of a buffer in it (on the same per-key chain, at most one call queued per
   key). A failed `watch`, and a listing or version check that fails with `not_found`, mark the key in
   `failedWatches`, so the next retain also re-arms it. Collapsing a directory releases its expanded
-  descendants too. Switching the active tab to another project re-attaches the panel
-  (`followFilesProject`).
+  descendants too, and so does a listing that no longer contains an expanded directory (removed or
+  turned into a file): it and its expanded descendants leave `expanded` (`pruneExpanded`).
+  Switching the active tab to another project re-attaches the panel (`followFilesProject`).
 - **Re-check without events**: a dead watch delivers nothing, so `recheckFiles` runs the disk check
-  for the directory of every open buffer and re-lists every directory the panel holds (root and
-  expanded, only while the panel is open). `useFilesSync` calls it on the window `focus` event (the
-  same trigger `GitSection` uses for its git refresh) and when the active tab becomes a file tab,
-  throttled to one run per `FILES_RECHECK_INTERVAL_MS` (2 s) plus one trailing run.
+  of every open buffer and re-lists every directory the panel holds (root and expanded, only while
+  the panel is open). `useFilesSync` calls it on the window `focus` event (the same trigger
+  `GitSection` uses for its git refresh) and when the active tab becomes a file tab, throttled to one
+  run per `FILES_RECHECK_INTERVAL_MS` (2 s) plus one trailing run. **Coalescing** (`coalesce` in
+  `filesSlice.ts`): while a listing of a directory runs, further requests for it (events, re-check,
+  expand, retry) collapse into one follow-up run after it; the re-check itself is coalesced the same
+  way, so neither can build a growing queue. **Retry timer**: while the panel is open and a held
+  directory has a listing in error or a lost watch, or an open buffer's watch directory is lost, a
+  single 3 s timer (`FILES_RETRY_INTERVAL_MS`) re-lists those directories and runs those buffers'
+  disk checks until nothing is in error or lost; it stops at once when that is so or the panel
+  closes, and does not exist otherwise. So a directory deleted and recreated while the window keeps
+  focus recovers within 3 s with the panel open.
 - **`useFilesSync`** (mounted in `AppShell` and `DetachedShell`) listens with
   `getCurrentWindow().listen`, not the global `listen`: a targeted `emit_to` reaches the global
   listener of every window. On an event it re-lists a directory that has a listing
   (`reloadFileDir`; the IPC call always runs, only the store write is skipped when the entries are
   identical), schedules a 500 ms debounced `refreshGit` while the panel is open (the tree colours
-  come from `gitSlice`, not a new git query; `gitStatusByPath`) and calls `checkFilesOnDisk` for the
-  open buffers of that directory. Every save that reaches the disk also schedules that debounced
+  come from `gitSlice`, not a new git query; `gitStatusByPath`) and calls `checkFilesOnDisk`, which
+  checks the buffers whose watch directory is that directory, and also those whose path is in it (so
+  a re-pointed link is still noticed when its own directory is watched by the panel). Every save that reaches the disk also schedules that debounced
   `refreshGit` for its project, panel open or not (`onFileSaved` listener exported by `filesSlice`),
   so a save and the directory event it causes end in one git refresh.
 - **Buffers** (`filesSlice.fileBuffers`, keyed by tab id, dropped by a `store/index.ts` subscriber
@@ -453,8 +498,12 @@ images read-only, binary/over 1 MiB as a message. Spec:
   `reloadFileBuffer` returns `reloaded | kept | error` (`kept`: the user typed meanwhile or the
   tab was closed, so the disk text was not applied).
 - **Disk-change rules**: clean buffer, changed file → silent reload. Dirty buffer → `disk:
-  'changed'` bar with „Wczytaj ponownie” / „Zostaw moje” (`keepFileBuffer` adopts the observed
-  version). Deleted file → `disk: 'deleted'`, bar „Plik został usunięty”; a version check that
+  'changed'` bar with „Wczytaj ponownie” / „Zostaw moje”. **„Zostaw moje”** (`keepFileBuffer`,
+  async, on the tab's queue) reads the file once and takes that text as the new `savedContent` and
+  that read's version, so undoing back to the old text stays dirty and typing the disk text is
+  clean; when the file is no longer text, or the read fails, `savedContent` becomes `null` (unknown
+  baseline, never equal to the text, so the buffer stays dirty) and a failed read keeps the observed
+  version as before. Deleted file → `disk: 'deleted'`, bar „Plik został usunięty”; a version check that
   fails with `not_found` (the parent directory is gone) counts as deleted too. Edited text is kept,
   and an **unedited** buffer whose file comes back (an agent switching branches, `git checkout`)
   reloads silently without a bar. Image, binary and too-large tabs show the deleted bar as well,
@@ -473,10 +522,14 @@ images read-only, binary/over 1 MiB as a message. Spec:
   `clipboardInputFilter` turns `\r\n` into `\n` in pasted and dropped text (otherwise the `\r` stays
   in the buffer and a CRLF file is saved with `\r\r\n`); a lone `\r` is left alone.
   `Ctrl/Cmd+S` is a CodeMirror keymap entry, not a global listener. The theme is built from CSS
-  variables and re-built by a `MutationObserver` on `data-theme`. An external reload (the `value` prop
-  differing from the document) is applied as the minimal `diffRange` replacement, which keeps the
-  scroll position and caret, with `addToHistory: false` and the history compartment reset, so
-  Ctrl+Z after a reload cannot undo into the older text. **Tests mock `./CodeEditor`** (a textarea
+  variables and re-built by a `MutationObserver` on `data-theme`; the mono font comes from the
+  `font-mono` class on the container (`.cm-scroller` inherits), and `globals.css` gives
+  `.cm-panels` the UI font so the search panel does not inherit the mono one. Compartments are
+  created once per editor. The editor remembers the text it last reported (`lastEmittedRef`) and
+  ignores a `value` equal to it, so a keystroke serialises the document once. Any other `value` is an
+  external reload, applied as the minimal `diffRange` replacement, which keeps the scroll position and
+  caret, with `addToHistory: false` and the history compartment reset, so Ctrl+Z after a reload cannot
+  undo into the older text. **Tests mock `./CodeEditor`** (a textarea
   with the same props) because jsdom cannot host CodeMirror; the real editor is covered only by
   `CodeEditor.test.tsx`.
 - **Unsaved-file guard points**: `useUnsavedFilesPrompt` (hook returning `{ prompt(tabIds),
@@ -485,12 +538,17 @@ images read-only, binary/over 1 MiB as a message. Spec:
   (the tab or window stays open), the queued save still finishes, and its late result is ignored
   because the hook settles only the request id it is waiting for. So a save that never resolves
   cannot make a window unclosable; the next close request opens the dialog again. A failed save
-  keeps the dialog open: `saveDirtyFiles` returns the failed tabs with `conflict` or `error`, and the
-  dialog names conflicting files („Nie udało się zapisać: <ścieżki>. Plik zmienił się na dysku —
-  otwórz zakładkę…”) or shows „Nie udało się zapisać wszystkich plików.” for other errors. Used
+  keeps the dialog open and gives the keyboard back to „Zapisz”: `saveDirtyFiles` returns the failed
+  tabs with `conflict` or `error`, and the dialog names conflicting files („Plik <ścieżka> zmienił
+  się na dysku” / „Pliki <ścieżki> zmieniły się na dysku”, then „Otwórz zakładkę pliku i wybierz
+  „Wczytaj ponownie” albo „Zostaw moje”, a potem zapisz.” — the steps the tab bar offers; „Nadpisz”
+  exists only in the conflict dialog of a save from the tab) or shows „Nie udało się zapisać
+  wszystkich plików.” for other errors. When the listed files come from more than one project, each
+  entry (and each name in the conflict text) is „<projekt>: <ścieżka>”. Used
   at: tab close (`closeWithGuard`), group detach (`detachWithGuard` in `useTabBarActions`, **not**
-  `lib/detachGroup.ts`), closing the main or a detached window (`onCloseRequested` in both shells,
-  **before** the notes settle step and the live-process confirm), and the update
+  `lib/detachGroup.ts`), closing the main or a detached window (`useWindowCloseGuard`, shared by
+  both shells: `onCloseRequested` asks **before** the notes settle step and the live-process
+  confirm; each shell keeps its own live-process dialog and confirm path), and the update
   (`holdForUnsavedFiles` in `AppShell`, before the download and again after it, before the notes
   settle step and `install()`, each followed by the `dirtyFilesInOtherWindows` check that refuses
   with „Masz niezapisane pliki w innym oknie…”; a failed check also holds the update). A refusal
@@ -506,14 +564,19 @@ images read-only, binary/over 1 MiB as a message. Spec:
 - **Panel placement**: `RightPanel` mounts `FilesPanel` next to `NotesPanel` and hides the rest of
   the column (`hidden` + `inert`) while either is open; `openFilesPanel` first awaits
   `closeNotesPanel` (refused when the notes flush fails) and `openNotesPanel` closes the files panel.
-  A `store/index.ts` subscriber closes the panel when the last tab closes.
+  A `store/index.ts` subscriber closes the panel when the last tab closes. `FileTree` renders one
+  memoised `FileTreeDir` per shown directory (it selects only its own listing and expanded children)
+  and memoised rows with stable path-taking callbacks, so the context menu, a git refresh or a
+  listing elsewhere re-renders only the rows that changed.
 - **Known limits**: no arrow-key navigation in the tree (Tab, Enter and Space only); search results
   are not git-coloured; the project-subfolder-of-a-repo ignore gap above; switching a
   Markdown tab to preview unmounts the editor, which loses its undo history (the buffer is kept);
-  file tabs are not restored after a restart; no file operations (create, rename, delete); a held
-  directory that is deleted and only later recreated stays stale (tree: „Nie udało się wczytać
-  katalogu”, tabs: the deleted bar) until „Spróbuj ponownie” or the next re-check (window focus,
-  activating a file tab).
+  file tabs are not restored after a restart; no file operations (create, rename, delete); `Ctrl/Cmd+S`
+  saves only while the editor has focus. With the panel closed, a tab whose directory was deleted
+  and recreated keeps the deleted bar until the next re-check (window focus, activating a file tab);
+  the tab's „Spróbuj ponownie” exists only for a file that failed to load, it does not refresh a
+  stale tab. The tree's „Spróbuj ponownie” re-lists a directory at once (the retry timer does it every
+  3 s anyway).
 
 ## Supervisor agent
 

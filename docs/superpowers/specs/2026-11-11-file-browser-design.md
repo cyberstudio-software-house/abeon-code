@@ -227,3 +227,42 @@ Rules:
   drop.
 - Manual QA on the packaged app: a large repo with `node_modules`, editing `.env` while an agent
   session writes files, detached window.
+
+## Amendments after implementation
+
+Decisions taken while building and reviewing the feature that differ from the text above (the
+as-built description lives in `DesktopApp/CLAUDE.md`, "File browser"):
+
+- **No in-place fallback on a full disk or exceeded quota.** When creating the temp file, copying
+  the mode/group or the rename fails with `StorageFull`/`QuotaExceeded`, the save fails and the
+  original file is untouched; rewriting it in place would truncate it first.
+- **Read-only files are not replaced.** A file that is not writable is refused with
+  `PermissionDenied`, also with `force`; the in-place path is not used to get around the mode.
+- **An unedited buffer whose file was deleted and recreated reloads silently** (an agent switching
+  branches, `git checkout`), without the „Plik został usunięty” or „Plik zmienił się na dysku” bar.
+  Edited text is kept and gets the bar.
+- **A reload from disk resets the editor's undo history**, so Ctrl+Z cannot bring back the text the
+  reload replaced.
+- **One shared watcher with a fixed 150 ms throttle.** One `notify` watcher serves every window;
+  each (window, project, directory) entry throttles its own event and emits it to its own window
+  only. Only directories are watched: a file tab watches the directory its bytes live in (the
+  target's directory for a symlinked file), not the file itself.
+- **Re-check without events and a retry timer.** A deleted and recreated directory leaves a dead
+  watch, so open files and held directories are re-checked on window focus and when a file tab
+  becomes active, and while the files panel is open a 3 s timer retries directories whose listing
+  failed or whose watch is lost (and the disk check of buffers whose watch is lost) until they
+  recover. Listings and re-checks requested while one runs collapse into one follow-up run.
+- **Update order: download → checks → install → relaunch.** The update uses the plugin's separate
+  `download()` and `install()`: the unsaved-files dialog and the other-windows check run before the
+  download and again after it, followed by the notes settle step, and only then `install()` (which
+  exits the process on Windows) and `relaunch()`. A refusal after the download leaves the update
+  downloaded but not installed, and „Zaktualizuj” retries without downloading again.
+- **Closing a dirty file tab uses a dedicated unsaved-files dialog** (`UnsavedFilesDialog`), not
+  `ConfirmDialog`; the same dialog guards window close, group detach and the update.
+- **„Zostaw moje” re-reads the file** and takes that text and version as the new baseline, so the
+  buffer stays dirty while its text differs from what is on disk.
+- **Projects that are sub-folders of a larger repository get no gitignore data**: repository
+  discovery stops at the project root's parent, as in the Git panel.
+- **v1 limits**: no arrow-key navigation in the tree (Tab, Enter and Space only); search results are
+  not git-coloured; switching a Markdown tab to the preview unmounts the editor and drops its undo
+  history (the buffer is kept); `Ctrl/Cmd+S` saves only while the editor has focus.
