@@ -3,7 +3,7 @@ import { decodeFileText, encodeFileText, fileDir, fileName, fileTabId, isMarkdow
 
 describe('decodeFileText', () => {
   it('strips the BOM, normalises CRLF and reports the predominant ending', () => {
-    expect(decodeFileText('﻿a\r\nb\r\nc\n')).toEqual({ text: 'a\nb\nc\n', eol: 'crlf', hasBom: true });
+    expect(decodeFileText('\uFEFFa\r\nb\r\nc\n')).toEqual({ text: 'a\nb\nc\n', eol: 'crlf', hasBom: true });
   });
 
   it('prefers lf on a tie', () => {
@@ -24,8 +24,8 @@ describe('encodeFileText', () => {
   it.each([
     ['pure LF', 'a\nb\nc\n'],
     ['pure CRLF', 'a\r\nb\r\nc\r\n'],
-    ['BOM with CRLF', '﻿a\r\nb\r\n'],
-    ['BOM with LF', '﻿a\nb\n'],
+    ['BOM with CRLF', '\uFEFFa\r\nb\r\n'],
+    ['BOM with LF', '\uFEFFa\nb\n'],
     ['no trailing newline', 'a\nb'],
     ['CRLF without trailing newline', 'a\r\nb'],
     ['empty file', ''],
@@ -36,7 +36,7 @@ describe('encodeFileText', () => {
   });
 
   it('turns every newline into the chosen ending and re-adds the BOM', () => {
-    expect(encodeFileText('a\nb', 'crlf', true)).toBe('﻿a\r\nb');
+    expect(encodeFileText('a\nb', 'crlf', true)).toBe('\uFEFFa\r\nb');
     expect(encodeFileText('a\nb', 'lf', false)).toBe('a\nb');
   });
 });

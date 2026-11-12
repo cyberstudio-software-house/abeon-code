@@ -12,7 +12,7 @@ import { createGitSlice, type GitSlice } from './gitSlice';
 import { createClickUpSlice, type ClickUpSlice } from './clickupSlice';
 import { createPanesSlice, ROOT_PANE_ID, type PanesSlice } from './panesSlice';
 import { createNotesSlice, type NotesSlice } from './notesSlice';
-import { createFilesSlice, type FilesSlice } from './filesSlice';
+import { createFilesSlice, dirtyFileTabIds, type FilesSlice } from './filesSlice';
 import { createTerminalDrawersSlice, type TerminalDrawersSlice } from './terminalDrawersSlice';
 import {
   clampTerminalFontSize, isTerminalColors, isTerminalCursorStyle, isTerminalFontId, isTerminalLineHeight,
@@ -670,6 +670,26 @@ useStore.subscribe((state) => {
 
 useStore.subscribe((state, prev) => {
   if (state.filesPanelOpen && state.activeTabId !== prev.activeTabId) state.followFilesProject();
+});
+
+let reportedDirtyFileCount = 0;
+
+useStore.subscribe((state, prev) => {
+  if (state.tabs !== prev.tabs) {
+    const liveTabIds = new Set(state.tabs.map(t => t.id));
+    const orphaned = Object.keys(state.fileBuffers).filter(id => !liveTabIds.has(id));
+    if (orphaned.length > 0) {
+      orphaned.forEach(id => state.dropFileBuffer(id));
+      return;
+    }
+  }
+  if (state.fileBuffers === prev.fileBuffers) return;
+  const count = dirtyFileTabIds(state).length;
+  if (count === reportedDirtyFileCount) return;
+  reportedDirtyFileCount = count;
+  tauri.setDirtyFileCount(count).catch(err => {
+    console.error('[files] setDirtyFileCount failed', err);
+  });
 });
 
 // --- Subscribe: on any state change, diff + write localStorage + SQLite ---

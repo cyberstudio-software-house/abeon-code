@@ -1,7 +1,9 @@
 import type { StateCreator } from 'zustand';
+import { decodeFileText, encodeFileText, fileDir, isMarkdownPath, type Eol } from '../lib/fileText';
 import { tauri } from '../lib/tauri';
-import type { FileEntry } from '../types';
+import type { FileContent, FileEntry } from '../types';
 import type { AppState } from './index';
+import type { Tab } from './tabsSlice';
 
 export const TREE_RENDER_LIMIT = 2000;
 export const FILE_SEARCH_DEBOUNCE_MS = 150;
@@ -16,10 +18,35 @@ export type FileSearch = {
 };
 export type FileTree = { expanded: string[]; listings: Record<string, DirListing> };
 
+export type FileBufferView =
+  | { kind: 'text' }
+  | { kind: 'image'; dataUrl: string }
+  | { kind: 'binary'; size: number }
+  | { kind: 'tooLarge'; size: number };
+export type FileBuffer = {
+  tabId: string;
+  projectId: number;
+  path: string;
+  status: 'loading' | 'ready' | 'error';
+  error?: string;
+  view: FileBufferView;
+  content: string;
+  savedContent: string;
+  eol: Eol;
+  hasBom: boolean;
+  version: string | null;
+  mode: 'edit' | 'preview';
+  saveStatus: 'idle' | 'saving' | 'saved' | 'error';
+  saveError?: string;
+  disk: 'same' | 'changed' | 'deleted';
+};
+export type FileSaveResult = 'saved' | 'conflict' | 'error' | 'clean';
+
 export type FilesSlice = {
   filesPanelOpen: boolean;
   fileTrees: Record<number, FileTree>;
   fileSearch: FileSearch;
+  fileBuffers: Record<string, FileBuffer>;
   openFilesPanel: () => Promise<void>;
   closeFilesPanel: () => void;
   followFilesProject: () => void;
@@ -29,10 +56,37 @@ export type FilesSlice = {
   moveFileSearchSelection: (delta: 1 | -1) => void;
   retainDirWatch: (projectId: number, relDir: string) => void;
   releaseDirWatch: (projectId: number, relDir: string) => void;
+  loadFileBuffer: (tabId: string) => Promise<void>;
+  editFileBuffer: (tabId: string, content: string) => void;
+  setFileBufferMode: (tabId: string, mode: 'edit' | 'preview') => void;
+  saveFileBuffer: (tabId: string, opts?: { force?: boolean }) => Promise<FileSaveResult>;
+  reloadFileBuffer: (tabId: string) => Promise<void>;
+  keepFileBuffer: (tabId: string) => void;
+  dropFileBuffer: (tabId: string) => void;
   checkFilesOnDisk: (projectId: number, relDir: string) => Promise<void>;
+  saveDirtyFiles: (tabIds: string[]) => Promise<boolean>;
+};
+
+type FileTab = Extract<Tab, { kind: 'file' }>;
+
+type BufferRuntime = {
+  projectId: number;
+  relDir: string;
+  readToken: number;
+  queue: Promise<void>;
+  observedVersion?: string;
 };
 
 export const childPath = (relDir: string, name: string) => (relDir ? `${relDir}/${name}` : name);
+
+export function isFileDirty(buffer: FileBuffer): boolean {
+  if (buffer.status !== 'ready' || buffer.view.kind !== 'text') return false;
+  return buffer.content !== buffer.savedContent || (buffer.disk === 'deleted' && buffer.content !== '');
+}
+
+export function dirtyFileTabIds(state: Pick<FilesSlice, 'fileBuffers'>): string[] {
+  return Object.values(state.fileBuffers).filter(isFileDirty).map((buffer) => buffer.tabId);
+}
 
 const emptySearch: FileSearch = { query: '', status: 'idle', results: [], truncated: false, selected: 0 };
 
@@ -41,11 +95,61 @@ const watchChains = new Map<string, Promise<void>>();
 const failedWatches = new Set<string>();
 const panelWatches = new Map<number, Set<string>>();
 const listTokens = new Map<string, number>();
+const bufferRuntimes = new Map<string, BufferRuntime>();
 let searchToken = 0;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let attachedProjectId: number | null = null;
 
 const dirKey = (projectId: number, relDir: string) => `${projectId}\u0000${relDir}`;
+
+function failureCode(error: unknown): unknown {
+  return typeof error === 'object' && error !== null ? (error as { code?: unknown }).code : undefined;
+}
+
+function failureMessage(error: unknown): string {
+  const message = typeof error === 'object' && error !== null ? (error as { message?: unknown }).message : undefined;
+  return typeof message === 'string' ? message : String(error);
+}
+
+function enqueue<T>(runtime: BufferRuntime, task: () => Promise<T>): Promise<T> {
+  const next = runtime.queue.then(task);
+  runtime.queue = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+function nextReadToken(runtime: BufferRuntime): number {
+  runtime.readToken += 1;
+  return runtime.readToken;
+}
+
+function emptyBuffer(tab: FileTab): FileBuffer {
+  return {
+    tabId: tab.id,
+    projectId: tab.projectId,
+    path: tab.path,
+    status: 'loading',
+    view: { kind: 'text' },
+    content: '',
+    savedContent: '',
+    eol: 'lf',
+    hasBom: false,
+    version: null,
+    mode: isMarkdownPath(tab.path) ? 'preview' : 'edit',
+    saveStatus: 'idle',
+    disk: 'same',
+  };
+}
+
+function loadedFields(file: FileContent, diskVersion: string | null): Partial<FileBuffer> {
+  const fresh = { status: 'ready' as const, error: undefined, saveStatus: 'idle' as const, saveError: undefined, disk: 'same' as const };
+  if (file.kind === 'text') {
+    const { text, eol, hasBom } = decodeFileText(file.content);
+    return { ...fresh, view: { kind: 'text' }, content: text, savedContent: text, eol, hasBom, version: file.version };
+  }
+  const blank = { ...fresh, content: '', savedContent: '', eol: 'lf' as const, hasBom: false };
+  if (file.kind === 'image') return { ...blank, view: { kind: 'image', dataUrl: file.data_url }, version: file.version };
+  return { ...blank, view: { kind: file.kind, size: file.size }, version: diskVersion };
+}
 
 function nextListToken(key: string): number {
   const token = (listTokens.get(key) ?? 0) + 1;
@@ -167,10 +271,119 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     attachedProjectId = null;
   };
 
+  const patchBuffer = (tabId: string, patch: Partial<FileBuffer>) => {
+    set((s) => (s.fileBuffers[tabId] ? { fileBuffers: { ...s.fileBuffers, [tabId]: { ...s.fileBuffers[tabId], ...patch } } } : s));
+  };
+
+  const isAlive = (tabId: string, runtime: BufferRuntime) => bufferRuntimes.get(tabId) === runtime;
+
+  const openRuntime = (tab: FileTab): BufferRuntime => {
+    const runtime: BufferRuntime = { projectId: tab.projectId, relDir: fileDir(tab.path), readToken: 0, queue: Promise.resolve() };
+    bufferRuntimes.set(tab.id, runtime);
+    get().retainDirWatch(runtime.projectId, runtime.relDir);
+    return runtime;
+  };
+
+  const markChanged = (tabId: string, runtime: BufferRuntime, diskVersion: string) => {
+    runtime.observedVersion = diskVersion;
+    if (get().fileBuffers[tabId]?.disk !== 'changed') patchBuffer(tabId, { disk: 'changed' });
+  };
+
+  const markDeleted = (tabId: string, runtime: BufferRuntime) => {
+    runtime.observedVersion = undefined;
+    patchBuffer(tabId, { disk: 'deleted', version: null });
+  };
+
+  const readFromDisk = async (tabId: string, runtime: BufferRuntime, token: number, diskVersion?: string) => {
+    const isLatest = () => isAlive(tabId, runtime) && runtime.readToken === token;
+    const buffer = get().fileBuffers[tabId];
+    if (!buffer || !isLatest()) return;
+    const silent = diskVersion !== undefined;
+    try {
+      const file = await tauri.readProjectFile(buffer.projectId, buffer.path);
+      const current = get().fileBuffers[tabId];
+      if (!current || !isLatest()) return;
+      if (silent && isFileDirty(current)) {
+        markChanged(tabId, runtime, 'version' in file ? file.version : diskVersion);
+        return;
+      }
+      runtime.observedVersion = undefined;
+      patchBuffer(tabId, loadedFields(file, diskVersion ?? null));
+    } catch (error) {
+      const current = get().fileBuffers[tabId];
+      if (!current || !isLatest()) return;
+      if (current.status === 'ready' && failureCode(error) === 'not_found') markDeleted(tabId, runtime);
+      else if (!isFileDirty(current)) patchBuffer(tabId, { status: 'error', error: failureMessage(error) });
+      else if (silent) markChanged(tabId, runtime, diskVersion);
+    }
+  };
+
+  const compareWithDisk = async (tabId: string, runtime: BufferRuntime) => {
+    const buffer = get().fileBuffers[tabId];
+    if (buffer?.status !== 'ready' || !isAlive(tabId, runtime)) return;
+    let diskVersion: string | null;
+    try {
+      diskVersion = await tauri.projectFileVersion(buffer.projectId, buffer.path);
+    } catch {
+      return;
+    }
+    const current = get().fileBuffers[tabId];
+    if (current?.status !== 'ready' || !isAlive(tabId, runtime) || diskVersion === current.version) return;
+    if (diskVersion === null) markDeleted(tabId, runtime);
+    else if (isFileDirty(current)) markChanged(tabId, runtime, diskVersion);
+    else await readFromDisk(tabId, runtime, runtime.readToken, diskVersion);
+  };
+
+  const settleConflict = async (tabId: string, runtime: BufferRuntime, buffer: FileBuffer) => {
+    let diskVersion: string | null | undefined;
+    try {
+      diskVersion = await tauri.projectFileVersion(buffer.projectId, buffer.path);
+    } catch {
+      diskVersion = undefined;
+    }
+    if (!isAlive(tabId, runtime)) return;
+    if (diskVersion === null) {
+      runtime.observedVersion = undefined;
+      patchBuffer(tabId, { saveStatus: 'idle', disk: 'deleted', version: null });
+      return;
+    }
+    if (diskVersion !== undefined) runtime.observedVersion = diskVersion;
+    patchBuffer(tabId, { saveStatus: 'idle', disk: 'changed' });
+  };
+
+  const writeToDisk = async (tabId: string, runtime: BufferRuntime, force: boolean): Promise<FileSaveResult> => {
+    const buffer = get().fileBuffers[tabId];
+    if (!buffer || !isAlive(tabId, runtime) || buffer.status !== 'ready' || buffer.view.kind !== 'text') return 'clean';
+    if (buffer.content === buffer.savedContent && buffer.disk !== 'deleted') return 'clean';
+    const sent = buffer.content;
+    patchBuffer(tabId, { saveStatus: 'saving', saveError: undefined });
+    try {
+      const version = await tauri.writeProjectFile(
+        buffer.projectId, buffer.path, encodeFileText(sent, buffer.eol, buffer.hasBom), buffer.version, force,
+      );
+      const current = get().fileBuffers[tabId];
+      if (current && isAlive(tabId, runtime)) {
+        runtime.observedVersion = undefined;
+        patchBuffer(tabId, { savedContent: sent, version, disk: 'same', saveStatus: current.content === sent ? 'saved' : 'idle' });
+      }
+      return 'saved';
+    } catch (error) {
+      const conflicted = failureCode(error) === 'conflict';
+      if (!isAlive(tabId, runtime)) return conflicted ? 'conflict' : 'error';
+      if (conflicted) {
+        await settleConflict(tabId, runtime, buffer);
+        return 'conflict';
+      }
+      patchBuffer(tabId, { saveStatus: 'error', saveError: failureMessage(error) });
+      return 'error';
+    }
+  };
+
   return {
     filesPanelOpen: false,
     fileTrees: {},
     fileSearch: emptySearch,
+    fileBuffers: {},
 
     openFilesPanel: async () => {
       if (!(await get().closeNotesPanel())) return;
@@ -270,6 +483,80 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       enqueueWatch(key, () => tauri.unwatchProjectDir(projectId, relDir));
     },
 
-    checkFilesOnDisk: async () => undefined,
+    loadFileBuffer: async (tabId) => {
+      const tab = get().tabs.find((t): t is FileTab => t.id === tabId && t.kind === 'file');
+      if (!tab) return;
+      const existing = get().fileBuffers[tabId];
+      if (existing && existing.status !== 'error') return;
+      const runtime = bufferRuntimes.get(tabId) ?? openRuntime(tab);
+      const loading = existing ? { ...existing, status: 'loading' as const, error: undefined } : emptyBuffer(tab);
+      set((s) => ({ fileBuffers: { ...s.fileBuffers, [tabId]: loading } }));
+      const token = nextReadToken(runtime);
+      await enqueue(runtime, () => readFromDisk(tabId, runtime, token));
+    },
+
+    editFileBuffer: (tabId, content) => {
+      const buffer = get().fileBuffers[tabId];
+      if (!buffer || buffer.status !== 'ready' || buffer.view.kind !== 'text' || buffer.content === content) return;
+      patchBuffer(tabId, { content, saveStatus: buffer.saveStatus === 'saving' ? 'saving' : 'idle', saveError: undefined });
+    },
+
+    setFileBufferMode: (tabId, mode) => {
+      const buffer = get().fileBuffers[tabId];
+      if (!buffer || buffer.mode === mode || buffer.view.kind !== 'text' || !isMarkdownPath(buffer.path)) return;
+      patchBuffer(tabId, { mode });
+    },
+
+    saveFileBuffer: (tabId, opts) => {
+      const runtime = bufferRuntimes.get(tabId);
+      if (!runtime) return Promise.resolve('clean');
+      return enqueue(runtime, () => writeToDisk(tabId, runtime, opts?.force ?? false));
+    },
+
+    reloadFileBuffer: async (tabId) => {
+      const runtime = bufferRuntimes.get(tabId);
+      const buffer = get().fileBuffers[tabId];
+      if (!runtime || !buffer) return;
+      if (buffer.status === 'error') patchBuffer(tabId, { status: 'loading', error: undefined });
+      const token = nextReadToken(runtime);
+      await enqueue(runtime, () => readFromDisk(tabId, runtime, token));
+    },
+
+    keepFileBuffer: (tabId) => {
+      const runtime = bufferRuntimes.get(tabId);
+      const buffer = get().fileBuffers[tabId];
+      if (!runtime || buffer?.disk !== 'changed') return;
+      const version = runtime.observedVersion ?? buffer.version;
+      runtime.observedVersion = undefined;
+      patchBuffer(tabId, { disk: 'same', version });
+    },
+
+    dropFileBuffer: (tabId) => {
+      const runtime = bufferRuntimes.get(tabId);
+      if (runtime) {
+        bufferRuntimes.delete(tabId);
+        get().releaseDirWatch(runtime.projectId, runtime.relDir);
+      }
+      if (!get().fileBuffers[tabId]) return;
+      set((s) => {
+        const { [tabId]: _dropped, ...rest } = s.fileBuffers;
+        return { fileBuffers: rest };
+      });
+    },
+
+    checkFilesOnDisk: async (projectId, relDir) => {
+      const checks = Object.values(get().fileBuffers)
+        .filter((buffer) => buffer.projectId === projectId && fileDir(buffer.path) === relDir)
+        .map((buffer) => {
+          const runtime = bufferRuntimes.get(buffer.tabId);
+          return runtime ? enqueue(runtime, () => compareWithDisk(buffer.tabId, runtime)) : undefined;
+        });
+      await Promise.all(checks);
+    },
+
+    saveDirtyFiles: async (tabIds) => {
+      const results = await Promise.all(tabIds.map((tabId) => get().saveFileBuffer(tabId)));
+      return results.every((result) => result === 'saved' || result === 'clean');
+    },
   };
 };

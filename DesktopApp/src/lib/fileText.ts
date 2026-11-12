@@ -1,6 +1,6 @@
 export type Eol = 'lf' | 'crlf';
 
-const BOM = '﻿';
+const BOM = '\uFEFF';
 
 export const fileTabId = (projectId: number, path: string) => `file:${projectId}:${path}`;
 
