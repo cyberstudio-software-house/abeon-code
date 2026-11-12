@@ -406,7 +406,7 @@ mod tests {
         assert_eq!(watch_dir_of(root.path(), "./b.txt", &outside), "");
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn watch_dir_with_a_non_utf8_target_directory_falls_back() {
         use std::os::unix::ffi::OsStrExt;

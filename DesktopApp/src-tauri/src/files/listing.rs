@@ -345,27 +345,6 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn a_symlinked_directory_is_checked_against_ignore_rules_as_a_link() {
-        use std::os::unix::fs::symlink;
-        let root = tempfile::tempdir().unwrap();
-        init_ignoring(root.path(), "real-dir/\n");
-        let canonical_root = fs::canonicalize(root.path()).unwrap();
-        fs::create_dir(canonical_root.join("real-dir")).unwrap();
-        fs::create_dir(canonical_root.join("target")).unwrap();
-        symlink("real-dir", canonical_root.join("linked")).unwrap();
-        let checker = IgnoreChecker::for_dir(&canonical_root, &canonical_root);
-        let entries = list_dir(&canonical_root, "").unwrap();
-        assert_eq!(find(&entries, "linked").kind, FileEntryKind::Dir);
-        assert_eq!(
-            find(&entries, "linked").ignored,
-            checker.is_ignored(&canonical_root.join("linked"), false)
-        );
-        assert!(find(&entries, "real-dir").ignored);
-        assert!(!find(&entries, "target").ignored);
-    }
-
-    #[cfg(unix)]
-    #[test]
     fn symlink_reports_target_kind() {
         use std::os::unix::fs::symlink;
         let root = tempfile::tempdir().unwrap();

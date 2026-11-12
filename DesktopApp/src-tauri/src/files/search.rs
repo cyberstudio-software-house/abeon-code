@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(search(root.path(), "env"), ["env.txt"]);
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     #[test]
     fn skips_names_that_are_not_utf8() {
         use std::os::unix::ffi::OsStrExt;

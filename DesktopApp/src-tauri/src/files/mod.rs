@@ -19,7 +19,6 @@ pub const FALLBACK_SKIP_DIRS: &[&str] = &[
     "__pycache__",
 ];
 pub const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdx"];
-pub const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "svg"];
 pub const IMAGE_TYPES: &[(&str, &str)] = &[
     ("png", "image/png"),
     ("jpg", "image/jpeg"),

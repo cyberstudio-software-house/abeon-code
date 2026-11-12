@@ -115,7 +115,7 @@ fn image_mime(path: &Path) -> Option<&'static str> {
 mod tests {
     use super::*;
     use crate::error::AppError;
-    use crate::files::{IMAGE_EXTENSIONS, MAX_TEXT_BYTES};
+    use crate::files::MAX_TEXT_BYTES;
     use filetime::{set_file_mtime, FileTime};
     use tempfile::tempdir;
 
@@ -280,12 +280,10 @@ mod tests {
     }
 
     #[test]
-    fn image_extensions_match_the_mime_table() {
-        let from_table: Vec<&str> = IMAGE_TYPES
-            .iter()
-            .map(|(extension, _)| *extension)
-            .collect();
-        assert_eq!(from_table, IMAGE_EXTENSIONS);
+    fn every_listed_image_type_reads_as_its_mime() {
+        for (extension, mime) in IMAGE_TYPES {
+            assert_eq!(mime_of(&format!("a.{extension}")), *mime);
+        }
     }
 
     #[test]
