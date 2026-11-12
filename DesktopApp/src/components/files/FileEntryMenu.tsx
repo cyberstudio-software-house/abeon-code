@@ -6,7 +6,7 @@ import { Icon } from '../shared/Icon';
 
 const MENU_WIDTH = 208;
 const MENU_HEIGHT = 84;
-const CONTROL_CHARACTERS = /[\x00-\x1f\x7f]/;
+const CONTROL_CHARACTERS = /[\x00-\x1f\x7f-\x9f]/;
 
 export type FileEntryMenuTarget = { x: number; y: number; path: string };
 

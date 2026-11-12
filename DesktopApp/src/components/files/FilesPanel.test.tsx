@@ -317,6 +317,16 @@ describe('FilesPanel', () => {
       expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     });
 
+    it('refuses to type a path with a C1 control character', async () => {
+      seed({ '': ready([entry('bad\u0085name.ts'), entry('ok.ts')]) }, [], { activeAgentPtyId: 'pty-1' });
+      render(<FilesPanel />);
+      fireEvent.contextMenu(screen.getAllByRole('treeitem')[0]);
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Wstaw ścieżkę do sesji' }));
+      await act(() => Promise.resolve());
+      expect(tauriMock.ptyWrite).not.toHaveBeenCalled();
+      expect(toastMock.error).toHaveBeenCalledWith('Ścieżka zawiera niedozwolone znaki');
+    });
+
     it('closes on Escape and on an outside click', () => {
       seed({ '': ready([entry('a.ts')]) });
       render(<FilesPanel />);
