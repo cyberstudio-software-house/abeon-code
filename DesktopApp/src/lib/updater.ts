@@ -5,7 +5,8 @@ import { relaunch } from '@tauri-apps/plugin-process';
 export type AvailableUpdate = {
   version: string;
   notes: string;
-  downloadAndInstall: (onProgress?: (downloaded: number, total: number | null) => void) => Promise<void>;
+  download: (onProgress?: (downloaded: number, total: number | null) => void) => Promise<void>;
+  install: () => Promise<void>;
   relaunch: () => Promise<void>;
 };
 
@@ -20,21 +21,29 @@ export async function checkForUpdate(): Promise<AvailableUpdate | null> {
   if (!update) return null;
 
   const u = update;
+  let downloading: Promise<void> | null = null;
   return {
     version: u.version,
     notes: u.body ?? '',
-    downloadAndInstall: async (onProgress) => {
-      let downloaded = 0;
-      let total: number | null = null;
-      await u.downloadAndInstall((event: DownloadEvent) => {
-        if (event.event === 'Started') {
-          total = event.data.contentLength ?? null;
-        } else if (event.event === 'Progress') {
-          downloaded += event.data.chunkLength;
-          onProgress?.(downloaded, total);
-        }
-      });
+    download: (onProgress) => {
+      if (!downloading) {
+        let downloaded = 0;
+        let total: number | null = null;
+        downloading = u.download((event: DownloadEvent) => {
+          if (event.event === 'Started') {
+            total = event.data.contentLength ?? null;
+          } else if (event.event === 'Progress') {
+            downloaded += event.data.chunkLength;
+            onProgress?.(downloaded, total);
+          }
+        }).catch((err: unknown) => {
+          downloading = null;
+          throw err;
+        });
+      }
+      return downloading;
     },
+    install: () => u.install(),
     relaunch,
   };
 }

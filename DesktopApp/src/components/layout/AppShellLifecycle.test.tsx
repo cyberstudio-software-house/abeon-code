@@ -367,14 +367,16 @@ describe('AppShell lifecycle', () => {
 
   describe('update install', () => {
     const relaunch = vi.fn();
-    const downloadAndInstall = vi.fn();
+    const download = vi.fn();
+    const install = vi.fn();
     const originalFlush = useStore.getState().settleNoteDraftsForExit;
     const calls: string[] = [];
 
     const offerUpdate = () => {
       relaunch.mockImplementation(async () => { calls.push('relaunch'); });
-      downloadAndInstall.mockImplementation(async () => { calls.push('install'); });
-      checkForUpdate.mockResolvedValue({ version: '9.9.9', notes: '', downloadAndInstall, relaunch });
+      download.mockImplementation(async () => { calls.push('download'); });
+      install.mockImplementation(async () => { calls.push('install'); });
+      checkForUpdate.mockResolvedValue({ version: '9.9.9', notes: '', download, install, relaunch });
     };
 
     const stubFlush = (results: boolean[]) => {
@@ -387,10 +389,13 @@ describe('AppShell lifecycle', () => {
       });
     };
 
+    const updateButton = async () => (await screen.findByText('Zaktualizuj')).closest('button');
+
     beforeEach(() => {
       calls.length = 0;
       relaunch.mockReset();
-      downloadAndInstall.mockReset();
+      download.mockReset();
+      install.mockReset();
       seed({ a: 'history' });
     });
 
@@ -398,18 +403,35 @@ describe('AppShell lifecycle', () => {
       useStore.setState({ settleNoteDraftsForExit: originalFlush });
     });
 
-    it('saves notes before installing and again before relaunching', async () => {
+    it('downloads, saves notes, installs and relaunches in that order', async () => {
       offerUpdate();
-      stubFlush([true, true]);
+      stubFlush([true]);
       render(<AppShell />);
 
       fireEvent.click(await screen.findByText('Zaktualizuj'));
 
       await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
-      expect(calls).toEqual(['flush', 'install', 'flush', 'relaunch']);
+      expect(calls).toEqual(['download', 'flush', 'install', 'relaunch']);
     });
 
-    it('writes a pending note to disk before installing', async () => {
+    it('shows the download progress', async () => {
+      offerUpdate();
+      let finish!: () => void;
+      download.mockImplementation((onProgress: (downloaded: number, total: number | null) => void) => new Promise<void>((resolve) => {
+        onProgress(25, 100);
+        finish = resolve;
+      }));
+      render(<AppShell />);
+
+      fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+      expect(await screen.findByText('25%')).toBeTruthy();
+      expect(screen.getByText('Pobieranie…')).toBeTruthy();
+      await act(async () => { finish(); });
+      await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
+    });
+
+    it('writes a pending note to disk after the download and before installing', async () => {
       offerUpdate();
       vi.spyOn(tauri, 'updateNote').mockImplementation(async () => {
         calls.push('save');
@@ -421,7 +443,7 @@ describe('AppShell lifecycle', () => {
       fireEvent.click(await screen.findByText('Zaktualizuj'));
 
       await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
-      expect(calls).toEqual(['save', 'install', 'relaunch']);
+      expect(calls).toEqual(['download', 'save', 'install', 'relaunch']);
     });
 
     it('deletes an emptied note instead of saving it before installing', async () => {
@@ -434,7 +456,7 @@ describe('AppShell lifecycle', () => {
       fireEvent.click(await screen.findByText('Zaktualizuj'));
 
       await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
-      expect(calls).toEqual(['delete', 'install', 'relaunch']);
+      expect(calls).toEqual(['download', 'delete', 'install', 'relaunch']);
       expect(tauri.updateNote).not.toHaveBeenCalled();
     });
 
@@ -449,23 +471,40 @@ describe('AppShell lifecycle', () => {
       await waitFor(() => expect(toastError).toHaveBeenCalledWith(
         'Nie udało się zapisać notatki — ponowne uruchomienie wstrzymane',
       ));
-      expect(downloadAndInstall).not.toHaveBeenCalled();
+      expect(calls).toEqual(['download']);
+      expect(install).not.toHaveBeenCalled();
       expect(relaunch).not.toHaveBeenCalled();
-      expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+      expect(await updateButton()).not.toBeDisabled();
     });
 
-    it('does not relaunch when notes typed during the download cannot be saved', async () => {
+    it('does not install when notes typed during the download cannot be saved', async () => {
       offerUpdate();
-      stubFlush([true, false]);
+      stubFlush([false]);
       render(<AppShell />);
 
       fireEvent.click(await screen.findByText('Zaktualizuj'));
 
       await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
-      expect(calls).toEqual(['flush', 'install', 'flush']);
+      expect(calls).toEqual(['download', 'flush']);
+      expect(install).not.toHaveBeenCalled();
       expect(relaunch).not.toHaveBeenCalled();
-      expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+      expect(await updateButton()).not.toBeDisabled();
     });
+
+    it('closes the dialog and installs nothing when the download fails', async () => {
+      offerUpdate();
+      const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      download.mockRejectedValue(new Error('connection lost'));
+      render(<AppShell />);
+
+      fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+      await waitFor(() => expect(screen.queryByText('Zaktualizuj')).toBeNull());
+      expect(install).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith('Update install failed', expect.any(Error));
+      error.mockRestore();
+    });
+
     describe('unsaved files', () => {
       const otherWindowsMessage =
         'Masz niezapisane pliki w innym oknie. Zapisz je lub zamknij to okno i spróbuj ponownie.';
@@ -476,6 +515,7 @@ describe('AppShell lifecycle', () => {
       });
 
       afterEach(() => {
+        Object.keys(useStore.getState().fileBuffers).forEach(id => useStore.getState().dropFileBuffer(id));
         useStore.setState({ fileBuffers: {} });
       });
 
@@ -487,7 +527,7 @@ describe('AppShell lifecycle', () => {
         fireEvent.click(await screen.findByText('Zaktualizuj'));
 
         expect(await screen.findByText('src/a.ts')).toBeTruthy();
-        expect(downloadAndInstall).not.toHaveBeenCalled();
+        expect(download).not.toHaveBeenCalled();
         expect(tauri.dirtyFilesInOtherWindows).not.toHaveBeenCalled();
       });
 
@@ -500,9 +540,10 @@ describe('AppShell lifecycle', () => {
         fireEvent.click(await screen.findByText('Anuluj'));
 
         await waitFor(() => expect(dialogTitle()).toBeNull());
-        expect(downloadAndInstall).not.toHaveBeenCalled();
+        expect(download).not.toHaveBeenCalled();
+        expect(install).not.toHaveBeenCalled();
         expect(relaunch).not.toHaveBeenCalled();
-        expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+        expect(await updateButton()).not.toBeDisabled();
       });
 
       it('installs after the files are saved', async () => {
@@ -515,7 +556,7 @@ describe('AppShell lifecycle', () => {
 
         await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
         expect(tauri.writeProjectFile).toHaveBeenCalledOnce();
-        expect(calls).toEqual(['install', 'relaunch']);
+        expect(calls).toEqual(['download', 'install', 'relaunch']);
       });
 
       it('installs after the changes are discarded', async () => {
@@ -533,8 +574,8 @@ describe('AppShell lifecycle', () => {
       it('asks again about a discarded file that is edited again during the download', async () => {
         offerUpdate();
         const id = await seedDirtyFileTab('src/a.ts');
-        downloadAndInstall.mockImplementation(async () => {
-          calls.push('install');
+        download.mockImplementation(async () => {
+          calls.push('download');
           useStore.getState().editFileBuffer(id, 'edited again');
         });
         render(<AppShell />);
@@ -542,12 +583,13 @@ describe('AppShell lifecycle', () => {
         fireEvent.click(await screen.findByText('Odrzuć zmiany'));
 
         expect(await screen.findByText('src/a.ts')).toBeTruthy();
+        expect(install).not.toHaveBeenCalled();
         expect(relaunch).not.toHaveBeenCalled();
       });
 
       it('asks about the files before settling notes', async () => {
         offerUpdate();
-        stubFlush([true, true]);
+        stubFlush([true]);
         await seedDirtyFileTab('src/a.ts');
         render(<AppShell />);
         fireEvent.click(await screen.findByText('Zaktualizuj'));
@@ -557,7 +599,7 @@ describe('AppShell lifecycle', () => {
         fireEvent.click(screen.getByText('Odrzuć zmiany'));
 
         await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
-        expect(calls).toEqual(['flush', 'install', 'flush', 'relaunch']);
+        expect(calls).toEqual(['download', 'flush', 'install', 'relaunch']);
       });
 
       it('refuses with a message and does not download when another window has unsaved files', async () => {
@@ -568,63 +610,79 @@ describe('AppShell lifecycle', () => {
         fireEvent.click(await screen.findByText('Zaktualizuj'));
 
         await waitFor(() => expect(toastError).toHaveBeenCalledWith(otherWindowsMessage));
-        expect(downloadAndInstall).not.toHaveBeenCalled();
+        expect(download).not.toHaveBeenCalled();
         expect(relaunch).not.toHaveBeenCalled();
-        expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+        expect(await updateButton()).not.toBeDisabled();
       });
 
-      it('proceeds when no other window has unsaved files', async () => {
+      it('checks the other windows before the download and again before installing', async () => {
         offerUpdate();
+        vi.spyOn(tauri, 'dirtyFilesInOtherWindows').mockImplementation(async () => {
+          calls.push('registry');
+          return 0;
+        });
+        stubFlush([true]);
         render(<AppShell />);
 
         fireEvent.click(await screen.findByText('Zaktualizuj'));
 
         await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
-        expect(tauri.dirtyFilesInOtherWindows).toHaveBeenCalledTimes(2);
+        expect(calls).toEqual(['registry', 'download', 'registry', 'flush', 'install', 'relaunch']);
         expect(toastError).not.toHaveBeenCalled();
       });
 
-      it('does not relaunch when another window gains unsaved files during the download', async () => {
+      it('downloads but does not install when another window gains unsaved files during the download, and installs on retry', async () => {
         offerUpdate();
-        vi.spyOn(tauri, 'dirtyFilesInOtherWindows').mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+        vi.spyOn(tauri, 'dirtyFilesInOtherWindows')
+          .mockResolvedValueOnce(0).mockResolvedValueOnce(1).mockResolvedValue(0);
         render(<AppShell />);
 
         fireEvent.click(await screen.findByText('Zaktualizuj'));
 
         await waitFor(() => expect(toastError).toHaveBeenCalledWith(otherWindowsMessage));
-        expect(calls).toEqual(['install']);
+        expect(calls).toEqual(['download']);
+        expect(install).not.toHaveBeenCalled();
         expect(relaunch).not.toHaveBeenCalled();
-        expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+        expect(await updateButton()).not.toBeDisabled();
+
+        fireEvent.click(await screen.findByText('Zaktualizuj'));
+
+        await waitFor(() => expect(relaunch).toHaveBeenCalledTimes(1));
+        expect(calls).toEqual(['download', 'download', 'install', 'relaunch']);
+        expect(install).toHaveBeenCalledTimes(1);
       });
 
-      it('asks again before relaunching when this window gains unsaved files during the download', async () => {
+      it('asks again before installing when this window gains unsaved files during the download', async () => {
         offerUpdate();
-        downloadAndInstall.mockImplementation(async () => {
-          calls.push('install');
+        download.mockImplementation(async () => {
+          calls.push('download');
           await seedDirtyFileTab('src/late.ts');
         });
         render(<AppShell />);
         fireEvent.click(await screen.findByText('Zaktualizuj'));
 
         expect(await screen.findByText('src/late.ts')).toBeTruthy();
-        expect(relaunch).not.toHaveBeenCalled();
+        expect(install).not.toHaveBeenCalled();
         fireEvent.click(screen.getByText('Anuluj'));
 
         await waitFor(() => expect(dialogTitle()).toBeNull());
+        expect(install).not.toHaveBeenCalled();
         expect(relaunch).not.toHaveBeenCalled();
-        expect((await screen.findByText('Zaktualizuj')).closest('button')).not.toBeDisabled();
+        expect(await updateButton()).not.toBeDisabled();
       });
 
       it('holds the update when the registry cannot be read', async () => {
         offerUpdate();
+        const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
         vi.spyOn(tauri, 'dirtyFilesInOtherWindows').mockRejectedValue(new Error('ipc'));
         render(<AppShell />);
 
         fireEvent.click(await screen.findByText('Zaktualizuj'));
 
         await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
-        expect(downloadAndInstall).not.toHaveBeenCalled();
+        expect(download).not.toHaveBeenCalled();
         expect(relaunch).not.toHaveBeenCalled();
+        error.mockRestore();
       });
     });
   });

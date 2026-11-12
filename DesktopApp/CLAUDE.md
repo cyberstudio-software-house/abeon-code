@@ -318,10 +318,12 @@ Short plain-text notes, per project or global, edited in the right column (`Note
   refuse to continue on `false`): back to the list, closing the panel, "open in tab", closing a tab,
   detaching a group (`lib/detachGroup.ts`, which then re-reads the group's tabs, because the flush
   may have re-pointed a note tab to a recreated note), closing the main or a detached window
-  (`AppShell`/`DetachedShell`, with a `ConfirmDialog` when notes cannot be saved), and **before
-  `downloadAndInstall` and `relaunch`** in `AppShell`. A new flush point needs the same treatment or
-  the last 700 ms of typing is lost.
-- **Exit settles, detach only flushes**: the window-close handlers and both update flushes call
+  (`AppShell`/`DetachedShell`, with a `ConfirmDialog` when notes cannot be saved), and in the update
+  **after the download, before `install()`** in `AppShell`. The update runs download → checks →
+  install → relaunch with nothing in between the last two, so that one settle covers both (on Windows
+  `install()` exits the process, which is why nothing may wait until after it). A new flush point
+  needs the same treatment or the last 700 ms of typing is lost.
+- **Exit settles, detach only flushes**: the window-close handlers and the update flush call
   `settleNoteDraftsForExit`, which flushes non-blank drafts but deletes a blank draft that has a
   `noteId` (an emptied note is never stored; the draft turns into a blank new draft so an open tab
   keeps working). Their guard is `hasNotesToSettle`, which also covers a blank note already autosaved
@@ -489,9 +491,12 @@ images read-only, binary/over 1 MiB as a message. Spec:
   at: tab close (`closeWithGuard`), group detach (`detachWithGuard` in `useTabBarActions`, **not**
   `lib/detachGroup.ts`), closing the main or a detached window (`onCloseRequested` in both shells,
   **before** the notes settle step and the live-process confirm), and the update
-  (`holdForUnsavedFiles` in `AppShell`, before download and again before relaunch, followed by the
-  `dirtyFilesInOtherWindows` check that refuses with „Masz niezapisane pliki w innym oknie…”; a
-  failed check also holds the update). Files the user
+  (`holdForUnsavedFiles` in `AppShell`, before the download and again after it, before the notes
+  settle step and `install()`, each followed by the `dirtyFilesInOtherWindows` check that refuses
+  with „Masz niezapisane pliki w innym oknie…”; a failed check also holds the update). A refusal
+  after the download leaves the update downloaded but not installed and „Zaktualizuj” retries
+  (`lib/updater.ts` downloads once per update object: the plugin's `download()` would fetch again
+  and orphan the first bytes, and `install()` needs them). Files the user
   discarded in the first pass are not asked about again unless their content changed. A new
   code path that drops tabs or closes a window must add the guard.
 - **„Wstaw ścieżkę do sesji”** types the relative path plus a space into `activeAgentPtyId` and
@@ -503,8 +508,7 @@ images read-only, binary/over 1 MiB as a message. Spec:
   `closeNotesPanel` (refused when the notes flush fails) and `openNotesPanel` closes the files panel.
   A `store/index.ts` subscriber closes the panel when the last tab closes.
 - **Known limits**: no arrow-key navigation in the tree (Tab, Enter and Space only); search results
-  are not git-coloured; the project-subfolder-of-a-repo ignore gap above; on Windows the updater
-  exits inside `downloadAndInstall`, so the pre-relaunch dirty check does not run there; switching a
+  are not git-coloured; the project-subfolder-of-a-repo ignore gap above; switching a
   Markdown tab to preview unmounts the editor, which loses its undo history (the buffer is kept);
   file tabs are not restored after a restart; no file operations (create, rename, delete); a held
   directory that is deleted and only later recreated stays stale (tree: „Nie udało się wczytać

@@ -242,17 +242,15 @@ export function AppShell() {
     if (!update) return;
     setUpdateProgress(null);
     setUpdateBusy(true);
-    const holdForUnsavedNotes = async () => {
-      if (await useStore.getState().settleNoteDraftsForExit()) return false;
-      toast.error('Nie udało się zapisać notatki — ponowne uruchomienie wstrzymane');
-      setUpdateBusy(false);
-      setUpdateProgress(null);
-      return true;
-    };
     const holdUpdate = () => {
       setUpdateBusy(false);
       setUpdateProgress(null);
       return true;
+    };
+    const holdForUnsavedNotes = async () => {
+      if (await useStore.getState().settleNoteDraftsForExit()) return false;
+      toast.error('Nie udało się zapisać notatki — ponowne uruchomienie wstrzymane');
+      return holdUpdate();
     };
     const discardedContent = new Map<string, string>();
     const holdForUnsavedFiles = async () => {
@@ -281,12 +279,12 @@ export function AppShell() {
     };
     try {
       if (await holdForUnsavedFiles()) return;
-      if (await holdForUnsavedNotes()) return;
-      await update.downloadAndInstall((downloaded, total) => {
+      await update.download((downloaded, total) => {
         setUpdateProgress(total ? Math.min(1, downloaded / total) : null);
       });
       if (await holdForUnsavedFiles()) return;
       if (await holdForUnsavedNotes()) return;
+      await update.install();
       await update.relaunch();
     } catch (err) {
       console.error('Update install failed', err);
