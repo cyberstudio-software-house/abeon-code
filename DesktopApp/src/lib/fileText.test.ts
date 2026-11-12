@@ -28,6 +28,8 @@ describe('encodeFileText', () => {
     ['BOM with LF', '﻿a\nb\n'],
     ['no trailing newline', 'a\nb'],
     ['CRLF without trailing newline', 'a\r\nb'],
+    ['empty file', ''],
+    ['BOM-only file', '\uFEFF'],
   ])('round-trips %s', (_label, raw) => {
     const { text, eol, hasBom } = decodeFileText(raw);
     expect(encodeFileText(text, eol, hasBom)).toBe(raw);
@@ -54,5 +56,8 @@ describe('path helpers', () => {
   it('recognises markdown paths by the last extension only', () => {
     expect(isMarkdownPath('docs/A.MD')).toBe(true);
     expect(isMarkdownPath('a.md.txt')).toBe(false);
+    expect(isMarkdownPath('x.markdown')).toBe(true);
+    expect(isMarkdownPath('X.MDX')).toBe(true);
+    expect(isMarkdownPath('a.mdx.txt')).toBe(false);
   });
 });

@@ -14,7 +14,7 @@ export function fileDir(path: string): string {
 }
 
 export function isMarkdownPath(path: string): boolean {
-  return /\.md$/i.test(path);
+  return /\.(md|markdown|mdx)$/i.test(path);
 }
 
 export function decodeFileText(raw: string): { text: string; eol: Eol; hasBom: boolean } {
