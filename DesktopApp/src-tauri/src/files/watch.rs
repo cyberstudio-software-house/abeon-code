@@ -35,11 +35,24 @@ struct Slot<H> {
     dir: PathBuf,
     handle: H,
     dead: bool,
+    generation: u64,
+}
+
+struct DirtyCount {
+    count: u32,
+    generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Armed {
+    Unchanged,
+    Added { first_for_dir: bool },
 }
 
 struct Registry<H> {
     slots: HashMap<WatchKey, Slot<H>>,
-    dirty: HashMap<String, u32>,
+    dirty: HashMap<String, DirtyCount>,
+    generations: HashMap<String, u64>,
 }
 
 impl<H> Registry<H> {
@@ -47,6 +60,7 @@ impl<H> Registry<H> {
         Self {
             slots: HashMap::new(),
             dirty: HashMap::new(),
+            generations: HashMap::new(),
         }
     }
 
@@ -55,10 +69,16 @@ impl<H> Registry<H> {
         key: WatchKey,
         dir: PathBuf,
         make: impl FnOnce() -> AppResult<H>,
-    ) -> AppResult<bool> {
-        if self.slots.get(&key).is_some_and(|slot| !slot.dead) {
-            return Ok(false);
+    ) -> AppResult<Armed> {
+        let generation = self.generation_of(&key.window_label);
+        if self
+            .slots
+            .get(&key)
+            .is_some_and(|slot| !slot.dead && slot.generation == generation)
+        {
+            return Ok(Armed::Unchanged);
         }
+        let first_for_dir = self.live_users(&dir) == 0;
         let handle = make()?;
         self.slots.insert(
             key,
@@ -66,22 +86,43 @@ impl<H> Registry<H> {
                 dir,
                 handle,
                 dead: false,
+                generation,
             },
         );
-        Ok(true)
+        Ok(Armed::Added { first_for_dir })
+    }
+
+    fn generation_of(&self, window_label: &str) -> u64 {
+        self.generations.get(window_label).copied().unwrap_or(0)
     }
 
     fn remove(&mut self, key: &WatchKey) -> Option<Slot<H>> {
         self.slots.remove(key)
     }
 
-    fn drop_window(&mut self, window_label: &str) -> Vec<Slot<H>> {
-        self.dirty.remove(window_label);
+    fn retire_window(&mut self, window_label: &str) -> u64 {
+        let counter = self
+            .generations
+            .entry(window_label.to_string())
+            .or_insert(0);
+        let retired = *counter;
+        *counter += 1;
+        retired
+    }
+
+    fn drop_window(&mut self, window_label: &str, generation: u64) -> Vec<Slot<H>> {
+        if self
+            .dirty
+            .get(window_label)
+            .is_some_and(|dirty| dirty.generation <= generation)
+        {
+            self.dirty.remove(window_label);
+        }
         let keys: Vec<WatchKey> = self
             .slots
-            .keys()
-            .filter(|key| key.window_label == window_label)
-            .cloned()
+            .iter()
+            .filter(|(key, slot)| key.window_label == window_label && slot.generation <= generation)
+            .map(|(key, _)| key.clone())
             .collect();
         keys.iter()
             .filter_map(|key| self.slots.remove(key))
@@ -135,7 +176,9 @@ impl<H> Registry<H> {
         if count == 0 {
             self.dirty.remove(window_label);
         } else {
-            self.dirty.insert(window_label.to_string(), count);
+            let generation = self.generation_of(window_label);
+            self.dirty
+                .insert(window_label.to_string(), DirtyCount { count, generation });
         }
     }
 
@@ -144,7 +187,7 @@ impl<H> Registry<H> {
         self.dirty
             .iter()
             .filter(|(label, _)| label.as_str() != window_label)
-            .map(|(_, count)| *count)
+            .map(|(_, dirty)| dirty.count)
             .sum()
     }
 }
@@ -213,12 +256,16 @@ impl Drop for Subscription {
     }
 }
 
+fn trigger_every_live<H: Trigger>(registry: &Registry<H>) {
+    registry.for_each_live_all(|handle| handle.trigger());
+}
+
 fn route_event<H: Trigger>(registry: &mut Registry<H>, event: &Event) {
     if matches!(event.kind, EventKind::Access(_)) {
         return;
     }
     if event.need_rescan() {
-        registry.for_each_live_all(|handle| handle.trigger());
+        trigger_every_live(registry);
         return;
     }
     let mut dirs: HashSet<&Path> = HashSet::new();
@@ -274,14 +321,12 @@ impl FileWatches {
     ) -> AppResult<()> {
         let key = WatchKey::new(window_label, project_id, rel_dir);
         let mut control = self.control.lock();
-        let needs_os_watch;
-        {
+        let armed = {
             let mut registry = self.registry.lock();
-            needs_os_watch = registry.live_users(&abs_dir) == 0;
             let emit_app = app.clone();
             let emit_label = key.window_label.clone();
             let emit_rel_dir = key.rel_dir.clone();
-            let inserted = registry.insert_with(key.clone(), abs_dir.clone(), || {
+            registry.insert_with(key.clone(), abs_dir.clone(), || {
                 Ok(Subscription::new(DEBOUNCE, move || {
                     let event = FilesDirChangedEvent {
                         project_id,
@@ -293,17 +338,17 @@ impl FileWatches {
                         eprintln!("files: directory change event failed: {error}");
                     }
                 }))
-            })?;
-            if !inserted {
-                return Ok(());
-            }
-        }
+            })?
+        };
+        let Armed::Added { first_for_dir } = armed else {
+            return Ok(());
+        };
         if app.get_webview_window(&key.window_label).is_none() {
             let removed = self.registry.lock().remove(&key);
             drop(removed);
             return Ok(());
         }
-        if needs_os_watch {
+        if first_for_dir {
             if let Err(error) = self.establish(&mut control, &abs_dir) {
                 let removed = self.registry.lock().remove(&key);
                 drop(removed);
@@ -318,15 +363,22 @@ impl FileWatches {
             *control = Some(shared_watcher(self.registry.clone())?);
         }
         if let Some(watcher) = control.as_mut() {
-            let _ = watcher.unwatch(abs_dir);
-            watcher
-                .watch(abs_dir, RecursiveMode::NonRecursive)
-                .map_err(|error| {
-                    eprintln!("files: cannot watch {}: {error}", abs_dir.display());
-                    AppError::Other(format!("notify: {error}"))
-                })?;
+            let unwatched = watcher.unwatch(abs_dir).is_ok();
+            let watched = watcher.watch(abs_dir, RecursiveMode::NonRecursive);
+            if unwatched || watched.is_ok() {
+                self.cover_stream_restart();
+            }
+            watched.map_err(|error| {
+                eprintln!("files: cannot watch {}: {error}", abs_dir.display());
+                AppError::Other(format!("notify: {error}"))
+            })?;
         }
         Ok(())
+    }
+
+    fn cover_stream_restart(&self) {
+        #[cfg(target_os = "macos")]
+        trigger_every_live(&self.registry.lock());
     }
 
     fn release_dirs(&self, control: &mut Option<RecommendedWatcher>, dirs: HashSet<PathBuf>) {
@@ -337,10 +389,10 @@ impl FileWatches {
             if self.registry.lock().live_users(&dir) > 0 {
                 continue;
             }
-            if let Err(error) = watcher.unwatch(&dir) {
-                if !matches!(error.kind, notify::ErrorKind::WatchNotFound) {
-                    eprintln!("files: cannot unwatch {}: {error}", dir.display());
-                }
+            match watcher.unwatch(&dir) {
+                Ok(()) => self.cover_stream_restart(),
+                Err(error) if matches!(error.kind, notify::ErrorKind::WatchNotFound) => {}
+                Err(error) => eprintln!("files: cannot unwatch {}: {error}", dir.display()),
             }
         }
     }
@@ -356,9 +408,13 @@ impl FileWatches {
         }
     }
 
-    pub fn drop_window(&self, window_label: &str) {
+    pub fn retire_window(&self, window_label: &str) -> u64 {
+        self.registry.lock().retire_window(window_label)
+    }
+
+    pub fn drop_window(&self, window_label: &str, generation: u64) {
         let mut control = self.control.lock();
-        let removed = self.registry.lock().drop_window(window_label);
+        let removed = self.registry.lock().drop_window(window_label, generation);
         let dirs: HashSet<PathBuf> = removed.iter().map(|slot| slot.dir.clone()).collect();
         drop(removed);
         self.release_dirs(&mut control, dirs);
@@ -420,13 +476,17 @@ mod tests {
 
         assert_eq!(registry.dirty_elsewhere("main", &live), 2);
         assert!(!registry.dirty.contains_key("project-2"));
-        assert_eq!(registry.dirty.get("project-1"), Some(&2));
+        assert_eq!(
+            registry.dirty.get("project-1").map(|dirty| dirty.count),
+            Some(2)
+        );
     }
 
     #[test]
     fn dirty_count_set_after_the_window_was_dropped_never_blocks() {
         let mut registry: Registry<()> = Registry::new();
-        registry.drop_window("project-1");
+        let retired = registry.retire_window("project-1");
+        registry.drop_window("project-1", retired);
         registry.set_dirty("project-1", 3);
 
         assert_eq!(registry.dirty_elsewhere("main", &labels(&["main"])), 0);
@@ -450,7 +510,8 @@ mod tests {
         registry.set_dirty("project-1", 4);
         registry.set_dirty("main", 1);
 
-        let dropped = registry.drop_window("project-1");
+        let retired = registry.retire_window("project-1");
+        let dropped = registry.drop_window("project-1", retired);
 
         assert_eq!(dropped.len(), 2);
         assert_eq!(registry.slots.len(), 1);
@@ -478,8 +539,13 @@ mod tests {
             })
             .unwrap();
 
-        assert!(first);
-        assert!(!second);
+        assert_eq!(
+            first,
+            Armed::Added {
+                first_for_dir: true
+            }
+        );
+        assert_eq!(second, Armed::Unchanged);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert_eq!(registry.slots.len(), 1);
         assert!(registry.remove(&key("main", 1, "src")).is_some());
@@ -506,7 +572,7 @@ mod tests {
         let again = registry
             .insert_with(key("main", 1, "src/"), PathBuf::from("/a/src"), || Ok(2))
             .unwrap();
-        assert!(!again);
+        assert_eq!(again, Armed::Unchanged);
         assert_eq!(key("main", 1, "src/"), key("main", 1, "src"));
         assert_eq!(key("main", 1, "/"), key("main", 1, ""));
         assert!(registry.remove(&key("main", 1, "src//")).is_some());
@@ -530,7 +596,12 @@ mod tests {
         let replaced = registry
             .insert_with(key("main", 1, "src"), dir.clone(), || Ok(2))
             .unwrap();
-        assert!(replaced);
+        assert_eq!(
+            replaced,
+            Armed::Added {
+                first_for_dir: true
+            }
+        );
         assert_eq!(registry.live_users(&dir), 1);
         assert_eq!(
             registry
@@ -554,6 +625,125 @@ mod tests {
         });
         assert!(result.is_err());
         assert_eq!(registry.live_users(&dir), 0);
+    }
+
+    #[test]
+    fn entries_of_a_recreated_window_survive_the_deferred_drop() {
+        let mut registry: Registry<u8> = Registry::new();
+        registry
+            .insert_with(key("project-1", 1, "src"), PathBuf::from("/a/src"), || {
+                Ok(1)
+            })
+            .unwrap();
+        registry
+            .insert_with(key("project-1", 1, "lib"), PathBuf::from("/a/lib"), || {
+                Ok(2)
+            })
+            .unwrap();
+        registry.set_dirty("project-1", 4);
+
+        let retired = registry.retire_window("project-1");
+        let rearmed = registry
+            .insert_with(key("project-1", 1, "src"), PathBuf::from("/a/src"), || {
+                Ok(3)
+            })
+            .unwrap();
+        registry
+            .insert_with(
+                key("project-1", 1, "docs"),
+                PathBuf::from("/a/docs"),
+                || Ok(4),
+            )
+            .unwrap();
+        registry.set_dirty("project-1", 2);
+        let dropped = registry.drop_window("project-1", retired);
+
+        assert_eq!(
+            rearmed,
+            Armed::Added {
+                first_for_dir: false
+            }
+        );
+        let dropped: Vec<u8> = dropped.iter().map(|slot| slot.handle).collect();
+        assert_eq!(dropped, vec![2]);
+        assert_eq!(
+            registry
+                .slots
+                .get(&key("project-1", 1, "src"))
+                .map(|slot| slot.handle),
+            Some(3)
+        );
+        assert!(registry.slots.contains_key(&key("project-1", 1, "docs")));
+        let live = labels(&["main", "project-1"]);
+        assert_eq!(registry.dirty_elsewhere("main", &live), 2);
+    }
+
+    #[test]
+    fn retiring_a_window_does_not_touch_other_labels() {
+        let mut registry: Registry<u8> = Registry::new();
+        registry
+            .insert_with(key("main", 1, "src"), PathBuf::from("/a/src"), || Ok(1))
+            .unwrap();
+        assert_eq!(registry.retire_window("project-1"), 0);
+        assert_eq!(registry.retire_window("project-1"), 1);
+        let dropped = registry.drop_window("main", 0);
+        assert_eq!(dropped.len(), 1);
+        let again = registry
+            .insert_with(key("main", 1, "src"), PathBuf::from("/a/src"), || Ok(2))
+            .unwrap();
+        assert_eq!(
+            again,
+            Armed::Added {
+                first_for_dir: true
+            }
+        );
+    }
+
+    #[test]
+    fn rearming_a_live_slot_needs_no_os_watch() {
+        let mut registry: Registry<u8> = Registry::new();
+        let dir = PathBuf::from("/a/src");
+        let calls = AtomicUsize::new(0);
+        let factory = |handle: u8| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Ok(handle)
+        };
+
+        let first = registry
+            .insert_with(key("main", 1, "src"), dir.clone(), || factory(1))
+            .unwrap();
+        let rearms: Vec<Armed> = (0..3)
+            .map(|_| {
+                registry
+                    .insert_with(key("main", 1, "src"), dir.clone(), || factory(2))
+                    .unwrap()
+            })
+            .collect();
+        let other_window = registry
+            .insert_with(key("project-1", 1, "src"), dir.clone(), || factory(3))
+            .unwrap();
+
+        assert_eq!(
+            first,
+            Armed::Added {
+                first_for_dir: true
+            }
+        );
+        assert!(rearms.iter().all(|armed| *armed == Armed::Unchanged));
+        assert_eq!(
+            other_window,
+            Armed::Added {
+                first_for_dir: false
+            }
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            registry
+                .slots
+                .get(&key("main", 1, "src"))
+                .map(|slot| slot.handle),
+            Some(1)
+        );
     }
 
     #[test]
@@ -677,7 +867,12 @@ mod tests {
                 Ok(counting_subscription(&watched_hits))
             })
             .unwrap();
-        assert!(replaced);
+        assert_eq!(
+            replaced,
+            Armed::Added {
+                first_for_dir: true
+            }
+        );
         let _ = watcher.unwatch(&watched);
         watcher
             .watch(&watched, RecursiveMode::NonRecursive)
@@ -778,6 +973,19 @@ mod tests {
         let event = Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan);
 
         route_event(&mut registry, &event);
+
+        assert_eq!(hits(&recorders[0]), 1);
+        assert_eq!(hits(&recorders[1]), 1);
+        assert_eq!(hits(&recorders[2]), 0);
+    }
+
+    #[test]
+    fn triggering_every_live_entry_skips_dead_ones() {
+        let (mut registry, recorders) =
+            recorded_registry(&[("src", "/p/src"), ("lib", "/p/lib"), ("gone", "/p/gone")]);
+        registry.mark_dir_dead(Path::new("/p/gone"));
+
+        trigger_every_live(&registry);
 
         assert_eq!(hits(&recorders[0]), 1);
         assert_eq!(hits(&recorders[1]), 1);

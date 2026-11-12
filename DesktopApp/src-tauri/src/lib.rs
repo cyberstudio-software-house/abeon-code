@@ -55,7 +55,10 @@ pub fn run() {
             if let tauri::WindowEvent::Destroyed = event {
                 let file_watches = window.state::<AppState>().file_watches.clone();
                 let label = window.label().to_string();
-                tauri::async_runtime::spawn_blocking(move || file_watches.drop_window(&label));
+                let generation = file_watches.retire_window(&label);
+                tauri::async_runtime::spawn_blocking(move || {
+                    file_watches.drop_window(&label, generation)
+                });
             }
         })
         .setup(|app| {
