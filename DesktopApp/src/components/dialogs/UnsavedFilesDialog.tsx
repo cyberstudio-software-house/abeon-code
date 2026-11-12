@@ -12,8 +12,8 @@ type Props = {
 export function UnsavedFilesDialog({ files, onSave, onDiscard, onCancel, busy = false, error }: Props) {
   const saveRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    saveRef.current?.focus();
-  }, []);
+    if (!busy) saveRef.current?.focus();
+  }, [busy]);
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;

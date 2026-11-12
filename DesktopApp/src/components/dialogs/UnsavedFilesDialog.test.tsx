@@ -26,6 +26,16 @@ describe('UnsavedFilesDialog', () => {
     expect(document.activeElement).toBe(screen.getByText('Zapisz'));
   });
 
+  it('focuses the save button again when it stops being busy', () => {
+    const handlers = { onSave: vi.fn(), onDiscard: vi.fn(), onCancel: vi.fn() };
+    const { rerender } = render(<UnsavedFilesDialog files={files} busy {...handlers} />);
+    screen.getByText('Anuluj').focus();
+
+    rerender(<UnsavedFilesDialog files={files} busy={false} error="Nie udało się zapisać wszystkich plików." {...handlers} />);
+
+    expect(document.activeElement).toBe(screen.getByText('Zapisz'));
+  });
+
   it('fires the matching callback for each button', () => {
     const { onSave, onDiscard, onCancel } = renderDialog();
 

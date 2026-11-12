@@ -19,8 +19,10 @@ function Harness({ tabIds }: { tabIds: string[] }) {
 }
 
 const conflict = { code: 'conflict', message: 'conflict: src/b.ts' };
-const conflictText = (paths: string) =>
-  `Nie udało się zapisać: ${paths}. Plik zmienił się na dysku — otwórz zakładkę i wybierz „Nadpisz” albo „Wczytaj ponownie”.`;
+const instruction = 'Otwórz zakładkę pliku i wybierz „Wczytaj ponownie” albo „Zostaw moje”, a potem zapisz.';
+const conflictText = (paths: string) => (
+  paths.includes(',') ? `Pliki ${paths} zmieniły się na dysku. ${instruction}` : `Plik ${paths} zmienił się na dysku. ${instruction}`
+);
 
 describe('useUnsavedFilesPrompt', () => {
   let a: string;
@@ -134,6 +136,69 @@ describe('useUnsavedFilesPrompt', () => {
     expect(alert).toHaveTextContent(conflictText('src/b.ts'));
     expect(alert).toHaveTextContent('Nie udało się zapisać wszystkich plików.');
     await act(async () => {});
+  });
+
+  it('names one conflicting file in the singular with the steps the tab offers', async () => {
+    vi.spyOn(tauri, 'writeProjectFile').mockRejectedValue(conflict);
+    ask([b]);
+
+    fireEvent.click(screen.getByText('Zapisz'));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /^Plik src\/b\.ts zmienił się na dysku\. Otwórz zakładkę pliku i wybierz „Wczytaj ponownie” albo „Zostaw moje”, a potem zapisz\.$/,
+    );
+    await act(async () => {});
+  });
+
+  it('gives the keyboard back to Zapisz after a failed save', async () => {
+    let fail!: (error: unknown) => void;
+    vi.spyOn(tauri, 'writeProjectFile').mockImplementation(() => new Promise<string>((_resolve, reject) => { fail = reject; }));
+    ask([a]);
+    const save = screen.getByText('Zapisz');
+    expect(save).toHaveFocus();
+
+    fireEvent.click(save);
+    await waitFor(() => expect(save.closest('button')).toBeDisabled());
+    screen.getByText('Anuluj').focus();
+    expect(screen.getByText('Anuluj')).toHaveFocus();
+    await act(async () => { fail({ code: 'io', message: 'disk full' }); });
+
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.getByText('Zapisz')).toHaveFocus();
+  });
+
+  describe('files from several projects', () => {
+    beforeEach(() => {
+      useStore.setState({ projects: [{ id: 1, name: 'Alfa', path: '/a' }, { id: 2, name: 'Beta', path: '/b' }] as never });
+    });
+
+    it('prefixes each path with its project name', async () => {
+      const c = await seedDirtyFileTab('src/c.ts', 2);
+      ask([a, c]);
+
+      expect(screen.getByText('Alfa: src/a.ts')).toBeTruthy();
+      expect(screen.getByText('Beta: src/c.ts')).toBeTruthy();
+      expect(screen.queryByText('src/a.ts')).toBeNull();
+    });
+
+    it('names conflicting files with their project too', async () => {
+      const c = await seedDirtyFileTab('src/c.ts', 2);
+      vi.spyOn(tauri, 'writeProjectFile').mockRejectedValue(conflict);
+      ask([a, c]);
+
+      fireEvent.click(screen.getByText('Zapisz'));
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(conflictText('Alfa: src/a.ts, Beta: src/c.ts'));
+      await act(async () => {});
+    });
+
+    it('keeps plain paths when every listed file is in one project', async () => {
+      await seedDirtyFileTab('src/c.ts', 2);
+      ask([a, b]);
+
+      expect(screen.getByText('src/a.ts')).toBeTruthy();
+      expect(screen.getByText('src/b.ts')).toBeTruthy();
+    });
   });
 
   it('disables saving and discarding but not cancelling while the save is in flight', async () => {

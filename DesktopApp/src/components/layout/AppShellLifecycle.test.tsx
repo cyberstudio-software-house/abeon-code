@@ -321,7 +321,7 @@ describe('AppShell lifecycle', () => {
 
         fireEvent.click(screen.getByText('Zapisz'));
 
-        expect(await screen.findByText('Nie udało się zapisać: src/a.ts. Plik zmienił się na dysku — otwórz zakładkę i wybierz „Nadpisz” albo „Wczytaj ponownie”.')).toBeTruthy();
+        expect(await screen.findByText('Plik src/a.ts zmienił się na dysku. Otwórz zakładkę pliku i wybierz „Wczytaj ponownie” albo „Zostaw moje”, a potem zapisz.')).toBeTruthy();
         expect(destroy).not.toHaveBeenCalled();
       });
 
