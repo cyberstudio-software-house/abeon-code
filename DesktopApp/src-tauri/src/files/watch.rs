@@ -44,7 +44,10 @@ struct Registry<H> {
 
 impl<H> Registry<H> {
     fn new() -> Self {
-        Self { slots: HashMap::new(), dirty: HashMap::new() }
+        Self {
+            slots: HashMap::new(),
+            dirty: HashMap::new(),
+        }
     }
 
     fn insert_with(
@@ -57,7 +60,14 @@ impl<H> Registry<H> {
             return Ok(false);
         }
         let handle = make()?;
-        self.slots.insert(key, Slot { dir, handle, dead: false });
+        self.slots.insert(
+            key,
+            Slot {
+                dir,
+                handle,
+                dead: false,
+            },
+        );
         Ok(true)
     }
 
@@ -73,7 +83,9 @@ impl<H> Registry<H> {
             .filter(|key| key.window_label == window_label)
             .cloned()
             .collect();
-        keys.iter().filter_map(|key| self.slots.remove(key)).collect()
+        keys.iter()
+            .filter_map(|key| self.slots.remove(key))
+            .collect()
     }
 
     fn live_users(&self, dir: &Path) -> usize {
@@ -84,7 +96,11 @@ impl<H> Registry<H> {
     }
 
     fn for_each_live(&self, dir: &Path, mut action: impl FnMut(&H)) {
-        for slot in self.slots.values().filter(|slot| !slot.dead && slot.dir == dir) {
+        for slot in self
+            .slots
+            .values()
+            .filter(|slot| !slot.dead && slot.dir == dir)
+        {
             action(&slot.handle);
         }
     }
@@ -106,7 +122,11 @@ impl<H> Registry<H> {
     }
 
     fn mark_dir_dead(&mut self, dir: &Path) {
-        for slot in self.slots.values_mut().filter(|slot| slot.dir.starts_with(dir)) {
+        for slot in self
+            .slots
+            .values_mut()
+            .filter(|slot| slot.dir.starts_with(dir))
+        {
             slot.dead = true;
         }
     }
@@ -179,7 +199,6 @@ impl Subscription {
         });
         Self { debouncer, active }
     }
-
 }
 
 impl Trigger for Subscription {
@@ -294,11 +313,7 @@ impl FileWatches {
         Ok(())
     }
 
-    fn establish(
-        &self,
-        control: &mut Option<RecommendedWatcher>,
-        abs_dir: &Path,
-    ) -> AppResult<()> {
+    fn establish(&self, control: &mut Option<RecommendedWatcher>, abs_dir: &Path) -> AppResult<()> {
         if control.is_none() {
             *control = Some(shared_watcher(self.registry.clone())?);
         }
@@ -315,7 +330,9 @@ impl FileWatches {
     }
 
     fn release_dirs(&self, control: &mut Option<RecommendedWatcher>, dirs: HashSet<PathBuf>) {
-        let Some(watcher) = control.as_mut() else { return };
+        let Some(watcher) = control.as_mut() else {
+            return;
+        };
         for dir in dirs {
             if self.registry.lock().live_users(&dir) > 0 {
                 continue;
@@ -352,7 +369,9 @@ impl FileWatches {
     }
 
     pub fn dirty_elsewhere(&self, window_label: &str, live_labels: &HashSet<String>) -> u32 {
-        self.registry.lock().dirty_elsewhere(window_label, live_labels)
+        self.registry
+            .lock()
+            .dirty_elsewhere(window_label, live_labels)
     }
 }
 
@@ -417,9 +436,17 @@ mod tests {
     #[test]
     fn drop_window_clears_dirty_and_watches() {
         let mut registry: Registry<u8> = Registry::new();
-        registry.insert_with(key("project-1", 1, ""), PathBuf::from("/a"), || Ok(1)).unwrap();
-        registry.insert_with(key("project-1", 1, "src"), PathBuf::from("/a/src"), || Ok(2)).unwrap();
-        registry.insert_with(key("main", 1, ""), PathBuf::from("/a"), || Ok(3)).unwrap();
+        registry
+            .insert_with(key("project-1", 1, ""), PathBuf::from("/a"), || Ok(1))
+            .unwrap();
+        registry
+            .insert_with(key("project-1", 1, "src"), PathBuf::from("/a/src"), || {
+                Ok(2)
+            })
+            .unwrap();
+        registry
+            .insert_with(key("main", 1, ""), PathBuf::from("/a"), || Ok(3))
+            .unwrap();
         registry.set_dirty("project-1", 4);
         registry.set_dirty("main", 1);
 
@@ -441,11 +468,15 @@ mod tests {
             calls.fetch_add(1, Ordering::SeqCst);
             Ok(7)
         };
-        let first = registry.insert_with(key("main", 1, "src"), PathBuf::from("/a/src"), factory).unwrap();
-        let second = registry.insert_with(key("main", 1, "src"), PathBuf::from("/a/src"), || {
-            calls.fetch_add(1, Ordering::SeqCst);
-            Ok(8)
-        }).unwrap();
+        let first = registry
+            .insert_with(key("main", 1, "src"), PathBuf::from("/a/src"), factory)
+            .unwrap();
+        let second = registry
+            .insert_with(key("main", 1, "src"), PathBuf::from("/a/src"), || {
+                calls.fetch_add(1, Ordering::SeqCst);
+                Ok(8)
+            })
+            .unwrap();
 
         assert!(first);
         assert!(!second);
@@ -469,8 +500,12 @@ mod tests {
     #[test]
     fn trailing_slash_is_one_watch() {
         let mut registry: Registry<u8> = Registry::new();
-        registry.insert_with(key("main", 1, "src"), PathBuf::from("/a/src"), || Ok(1)).unwrap();
-        let again = registry.insert_with(key("main", 1, "src/"), PathBuf::from("/a/src"), || Ok(2)).unwrap();
+        registry
+            .insert_with(key("main", 1, "src"), PathBuf::from("/a/src"), || Ok(1))
+            .unwrap();
+        let again = registry
+            .insert_with(key("main", 1, "src/"), PathBuf::from("/a/src"), || Ok(2))
+            .unwrap();
         assert!(!again);
         assert_eq!(key("main", 1, "src/"), key("main", 1, "src"));
         assert_eq!(key("main", 1, "/"), key("main", 1, ""));
@@ -481,7 +516,9 @@ mod tests {
     fn dead_entry_is_replaced_by_the_next_watch() {
         let mut registry: Registry<u8> = Registry::new();
         let dir = PathBuf::from("/a/src");
-        registry.insert_with(key("main", 1, "src"), dir.clone(), || Ok(1)).unwrap();
+        registry
+            .insert_with(key("main", 1, "src"), dir.clone(), || Ok(1))
+            .unwrap();
         assert_eq!(registry.live_users(&dir), 1);
 
         registry.mark_dir_dead(&dir);
@@ -490,17 +527,27 @@ mod tests {
         registry.for_each_live(&dir, |_| seen += 1);
         assert_eq!(seen, 0);
 
-        let replaced = registry.insert_with(key("main", 1, "src"), dir.clone(), || Ok(2)).unwrap();
+        let replaced = registry
+            .insert_with(key("main", 1, "src"), dir.clone(), || Ok(2))
+            .unwrap();
         assert!(replaced);
         assert_eq!(registry.live_users(&dir), 1);
-        assert_eq!(registry.slots.get(&key("main", 1, "src")).map(|slot| slot.handle), Some(2));
+        assert_eq!(
+            registry
+                .slots
+                .get(&key("main", 1, "src"))
+                .map(|slot| slot.handle),
+            Some(2)
+        );
     }
 
     #[test]
     fn failing_factory_keeps_a_dead_entry_dead() {
         let mut registry: Registry<u8> = Registry::new();
         let dir = PathBuf::from("/a/src");
-        registry.insert_with(key("main", 1, "src"), dir.clone(), || Ok(1)).unwrap();
+        registry
+            .insert_with(key("main", 1, "src"), dir.clone(), || Ok(1))
+            .unwrap();
         registry.mark_dir_dead(&dir);
         let result = registry.insert_with(key("main", 1, "src"), dir.clone(), || {
             Err(AppError::Other("boom".to_string()))
@@ -513,9 +560,15 @@ mod tests {
     fn live_users_counts_every_window_on_a_directory() {
         let mut registry: Registry<u8> = Registry::new();
         let dir = PathBuf::from("/a/src");
-        registry.insert_with(key("main", 1, "src"), dir.clone(), || Ok(1)).unwrap();
-        registry.insert_with(key("project-1", 1, "src"), dir.clone(), || Ok(2)).unwrap();
-        registry.insert_with(key("main", 1, "lib"), PathBuf::from("/a/lib"), || Ok(3)).unwrap();
+        registry
+            .insert_with(key("main", 1, "src"), dir.clone(), || Ok(1))
+            .unwrap();
+        registry
+            .insert_with(key("project-1", 1, "src"), dir.clone(), || Ok(2))
+            .unwrap();
+        registry
+            .insert_with(key("main", 1, "lib"), PathBuf::from("/a/lib"), || Ok(3))
+            .unwrap();
         assert_eq!(registry.live_users(&dir), 2);
         registry.remove(&key("main", 1, "src"));
         assert_eq!(registry.live_users(&dir), 1);
@@ -570,24 +623,37 @@ mod tests {
         let registry = Arc::new(Mutex::new(Registry::new()));
         let watched_hits = Arc::new(AtomicUsize::new(0));
         let other_hits = Arc::new(AtomicUsize::new(0));
-        registry.lock().insert_with(key("main", 1, "watched"), watched.clone(), || {
-            Ok(counting_subscription(&watched_hits))
-        }).unwrap();
-        registry.lock().insert_with(key("project-1", 1, "watched"), watched.clone(), || {
-            Ok(counting_subscription(&watched_hits))
-        }).unwrap();
-        registry.lock().insert_with(key("main", 1, "other"), other.clone(), || {
-            Ok(counting_subscription(&other_hits))
-        }).unwrap();
+        registry
+            .lock()
+            .insert_with(key("main", 1, "watched"), watched.clone(), || {
+                Ok(counting_subscription(&watched_hits))
+            })
+            .unwrap();
+        registry
+            .lock()
+            .insert_with(key("project-1", 1, "watched"), watched.clone(), || {
+                Ok(counting_subscription(&watched_hits))
+            })
+            .unwrap();
+        registry
+            .lock()
+            .insert_with(key("main", 1, "other"), other.clone(), || {
+                Ok(counting_subscription(&other_hits))
+            })
+            .unwrap();
 
         let mut watcher = shared_watcher(registry.clone()).unwrap();
-        watcher.watch(&watched, RecursiveMode::NonRecursive).unwrap();
+        watcher
+            .watch(&watched, RecursiveMode::NonRecursive)
+            .unwrap();
         watcher.watch(&other, RecursiveMode::NonRecursive).unwrap();
 
         for index in 0..10 {
             std::fs::write(watched.join(format!("file-{index}.txt")), "x").unwrap();
         }
-        assert!(wait_until(Duration::from_secs(10), || watched_hits.load(Ordering::SeqCst) >= 2));
+        assert!(wait_until(Duration::from_secs(10), || watched_hits
+            .load(Ordering::SeqCst)
+            >= 2));
         std::thread::sleep(Duration::from_millis(600));
         let settled = watched_hits.load(Ordering::SeqCst);
         std::thread::sleep(Duration::from_millis(600));
@@ -599,19 +665,28 @@ mod tests {
         assert!(wait_until(Duration::from_secs(10), || {
             registry.lock().live_users(&watched) == 0
         }));
-        assert!(wait_until(Duration::from_secs(10), || watched_hits.load(Ordering::SeqCst) > settled));
+        assert!(wait_until(Duration::from_secs(10), || watched_hits
+            .load(Ordering::SeqCst)
+            > settled));
         assert_eq!(registry.lock().live_users(&other), 1);
 
         std::fs::create_dir_all(&watched).unwrap();
-        let replaced = registry.lock().insert_with(key("main", 1, "watched"), watched.clone(), || {
-            Ok(counting_subscription(&watched_hits))
-        }).unwrap();
+        let replaced = registry
+            .lock()
+            .insert_with(key("main", 1, "watched"), watched.clone(), || {
+                Ok(counting_subscription(&watched_hits))
+            })
+            .unwrap();
         assert!(replaced);
         let _ = watcher.unwatch(&watched);
-        watcher.watch(&watched, RecursiveMode::NonRecursive).unwrap();
+        watcher
+            .watch(&watched, RecursiveMode::NonRecursive)
+            .unwrap();
         let before = watched_hits.load(Ordering::SeqCst);
         std::fs::write(watched.join("again.txt"), "x").unwrap();
-        assert!(wait_until(Duration::from_secs(10), || watched_hits.load(Ordering::SeqCst) > before));
+        assert!(wait_until(Duration::from_secs(10), || watched_hits
+            .load(Ordering::SeqCst)
+            > before));
     }
 
     #[derive(Default)]
@@ -625,7 +700,9 @@ mod tests {
         }
     }
 
-    fn recorded_registry(entries: &[(&str, &str)]) -> (Registry<Arc<Recorder>>, Vec<Arc<Recorder>>) {
+    fn recorded_registry(
+        entries: &[(&str, &str)],
+    ) -> (Registry<Arc<Recorder>>, Vec<Arc<Recorder>>) {
         let mut registry = Registry::new();
         let mut recorders = Vec::new();
         for (rel, dir) in entries {
@@ -644,8 +721,11 @@ mod tests {
 
     #[test]
     fn marking_a_directory_dead_covers_its_subdirectories_by_path_component() {
-        let (mut registry, _recorders) =
-            recorded_registry(&[("src", "/p/src"), ("src/comp", "/p/src/comp"), ("src2", "/p/src2")]);
+        let (mut registry, _recorders) = recorded_registry(&[
+            ("src", "/p/src"),
+            ("src/comp", "/p/src/comp"),
+            ("src2", "/p/src2"),
+        ]);
         registry.mark_dir_dead(Path::new("/p/src"));
         assert_eq!(registry.live_users(Path::new("/p/src")), 0);
         assert_eq!(registry.live_users(Path::new("/p/src/comp")), 0);
@@ -654,10 +734,16 @@ mod tests {
 
     #[test]
     fn renaming_a_watched_directory_notifies_and_kills_nested_watches() {
-        let (mut registry, recorders) =
-            recorded_registry(&[("src", "/p/src"), ("src/comp", "/p/src/comp"), ("src2", "/p/src2"), ("", "/p")]);
-        let event = Event::new(EventKind::Modify(ModifyKind::Name(notify::event::RenameMode::From)))
-            .add_path(PathBuf::from("/p/src"));
+        let (mut registry, recorders) = recorded_registry(&[
+            ("src", "/p/src"),
+            ("src/comp", "/p/src/comp"),
+            ("src2", "/p/src2"),
+            ("", "/p"),
+        ]);
+        let event = Event::new(EventKind::Modify(ModifyKind::Name(
+            notify::event::RenameMode::From,
+        )))
+        .add_path(PathBuf::from("/p/src"));
 
         route_event(&mut registry, &event);
 
@@ -686,7 +772,8 @@ mod tests {
 
     #[test]
     fn a_queue_overflow_notifies_every_live_entry() {
-        let (mut registry, recorders) = recorded_registry(&[("src", "/p/src"), ("lib", "/p/lib"), ("gone", "/p/gone")]);
+        let (mut registry, recorders) =
+            recorded_registry(&[("src", "/p/src"), ("lib", "/p/lib"), ("gone", "/p/gone")]);
         registry.mark_dir_dead(Path::new("/p/gone"));
         let event = Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan);
 
