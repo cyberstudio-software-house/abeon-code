@@ -320,11 +320,12 @@ Short plain-text notes, per project or global, edited in the right column (`Note
   detaching a group (`lib/detachGroup.ts`, which then re-reads the group's tabs, because the flush
   may have re-pointed a note tab to a recreated note), closing the main or a detached window
   (`AppShell`/`DetachedShell`, with a `ConfirmDialog` when notes cannot be saved), and in the update
-  **after the download, before `install()`** in `AppShell`. The update runs download → checks →
-  install → relaunch with nothing in between the last two, so that one settle covers both (on Windows
-  `install()` exits the process, which is why nothing may wait until after it). A new flush point
-  needs the same treatment or the last 700 ms of typing is lost.
-- **Exit settles, detach only flushes**: the window-close handlers and the update flush call
+  **before `install()` and again before `relaunch()`** in `AppShell`. The update runs download →
+  checks → install → checks → relaunch: the settle before `install()` matters on Windows, where
+  `install()` exits the process; the one after it on Linux/macOS, where `install()` can take seconds
+  (a `.deb`/`.rpm` install waits for the pkexec password with no time limit) while the user keeps
+  typing. A new flush point needs the same treatment or the last 700 ms of typing is lost.
+- **Exit settles, detach only flushes**: the window-close handlers and both update flushes call
   `settleNoteDraftsForExit`, which flushes non-blank drafts but deletes a blank draft that has a
   `noteId` (an emptied note is never stored; the draft turns into a blank new draft so an open tab
   keeps working). Their guard is `hasNotesToSettle`, which also covers a blank note already autosaved
@@ -471,8 +472,10 @@ images read-only, binary/over 1 MiB as a message. Spec:
   `GitSection` uses for its git refresh) and when the active tab becomes a file tab, throttled to one
   run per `FILES_RECHECK_INTERVAL_MS` (2 s) plus one trailing run. **Coalescing** (`coalesce` in
   `filesSlice.ts`): while a listing of a directory runs, further requests for it (events, re-check,
-  expand, retry) collapse into one follow-up run after it; the re-check itself is coalesced the same
-  way, so neither can build a growing queue. **Retry timer**: while the panel is open and a held
+  expand, retry) collapse into one follow-up run after it. The re-check and the retry timer queue at
+  most one disk check per buffer (`queueDiskCheck`, keyed by the buffer runtime), so a buffer whose
+  queue is stuck (a save that never finishes) neither blocks the other buffers and the panel nor
+  collects more checks. **Retry timer**: while the panel is open and a held
   directory has a listing in error or a lost watch, or an open buffer's watch directory is lost, a
   single 3 s timer (`FILES_RETRY_INTERVAL_MS`) re-lists those directories and runs those buffers'
   disk checks until nothing is in error or lost; it stops at once when that is so or the panel
@@ -549,13 +552,16 @@ images read-only, binary/over 1 MiB as a message. Spec:
   `lib/detachGroup.ts`), closing the main or a detached window (`useWindowCloseGuard`, shared by
   both shells: `onCloseRequested` asks **before** the notes settle step and the live-process
   confirm; each shell keeps its own live-process dialog and confirm path), and the update
-  (`holdForUnsavedFiles` in `AppShell`, before the download and again after it, before the notes
-  settle step and `install()`, each followed by the `dirtyFilesInOtherWindows` check that refuses
-  with „Masz niezapisane pliki w innym oknie…”; a failed check also holds the update). A refusal
-  after the download leaves the update downloaded but not installed and „Zaktualizuj” retries
-  (`lib/updater.ts` downloads once per update object: the plugin's `download()` would fetch again
-  and orphan the first bytes, and `install()` needs them). Files the user
-  discarded in the first pass are not asked about again unless their content changed. A new
+  (`holdForUnsavedFiles` in `AppShell`: before the download, after it before the notes settle step
+  and `install()`, and after `install()` before the second notes settle step and `relaunch()`, each
+  followed by the `dirtyFilesInOtherWindows` check that refuses with „Masz niezapisane pliki w innym
+  oknie…”; a failed check also holds the update). A refusal after the download leaves the update
+  downloaded but not installed, one after `install()` leaves it installed but not relaunched, and
+  „Zaktualizuj” retries: `lib/updater.ts` keeps a successful download and a successful install per
+  update object (the plugin's `download()` would fetch again and orphan the first bytes, and after a
+  successful `install()` the plugin drops the bytes, so a second call would throw), so a retry
+  repeats only the checks and whatever has not succeeded yet; a failed install is not kept. Files the
+  user discarded in the first pass are not asked about again unless their content changed. A new
   code path that drops tabs or closes a window must add the guard.
 - **„Wstaw ścieżkę do sesji”** types the relative path plus a space into `activeAgentPtyId` and
   refuses a path with C0, DEL or C1 control characters („Ścieżka zawiera niedozwolone znaki”): the

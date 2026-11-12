@@ -251,12 +251,16 @@ as-built description lives in `DesktopApp/CLAUDE.md`, "File browser"):
   watch, so open files and held directories are re-checked on window focus and when a file tab
   becomes active, and while the files panel is open a 3 s timer retries directories whose listing
   failed or whose watch is lost (and the disk check of buffers whose watch is lost) until they
-  recover. Listings and re-checks requested while one runs collapse into one follow-up run.
-- **Update order: download → checks → install → relaunch.** The update uses the plugin's separate
-  `download()` and `install()`: the unsaved-files dialog and the other-windows check run before the
-  download and again after it, followed by the notes settle step, and only then `install()` (which
-  exits the process on Windows) and `relaunch()`. A refusal after the download leaves the update
-  downloaded but not installed, and „Zaktualizuj” retries without downloading again.
+  recover. Listings requested while one runs collapse into one follow-up run, and at most one disk
+  check per buffer is queued, so a buffer stuck behind a save that never finishes blocks nothing.
+- **Update order: download → checks → install → checks → relaunch.** The update uses the plugin's
+  separate `download()` and `install()`: the unsaved-files dialog and the other-windows check run
+  before the download and again after it, followed by the notes settle step; then `install()` (which
+  exits the process on Windows); then, because on Linux/macOS `install()` can take seconds or wait
+  for a pkexec password, the same checks and the notes settle step run once more before
+  `relaunch()`. A refusal after the download leaves the update downloaded but not installed, one
+  after `install()` leaves it installed but not relaunched, and „Zaktualizuj” retries without
+  downloading or installing again.
 - **Closing a dirty file tab uses a dedicated unsaved-files dialog** (`UnsavedFilesDialog`), not
   `ConfirmDialog`; the same dialog guards window close, group detach and the update.
 - **„Zostaw moje” re-reads the file** and takes that text and version as the new baseline, so the

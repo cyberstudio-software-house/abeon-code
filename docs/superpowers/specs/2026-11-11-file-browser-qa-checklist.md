@@ -169,7 +169,7 @@ repozytorium Git z plikiem `.env` w `.gitignore`.
     ma same ścieżki.
 49. Przy dostępnej aktualizacji z niezapisanym plikiem w oknie głównym: przed pobraniem pojawia się
     okno „Niezapisane zmiany”; po „Anuluj” aktualizacja jest wstrzymana, po „Zapisz” lub
-    „Odrzuć zmiany” pobiera się (pasek postępu), a po pobraniu, przed instalacją, okno nie pyta o te
+    „Odrzuć zmiany” pobiera się (pasek postępu), a po pobraniu ani po instalacji okno nie pyta o te
     same pliki; potem instalacja i ponowne uruchomienie.
 50. Przy dostępnej aktualizacji z niezapisanym plikiem w oknie odłączonym (okno główne czyste):
     aktualizacja jest odrzucona z komunikatem „Masz niezapisane pliki w innym oknie. Zapisz je lub
@@ -181,14 +181,22 @@ repozytorium Git z plikiem `.env` w `.gitignore`.
     komunikatem „Masz niezapisane pliki w innym oknie…”, nic nie zostaje zainstalowane (aplikacja
     działa dalej w starej wersji, po zamknięciu i ponownym uruchomieniu nadal jest stara wersja), a
     „Zaktualizuj” znowu działa. Zapisz plik w oknie odłączonym i kliknij „Zaktualizuj”: aktualizacja
-    instaluje się bez ponownego pobierania (pasek postępu nie startuje od zera) i aplikacja
-    uruchamia się ponownie. Na Windows (jeśli dostępny) powtórz: instalator startuje dopiero po
-    kontrolach (wcześniej proces kończył się w trakcie instalacji, przed kontrolą).
+    instaluje się bez ponownego pobierania (paska postępu w ogóle nie ma, bo nic się nie pobiera) i
+    aplikacja uruchamia się ponownie. Na Windows (jeśli dostępny) powtórz: instalator startuje
+    dopiero po kontrolach (wcześniej proces kończył się w trakcie instalacji, przed kontrolą).
+52. Kontrola po instalacji (Linux/macOS): przy czystych oknach kliknij „Zaktualizuj” i w trakcie
+    instalacji (przy pakiecie `.deb`/`.rpm` instalacja czeka na hasło pkexec — nie wpisuj go od razu)
+    zmień plik w oknie odłączonym bez zapisu, potem dokończ instalację. Aplikacja nie uruchamia się
+    ponownie: pojawia się komunikat „Masz niezapisane pliki w innym oknie…”, a „Zaktualizuj” znowu
+    działa. Powtórz z plikiem zmienionym w oknie głównym: po instalacji pojawia się okno
+    „Niezapisane zmiany”, a „Anuluj” zostawia aplikację uruchomioną. Zapisz plik i kliknij
+    „Zaktualizuj”: aplikacja uruchamia się ponownie bez ponownego pobierania i bez ponownej
+    instalacji (nie ma paska postępu ani pytania o hasło).
 
 ## 7. Wydajność i stabilność
 
-52. Podczas pracy z otwartym panelem plików obserwuj log diagnostyczny
+53. Podczas pracy z otwartym panelem plików obserwuj log diagnostyczny
     (`~/.local/share/pl.cyberstudio.abeoncode/logs/abeoncode.log`): brak linii `files:` z błędami
     obserwatora przy zwykłej pracy, brak samoczynnych zamknięć okna (patrz gotcha o głównym wątku).
-53. Zamknij okno odłączone z rozwiniętym drzewem i otwartymi plikami: okno główne nie zacina się
+54. Zamknij okno odłączone z rozwiniętym drzewem i otwartymi plikami: okno główne nie zacina się
     przy zamknięciu, a po powrocie do rozwiniętych katalogów drzewo dalej się odświeża.
