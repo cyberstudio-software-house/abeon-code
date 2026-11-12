@@ -7,6 +7,7 @@ import type { Tab } from './tabsSlice';
 
 export const TREE_RENDER_LIMIT = 2000;
 export const FILE_SEARCH_DEBOUNCE_MS = 150;
+export const FILES_RETRY_INTERVAL_MS = 3000;
 
 export type DirListing = { status: 'loading' | 'ready' | 'error'; entries: FileEntry[] };
 export type FileSearch = {
@@ -31,7 +32,7 @@ export type FileBuffer = {
   error?: string;
   view: FileBufferView;
   content: string;
-  savedContent: string;
+  savedContent: string | null;
   eol: Eol;
   hasBom: boolean;
   version: string | null;
@@ -63,7 +64,7 @@ export type FilesSlice = {
   setFileBufferMode: (tabId: string, mode: 'edit' | 'preview') => void;
   saveFileBuffer: (tabId: string, opts?: { force?: boolean }) => Promise<FileSaveResult>;
   reloadFileBuffer: (tabId: string) => Promise<FileReloadResult>;
-  keepFileBuffer: (tabId: string) => void;
+  keepFileBuffer: (tabId: string) => Promise<void>;
   dropFileBuffer: (tabId: string) => void;
   checkFilesOnDisk: (projectId: number, relDir: string) => Promise<void>;
   recheckFiles: () => Promise<void>;
@@ -79,6 +80,8 @@ type BufferRuntime = {
   queue: Promise<void>;
   observedVersion?: string;
 };
+
+type CoalescedRun = { done: Promise<void>; followUp: Promise<void> | null };
 
 type ReadIntent =
   | { kind: 'load' }
@@ -103,6 +106,16 @@ export function onFileSaved(listener: (projectId: number) => void): () => void {
   return () => { fileSavedListeners.delete(listener); };
 }
 
+function announceSave(projectId: number) {
+  fileSavedListeners.forEach((listener) => {
+    try {
+      listener(projectId);
+    } catch (error) {
+      console.warn('[files] save listener failed', error);
+    }
+  });
+}
+
 const emptySearch: FileSearch = { query: '', status: 'idle', results: [], truncated: false, selected: 0 };
 const deletedFields = { disk: 'deleted', version: null } as const;
 
@@ -116,7 +129,12 @@ const failedWatches = new Set<string>();
 const queuedWatchArms = new Set<string>();
 const panelWatches = new Map<number, Set<string>>();
 const listTokens = new Map<string, number>();
+const listingRuns = new Map<string, CoalescedRun>();
+const recheckRuns = new Map<string, CoalescedRun>();
 const bufferRuntimes = new Map<string, BufferRuntime>();
+const retryingBuffers = new Set<string>();
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let watchHealthChanged: () => void = () => undefined;
 let searchToken = 0;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
 let searchSequence = Date.now();
@@ -174,6 +192,23 @@ function loadedFields(file: FileContent): Partial<FileBuffer> {
   return { ...blank, view: { kind: file.kind, size: file.size }, version: file.version };
 }
 
+function coalesce(runs: Map<string, CoalescedRun>, key: string, task: () => Promise<void>): Promise<void> {
+  const active = runs.get(key);
+  if (active) {
+    active.followUp ??= active.done.then(() => {
+      runs.delete(key);
+      return coalesce(runs, key, task);
+    });
+    return active.followUp;
+  }
+  const run: CoalescedRun = { done: Promise.resolve(), followUp: null };
+  run.done = task().catch(() => undefined).finally(() => {
+    if (run.followUp === null && runs.get(key) === run) runs.delete(key);
+  });
+  runs.set(key, run);
+  return run.done;
+}
+
 function nextListToken(key: string): number {
   const token = (listTokens.get(key) ?? 0) + 1;
   listTokens.set(key, token);
@@ -202,6 +237,7 @@ async function establishWatch(projectId: number, relDir: string) {
     failedWatches.add(key);
     console.warn('[files] watch failed', relDir || '.');
   }
+  watchHealthChanged();
 }
 
 const isWatchHeld = (key: string) => (watchCounts.get(key) ?? 0) > 0;
@@ -223,7 +259,9 @@ function retryFailedWatch(projectId: number, relDir: string) {
 
 function markWatchLost(projectId: number, relDir: string) {
   const key = dirKey(projectId, relDir);
-  if (isWatchHeld(key)) failedWatches.add(key);
+  if (!isWatchHeld(key)) return;
+  failedWatches.add(key);
+  watchHealthChanged();
 }
 
 function cancelSearch() {
@@ -256,7 +294,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     });
   };
 
-  const loadDir = async (projectId: number, relDir: string) => {
+  const listDirNow = async (projectId: number, relDir: string) => {
     const key = dirKey(projectId, relDir);
     const token = nextListToken(key);
     const existing = get().fileTrees[projectId]?.listings[relDir];
@@ -285,7 +323,12 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
         listings: { ...tree.listings, [relDir]: { status: 'error', entries: tree.listings[relDir]?.entries ?? [] } },
       }));
     }
+    updateRetryTimer();
   };
+
+  const loadDir = (projectId: number, relDir: string) => (
+    coalesce(listingRuns, dirKey(projectId, relDir), () => listDirNow(projectId, relDir))
+  );
 
   const panelRetain = (projectId: number, relDir: string) => {
     const held = panelWatches.get(projectId) ?? new Set<string>();
@@ -333,6 +376,14 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     return runtime;
   };
 
+  const followWatchDir = (runtime: BufferRuntime, watchDir: string) => {
+    if (watchDir === runtime.relDir) return;
+    const previous = runtime.relDir;
+    runtime.relDir = watchDir;
+    get().retainDirWatch(runtime.projectId, watchDir);
+    get().releaseDirWatch(runtime.projectId, previous);
+  };
+
   const markChanged = (tabId: string, runtime: BufferRuntime, diskVersion: string | undefined) => {
     if (diskVersion !== undefined) runtime.observedVersion = diskVersion;
     if (get().fileBuffers[tabId]?.disk !== 'changed') patchBuffer(tabId, { disk: 'changed' });
@@ -358,6 +409,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       const file = await tauri.readProjectFile(buffer.projectId, buffer.path);
       const current = get().fileBuffers[tabId];
       if (!current || !isLatest()) return 'kept';
+      followWatchDir(runtime, file.watch_dir);
       const fields = loadedFields(file);
       if (keepsUserText(current, intent, fields)) {
         markChanged(tabId, runtime, 'version' in file ? file.version : diskVersion);
@@ -399,6 +451,45 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     else await readFromDisk(tabId, runtime, runtime.readToken, { kind: 'silent', diskVersion });
   };
 
+  const isLost = (projectId: number, relDir: string) => failedWatches.has(dirKey(projectId, relDir));
+
+  const failingPanelDirs = (): string[] => {
+    const projectId = attachedProjectId;
+    if (projectId === null) return [];
+    const listings = get().fileTrees[projectId]?.listings ?? {};
+    return [...(panelWatches.get(projectId) ?? [])]
+      .filter((relDir) => listings[relDir]?.status === 'error' || isLost(projectId, relDir));
+  };
+
+  const buffersWithLostWatch = () => [...bufferRuntimes].filter(([, runtime]) => isLost(runtime.projectId, runtime.relDir));
+
+  const needsRetry = () => get().filesPanelOpen && (failingPanelDirs().length > 0 || buffersWithLostWatch().length > 0);
+
+  const retryFailing = () => {
+    retryTimer = null;
+    const projectId = attachedProjectId;
+    if (get().filesPanelOpen) {
+      if (projectId !== null) failingPanelDirs().forEach((relDir) => { void loadDir(projectId, relDir); });
+      for (const [tabId, runtime] of buffersWithLostWatch()) {
+        if (retryingBuffers.has(tabId)) continue;
+        retryingBuffers.add(tabId);
+        void enqueue(runtime, () => compareWithDisk(tabId, runtime)).finally(() => retryingBuffers.delete(tabId));
+      }
+    }
+    updateRetryTimer();
+  };
+
+  const updateRetryTimer = () => {
+    const wanted = needsRetry();
+    if (wanted && retryTimer === null) retryTimer = setTimeout(retryFailing, FILES_RETRY_INTERVAL_MS);
+    if (!wanted && retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  };
+
+  watchHealthChanged = updateRetryTimer;
+
   const settleConflict = async (tabId: string, runtime: BufferRuntime, buffer: FileBuffer) => {
     let diskVersion: string | null | undefined;
     try {
@@ -416,6 +507,23 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     patchBuffer(tabId, { saveStatus: 'idle', disk: 'changed', ...(buffer.version === null ? { savedContent: '' } : {}) });
   };
 
+  const keepMine = async (tabId: string, runtime: BufferRuntime) => {
+    const buffer = get().fileBuffers[tabId];
+    if (buffer?.disk !== 'changed' || !isAlive(tabId, runtime)) return;
+    let baseline: Pick<FileBuffer, 'savedContent' | 'version'>;
+    try {
+      const file = await tauri.readProjectFile(buffer.projectId, buffer.path);
+      if (!isAlive(tabId, runtime)) return;
+      followWatchDir(runtime, file.watch_dir);
+      baseline = { savedContent: file.kind === 'text' ? decodeFileText(file.content).text : null, version: file.version };
+    } catch {
+      baseline = { savedContent: null, version: runtime.observedVersion ?? buffer.version };
+    }
+    if (get().fileBuffers[tabId]?.disk !== 'changed' || !isAlive(tabId, runtime)) return;
+    runtime.observedVersion = undefined;
+    patchBuffer(tabId, { disk: 'same', ...baseline });
+  };
+
   const writeToDisk = async (tabId: string, runtime: BufferRuntime, force: boolean): Promise<FileSaveResult> => {
     const buffer = get().fileBuffers[tabId];
     if (!buffer || !isAlive(tabId, runtime)) return 'error';
@@ -423,17 +531,11 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     if (!force && buffer.content === buffer.savedContent && buffer.disk !== 'deleted') return 'clean';
     const sent = buffer.content;
     patchBuffer(tabId, { saveStatus: 'saving', saveError: undefined });
+    let version: string;
     try {
-      const version = await tauri.writeProjectFile(
+      version = await tauri.writeProjectFile(
         buffer.projectId, buffer.path, encodeFileText(sent, buffer.eol, buffer.hasBom), buffer.version, force,
       );
-      const current = get().fileBuffers[tabId];
-      if (current && isAlive(tabId, runtime)) {
-        runtime.observedVersion = undefined;
-        patchBuffer(tabId, { savedContent: sent, version, disk: 'same', saveStatus: current.content === sent ? 'saved' : 'idle' });
-      }
-      fileSavedListeners.forEach((listener) => listener(buffer.projectId));
-      return 'saved';
     } catch (error) {
       const conflicted = failureCode(error) === 'conflict';
       if (!isAlive(tabId, runtime)) return conflicted ? 'conflict' : 'error';
@@ -444,6 +546,13 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       patchBuffer(tabId, { saveStatus: 'error', saveError: failureMessage(error) });
       return 'error';
     }
+    const current = get().fileBuffers[tabId];
+    if (current && isAlive(tabId, runtime)) {
+      runtime.observedVersion = undefined;
+      patchBuffer(tabId, { savedContent: sent, version, disk: 'same', saveStatus: current.content === sent ? 'saved' : 'idle' });
+    }
+    announceSave(buffer.projectId);
+    return 'saved';
   };
 
   return {
@@ -461,12 +570,14 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       detachProject();
       set({ filesPanelOpen: true, fileSearch: emptySearch });
       attachProject(projectId);
+      updateRetryTimer();
     },
 
     closeFilesPanel: () => {
       abandonSearch();
       detachProject();
       set({ filesPanelOpen: false, fileSearch: emptySearch });
+      updateRetryTimer();
     },
 
     followFilesProject: () => {
@@ -478,6 +589,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       detachProject();
       set({ fileSearch: emptySearch });
       attachProject(projectId);
+      updateRetryTimer();
     },
 
     toggleFileDir: async (projectId, relDir) => {
@@ -553,6 +665,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       watchCounts.delete(key);
       failedWatches.delete(key);
       enqueueWatch(key, () => tauri.unwatchProjectDir(projectId, relDir));
+      updateRetryTimer();
     },
 
     loadFileBuffer: async (tabId) => {
@@ -595,13 +708,10 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       return enqueue(runtime, () => readFromDisk(tabId, runtime, token, intent));
     },
 
-    keepFileBuffer: (tabId) => {
+    keepFileBuffer: async (tabId) => {
       const runtime = bufferRuntimes.get(tabId);
-      const buffer = get().fileBuffers[tabId];
-      if (!runtime || buffer?.disk !== 'changed') return;
-      const version = runtime.observedVersion ?? buffer.version;
-      runtime.observedVersion = undefined;
-      patchBuffer(tabId, { disk: 'same', version });
+      if (!runtime || get().fileBuffers[tabId]?.disk !== 'changed') return;
+      await enqueue(runtime, () => keepMine(tabId, runtime));
     },
 
     dropFileBuffer: (tabId) => {
@@ -610,37 +720,33 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
         bufferRuntimes.delete(tabId);
         get().releaseDirWatch(runtime.projectId, runtime.relDir);
       }
-      if (!get().fileBuffers[tabId]) return;
-      set((s) => {
-        const { [tabId]: _dropped, ...rest } = s.fileBuffers;
-        return { fileBuffers: rest };
-      });
+      if (get().fileBuffers[tabId]) {
+        set((s) => {
+          const { [tabId]: _dropped, ...rest } = s.fileBuffers;
+          return { fileBuffers: rest };
+        });
+      }
+      updateRetryTimer();
     },
 
     checkFilesOnDisk: async (projectId, relDir) => {
-      const checks = Object.values(get().fileBuffers)
-        .filter((buffer) => buffer.projectId === projectId && fileDir(buffer.path) === relDir)
-        .map((buffer) => {
-          const runtime = bufferRuntimes.get(buffer.tabId);
-          return runtime ? enqueue(runtime, () => compareWithDisk(buffer.tabId, runtime)) : undefined;
-        });
+      const checks = Object.values(get().fileBuffers).flatMap((buffer) => {
+        const runtime = bufferRuntimes.get(buffer.tabId);
+        if (!runtime || buffer.projectId !== projectId) return [];
+        if (runtime.relDir !== relDir && fileDir(buffer.path) !== relDir) return [];
+        return [enqueue(runtime, () => compareWithDisk(buffer.tabId, runtime))];
+      });
       await Promise.all(checks);
     },
 
-    recheckFiles: async () => {
-      const state = get();
-      const bufferDirs = new Map<string, { projectId: number; relDir: string }>();
-      for (const buffer of Object.values(state.fileBuffers)) {
-        const relDir = fileDir(buffer.path);
-        bufferDirs.set(dirKey(buffer.projectId, relDir), { projectId: buffer.projectId, relDir });
-      }
-      const checks = [...bufferDirs.values()].map(({ projectId, relDir }) => state.checkFilesOnDisk(projectId, relDir));
+    recheckFiles: () => coalesce(recheckRuns, '', async () => {
+      const checks = [...bufferRuntimes].map(([tabId, runtime]) => enqueue(runtime, () => compareWithDisk(tabId, runtime)));
       const projectId = attachedProjectId;
-      const listings = state.filesPanelOpen && projectId !== null
+      const listings = get().filesPanelOpen && projectId !== null
         ? [...(panelWatches.get(projectId) ?? [])].map((relDir) => loadDir(projectId, relDir))
         : [];
       await Promise.all([...checks, ...listings]);
-    },
+    }),
 
     saveDirtyFiles: async (tabIds) => {
       const results = await Promise.all(tabIds.map((tabId) => get().saveFileBuffer(tabId)));

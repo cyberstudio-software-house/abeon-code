@@ -189,7 +189,7 @@ export function FileTabView({ tab, visible, focused }: Props) {
       {buffer.disk === 'changed' && (
         <DiskBar message="Plik zmienił się na dysku">
           <button type="button" className="btn-secondary" onClick={() => void reload()}>Wczytaj ponownie</button>
-          <button type="button" className="btn-secondary" onClick={() => keepFileBuffer(tab.id)}>Zostaw moje</button>
+          <button type="button" className="btn-secondary" onClick={() => void keepFileBuffer(tab.id)}>Zostaw moje</button>
         </DiskBar>
       )}
       {buffer.disk === 'deleted' && <DiskBar message="Plik został usunięty" hint="Zapis utworzy go ponownie." />}

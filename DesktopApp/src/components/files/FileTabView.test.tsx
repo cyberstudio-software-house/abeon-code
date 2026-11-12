@@ -14,7 +14,12 @@ const tauriMock = vi.hoisted(() => ({
 
 vi.mock('../../lib/tauri', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../lib/tauri')>();
-  return { ...actual, tauri: { ...actual.tauri, ...tauriMock } };
+  const { fileDir } = await import('../../lib/fileText');
+  const readProjectFile = async (projectId: number, relPath: string) => {
+    const file = await tauriMock.readProjectFile(projectId, relPath);
+    return file && !('watch_dir' in file) ? { ...file, watch_dir: fileDir(relPath) } : file;
+  };
+  return { ...actual, tauri: { ...actual.tauri, ...tauriMock, readProjectFile } };
 });
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
@@ -225,10 +230,13 @@ describe('FileTabView', () => {
     act(() => {
       useStore.setState((s) => ({ fileBuffers: { ...s.fileBuffers, [tab.id]: { ...s.fileBuffers[tab.id], disk: 'changed' } } }));
     });
+    tauriMock.readProjectFile.mockResolvedValueOnce(textFile('theirs\n', 'v2'));
     fireEvent.click(screen.getByRole('button', { name: 'Zostaw moje' }));
-    expect(screen.queryByText('Plik zmienił się na dysku')).not.toBeInTheDocument();
-    expect(state().fileBuffers[tab.id]).toMatchObject({ disk: 'same', content: 'mine\n' });
+    await waitFor(() => expect(screen.queryByText('Plik zmienił się na dysku')).not.toBeInTheDocument());
+    expect(state().fileBuffers[tab.id]).toMatchObject({ disk: 'same', content: 'mine\n', savedContent: 'theirs\n', version: 'v2' });
     expect(screen.getByLabelText('editor')).toHaveValue('mine\n');
+    edit('hello\n');
+    expect(screen.getByText('Niezapisane zmiany')).toBeInTheDocument();
   });
 
   it('toasts when reloading fails', async () => {

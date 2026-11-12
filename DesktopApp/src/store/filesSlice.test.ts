@@ -14,11 +14,16 @@ const tauriMock = vi.hoisted(() => ({
 
 vi.mock('../lib/tauri', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/tauri')>();
-  return { ...actual, tauri: { ...actual.tauri, ...tauriMock } };
+  const { fileDir } = await import('../lib/fileText');
+  const readProjectFile = async (projectId: number, relPath: string) => {
+    const file = await tauriMock.readProjectFile(projectId, relPath);
+    return file && !('watch_dir' in file) ? { ...file, watch_dir: fileDir(relPath) } : file;
+  };
+  return { ...actual, tauri: { ...actual.tauri, ...tauriMock, readProjectFile } };
 });
 
 import { useStore } from './index';
-import { FILE_SEARCH_DEBOUNCE_MS, dirtyFileTabIds, isFileDirty, onFileSaved, type FileBuffer } from './filesSlice';
+import { FILES_RETRY_INTERVAL_MS, FILE_SEARCH_DEBOUNCE_MS, dirtyFileTabIds, isFileDirty, onFileSaved, type FileBuffer } from './filesSlice';
 import { fileName, fileTabId } from '../lib/fileText';
 
 const state = () => useStore.getState();
@@ -148,19 +153,48 @@ describe('filesSlice', () => {
     expect(state().fileTrees[1].listings.src.entries).toEqual([entry('b.ts')]);
   });
 
-  it('drops a stale listing response', async () => {
+  it('collapses reload requests made during an in-flight listing into one follow-up run', async () => {
     await state().openFilesPanel();
     await flush();
+    tauriMock.listProjectDir.mockClear();
     const first = deferred<FileEntry[]>();
     const second = deferred<FileEntry[]>();
     tauriMock.listProjectDir.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-    const slow = state().reloadFileDir(1, 'src');
-    const fast = state().reloadFileDir(1, 'src');
-    second.resolve([entry('new.ts')]);
-    await fast;
+    const requests = Array.from({ length: 5 }, () => state().reloadFileDir(1, 'src'));
+    await flush();
+    expect(tauriMock.listProjectDir).toHaveBeenCalledTimes(1);
     first.resolve([entry('old.ts')]);
-    await slow;
+    await requests[0];
+    await flush();
+    expect(tauriMock.listProjectDir).toHaveBeenCalledTimes(2);
+    second.resolve([entry('new.ts')]);
+    await Promise.all(requests);
+    expect(tauriMock.listProjectDir).toHaveBeenCalledTimes(2);
     expect(state().fileTrees[1].listings.src.entries).toEqual([entry('new.ts')]);
+  });
+
+  it('gives a reload requested while the follow-up runs a run of its own, and lists other directories independently', async () => {
+    await state().openFilesPanel();
+    await flush();
+    tauriMock.listProjectDir.mockClear();
+    const runs = [deferred<FileEntry[]>(), deferred<FileEntry[]>()];
+    let started = 0;
+    tauriMock.listProjectDir.mockImplementation(async (_projectId: number, relDir: string) => (
+      relDir === 'src' ? (runs[started++]?.promise ?? []) : []
+    ));
+    const initial = state().reloadFileDir(1, 'src');
+    const followUp = state().reloadFileDir(1, 'src');
+    const other = state().reloadFileDir(1, 'lib');
+    await other;
+    expect(tauriMock.listProjectDir.mock.calls).toEqual([[1, 'src'], [1, 'lib']]);
+    runs[0].resolve([]);
+    await initial;
+    await flush();
+    const late = state().reloadFileDir(1, 'src');
+    runs[1].resolve([entry('a.ts')]);
+    await followUp;
+    await late;
+    expect(tauriMock.listProjectDir.mock.calls).toEqual([[1, 'src'], [1, 'lib'], [1, 'src'], [1, 'src']]);
   });
 
   it('keeps a ready listing while it reloads and marks a failed reload as an error', async () => {
@@ -506,6 +540,99 @@ describe('filesSlice', () => {
     expect(state().fileSearch.selected).toBe(0);
   });
 
+  describe('retry timer', () => {
+    const notFound = { code: 'not_found', message: 'not found: src' };
+
+    const breakSrc = async () => {
+      await state().openFilesPanel();
+      await toggleAndSettle(1, 'src');
+      tauriMock.listProjectDir.mockRejectedValueOnce(notFound);
+      await state().reloadFileDir(1, 'src');
+      await flush();
+      expect(state().fileTrees[1].listings.src.status).toBe('error');
+      tauriMock.listProjectDir.mockClear();
+      tauriMock.watchProjectDir.mockClear();
+    };
+
+    it('lists a held directory again every 3 s without a focus event until it lists, then stops', async () => {
+      await breakSrc();
+      tauriMock.listProjectDir.mockRejectedValueOnce(notFound);
+      await vi.advanceTimersByTimeAsync(FILES_RETRY_INTERVAL_MS - 1);
+      expect(tauriMock.listProjectDir).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(tauriMock.listProjectDir.mock.calls).toEqual([[1, 'src']]);
+      expect(state().fileTrees[1].listings.src.status).toBe('error');
+
+      tauriMock.listProjectDir.mockResolvedValueOnce([entry('index.ts')]);
+      await vi.advanceTimersByTimeAsync(FILES_RETRY_INTERVAL_MS);
+      expect(state().fileTrees[1].listings.src).toEqual({ status: 'ready', entries: [entry('index.ts')] });
+      expect(tauriMock.watchProjectDir).toHaveBeenCalledWith(1, 'src');
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(FILES_RETRY_INTERVAL_MS * 3);
+      expect(tauriMock.listProjectDir).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops when the panel closes', async () => {
+      await breakSrc();
+      expect(vi.getTimerCount()).toBe(1);
+      state().closeFilesPanel();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(FILES_RETRY_INTERVAL_MS * 3);
+      expect(tauriMock.listProjectDir).not.toHaveBeenCalled();
+    });
+
+    it('runs no timer while nothing is in error or lost', async () => {
+      await state().openFilesPanel();
+      await toggleAndSettle(1, 'src');
+      expect(vi.getTimerCount()).toBe(0);
+      tauriMock.listProjectDir.mockClear();
+      await vi.advanceTimersByTimeAsync(FILES_RETRY_INTERVAL_MS * 3);
+      expect(tauriMock.listProjectDir).not.toHaveBeenCalled();
+    });
+
+    it('retries a held directory whose watch failed although its listing is fine', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      tauriMock.watchProjectDir.mockRejectedValue(new Error('no watch'));
+      await state().openFilesPanel();
+      await flush();
+      expect(vi.getTimerCount()).toBe(1);
+      tauriMock.watchProjectDir.mockResolvedValue(undefined);
+      tauriMock.listProjectDir.mockClear();
+      await vi.advanceTimersByTimeAsync(FILES_RETRY_INTERVAL_MS);
+      expect(tauriMock.listProjectDir.mock.calls).toEqual([[1, '']]);
+      expect(vi.getTimerCount()).toBe(0);
+      warn.mockRestore();
+    });
+
+    it('runs the disk check of a buffer whose directory watch is lost while the panel is open', async () => {
+      await state().openFilesPanel();
+      await flush();
+      const id = await openBuffer('src/a.ts');
+      tauriMock.projectFileVersion.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src/a.ts' });
+      await state().checkFilesOnDisk(1, 'src');
+      await flush();
+      expect(buffer(id).disk).toBe('deleted');
+      tauriMock.projectFileVersion.mockClear();
+      tauriMock.projectFileVersion.mockResolvedValueOnce('v7');
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('agent\n', 'v7'));
+      await vi.advanceTimersByTimeAsync(FILES_RETRY_INTERVAL_MS);
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledTimes(1);
+      expect(buffer(id)).toMatchObject({ content: 'agent\n', version: 'v7', disk: 'same' });
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('leaves a buffer with a lost watch to the focus re-check while the panel is closed', async () => {
+      const id = await openBuffer('src/a.ts');
+      tauriMock.projectFileVersion.mockRejectedValueOnce({ code: 'not_found', message: 'not found: src/a.ts' });
+      await state().checkFilesOnDisk(1, 'src');
+      await flush();
+      expect(buffer(id).disk).toBe('deleted');
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(FILES_RETRY_INTERVAL_MS * 3);
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('closes the panel when the last tab closes', async () => {
     await state().openFilesPanel();
     await flush();
@@ -527,6 +654,71 @@ describe('filesSlice', () => {
         mode: 'edit', saveStatus: 'idle', disk: 'same',
       });
       expect(isFileDirty(buffer(id))).toBe(false);
+    });
+
+    describe('watch directory', () => {
+      const linked = (content: string, watchDir: string, version = 'v1') => ({ ...textFile(content, version), watch_dir: watchDir });
+      const callsFor = (mock: typeof tauriMock.watchProjectDir) => mock.mock.calls.map((call) => call[1]);
+
+      it('watches the directory an ordinary file lives in', async () => {
+        await openBuffer('src/a.ts', textFile('hello\n'));
+        await flush();
+        expect(callsFor(tauriMock.watchProjectDir)).toEqual(['src']);
+        expect(tauriMock.unwatchProjectDir).not.toHaveBeenCalled();
+        await state().checkFilesOnDisk(1, 'src');
+        expect(tauriMock.projectFileVersion).toHaveBeenCalledWith(1, 'src/a.ts');
+      });
+
+      it('watches the directory a symlinked file points into and checks the file on an event there', async () => {
+        const id = await openBuffer('.env', linked('A=1\n', 'config'));
+        await flush();
+        expect(callsFor(tauriMock.watchProjectDir)).toEqual(['', 'config']);
+        expect(callsFor(tauriMock.unwatchProjectDir)).toEqual(['']);
+        await state().checkFilesOnDisk(1, 'lib');
+        expect(tauriMock.projectFileVersion).not.toHaveBeenCalled();
+        tauriMock.projectFileVersion.mockResolvedValueOnce('v2');
+        tauriMock.readProjectFile.mockResolvedValueOnce(linked('A=2\n', 'config', 'v2'));
+        await state().checkFilesOnDisk(1, 'config');
+        expect(buffer(id)).toMatchObject({ content: 'A=2\n', version: 'v2', disk: 'same' });
+      });
+
+      it('still checks a symlinked file on an event in the directory of the link itself', async () => {
+        await openBuffer('.env', linked('A=1\n', 'config'));
+        await state().checkFilesOnDisk(1, '');
+        expect(tauriMock.projectFileVersion).toHaveBeenCalledWith(1, '.env');
+      });
+
+      it('moves the watch exactly once when a reload finds the link pointing elsewhere', async () => {
+        const id = await openBuffer('.env', linked('A=1\n', 'config'));
+        tauriMock.readProjectFile.mockResolvedValueOnce(linked('B=1\n', 'vault', 'v2'));
+        await state().reloadFileBuffer(id);
+        tauriMock.readProjectFile.mockResolvedValueOnce(linked('B=1\n', 'vault', 'v2'));
+        await state().reloadFileBuffer(id);
+        await flush();
+        expect(callsFor(tauriMock.watchProjectDir)).toEqual(['', 'config', 'vault']);
+        expect(callsFor(tauriMock.unwatchProjectDir)).toEqual(['', 'config']);
+        tauriMock.projectFileVersion.mockResolvedValueOnce('v2');
+        await state().checkFilesOnDisk(1, 'vault');
+        expect(tauriMock.projectFileVersion).toHaveBeenCalledTimes(1);
+        state().dropFileBuffer(id);
+        await flush();
+        expect(callsFor(tauriMock.unwatchProjectDir)).toEqual(['', 'config', 'vault']);
+      });
+
+      it('holds the directory of the path until the first read resolves and never moves a dropped buffer', async () => {
+        const id = addFileTab('.env');
+        const read = deferred<FileContent>();
+        tauriMock.readProjectFile.mockReturnValueOnce(read.promise);
+        const load = state().loadFileBuffer(id);
+        await flush();
+        expect(callsFor(tauriMock.watchProjectDir)).toEqual(['']);
+        state().dropFileBuffer(id);
+        read.resolve(linked('A=1\n', 'config'));
+        await load;
+        await flush();
+        expect(callsFor(tauriMock.watchProjectDir)).toEqual(['']);
+        expect(callsFor(tauriMock.unwatchProjectDir)).toEqual(['']);
+      });
     });
 
     it('opens a Markdown file in preview mode', async () => {
@@ -670,6 +862,24 @@ describe('filesSlice', () => {
       expect(listener).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps a completed save saved when a save listener throws and still tells the other listeners', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const failure = new Error('listener broke');
+      const stopFailing = onFileSaved(() => { throw failure; });
+      const after = vi.fn();
+      const stopAfter = onFileSaved(after);
+      const id = await openBuffer();
+      state().editFileBuffer(id, 'mine\n');
+      await expect(state().saveFileBuffer(id)).resolves.toBe('saved');
+      expect(buffer(id)).toMatchObject({ savedContent: 'mine\n', version: 'v2', saveStatus: 'saved', disk: 'same' });
+      expect(buffer(id).saveError).toBeUndefined();
+      expect(after).toHaveBeenCalledWith(1);
+      expect(warn).toHaveBeenCalledWith('[files] save listener failed', failure);
+      stopFailing();
+      stopAfter();
+      warn.mockRestore();
+    });
+
     it('does not write a clean buffer', async () => {
       const id = await openBuffer();
       await expect(state().saveFileBuffer(id)).resolves.toBe('clean');
@@ -717,8 +927,9 @@ describe('filesSlice', () => {
       tauriMock.writeProjectFile.mockRejectedValueOnce(conflict).mockResolvedValueOnce('v4');
       tauriMock.projectFileVersion.mockResolvedValueOnce('v3');
       await state().saveFileBuffer(id);
-      state().keepFileBuffer(id);
-      expect(buffer(id)).toMatchObject({ disk: 'same', version: 'v3', content: 'mine\n' });
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('theirs\n', 'v3'));
+      await state().keepFileBuffer(id);
+      expect(buffer(id)).toMatchObject({ disk: 'same', version: 'v3', content: 'mine\n', savedContent: 'theirs\n' });
       await expect(state().saveFileBuffer(id)).resolves.toBe('saved');
       expect(tauriMock.writeProjectFile).toHaveBeenLastCalledWith(1, 'src/a.ts', 'mine\n', 'v3', false);
     });
@@ -835,8 +1046,9 @@ describe('filesSlice', () => {
       await state().checkFilesOnDisk(1, 'src');
       expect(buffer(id)).toMatchObject({ content: 'hello\n', savedContent: 'hello\n', version: null, disk: 'deleted' });
       expect(isFileDirty(buffer(id))).toBe(true);
-      state().keepFileBuffer(id);
+      await state().keepFileBuffer(id);
       expect(buffer(id).disk).toBe('deleted');
+      expect(tauriMock.readProjectFile).toHaveBeenCalledTimes(1);
       tauriMock.writeProjectFile.mockResolvedValueOnce('v5');
       await expect(state().saveFileBuffer(id)).resolves.toBe('saved');
       expect(tauriMock.writeProjectFile).toHaveBeenCalledWith(1, 'src/a.ts', 'hello\n', null, false);
@@ -871,8 +1083,9 @@ describe('filesSlice', () => {
       await state().checkFilesOnDisk(1, 'src');
       expect(buffer(id)).toMatchObject({ content: 'mine\n', savedContent: 'hello\n', disk: 'changed', version: null });
       expect(isFileDirty(buffer(id))).toBe(true);
-      state().keepFileBuffer(id);
-      expect(buffer(id)).toMatchObject({ disk: 'same', version: 'v7' });
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('agent\n', 'v7'));
+      await state().keepFileBuffer(id);
+      expect(buffer(id)).toMatchObject({ disk: 'same', version: 'v7', savedContent: 'agent\n' });
       expect(isFileDirty(buffer(id))).toBe(true);
       tauriMock.writeProjectFile.mockResolvedValueOnce('v8');
       await expect(state().saveFileBuffer(id)).resolves.toBe('saved');
@@ -1053,7 +1266,8 @@ describe('filesSlice', () => {
       read.resolve(textFile('agent\n', 'v3'));
       await check;
       expect(buffer(id)).toMatchObject({ content: 'mine\n', savedContent: 'hello\n', version: 'v1', disk: 'changed' });
-      state().keepFileBuffer(id);
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('agent\n', 'v3'));
+      await state().keepFileBuffer(id);
       expect(buffer(id)).toMatchObject({ disk: 'same', version: 'v3' });
     });
 
@@ -1150,6 +1364,18 @@ describe('filesSlice', () => {
       expect(tauriMock.listProjectDir).toHaveBeenCalledWith(1, 'src');
     });
 
+    it('collapses re-checks requested while one runs into one follow-up run', async () => {
+      await openBuffer('src/a.ts');
+      const version = deferred<string | null>();
+      tauriMock.projectFileVersion.mockReturnValueOnce(version.promise);
+      const requests = Array.from({ length: 5 }, () => state().recheckFiles());
+      await flush();
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledTimes(1);
+      version.resolve('v1');
+      await Promise.all(requests);
+      expect(tauriMock.projectFileVersion).toHaveBeenCalledTimes(2);
+    });
+
     it('re-checks only the buffers while the panel is closed', async () => {
       await openBuffer('src/a.ts');
       await state().recheckFiles();
@@ -1207,17 +1433,100 @@ describe('filesSlice', () => {
       expect(isFileDirty(buffer(id))).toBe(false);
     });
 
+    it.each([
+      ['a binary file', { kind: 'binary', version: 'b1', size: 1 }],
+      ['a too large file', { kind: 'tooLarge', version: 'b1', size: 2_000_000 }],
+    ] as const)('knows the version of %s from its first read', async (_label, file) => {
+      const id = await openBuffer('bin/app', file);
+      expect(buffer(id).version).toBe('b1');
+      tauriMock.projectFileVersion.mockResolvedValueOnce('b1');
+      await state().checkFilesOnDisk(1, 'bin');
+      expect(tauriMock.readProjectFile).toHaveBeenCalledTimes(1);
+      expect(buffer(id)).toMatchObject({ disk: 'same', version: 'b1' });
+      tauriMock.projectFileVersion.mockResolvedValueOnce(null);
+      await state().checkFilesOnDisk(1, 'bin');
+      expect(buffer(id)).toMatchObject({ disk: 'deleted', version: null });
+      expect(tauriMock.readProjectFile).toHaveBeenCalledTimes(1);
+    });
+
     it('keeps my edits against the changed file so the next save succeeds without force', async () => {
       const id = await openBuffer();
       state().editFileBuffer(id, 'mine\n');
       tauriMock.projectFileVersion.mockResolvedValueOnce('v2');
       await state().checkFilesOnDisk(1, 'src');
-      state().keepFileBuffer(id);
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('agent\n', 'v2'));
+      await state().keepFileBuffer(id);
       expect(buffer(id)).toMatchObject({ disk: 'same', version: 'v2', content: 'mine\n' });
       expect(isFileDirty(buffer(id))).toBe(true);
       tauriMock.writeProjectFile.mockResolvedValueOnce('v3');
       await expect(state().saveFileBuffer(id)).resolves.toBe('saved');
       expect(tauriMock.writeProjectFile).toHaveBeenCalledWith(1, 'src/a.ts', 'mine\n', 'v2', false);
+    });
+
+    describe('„Zostaw moje”', () => {
+      const keepAgainst = async (disk: FileContent | 'unreadable') => {
+        const id = await openBuffer();
+        state().editFileBuffer(id, 'mine\n');
+        tauriMock.projectFileVersion.mockResolvedValueOnce('v2');
+        await state().checkFilesOnDisk(1, 'src');
+        expect(buffer(id).disk).toBe('changed');
+        if (disk === 'unreadable') tauriMock.readProjectFile.mockRejectedValueOnce({ code: 'io', message: 'denied' });
+        else tauriMock.readProjectFile.mockResolvedValueOnce(disk);
+        await state().keepFileBuffer(id);
+        return id;
+      };
+
+      it('stays dirty when the text is undone back to what the file held before it changed', async () => {
+        const id = await keepAgainst(textFile('agent\n', 'v2'));
+        expect(tauriMock.readProjectFile).toHaveBeenCalledTimes(2);
+        expect(buffer(id)).toMatchObject({ disk: 'same', version: 'v2', savedContent: 'agent\n', content: 'mine\n' });
+        state().editFileBuffer(id, 'hello\n');
+        expect(isFileDirty(buffer(id))).toBe(true);
+        await state().saveFileBuffer(id);
+        expect(tauriMock.writeProjectFile).toHaveBeenCalledWith(1, 'src/a.ts', 'hello\n', 'v2', false);
+      });
+
+      it('is clean once the text equals what is on disk now', async () => {
+        const id = await keepAgainst(textFile('agent\r\n', 'v2'));
+        state().editFileBuffer(id, 'agent\n');
+        expect(isFileDirty(buffer(id))).toBe(false);
+        expect(buffer(id).eol).toBe('lf');
+      });
+
+      it('stays dirty whatever is typed when the read behind it fails, and saves against the observed version', async () => {
+        const id = await keepAgainst('unreadable');
+        expect(buffer(id)).toMatchObject({ disk: 'same', version: 'v2', savedContent: null });
+        state().editFileBuffer(id, 'hello\n');
+        expect(isFileDirty(buffer(id))).toBe(true);
+        tauriMock.writeProjectFile.mockResolvedValueOnce('v3');
+        await expect(state().saveFileBuffer(id)).resolves.toBe('saved');
+        expect(tauriMock.writeProjectFile).toHaveBeenCalledWith(1, 'src/a.ts', 'hello\n', 'v2', false);
+        expect(isFileDirty(buffer(id))).toBe(false);
+      });
+
+      it('takes a file that is no longer text as an unknown baseline', async () => {
+        const id = await keepAgainst({ kind: 'binary', version: 'v2', size: 3 });
+        expect(buffer(id)).toMatchObject({ view: { kind: 'text' }, disk: 'same', version: 'v2', savedContent: null, content: 'mine\n' });
+        expect(isFileDirty(buffer(id))).toBe(true);
+      });
+
+      it('waits for an in-flight disk check and does nothing once the bar is gone', async () => {
+        const id = await openBuffer();
+        state().editFileBuffer(id, 'mine\n');
+        tauriMock.projectFileVersion.mockResolvedValueOnce('v2');
+        await state().checkFilesOnDisk(1, 'src');
+        const reload = deferred<FileContent>();
+        tauriMock.readProjectFile.mockReturnValueOnce(reload.promise);
+        const reloading = state().reloadFileBuffer(id);
+        const keeping = state().keepFileBuffer(id);
+        await flush();
+        expect(tauriMock.readProjectFile).toHaveBeenCalledTimes(2);
+        reload.resolve(textFile('agent\n', 'v2'));
+        await reloading;
+        await keeping;
+        expect(tauriMock.readProjectFile).toHaveBeenCalledTimes(2);
+        expect(buffer(id)).toMatchObject({ content: 'agent\n', savedContent: 'agent\n', disk: 'same' });
+      });
     });
 
     it('reloads from disk and drops the edits', async () => {
@@ -1243,7 +1552,8 @@ describe('filesSlice', () => {
       read.resolve(textFile('agent\n', 'v2'));
       await expect(reload).resolves.toBe('kept');
       expect(buffer(id)).toMatchObject({ content: 'mine 2\n', savedContent: 'hello\n', version: 'v1', disk: 'changed' });
-      state().keepFileBuffer(id);
+      tauriMock.readProjectFile.mockResolvedValueOnce(textFile('agent\n', 'v2'));
+      await state().keepFileBuffer(id);
       expect(buffer(id)).toMatchObject({ disk: 'same', version: 'v2' });
     });
 
