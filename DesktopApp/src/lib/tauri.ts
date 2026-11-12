@@ -48,8 +48,8 @@ export const tauri = {
     listen<NotesChangedEvent>('notes://changed', e => cb(e.payload)),
   listProjectDir: (projectId: number, relPath: string) =>
     invoke<FileEntry[]>('list_project_dir', { projectId, relPath }),
-  searchProjectFiles: (projectId: number, query: string) =>
-    invoke<FileSearchResponse>('search_project_files', { projectId, query }),
+  searchProjectFiles: (projectId: number, query: string, sequence: number) =>
+    invoke<FileSearchResponse>('search_project_files', { projectId, query, sequence }),
   readProjectFile: (projectId: number, relPath: string) =>
     invoke<FileReadResponse>('read_project_file', { projectId, relPath }),
   projectFileVersion: (projectId: number, relPath: string) =>

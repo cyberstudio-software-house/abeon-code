@@ -391,7 +391,7 @@ describe('filesSlice', () => {
     tauriMock.searchProjectFiles.mockReturnValueOnce(slow.promise);
     await vi.advanceTimersByTimeAsync(1);
     expect(tauriMock.searchProjectFiles).toHaveBeenCalledTimes(1);
-    expect(tauriMock.searchProjectFiles).toHaveBeenCalledWith(1, 'ab');
+    expect(tauriMock.searchProjectFiles).toHaveBeenCalledWith(1, 'ab', expect.any(Number));
 
     state().setFileSearchQuery(1, 'abc');
     tauriMock.searchProjectFiles.mockResolvedValueOnce({ results: ['abc.ts'], truncated: true });
@@ -399,6 +399,75 @@ describe('filesSlice', () => {
     slow.resolve({ results: ['stale.ts'], truncated: false });
     await flush();
     expect(state().fileSearch).toMatchObject({ query: 'abc', status: 'ready', results: ['abc.ts'], truncated: true });
+  });
+
+  describe('search cancellation', () => {
+    const sequences = () => tauriMock.searchProjectFiles.mock.calls.map((call) => call[2] as number);
+    const queries = () => tauriMock.searchProjectFiles.mock.calls.map((call) => [call[0], call[1]]);
+
+    const startSearch = async (query: string, projectId = 1) => {
+      const pending = deferred<{ results: string[]; truncated: boolean }>();
+      tauriMock.searchProjectFiles.mockReturnValueOnce(pending.promise);
+      state().setFileSearchQuery(projectId, query);
+      await vi.advanceTimersByTimeAsync(FILE_SEARCH_DEBOUNCE_MS);
+      return pending;
+    };
+
+    it('numbers every search request with a higher sequence than the one before', async () => {
+      (await startSearch('a')).resolve({ results: [], truncated: false });
+      (await startSearch('ab')).resolve({ results: [], truncated: false });
+      await flush();
+      const [first, second] = sequences();
+      expect(Number.isSafeInteger(first)).toBe(true);
+      expect(second).toBeGreaterThan(first);
+    });
+
+    it('sends a blank search with a higher sequence when the query is cleared while a search runs', async () => {
+      await startSearch('abc');
+      state().setFileSearchQuery(1, '');
+      expect(queries()).toEqual([[1, 'abc'], [1, '']]);
+      expect(sequences()[1]).toBeGreaterThan(sequences()[0]);
+      expect(state().fileSearch).toMatchObject({ query: '', status: 'idle' });
+    });
+
+    it('sends the cancel when the panel closes while a search runs', async () => {
+      await state().openFilesPanel();
+      await flush();
+      await startSearch('abc');
+      state().closeFilesPanel();
+      expect(queries()).toEqual([[1, 'abc'], [1, '']]);
+      expect(sequences()[1]).toBeGreaterThan(sequences()[0]);
+    });
+
+    it('sends the cancel for the old project when the panel follows another project', async () => {
+      await state().openFilesPanel();
+      await flush();
+      await startSearch('abc');
+      useStore.setState({ activeTabId: 'tab-2' });
+      await flush();
+      expect(queries()).toEqual([[1, 'abc'], [1, '']]);
+      expect(sequences()[1]).toBeGreaterThan(sequences()[0]);
+    });
+
+    it('sends no cancel when no search is running', async () => {
+      await state().openFilesPanel();
+      await flush();
+      (await startSearch('abc')).resolve({ results: ['abc.ts'], truncated: false });
+      await flush();
+      state().setFileSearchQuery(1, '');
+      state().setFileSearchQuery(1, 'x');
+      state().closeFilesPanel();
+      await vi.advanceTimersByTimeAsync(FILE_SEARCH_DEBOUNCE_MS);
+      expect(queries()).toEqual([[1, 'abc']]);
+    });
+
+    it('sends one cancel for a search that was superseded by a newer one', async () => {
+      await startSearch('a');
+      await startSearch('ab');
+      state().setFileSearchQuery(1, '');
+      state().setFileSearchQuery(1, '');
+      expect(queries()).toEqual([[1, 'a'], [1, 'ab'], [1, '']]);
+    });
   });
 
   it('marks a failed search as an error', async () => {

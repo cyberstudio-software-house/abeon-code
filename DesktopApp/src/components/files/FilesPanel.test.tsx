@@ -185,7 +185,7 @@ describe('FilesPanel', () => {
       render(<FilesPanel />);
       await type('a');
       const first = screen.getByRole('option', { name: /a\.ts/ });
-      expect(tauriMock.searchProjectFiles).toHaveBeenCalledWith(1, 'a');
+      expect(tauriMock.searchProjectFiles).toHaveBeenCalledWith(1, 'a', expect.any(Number));
       expect(within(first).getByText('src/lib')).toBeInTheDocument();
       expect(screen.getAllByRole('option')).toHaveLength(2);
       expect(screen.queryByRole('treeitem')).not.toBeInTheDocument();
@@ -237,6 +237,23 @@ describe('FilesPanel', () => {
       expect(screen.getByPlaceholderText('Szukaj pliku…')).toHaveValue('');
       expect(screen.getByRole('treeitem', { name: /src/ })).toBeInTheDocument();
       expect(screen.queryByRole('option')).not.toBeInTheDocument();
+    });
+
+    it('stops a running search when the query is cleared and when the panel closes', async () => {
+      tauriMock.searchProjectFiles.mockImplementation((_projectId: number, query: string) => (
+        query === '' ? Promise.resolve({ results: [], truncated: false }) : new Promise(() => undefined)
+      ));
+      seed({ '': ready([]) }, [], { closeFilesPanel: realCloseFilesPanel });
+      render(<FilesPanel />);
+      await type('a');
+      fireEvent.keyDown(screen.getByPlaceholderText('Szukaj pliku…'), { key: 'Escape' });
+      expect(tauriMock.searchProjectFiles).toHaveBeenLastCalledWith(1, '', expect.any(Number));
+
+      await type('b');
+      expect(tauriMock.searchProjectFiles).toHaveBeenLastCalledWith(1, 'b', expect.any(Number));
+      fireEvent.click(screen.getByRole('button', { name: 'Zamknij pliki' }));
+      expect(tauriMock.searchProjectFiles).toHaveBeenLastCalledWith(1, '', expect.any(Number));
+      expect(tauriMock.searchProjectFiles).toHaveBeenCalledTimes(4);
     });
 
     it('says when nothing matches', async () => {

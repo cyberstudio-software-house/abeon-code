@@ -18,29 +18,28 @@ pub struct SearchGenerations {
 }
 
 impl SearchGenerations {
-    pub fn begin(&self, window_label: &str) -> SearchTicket {
-        let counter = self
+    pub fn begin(&self, window_label: &str, sequence: u64) -> Option<SearchTicket> {
+        let newest = self
             .counters
             .lock()
             .entry(window_label.to_string())
             .or_default()
             .clone();
-        let generation = counter.fetch_add(1, Ordering::SeqCst) + 1;
-        SearchTicket {
-            counter,
-            generation,
+        if newest.fetch_max(sequence, Ordering::SeqCst) > sequence {
+            return None;
         }
+        Some(SearchTicket { newest, sequence })
     }
 }
 
 pub struct SearchTicket {
-    counter: Arc<AtomicU64>,
-    generation: u64,
+    newest: Arc<AtomicU64>,
+    sequence: u64,
 }
 
 impl SearchTicket {
     pub fn is_superseded(&self) -> bool {
-        self.counter.load(Ordering::SeqCst) != self.generation
+        self.newest.load(Ordering::SeqCst) > self.sequence
     }
 }
 
@@ -452,16 +451,20 @@ mod tests {
     }
 
     #[test]
-    fn a_newer_search_from_the_same_window_supersedes_the_older_one() {
+    fn only_a_search_with_a_higher_sequence_supersedes_a_walk() {
         let generations = SearchGenerations::default();
-        let first = generations.begin("main");
+        let first = generations.begin("main", 5).unwrap();
         assert!(!first.is_superseded());
-        let other_window = generations.begin("project-1");
+        let other_window = generations.begin("project-1", 1).unwrap();
         assert!(!first.is_superseded());
-        let second = generations.begin("main");
+        assert!(generations.begin("main", 4).is_none());
+        assert!(!first.is_superseded());
+        let second = generations.begin("main", 6).unwrap();
         assert!(first.is_superseded());
         assert!(!second.is_superseded());
         assert!(!other_window.is_superseded());
+        assert!(generations.begin("main", 5).is_none());
+        assert!(!second.is_superseded());
     }
 
     #[cfg(unix)]

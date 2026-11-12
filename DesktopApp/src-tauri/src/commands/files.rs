@@ -7,6 +7,7 @@ use crate::db::projects_repo;
 use crate::domain::files::{FileEntry, FileReadResponse, FileSearchResponse};
 use crate::error::{AppError, AppResult};
 use crate::files::paths::{resolve_existing, resolve_for_write, watch_dir_of};
+use crate::files::search::SearchGenerations;
 use crate::files::{
     content, listing, search, write, MAX_TEXT_BYTES, SEARCH_LIMIT, SEARCH_VISIT_CAP,
 };
@@ -42,10 +43,32 @@ pub fn search_project_files(
     state: State<AppState>,
     project_id: i64,
     query: String,
+    sequence: u64,
 ) -> AppResult<FileSearchResponse> {
-    let ticket = state.file_searches.begin(window.label());
-    let root = project_root(&state, project_id)?;
-    search::search_files(&root, &query, SEARCH_LIMIT, SEARCH_VISIT_CAP, &|| {
+    search_in_order(
+        &state.file_searches,
+        window.label(),
+        sequence,
+        &query,
+        || project_root(&state, project_id),
+    )
+}
+
+fn search_in_order(
+    generations: &SearchGenerations,
+    window_label: &str,
+    sequence: u64,
+    query: &str,
+    root: impl FnOnce() -> AppResult<PathBuf>,
+) -> AppResult<FileSearchResponse> {
+    let Some(ticket) = generations.begin(window_label, sequence) else {
+        return Ok(FileSearchResponse {
+            results: Vec::new(),
+            truncated: true,
+        });
+    };
+    let root = root()?;
+    search::search_files(&root, query, SEARCH_LIMIT, SEARCH_VISIT_CAP, &|| {
         ticket.is_superseded()
     })
 }
@@ -184,6 +207,30 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let error = read_with_watch_dir(root.path(), "nope.txt").unwrap_err();
         assert!(matches!(error, AppError::NotFound(_)), "{error:?}");
+    }
+
+    #[test]
+    fn a_search_older_than_the_newest_returns_nothing_without_walking() {
+        let generations = SearchGenerations::default();
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("hit.txt"), "x").unwrap();
+        let newest = search_in_order(&generations, "main", 7, "hit", || {
+            Ok(root.path().to_path_buf())
+        })
+        .unwrap();
+        assert_eq!(newest.results, ["hit.txt"]);
+        assert!(!newest.truncated);
+        let stale = search_in_order(&generations, "main", 6, "hit", || {
+            panic!("a stale search must not resolve the project")
+        })
+        .unwrap();
+        assert!(stale.results.is_empty());
+        assert!(stale.truncated);
+        let other_window = search_in_order(&generations, "project-1", 1, "hit", || {
+            Ok(root.path().to_path_buf())
+        })
+        .unwrap();
+        assert_eq!(other_window.results, ["hit.txt"]);
     }
 
     #[test]

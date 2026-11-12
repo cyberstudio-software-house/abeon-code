@@ -119,6 +119,8 @@ const listTokens = new Map<string, number>();
 const bufferRuntimes = new Map<string, BufferRuntime>();
 let searchToken = 0;
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let searchSequence = Date.now();
+let runningSearch: { projectId: number; sequence: number } | null = null;
 let attachedProjectId: number | null = null;
 
 const dirKey = (projectId: number, relDir: string) => `${projectId}\u0000${relDir}`;
@@ -228,6 +230,18 @@ function cancelSearch() {
   searchToken += 1;
   if (searchTimer !== null) clearTimeout(searchTimer);
   searchTimer = null;
+}
+
+function nextSearchSequence(): number {
+  searchSequence += 1;
+  return searchSequence;
+}
+
+function abandonSearch() {
+  cancelSearch();
+  const running = runningSearch;
+  runningSearch = null;
+  if (running) void tauri.searchProjectFiles(running.projectId, '', nextSearchSequence()).catch(() => undefined);
 }
 
 function activeProjectOf(state: Pick<AppState, 'tabs' | 'activeTabId'>): number | null {
@@ -443,14 +457,14 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       const projectId = activeProjectOf(get());
       if (projectId === null) return;
       if (get().filesPanelOpen && attachedProjectId === projectId) return;
-      cancelSearch();
+      abandonSearch();
       detachProject();
       set({ filesPanelOpen: true, fileSearch: emptySearch });
       attachProject(projectId);
     },
 
     closeFilesPanel: () => {
-      cancelSearch();
+      abandonSearch();
       detachProject();
       set({ filesPanelOpen: false, fileSearch: emptySearch });
     },
@@ -460,7 +474,7 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
       if (!state.filesPanelOpen) return;
       const projectId = activeProjectOf(state);
       if (projectId === null || projectId === attachedProjectId) return;
-      cancelSearch();
+      abandonSearch();
       detachProject();
       set({ fileSearch: emptySearch });
       attachProject(projectId);
@@ -483,18 +497,21 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
     reloadFileDir: (projectId, relDir) => loadDir(projectId, relDir),
 
     setFileSearchQuery: (projectId, query) => {
-      cancelSearch();
       if (query.trim() === '') {
+        abandonSearch();
         set({ fileSearch: { ...emptySearch, query } });
         return;
       }
+      cancelSearch();
       const token = searchToken;
       set((s) => ({ fileSearch: { ...s.fileSearch, query, status: 'loading', selected: 0 } }));
       searchTimer = setTimeout(() => {
         searchTimer = null;
+        const sequence = nextSearchSequence();
+        runningSearch = { projectId, sequence };
         void (async () => {
           try {
-            const response = await tauri.searchProjectFiles(projectId, query);
+            const response = await tauri.searchProjectFiles(projectId, query, sequence);
             if (searchToken !== token) return;
             set((s) => ({
               fileSearch: { ...s.fileSearch, status: 'ready', results: response.results, truncated: response.truncated, selected: 0 },
@@ -502,6 +519,8 @@ export const createFilesSlice: StateCreator<AppState, [], [], FilesSlice> = (set
           } catch {
             if (searchToken !== token) return;
             set((s) => ({ fileSearch: { ...s.fileSearch, status: 'error', results: [], truncated: false, selected: 0 } }));
+          } finally {
+            if (runningSearch?.sequence === sequence) runningSearch = null;
           }
         })();
       }, FILE_SEARCH_DEBOUNCE_MS);
