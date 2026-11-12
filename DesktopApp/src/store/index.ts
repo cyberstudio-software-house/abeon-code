@@ -672,25 +672,34 @@ useStore.subscribe((state, prev) => {
   if (state.filesPanelOpen && state.activeTabId !== prev.activeTabId) state.followFilesProject();
 });
 
-let reportedDirtyFileCount = 0;
+let reportedDirtyFileCount: number | null = null;
+let dirtyFileCountInFlight = false;
+
+async function reportDirtyFileCount(): Promise<void> {
+  const count = dirtyFileTabIds(useStore.getState()).length;
+  if (dirtyFileCountInFlight || count === reportedDirtyFileCount) return;
+  dirtyFileCountInFlight = true;
+  try {
+    await tauri.setDirtyFileCount(count);
+  } catch (err) {
+    dirtyFileCountInFlight = false;
+    console.error('[files] setDirtyFileCount failed', err);
+    return;
+  }
+  dirtyFileCountInFlight = false;
+  reportedDirtyFileCount = count;
+  await reportDirtyFileCount();
+}
 
 useStore.subscribe((state, prev) => {
   if (state.tabs !== prev.tabs) {
     const liveTabIds = new Set(state.tabs.map(t => t.id));
-    const orphaned = Object.keys(state.fileBuffers).filter(id => !liveTabIds.has(id));
-    if (orphaned.length > 0) {
-      orphaned.forEach(id => state.dropFileBuffer(id));
-      return;
-    }
+    Object.keys(state.fileBuffers).filter(id => !liveTabIds.has(id)).forEach(id => state.dropFileBuffer(id));
   }
-  if (state.fileBuffers === prev.fileBuffers) return;
-  const count = dirtyFileTabIds(state).length;
-  if (count === reportedDirtyFileCount) return;
-  reportedDirtyFileCount = count;
-  tauri.setDirtyFileCount(count).catch(err => {
-    console.error('[files] setDirtyFileCount failed', err);
-  });
+  if (state.fileBuffers !== prev.fileBuffers) void reportDirtyFileCount();
 });
+
+void reportDirtyFileCount();
 
 // --- Subscribe: on any state change, diff + write localStorage + SQLite ---
 const tabsChangeKey = (state: AppState) =>
