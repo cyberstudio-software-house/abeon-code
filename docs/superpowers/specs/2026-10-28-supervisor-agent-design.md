@@ -224,7 +224,8 @@ Lifecycle:
      the TUI menu appears and the supervisor stays out of that question.
    - Grace ends early when the user submits a human prompt in that session (`UserPromptSubmit` with
      human origin) or answers on the card.
-   - *My call:* the countdown pauses while that session's terminal holds keyboard focus.
+   - *My call:* the countdown pauses while that session's terminal holds keyboard focus. For `Menu`
+     questions this is superseded by `2026-11-16-supervisor-question-card-design.md`.
 3. **User away → no grace.**
 4. **Handed to the supervisor.** The event is queued and the supervisor is woken up (§5).
 5. **The supervisor decides.** It either answers (`answer_question`) or escalates (`escalate`).

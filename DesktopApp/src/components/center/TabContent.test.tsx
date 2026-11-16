@@ -1,9 +1,21 @@
 import { useEffect } from 'react';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
 import type { Tab } from '../../store/tabsSlice';
 
 const counters = vi.hoisted(() => ({ terminalMounts: 0, lastProps: null as Record<string, unknown> | null }));
+const observers = vi.hoisted(() => [] as Array<() => void>);
+
+vi.stubGlobal('ResizeObserver', class {
+  callback: () => void;
+  constructor(callback: () => void) {
+    this.callback = callback;
+    observers.push(() => this.callback());
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+});
 
 vi.mock('../terminal/TerminalView', () => ({
   TerminalView: (props: { visible?: boolean }) => {
@@ -158,7 +170,13 @@ describe('TabPanel question card', () => {
 
   beforeEach(() => {
     counters.terminalMounts = 0;
+    observers.length = 0;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ height: 180 } as DOMRect);
     useStore.setState({ tabs: [], activeTabId: null, mruOrder: [], supervisor: null });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('shows the card of the tab session without remounting the terminal', () => {
@@ -174,6 +192,34 @@ describe('TabPanel question card', () => {
     act(() => { useStore.setState({ supervisor: { ...baseSnapshot, cards: [] } }); });
     expect(queryByText('Which color?')).toBeNull();
     expect(getByTestId('terminal')).toBe(terminal);
+    expect(counters.terminalMounts).toBe(1);
+  });
+
+  it('pushes the terminal up by the card height', () => {
+    useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1', supervisor: { ...baseSnapshot, cards: [card('s1')] } });
+    const { getByTestId } = render(<TabPanels />);
+    act(() => { observers.forEach(fire => fire()); });
+    expect(getByTestId('terminal').parentElement!.style.bottom).toBe('180px');
+  });
+
+  it('keeps the inset on a hidden tab', () => {
+    useStore.setState({
+      tabs: [sessionTab, { kind: 'terminal', id: 'terminal:t1', projectId: 1, title: 'Terminal' }],
+      activeTabId: 'terminal:t1',
+      supervisor: { ...baseSnapshot, cards: [card('s1')] },
+    });
+    const { getAllByTestId } = render(<TabPanels />);
+    act(() => { observers.forEach(fire => fire()); });
+    const sessionTerminal = getAllByTestId('terminal').find(node => node.dataset.visible === 'false')!;
+    expect(sessionTerminal.parentElement!.style.bottom).toBe('180px');
+  });
+
+  it('drops the inset when the card goes', () => {
+    useStore.setState({ tabs: [sessionTab], activeTabId: 'session:s1', supervisor: { ...baseSnapshot, cards: [card('s1')] } });
+    const { getByTestId } = render(<TabPanels />);
+    act(() => { observers.forEach(fire => fire()); });
+    act(() => { useStore.setState({ supervisor: { ...baseSnapshot, cards: [] } }); });
+    expect(getByTestId('terminal').parentElement!.style.bottom).toBe('');
     expect(counters.terminalMounts).toBe(1);
   });
 

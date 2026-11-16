@@ -90,10 +90,11 @@ function QuestionBlock({
   );
 }
 
-export function QuestionCard({ card, visible = true, onDone }: {
+export function QuestionCard({ card, visible = true, onDone, measureRef }: {
   card: QuestionCardView;
   visible?: boolean;
   onDone?: () => void;
+  measureRef?: (element: HTMLDivElement | null) => void;
 }) {
   const [selections, setSelections] = useState<Record<number, string[]>>({});
   const [freeTexts, setFreeTexts] = useState<Record<number, string>>({});
@@ -143,9 +144,10 @@ export function QuestionCard({ card, visible = true, onDone }: {
 
   return (
     <div
+      ref={measureRef}
       role="group"
       aria-label="Pytanie sesji"
-      className={`absolute top-0 inset-x-0 z-20 max-h-[60%] overflow-y-auto border-y-2 border-accent bg-[color-mix(in_srgb,var(--color-accent)_14%,var(--color-bg-elev))] shadow-lg p-3 space-y-3 ${visible ? '' : 'invisible pointer-events-none'}`}
+      className={`absolute bottom-0 inset-x-0 z-20 max-h-[50%] overflow-y-auto border-y-2 border-accent bg-[color-mix(in_srgb,var(--color-accent)_14%,var(--color-bg-elev))] shadow-lg p-3 space-y-3 ${visible ? '' : 'invisible pointer-events-none'}`}
     >
       <div className="flex items-center justify-between gap-3 text-[12px]">
         <span className="font-semibold text-accent">Pytanie sesji</span>
