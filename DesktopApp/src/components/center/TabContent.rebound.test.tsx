@@ -100,7 +100,7 @@ const snapshotWithCard = (sessionId: string): SupervisorSnapshot => ({
     questionId: 'q1',
     sessionId,
     questions: [{ question: 'Który kolor?', header: null, options: ['Czerwony'], multiSelect: false }],
-    phase: 'paused',
+    phase: 'grace',
     deadlineMs: null,
   }],
 });

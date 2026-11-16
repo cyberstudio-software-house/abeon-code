@@ -85,6 +85,13 @@ pub fn supervisor_release_card(state: State<AppState>, question_id: String) -> A
         .map_err(AppError::InvalidInput)
 }
 
+#[tauri::command]
+pub fn supervisor_extend_card(state: State<AppState>, question_id: String) {
+    if let Some(core) = current_core(&state) {
+        core.extend_card(&question_id);
+    }
+}
+
 #[tauri::command(async)]
 pub fn supervisor_resolve_approval(
     state: State<AppState>,

@@ -27,7 +27,6 @@ pub struct MenuQuestion {
 #[serde(rename_all = "camelCase")]
 pub enum CardPhase {
     Grace,
-    Paused,
     WithSupervisor,
 }
 

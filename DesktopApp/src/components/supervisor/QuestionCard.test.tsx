@@ -74,11 +74,6 @@ describe('QuestionCard', () => {
     expect(screen.getByText('Agent odpowie za 1:05')).toBeInTheDocument();
   });
 
-  it('shows the pinned text when paused', () => {
-    render(<QuestionCard card={card({ phase: 'paused' })} />);
-    expect(screen.getByText('Wstrzymane — pracujesz w tej sesji')).toBeInTheDocument();
-  });
-
   it('shows that the agent is analysing', () => {
     render(<QuestionCard card={card({ phase: 'withSupervisor' })} />);
     expect(screen.getByText('Agent analizuje pytanie…')).toBeInTheDocument();

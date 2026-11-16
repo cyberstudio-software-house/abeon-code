@@ -41,6 +41,7 @@ pub const WAKE_DEBOUNCE: Duration = Duration::from_secs(10);
 pub const WAKE_RETRY: Duration = Duration::from_secs(120);
 pub const DECISION_WINDOW: Duration = Duration::from_secs(120);
 pub const MENU_HOLD_CAP: Duration = Duration::from_secs(570);
+pub const ACTIVE_CARD_GRACE: Duration = Duration::from_secs(300);
 pub const MENU_SAFETY_TIMEOUT: Duration = Duration::from_secs(580);
 
 pub mod decision_kind {
@@ -201,6 +202,7 @@ struct Question {
     project_id: Option<i64>,
     created: Instant,
     pause_mark: Instant,
+    extended: bool,
     phase: Phase,
     body: QuestionBody,
 }
@@ -492,6 +494,7 @@ impl CoreState {
             project_id: info.project_id,
             created: now,
             pause_mark: now,
+            extended: false,
             phase: Phase::Grace {
                 deadline: now + settings.grace,
                 deadline_ms: now_ms() + settings.grace.as_millis() as i64,
@@ -530,7 +533,7 @@ impl CoreState {
         for question in &mut self.questions {
             let elapsed = now.saturating_duration_since(question.pause_mark);
             question.pause_mark = now;
-            if focused.as_deref() != Some(question.session_id.as_str()) {
+            if question.is_menu() || focused.as_deref() != Some(question.session_id.as_str()) {
                 continue;
             }
             if let Phase::Grace {
@@ -554,7 +557,13 @@ impl CoreState {
                     Phase::Grace { .. } if question.is_menu() && held >= MENU_HOLD_CAP => {
                         Step::Release
                     }
-                    Phase::Grace { deadline, .. } if !present || now >= deadline => Step::HandOff,
+                    Phase::Grace { deadline, .. }
+                        if self.presence.away()
+                            || now >= deadline
+                            || (!present && !question.extended) =>
+                    {
+                        Step::HandOff
+                    }
                     Phase::WithSupervisor { since }
                         if question.is_menu()
                             && (now.saturating_duration_since(since) >= DECISION_WINDOW
@@ -799,7 +808,6 @@ impl CoreState {
     }
 
     fn build_snapshot(&self, settings: &SupervisorSettings, now: Instant) -> SupervisorSnapshot {
-        let focused = self.focused_present(settings, now);
         let cards = self
             .questions
             .iter()
@@ -808,9 +816,6 @@ impl CoreState {
                     return None;
                 };
                 let (phase, deadline_ms) = match question.phase {
-                    Phase::Grace { .. } if focused == Some(question.session_id.as_str()) => {
-                        (CardPhase::Paused, None)
-                    }
                     Phase::Grace { deadline_ms, .. } => (CardPhase::Grace, Some(deadline_ms)),
                     Phase::WithSupervisor { .. } => (CardPhase::WithSupervisor, None),
                 };
@@ -1271,6 +1276,32 @@ impl SupervisorCore {
         Ok(())
     }
 
+    pub fn extend_card(&self, question_id: &str) {
+        let settings = self.effects.settings();
+        let now = now();
+        {
+            let mut state = self.state.lock();
+            let Some(question) = state
+                .questions
+                .iter_mut()
+                .find(|question| question.id == question_id && question.is_menu())
+            else {
+                return;
+            };
+            let Phase::Grace {
+                deadline,
+                deadline_ms,
+            } = &mut question.phase
+            else {
+                return;
+            };
+            *deadline = (*deadline).max(now + ACTIVE_CARD_GRACE);
+            *deadline_ms = (*deadline_ms).max(now_ms() + ACTIVE_CARD_GRACE.as_millis() as i64);
+            question.extended = true;
+        }
+        self.publish_with(&settings);
+    }
+
     pub fn dismiss_escalation(&self, id: &str) {
         let question_id = {
             let mut state = self.state.lock();
@@ -1700,26 +1731,10 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn grace_pauses_while_session_focused() {
+    async fn focused_menu_keeps_counting() {
         let (_effects, core) = setup();
         core.report_activity(Some("s1".into()));
         let _handle = spawn_menu(&core, "s1").await;
-        let card = only_card(&core);
-        assert_eq!(card.phase, CardPhase::Paused);
-        assert_eq!(card.deadline_ms, None);
-        advance(120 * SECOND).await;
-        core.tick();
-        assert_eq!(only_card(&core).phase, CardPhase::Paused);
-        assert!(core.take_events().is_empty());
-        assert!(core
-            .answer_question(
-                &card.question_id,
-                None,
-                Some(answer(COLOR_QUESTION, "Red")),
-                "x"
-            )
-            .is_err());
-        core.report_activity(None);
         let card = only_card(&core);
         assert_eq!(card.phase, CardPhase::Grace);
         assert!(card.deadline_ms.is_some());
@@ -1730,6 +1745,104 @@ mod tests {
         core.tick();
         assert_eq!(only_card(&core).phase, CardPhase::WithSupervisor);
         assert_eq!(core.take_events().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn focused_turn_end_still_pauses() {
+        let (_effects, core) = setup();
+        core.report_activity(Some("s1".into()));
+        core.on_session_hook(stop("s1", "Czy kontynuować?")).await;
+        advance(120 * SECOND).await;
+        core.tick();
+        assert!(core.take_events().is_empty());
+        core.report_activity(None);
+        advance(61 * SECOND).await;
+        core.tick();
+        assert_eq!(core.take_events().len(), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn extend_card_moves_deadline_to_five_minutes() {
+        let (_effects, core) = setup();
+        core.report_activity(None);
+        let _handle = spawn_menu(&core, "s1").await;
+        let card = only_card(&core);
+        core.extend_card(&card.question_id);
+        let extended = only_card(&core);
+        assert_eq!(extended.phase, CardPhase::Grace);
+        assert!(extended.deadline_ms.unwrap() - card.deadline_ms.unwrap() >= 239_000);
+        advance(299 * SECOND).await;
+        core.tick();
+        assert_eq!(only_card(&core).phase, CardPhase::Grace);
+        advance(2 * SECOND).await;
+        core.tick();
+        assert_eq!(only_card(&core).phase, CardPhase::WithSupervisor);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn extended_menu_outlives_presence_lapse() {
+        let (_effects, core) = setup();
+        core.report_activity(None);
+        let _handle = spawn_menu(&core, "s1").await;
+        advance(50 * SECOND).await;
+        core.extend_card(&only_card(&core).question_id);
+        advance(260 * SECOND).await;
+        core.tick();
+        assert_eq!(only_card(&core).phase, CardPhase::Grace);
+        advance(41 * SECOND).await;
+        core.tick();
+        assert_eq!(only_card(&core).phase, CardPhase::WithSupervisor);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn extended_menu_is_handed_off_when_away() {
+        let (_effects, core) = setup();
+        core.report_activity(None);
+        let _handle = spawn_menu(&core, "s1").await;
+        core.extend_card(&only_card(&core).question_id);
+        core.set_away(true);
+        core.tick();
+        assert_eq!(only_card(&core).phase, CardPhase::WithSupervisor);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn extend_card_ignores_unknown_and_supervisor_questions() {
+        let (_effects, core) = setup();
+        core.report_activity(None);
+        let _handle = spawn_menu(&core, "s1").await;
+        core.extend_card("missing");
+        advance(61 * SECOND).await;
+        core.tick();
+        let card = only_card(&core);
+        assert_eq!(card.phase, CardPhase::WithSupervisor);
+        core.extend_card(&card.question_id);
+        let card = only_card(&core);
+        assert_eq!(card.phase, CardPhase::WithSupervisor);
+        assert_eq!(card.deadline_ms, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn extended_menu_is_released_to_terminal_at_hold_cap() {
+        let (effects, core) = setup();
+        core.report_activity(None);
+        let handle = spawn_menu(&core, "s1").await;
+        let id = only_card(&core).question_id;
+        core.extend_card(&id);
+        for _ in 0..5 {
+            advance(100 * SECOND).await;
+            core.extend_card(&id);
+            core.tick();
+        }
+        advance(69 * SECOND).await;
+        core.tick();
+        settle().await;
+        assert!(!handle.is_finished());
+        assert_eq!(only_card(&core).phase, CardPhase::Grace);
+        advance(SECOND).await;
+        core.tick();
+        assert_eq!(reply_of(handle).await, HookReply::Empty);
+        assert_eq!(effects.kinds(), vec![decision_kind::RELEASED_TO_USER]);
+        assert!(core.snapshot().cards.is_empty());
     }
 
     #[tokio::test(start_paused = true)]
@@ -1873,29 +1986,6 @@ mod tests {
         assert!(core.take_events().is_empty());
         assert_eq!(effects.wakes(), 0);
         assert!(effects.kinds().is_empty());
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn paused_menu_is_released_to_terminal_at_hold_cap() {
-        let (effects, core) = setup();
-        core.report_activity(Some("s1".into()));
-        let handle = spawn_menu(&core, "s1").await;
-        for _ in 0..5 {
-            advance(100 * SECOND).await;
-            core.report_activity(Some("s1".into()));
-            core.tick();
-        }
-        advance(69 * SECOND).await;
-        core.tick();
-        settle().await;
-        assert!(!handle.is_finished());
-        assert_eq!(only_card(&core).phase, CardPhase::Paused);
-        advance(SECOND).await;
-        core.tick();
-        assert_eq!(reply_of(handle).await, HookReply::Empty);
-        assert_eq!(effects.kinds(), vec![decision_kind::RELEASED_TO_USER]);
-        assert!(core.snapshot().cards.is_empty());
-        assert!(core.take_events().is_empty());
     }
 
     #[tokio::test(start_paused = true)]

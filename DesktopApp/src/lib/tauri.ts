@@ -233,6 +233,8 @@ export const tauri = {
     invoke<void>('supervisor_answer_card', { questionId, answers }),
   supervisorReleaseCard: (questionId: string) =>
     invoke<void>('supervisor_release_card', { questionId }),
+  supervisorExtendCard: (questionId: string) =>
+    invoke<void>('supervisor_extend_card', { questionId }),
   supervisorResolveApproval: (approvalId: string, approve: boolean) =>
     invoke<void>('supervisor_resolve_approval', { approvalId, approve }),
   supervisorDismissEscalation: (id: string) =>

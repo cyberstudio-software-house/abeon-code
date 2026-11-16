@@ -31,7 +31,6 @@ function Footer({ card }: { card: QuestionCardView }) {
     return () => clearInterval(interval);
   }, [counting]);
 
-  if (card.phase === 'paused') return <span>Wstrzymane — pracujesz w tej sesji</span>;
   if (card.phase === 'withSupervisor') return <span>Agent analizuje pytanie…</span>;
   if (card.deadlineMs === null) return <span />;
   return <span className="tabular-nums">Agent odpowie za {formatCountdown(card.deadlineMs - now)}</span>;

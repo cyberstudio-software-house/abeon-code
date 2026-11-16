@@ -152,7 +152,7 @@ describe('TabPanel question card', () => {
     questionId: 'q1',
     sessionId,
     questions: [{ question: 'Which color?', header: null, options: ['Red'], multiSelect: false }],
-    phase: 'paused' as const,
+    phase: 'grace' as const,
     deadlineMs: null,
   });
 
