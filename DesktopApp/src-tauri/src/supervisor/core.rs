@@ -201,6 +201,7 @@ struct Question {
     label: String,
     project_id: Option<i64>,
     created: Instant,
+    created_ms: i64,
     pause_mark: Instant,
     extended: bool,
     phase: Phase,
@@ -493,6 +494,7 @@ impl CoreState {
             label: info.label,
             project_id: info.project_id,
             created: now,
+            created_ms: now_ms(),
             pause_mark: now,
             extended: false,
             phase: Phase::Grace {
@@ -1295,8 +1297,12 @@ impl SupervisorCore {
             else {
                 return;
             };
-            *deadline = (*deadline).max(now + ACTIVE_CARD_GRACE);
-            *deadline_ms = (*deadline_ms).max(now_ms() + ACTIVE_CARD_GRACE.as_millis() as i64);
+            let latest = MENU_HOLD_CAP - DECISION_WINDOW;
+            *deadline = (*deadline).max((now + ACTIVE_CARD_GRACE).min(question.created + latest));
+            *deadline_ms = (*deadline_ms).max(
+                (now_ms() + ACTIVE_CARD_GRACE.as_millis() as i64)
+                    .min(question.created_ms + latest.as_millis() as i64),
+            );
             question.extended = true;
         }
         self.publish_with(&settings);
@@ -1822,27 +1828,40 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn extended_menu_is_released_to_terminal_at_hold_cap() {
+    async fn extended_menu_is_handed_off_before_the_hold_cap() {
         let (effects, core) = setup();
         core.report_activity(None);
         let handle = spawn_menu(&core, "s1").await;
         let id = only_card(&core).question_id;
         core.extend_card(&id);
-        for _ in 0..5 {
+        core.tick();
+        for _ in 0..4 {
             advance(100 * SECOND).await;
             core.extend_card(&id);
             core.tick();
         }
-        advance(69 * SECOND).await;
+        advance(49 * SECOND).await;
         core.tick();
         settle().await;
         assert!(!handle.is_finished());
         assert_eq!(only_card(&core).phase, CardPhase::Grace);
-        advance(SECOND).await;
+        advance(2 * SECOND).await;
         core.tick();
-        assert_eq!(reply_of(handle).await, HookReply::Empty);
-        assert_eq!(effects.kinds(), vec![decision_kind::RELEASED_TO_USER]);
-        assert!(core.snapshot().cards.is_empty());
+        assert_eq!(only_card(&core).phase, CardPhase::WithSupervisor);
+        assert_eq!(core.take_events().len(), 1);
+        assert!(effects.kinds().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn never_extended_menu_hands_off_on_presence_lapse() {
+        let (_effects, core) = setup();
+        core.report_activity(None);
+        advance(250 * SECOND).await;
+        let _handle = spawn_menu(&core, "s1").await;
+        assert_eq!(only_card(&core).phase, CardPhase::Grace);
+        advance(51 * SECOND).await;
+        core.tick();
+        assert_eq!(only_card(&core).phase, CardPhase::WithSupervisor);
     }
 
     #[tokio::test(start_paused = true)]
