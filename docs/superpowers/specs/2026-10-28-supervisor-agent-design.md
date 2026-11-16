@@ -219,9 +219,10 @@ Lifecycle:
 1. **Detected.** At level *Wyłączony* nothing happens, as today.
 2. **User present → grace period** (default 60 s, setting).
    - The question is shown in the app: the existing attention bell, and for a `Menu` a question
-     card above the session terminal. The card shows the options, a countdown ("Agent odpowie za
-     0:42") and an „Odpowiem w terminalu" button. The button releases the hook with no decision, so
-     the TUI menu appears and the supervisor stays out of that question.
+     card under the session terminal (see `2026-11-16-supervisor-question-card-design.md`). The card
+     shows the options, a countdown ("Agent odpowie za 0:42") and an „Odpowiem w terminalu" button.
+     The button releases the hook with no decision, so the TUI menu appears and the supervisor stays
+     out of that question.
    - Grace ends early when the user submits a human prompt in that session (`UserPromptSubmit` with
      human origin) or answers on the card.
    - *My call:* the countdown pauses while that session's terminal holds keyboard focus. For `Menu`

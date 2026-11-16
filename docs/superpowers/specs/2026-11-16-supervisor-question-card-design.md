@@ -55,13 +55,15 @@ question arrived: there is no grace at all.
   the existing layer div changes; the layer never gets a new parent or key (content-layer gotcha in
   `DesktopApp/CLAUDE.md`). `TerminalView`'s own ResizeObserver refits and resizes the PTY.
 - The inset follows the card's **existence**, not its visibility: a hidden tab is `invisible`, still
-  measurable, so switching tabs never resizes the PTY. Only appear and disappear do.
+  measurable, so switching tabs does not toggle the inset. A card that appears or goes while the tab
+  is hidden resizes the PTY once, on the next reveal (hidden terminals are not fitted).
 - Shown in terminal mode only, as today.
 
 ### Look
 
 - A heading row: „Pytanie sesji” on the left; on the right the countdown „Agent odpowie za 4:59”
-  (tabular figures, accent colour) or „Agent analizuje pytanie…”.
+  (tabular figures, `fg-strong`) or „Agent analizuje pytanie…” (`fg-secondary`). Accent stays on the
+  frame and the tint; accent text and `muted` text fall below AA contrast on the tinted light card.
 - A frame in the accent colour and a background distinct from the terminal (`bg-elev` family), so
   the card reads as app UI, not output.
 - The question text larger and stronger than body text (about 14 px, `fg-strong`); the per-question
@@ -72,9 +74,12 @@ question arrived: there is no grace at all.
 
 - New constant `ACTIVE_CARD_GRACE` = 5 min.
 - New command `supervisor_extend_card(question_id)`: for a `Menu` question in `Grace`, sets the
-  deadline to `max(deadline, now + ACTIVE_CARD_GRACE)` (both `Instant` and `deadline_ms`), marks the
-  question as extended and publishes the snapshot. For any other phase or an unknown id it does
-  nothing and succeeds (the card may have just moved on).
+  deadline to `max(deadline, min(now + ACTIVE_CARD_GRACE, created + MENU_HOLD_CAP - DECISION_WINDOW))`
+  (both `Instant` and `deadline_ms`; `Question` keeps `created_ms` for the second), marks the
+  question as extended and publishes the snapshot. The cap, 450 s after the question opened, keeps
+  the countdown honest: the supervisor always gets its 120 s decision window before the 570 s hold
+  cap releases the menu to the terminal. If the cap is already past, the next tick hands off. For
+  any other phase or an unknown id it does nothing and succeeds (the card may have just moved on).
 - `QuestionCard`, while `visible` and in `grace`, listens on `window` (capture, passive) to
   `mousemove`, `wheel`, `keydown` and `mousedown`, and calls the command at most once per 10 s
   (leading edge, so the first move after the card appears extends at once).
@@ -88,7 +93,12 @@ question arrived: there is no grace at all.
 
 ### Presence (`lib/usePresenceReporter.ts`)
 
-- `mousemove` and `wheel` join the activity events, with the existing 20 s throttle.
+- `mousemove` and `wheel` join the activity events, with the existing 20 s throttle. They count only
+  while the window has focus (an unfocused window would otherwise report `null` and clear the
+  focused session).
+- A `mousemove` at the same `screenX`/`screenY` as the previous one is ignored here and in the card
+  extension (`lib/pointerMoveFilter.ts`): WebKit fires such synthetic moves when scrolled content
+  moves under a still cursor, which would keep an absent user present.
 
 ## Non-goals
 

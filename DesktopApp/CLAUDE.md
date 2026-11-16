@@ -616,10 +616,15 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   session/subagent layer by its measured height (`useElementHeight`; the inset follows the card's
   existence, not its visibility, so switching tabs does not toggle the inset; a card that appears or
   goes while the tab is hidden resizes the PTY once, on the next reveal, because hidden terminals are
-  not fitted). While the card is visible in grace, activity calls `supervisor_extend_card` at most every 10 s, which sets the deadline to at
-  least now + 5 min (`ACTIVE_CARD_GRACE`) and marks the question extended; an extended menu ignores a
-  presence lapse but not „Nie ma mnie”. Menus no longer pause on focus (`TurnEnded` still does), and
-  presence counts `mousemove`/`wheel`. Spec: `docs/superpowers/specs/2026-11-16-supervisor-question-card-design.md`.
+  not fitted). While the card is visible in grace, activity calls `supervisor_extend_card` at most
+  every 10 s, which sets the deadline to at least now + 5 min (`ACTIVE_CARD_GRACE`) and marks the
+  question extended. The deadline never goes past 450 s after the question opened, so the supervisor
+  keeps its 120 s decision window before the 570 s hold cap. An extended menu ignores a presence
+  lapse but not „Nie ma mnie”. Menus no longer pause on focus (`TurnEnded` still does). Presence
+  counts `mousemove`/`wheel` only while the window has focus, and both presence and extension skip a
+  `mousemove` that repeats the previous pointer position (`pointerMoveFilter`, WebKit emits those
+  when content scrolls under a still cursor). Spec:
+  `docs/superpowers/specs/2026-11-16-supervisor-question-card-design.md`.
 - **Held menus**: a `Menu` whose decision window (120 s after grace) runs out is escalated only if
   the supervisor drained its event; an event it never took is released to the TUI menu
   (`released_to_user`).
