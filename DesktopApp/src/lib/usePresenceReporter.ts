@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useStore, type AppState } from '../store';
 import { tauri } from './tauri';
+import { createPointerMoveFilter } from './pointerMoveFilter';
 
 export const PRESENCE_THROTTLE_MS = 20_000;
 export const LEAVE_SESSION_DEBOUNCE_MS = 300;
@@ -16,6 +17,7 @@ export function focusedSessionOf(state: Pick<AppState, 'tabs' | 'activeAgentPtyI
 
 export function usePresenceReporter() {
   useEffect(() => {
+    const acceptsPointerMove = createPointerMoveFilter();
     let lastSentAt = 0;
     let trackedSession = focusedSessionOf(useStore.getState());
     let leaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -34,6 +36,11 @@ export function usePresenceReporter() {
     const onActivity = () => {
       if (Date.now() - lastSentAt < PRESENCE_THROTTLE_MS) return;
       send(document.hasFocus() ? focusedSessionOf(useStore.getState()) : null);
+    };
+
+    const onPointerActivity = (event: Event) => {
+      if (!acceptsPointerMove(event) || !document.hasFocus()) return;
+      onActivity();
     };
 
     const onBlur = () => {
@@ -63,8 +70,8 @@ export function usePresenceReporter() {
     window.addEventListener('blur', onBlur);
     window.addEventListener('keydown', onActivity, true);
     window.addEventListener('mousedown', onActivity, true);
-    window.addEventListener('mousemove', onActivity, { capture: true, passive: true });
-    window.addEventListener('wheel', onActivity, { capture: true, passive: true });
+    window.addEventListener('mousemove', onPointerActivity, { capture: true, passive: true });
+    window.addEventListener('wheel', onPointerActivity, { capture: true, passive: true });
     return () => {
       unsubscribe();
       cancelLeave();
@@ -72,8 +79,8 @@ export function usePresenceReporter() {
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('keydown', onActivity, true);
       window.removeEventListener('mousedown', onActivity, true);
-      window.removeEventListener('mousemove', onActivity, true);
-      window.removeEventListener('wheel', onActivity, true);
+      window.removeEventListener('mousemove', onPointerActivity, true);
+      window.removeEventListener('wheel', onPointerActivity, true);
     };
   }, []);
 }

@@ -90,6 +90,26 @@ describe('usePresenceReporter', () => {
     expect(report).toHaveBeenLastCalledWith('s1');
   });
 
+  it('ignores a mouse move that repeats the previous pointer position', () => {
+    renderHook(() => usePresenceReporter());
+    act(() => { window.dispatchEvent(new MouseEvent('mousemove', { screenX: 5, screenY: 6 })); });
+    expect(report).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(PRESENCE_THROTTLE_MS + 1); });
+    act(() => { window.dispatchEvent(new MouseEvent('mousemove', { screenX: 5, screenY: 6 })); });
+    expect(report).toHaveBeenCalledTimes(1);
+    act(() => { window.dispatchEvent(new MouseEvent('mousemove', { screenX: 7, screenY: 6 })); });
+    expect(report).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores mouse movement and scrolling while the window is not focused', () => {
+    hasFocus.mockReturnValue(false);
+    renderHook(() => usePresenceReporter());
+    act(() => { window.dispatchEvent(new MouseEvent('mousemove', { screenX: 1, screenY: 1 })); });
+    act(() => { vi.advanceTimersByTime(PRESENCE_THROTTLE_MS + 1); });
+    act(() => { window.dispatchEvent(new WheelEvent('wheel')); });
+    expect(report).not.toHaveBeenCalled();
+  });
+
   it('reports immediately with the session id when the focused session changes', () => {
     renderHook(() => usePresenceReporter());
     act(() => { pressKey(); });

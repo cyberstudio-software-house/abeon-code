@@ -31,6 +31,17 @@ describe('useExtendOnActivity', () => {
     expect(extend).toHaveBeenCalledTimes(2);
   });
 
+  it('does not extend on a mouse move that repeats the previous pointer position', () => {
+    renderHook(() => useExtendOnActivity('q1', true));
+    act(() => { window.dispatchEvent(new MouseEvent('mousemove', { screenX: 5, screenY: 6 })); });
+    expect(extend).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(CARD_EXTEND_THROTTLE_MS); });
+    act(() => { window.dispatchEvent(new MouseEvent('mousemove', { screenX: 5, screenY: 6 })); });
+    expect(extend).toHaveBeenCalledTimes(1);
+    act(() => { window.dispatchEvent(new MouseEvent('mousemove', { screenX: 8, screenY: 6 })); });
+    expect(extend).toHaveBeenCalledTimes(2);
+  });
+
   it('does nothing while disabled', () => {
     renderHook(() => useExtendOnActivity('q1', false));
     act(() => { window.dispatchEvent(new MouseEvent('mousemove')); });
