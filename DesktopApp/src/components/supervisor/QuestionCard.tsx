@@ -32,9 +32,9 @@ function CardStatus({ card }: { card: QuestionCardView }) {
     return () => clearInterval(interval);
   }, [counting]);
 
-  if (card.phase === 'withSupervisor') return <span className="text-muted">Agent analizuje pytanie…</span>;
+  if (card.phase === 'withSupervisor') return <span className="text-fg-secondary">Agent analizuje pytanie…</span>;
   if (card.deadlineMs === null) return <span />;
-  return <span className="tabular-nums text-accent">Agent odpowie za {formatCountdown(card.deadlineMs - now)}</span>;
+  return <span className="tabular-nums text-fg-strong">Agent odpowie za {formatCountdown(card.deadlineMs - now)}</span>;
 }
 
 function QuestionBlock({
@@ -52,7 +52,7 @@ function QuestionBlock({
 }) {
   return (
     <div className="space-y-1.5">
-      {question.header && <div className="text-[10.5px] uppercase tracking-wide text-muted">{question.header}</div>}
+      {question.header && <div className="text-[10.5px] uppercase tracking-wide text-fg-secondary">{question.header}</div>}
       <div className="text-[14px] font-medium text-fg-strong">{question.question}</div>
       <div className="flex flex-wrap gap-1.5">
         {question.options.map(option =>
@@ -150,7 +150,7 @@ export function QuestionCard({ card, visible = true, onDone, measureRef }: {
       className={`absolute bottom-0 inset-x-0 z-20 max-h-[50%] overflow-y-auto border-y-2 border-accent bg-[color-mix(in_srgb,var(--color-accent)_14%,var(--color-bg-elev))] shadow-lg p-3 space-y-3 ${visible ? '' : 'invisible pointer-events-none'}`}
     >
       <div className="flex items-center justify-between gap-3 text-[12px]">
-        <span className="font-semibold text-accent">Pytanie sesji</span>
+        <span className="font-semibold text-fg-strong">Pytanie sesji</span>
         <CardStatus card={card} />
       </div>
       {card.questions.map((question, index) => (
