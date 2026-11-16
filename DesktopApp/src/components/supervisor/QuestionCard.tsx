@@ -145,7 +145,7 @@ export function QuestionCard({ card, visible = true, onDone }: {
     <div
       role="group"
       aria-label="Pytanie sesji"
-      className={`absolute top-0 inset-x-0 z-20 max-h-[60%] overflow-y-auto border-t-2 border-accent bg-bg-elev shadow-lg ring-1 ring-inset ring-accent/40 p-3 space-y-3 ${visible ? '' : 'invisible pointer-events-none'}`}
+      className={`absolute top-0 inset-x-0 z-20 max-h-[60%] overflow-y-auto border-y-2 border-accent bg-[color-mix(in_srgb,var(--color-accent)_14%,var(--color-bg-elev))] shadow-lg p-3 space-y-3 ${visible ? '' : 'invisible pointer-events-none'}`}
     >
       <div className="flex items-center justify-between gap-3 text-[12px]">
         <span className="font-semibold text-accent">Pytanie sesji</span>
