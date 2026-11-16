@@ -63,6 +63,8 @@ export function usePresenceReporter() {
     window.addEventListener('blur', onBlur);
     window.addEventListener('keydown', onActivity, true);
     window.addEventListener('mousedown', onActivity, true);
+    window.addEventListener('mousemove', onActivity, { capture: true, passive: true });
+    window.addEventListener('wheel', onActivity, { capture: true, passive: true });
     return () => {
       unsubscribe();
       cancelLeave();
@@ -70,6 +72,8 @@ export function usePresenceReporter() {
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('keydown', onActivity, true);
       window.removeEventListener('mousedown', onActivity, true);
+      window.removeEventListener('mousemove', onActivity, true);
+      window.removeEventListener('wheel', onActivity, true);
     };
   }, []);
 }

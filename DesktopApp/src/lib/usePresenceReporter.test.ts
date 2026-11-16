@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useStore } from '../store';
 import { tauri } from './tauri';
-import { usePresenceReporter } from './usePresenceReporter';
+import { PRESENCE_THROTTLE_MS, usePresenceReporter } from './usePresenceReporter';
 
 const sessionTab = (id: string, sessionId: string, ptyId: string, linkedSessionId?: string) => ({
   kind: 'session' as const,
@@ -75,6 +75,19 @@ describe('usePresenceReporter', () => {
     act(() => { vi.advanceTimersByTime(20_000); });
     act(() => { window.dispatchEvent(new MouseEvent('mousedown')); });
     expect(report).toHaveBeenCalledTimes(2);
+  });
+
+  it('counts mouse movement and scrolling as activity', () => {
+    useStore.setState({ activeAgentPtyId: 'pty-1' });
+    renderHook(() => usePresenceReporter());
+    expect(report).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(PRESENCE_THROTTLE_MS + 1); });
+    act(() => { window.dispatchEvent(new MouseEvent('mousemove')); });
+    expect(report).toHaveBeenCalledTimes(2);
+    act(() => { vi.advanceTimersByTime(PRESENCE_THROTTLE_MS + 1); });
+    act(() => { window.dispatchEvent(new WheelEvent('wheel')); });
+    expect(report).toHaveBeenCalledTimes(3);
+    expect(report).toHaveBeenLastCalledWith('s1');
   });
 
   it('reports immediately with the session id when the focused session changes', () => {
