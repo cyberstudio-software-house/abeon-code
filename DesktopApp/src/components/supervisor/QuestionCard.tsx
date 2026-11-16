@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { tauri } from '../../lib/tauri';
 import { formatTauriError } from '../../lib/errors';
+import { useExtendOnActivity } from '../../lib/useExtendOnActivity';
 import type { MenuQuestion, QuestionCardView } from '../../types';
 
 const formatCountdown = (remainingMs: number) => {
@@ -20,7 +21,7 @@ const primaryButtonClass = 'px-2.5 py-1 bg-accent text-accent-fg text-[12px] rou
 const optionClass = (selected: boolean) =>
   `px-2.5 py-1 border rounded-md text-[12px] ${selected ? 'border-accent bg-accent/15 text-fg' : 'border-border text-fg-secondary hover:text-fg'}`;
 
-function Footer({ card }: { card: QuestionCardView }) {
+function CardStatus({ card }: { card: QuestionCardView }) {
   const [now, setNow] = useState(() => Date.now());
   const counting = card.phase === 'grace' && card.deadlineMs !== null;
 
@@ -31,9 +32,9 @@ function Footer({ card }: { card: QuestionCardView }) {
     return () => clearInterval(interval);
   }, [counting]);
 
-  if (card.phase === 'withSupervisor') return <span>Agent analizuje pytanie…</span>;
+  if (card.phase === 'withSupervisor') return <span className="text-muted">Agent analizuje pytanie…</span>;
   if (card.deadlineMs === null) return <span />;
-  return <span className="tabular-nums">Agent odpowie za {formatCountdown(card.deadlineMs - now)}</span>;
+  return <span className="tabular-nums text-accent">Agent odpowie za {formatCountdown(card.deadlineMs - now)}</span>;
 }
 
 function QuestionBlock({
@@ -52,7 +53,7 @@ function QuestionBlock({
   return (
     <div className="space-y-1.5">
       {question.header && <div className="text-[10.5px] uppercase tracking-wide text-muted">{question.header}</div>}
-      <div className="text-[13px] text-fg">{question.question}</div>
+      <div className="text-[14px] font-medium text-fg-strong">{question.question}</div>
       <div className="flex flex-wrap gap-1.5">
         {question.options.map(option =>
           question.multiSelect ? (
@@ -98,6 +99,8 @@ export function QuestionCard({ card, visible = true, onDone }: {
   const [freeTexts, setFreeTexts] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState(false);
 
+  useExtendOnActivity(card.questionId, visible && card.phase === 'grace');
+
   const select = (index: number, question: MenuQuestion, option: string) => {
     setSelections(prev => {
       const current = prev[index] ?? [];
@@ -141,9 +144,13 @@ export function QuestionCard({ card, visible = true, onDone }: {
   return (
     <div
       role="group"
-      aria-label="Pytanie agenta"
-      className={`absolute top-0 inset-x-0 z-20 max-h-[60%] overflow-y-auto border-b border-border bg-bg shadow-lg p-3 space-y-3 ${visible ? '' : 'invisible pointer-events-none'}`}
+      aria-label="Pytanie sesji"
+      className={`absolute top-0 inset-x-0 z-20 max-h-[60%] overflow-y-auto border-t-2 border-accent bg-bg-elev shadow-lg ring-1 ring-inset ring-accent/40 p-3 space-y-3 ${visible ? '' : 'invisible pointer-events-none'}`}
     >
+      <div className="flex items-center justify-between gap-3 text-[12px]">
+        <span className="font-semibold text-accent">Pytanie sesji</span>
+        <CardStatus card={card} />
+      </div>
       {card.questions.map((question, index) => (
         <QuestionBlock
           key={index}
@@ -154,16 +161,13 @@ export function QuestionCard({ card, visible = true, onDone }: {
           onFreeText={value => setFreeTexts(prev => ({ ...prev, [index]: value }))}
         />
       ))}
-      <div className="flex items-center justify-between gap-3 text-[12px] text-muted">
-        <Footer card={card} />
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={release} disabled={busy} className={buttonClass}>
-            Odpowiem w terminalu
-          </button>
-          <button type="button" onClick={send} disabled={busy || !complete} className={primaryButtonClass}>
-            Wyślij
-          </button>
-        </div>
+      <div className="flex items-center justify-end gap-2">
+        <button type="button" onClick={release} disabled={busy} className={buttonClass}>
+          Odpowiem w terminalu
+        </button>
+        <button type="button" onClick={send} disabled={busy || !complete} className={primaryButtonClass}>
+          Wyślij
+        </button>
       </div>
     </div>
   );

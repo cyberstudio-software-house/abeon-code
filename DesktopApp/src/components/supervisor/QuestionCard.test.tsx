@@ -36,6 +36,7 @@ describe('QuestionCard', () => {
     vi.mocked(toast.error).mockClear();
     vi.spyOn(tauri, 'supervisorAnswerCard').mockResolvedValue(undefined);
     vi.spyOn(tauri, 'supervisorReleaseCard').mockResolvedValue(undefined);
+    vi.spyOn(tauri, 'supervisorExtendCard').mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -77,6 +78,26 @@ describe('QuestionCard', () => {
   it('shows that the agent is analysing', () => {
     render(<QuestionCard card={card({ phase: 'withSupervisor' })} />);
     expect(screen.getByText('Agent analizuje pytanie…')).toBeInTheDocument();
+  });
+
+  it('shows the session question heading with the countdown', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-16T10:00:00Z'));
+    render(<QuestionCard card={card({ deadlineMs: Date.now() + 299_000 })} />);
+    expect(screen.getByText('Pytanie sesji')).toBeInTheDocument();
+    expect(screen.getByText('Agent odpowie za 4:59')).toBeInTheDocument();
+  });
+
+  it('asks for more time only while visible in grace', () => {
+    const { rerender } = render(<QuestionCard card={card()} visible={false} />);
+    fireEvent.mouseMove(window);
+    expect(tauri.supervisorExtendCard).not.toHaveBeenCalled();
+    rerender(<QuestionCard card={card({ phase: 'withSupervisor' })} visible />);
+    fireEvent.mouseMove(window);
+    expect(tauri.supervisorExtendCard).not.toHaveBeenCalled();
+    rerender(<QuestionCard card={card()} visible />);
+    fireEvent.mouseMove(window);
+    expect(tauri.supervisorExtendCard).toHaveBeenCalledWith('q1');
   });
 
   it('joins multi-select labels in option order', () => {
