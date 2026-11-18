@@ -47,8 +47,13 @@ function track(ptyId: string): Entry {
     if (entry.released) off();
     else entry.unlisten.push(off);
   };
-  tauri.onPtyOutput(ptyId, (bytes) => push(entry, bytes)).then(adopt).catch(() => {});
-  tauri.onPtyExit(ptyId, (code) => push(entry, exitMarker(code))).then(adopt).catch(() => {});
+  const listening = [
+    tauri.onPtyOutput(ptyId, (bytes) => push(entry, bytes)).then(adopt),
+    tauri.onPtyExit(ptyId, (code) => push(entry, exitMarker(code))).then(adopt),
+  ];
+  void Promise.allSettled(listening).then(() => {
+    if (!entry.released) tauri.ptyAttach(ptyId).catch(() => {});
+  });
   return entry;
 }
 

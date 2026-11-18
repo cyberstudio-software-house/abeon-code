@@ -3,6 +3,7 @@ import { renderHook, act, waitFor } from '@testing-library/react';
 import { useStore } from '../store';
 import { tauri } from './tauri';
 import { useSupervisorSnapshot } from './useSupervisorSnapshot';
+import { supervisorProcess } from './supervisorProcess';
 import type { SessionRebound, SupervisorSnapshot } from '../types';
 import type { Tab } from '../store/tabsSlice';
 
@@ -42,6 +43,24 @@ describe('useSupervisorSnapshot', () => {
     await waitFor(() => expect(useStore.getState().supervisor?.running).toBe(false));
     act(() => { emit(snapshot({ running: true })); });
     expect(useStore.getState().supervisor?.running).toBe(true);
+  });
+
+  it('follows the supervisor pty of a snapshot by default', async () => {
+    const track = vi.spyOn(supervisorProcess, 'track').mockImplementation(() => {});
+    vi.spyOn(tauri, 'supervisorSnapshot').mockResolvedValue(snapshot({ ptyId: 'pty-sup' }));
+    renderHook(() => useSupervisorSnapshot());
+    await waitFor(() => expect(useStore.getState().supervisor?.ptyId).toBe('pty-sup'));
+    expect(track).toHaveBeenCalledWith('pty-sup');
+  });
+
+  it('leaves the supervisor pty alone in a window that does not show its terminal', async () => {
+    const track = vi.spyOn(supervisorProcess, 'track').mockImplementation(() => {});
+    vi.spyOn(tauri, 'supervisorSnapshot').mockResolvedValue(snapshot({ ptyId: 'pty-sup' }));
+    renderHook(() => useSupervisorSnapshot({ trackPty: false }));
+    await waitFor(() => expect(useStore.getState().supervisor?.ptyId).toBe('pty-sup'));
+    act(() => { emit(snapshot({ ptyId: 'pty-next' })); });
+    expect(useStore.getState().supervisor?.ptyId).toBe('pty-next');
+    expect(track).not.toHaveBeenCalled();
   });
 
   it('does not let a late initial snapshot overwrite a newer event', async () => {

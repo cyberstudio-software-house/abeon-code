@@ -45,7 +45,7 @@ export function DetachedShell({ mode }: { mode: WindowMode }) {
   const { confirmingClose, cancelClose, notesLossDialog } = useWindowCloseGuard(promptUnsavedFiles);
 
   usePresenceReporter();
-  useSupervisorSnapshot();
+  useSupervisorSnapshot({ trackPty: false });
   useNotesSync();
   useFilesSync();
 

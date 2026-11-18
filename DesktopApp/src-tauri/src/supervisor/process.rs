@@ -528,7 +528,7 @@ impl SupervisorProcess {
             ROWS,
             &launch.env,
             Some(hook),
-            crate::pty::output_gate::OutputDelivery::Immediate,
+            crate::pty::output_gate::OutputDelivery::OnAttach,
         );
         match spawned {
             Ok(pty_id) => self.attach_locked(&mut state, pty_id, launch.session, launch.discord),

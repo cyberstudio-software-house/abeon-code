@@ -11,7 +11,7 @@ export function followSessionRebound({ ptyId, sessionId }: SessionRebound) {
   linkNewSession(tab.id, sessionId);
 }
 
-export function useSupervisorSnapshot() {
+export function useSupervisorSnapshot({ trackPty = true }: { trackPty?: boolean } = {}) {
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | null = null;
@@ -37,7 +37,7 @@ export function useSupervisorSnapshot() {
     let unlisten: (() => void) | null = null;
     const setSnapshot = useStore.getState().setSupervisorSnapshot;
     const apply = (snapshot: SupervisorSnapshot) => {
-      if (snapshot.ptyId) supervisorProcess.track(snapshot.ptyId);
+      if (trackPty && snapshot.ptyId) supervisorProcess.track(snapshot.ptyId);
       setSnapshot(snapshot);
     };
 
@@ -69,5 +69,5 @@ export function useSupervisorSnapshot() {
       disposed = true;
       if (unlisten) unlisten();
     };
-  }, []);
+  }, [trackPty]);
 }
