@@ -39,6 +39,7 @@ vi.mock('../../lib/tauri', () => ({
     spawnPty: vi.fn(async () => `pty-${++probe.spawned}`),
     onPtyOutput: vi.fn(async () => () => {}),
     onPtyExit: vi.fn(async () => () => {}),
+    ptyAttach: vi.fn(async () => {}),
     ptyKill: vi.fn(async () => {}),
     ptyWrite: vi.fn(async () => {}),
     ptyResize: vi.fn(async () => {}),
