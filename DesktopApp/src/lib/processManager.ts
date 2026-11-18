@@ -37,6 +37,7 @@ async function register(actionId: number, ptyId: string): Promise<void> {
     return;
   }
   entry.unlisten.push(offOut, offExit);
+  await tauri.ptyAttach(ptyId).catch(() => {});
 }
 
 export const processManager = {

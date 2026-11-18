@@ -125,6 +125,7 @@ pub fn run() {
             commands::pty::spawn_pty,
             commands::pty::pty_write,
             commands::pty::pty_resize,
+            commands::pty::pty_attach,
             commands::pty::pty_kill,
             commands::pty::resolve_opencode_start,
             commands::pty::save_clipboard_image,

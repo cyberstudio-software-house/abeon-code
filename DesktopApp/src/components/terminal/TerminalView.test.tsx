@@ -61,6 +61,7 @@ vi.mock('../../lib/tauri', () => ({
       probe.exits.push(cb);
       return () => {};
     }),
+    ptyAttach: vi.fn(async () => {}),
     ptyKill: vi.fn(async () => {}),
     ptyWrite: vi.fn(async () => {}),
     ptyResize: vi.fn(async () => {}),
@@ -236,6 +237,51 @@ describe('TerminalView focus', () => {
     expect(probe.spawned).toBe(1);
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledWith(0);
+  });
+});
+
+describe('TerminalView PTY output delivery', () => {
+  const deferListener = <T,>(mock: typeof tauri.onPtyOutput | typeof tauri.onPtyExit, sinks: T[]) => {
+    let resolveListen!: (off: () => void) => void;
+    vi.mocked(mock).mockImplementationOnce(((_id: string, cb: T) => {
+      sinks.push(cb);
+      return new Promise<() => void>(resolve => { resolveListen = resolve; });
+    }) as never);
+    return () => resolveListen(() => {});
+  };
+
+  beforeEach(() => {
+    probe.sinks = [];
+    probe.exits = [];
+    probe.spawned = 0;
+    vi.mocked(tauri.ptyAttach).mockClear();
+    useStore.setState({ projects: [{ id: 1, name: 'P', path: '/p' }] as never });
+  });
+
+  it.each(['agent', 'shell'] as const)('attaches a %s PTY only once its output and exit listeners are registered', async (kind) => {
+    const resolveOutput = deferListener(tauri.onPtyOutput, probe.sinks);
+    const resolveExit = deferListener(tauri.onPtyExit, probe.exits);
+
+    await act(async () => { render(<TerminalView projectId={1} kind={kind} sessionId="s1" visible focused />); });
+    expect(tauri.ptyAttach).not.toHaveBeenCalled();
+
+    await act(async () => { resolveOutput(); });
+    expect(tauri.ptyAttach).not.toHaveBeenCalled();
+
+    await act(async () => { resolveExit(); });
+    expect(tauri.ptyAttach).toHaveBeenCalledTimes(1);
+    expect(tauri.ptyAttach).toHaveBeenCalledWith('pty-1');
+  });
+
+  it('never attaches a PTY whose view unmounted while it was still registering listeners', async () => {
+    const resolveOutput = deferListener(tauri.onPtyOutput, probe.sinks);
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<TerminalView projectId={1} kind="shell" visible focused />); });
+
+    view.unmount();
+    await act(async () => { resolveOutput(); });
+
+    expect(tauri.ptyAttach).not.toHaveBeenCalled();
   });
 });
 

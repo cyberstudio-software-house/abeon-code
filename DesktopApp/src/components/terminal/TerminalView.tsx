@@ -217,6 +217,11 @@ export function TerminalView({ projectId, kind, ptyId, provider, sessionId, fres
         term.write(`\r\n\x1b[33m[process exited with code ${code}]\x1b[0m\r\n`);
         onExitRef.current?.(code);
       });
+      if (cancelled) {
+        offOut();
+        offExit();
+        return;
+      }
       unlistenRefs.current.push(offOut, offExit);
 
       term.onData((d) => {
@@ -229,6 +234,7 @@ export function TerminalView({ projectId, kind, ptyId, provider, sessionId, fres
         tauri.ptyResize(id, cols, rows).catch(() => {});
       });
       if (term.cols !== cols || term.rows !== rows) tauri.ptyResize(id, term.cols, term.rows).catch(() => {});
+      tauri.ptyAttach(id).catch(() => {});
 
       if (kind === 'agent') {
         const onKeyDown = async (e: KeyboardEvent) => {

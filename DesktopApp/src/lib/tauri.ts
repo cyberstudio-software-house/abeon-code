@@ -107,6 +107,7 @@ export const tauri = {
   ptyWrite: (ptyId: string, data: string) => invoke<void>('pty_write', { ptyId, data }),
   ptyResize: (ptyId: string, cols: number, rows: number) =>
     invoke<void>('pty_resize', { ptyId, cols, rows }),
+  ptyAttach: (ptyId: string) => invoke<void>('pty_attach', { ptyId }),
   ptyKill: (ptyId: string) => invoke<void>('pty_kill', { ptyId }),
   resolveOpencodeStart: (
     projectId: number,

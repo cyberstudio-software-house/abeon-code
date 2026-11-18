@@ -22,6 +22,7 @@ describe('processManager', () => {
     vi.spyOn(tauri, 'ptyWrite').mockResolvedValue(undefined);
     vi.spyOn(tauri, 'ptyResize').mockResolvedValue(undefined);
     vi.spyOn(tauri, 'ptyKill').mockResolvedValue(undefined);
+    vi.spyOn(tauri, 'ptyAttach').mockResolvedValue(undefined);
   });
   afterEach(() => { processManager.dismiss(1); });
 
@@ -29,6 +30,27 @@ describe('processManager', () => {
     await processManager.start(7, action);
     expect(tauri.spawnPty).toHaveBeenCalledWith(7, { kind: 'action', action_id: 1 }, 80, 24);
     expect(useStore.getState().runningActions[1]).toMatchObject({ actionId: 1, ptyId: 'pty-1', status: 'running' });
+  });
+
+  it('start attaches the pty only once its output and exit listeners are registered', async () => {
+    let resolveExit!: (off: () => void) => void;
+    vi.spyOn(tauri, 'onPtyExit').mockImplementation((_id, cb) => {
+      exitCb = cb;
+      return new Promise(resolve => { resolveExit = resolve; });
+    });
+
+    const started = processManager.start(7, action);
+    await vi.waitFor(() => expect(tauri.onPtyExit).toHaveBeenCalled());
+    expect(tauri.ptyAttach).not.toHaveBeenCalled();
+
+    resolveExit(() => {});
+    await started;
+    expect(tauri.ptyAttach).toHaveBeenCalledWith('pty-1');
+  });
+
+  it('adopt attaches the existing pty after listening, so output held for it is delivered', async () => {
+    await processManager.adopt(1, 'pty-live');
+    expect(tauri.ptyAttach).toHaveBeenCalledWith('pty-live');
   });
 
   it('attach replays the buffer then receives live output, detach stops it', async () => {

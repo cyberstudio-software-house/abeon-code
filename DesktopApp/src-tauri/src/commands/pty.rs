@@ -8,6 +8,7 @@ use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use crate::db::{projects_repo, actions_repo};
 use crate::pty::session_registry::{session_to_bind, SessionPtyRegistry, PTY_ID_ENV};
+use crate::pty::output_gate::OutputDelivery;
 use crate::validation::validate_session_id;
 
 const OPENCODE_DISCOVERY_GRACE_PERIOD: std::time::Duration = std::time::Duration::from_secs(15);
@@ -211,7 +212,7 @@ pub(crate) fn spawn_claude_resume(
     let cmd = build_claude_command(Some(session_id), None, None, false, false, None);
     let shell = crate::commands::settings::resolve_shell(&c);
     let env = crate::commands::settings::ensure_shell_env(&state, &shell);
-    state.pty.spawn(app.clone(), "bash", &["-c", &cmd], &cwd, 80, 24, &env)
+    state.pty.spawn(app.clone(), "bash", &["-c", &cmd], &cwd, 80, 24, &env, OutputDelivery::Immediate)
 }
 
 fn assign_hooked_pty_id(
@@ -358,15 +359,16 @@ pub fn spawn_pty(
                     OPENCODE_DISCOVERY_GRACE_PERIOD,
                 );
             })),
+            OutputDelivery::OnAttach,
         )
     } else if let Some(id) = hooked_pty_id {
-        let spawned = state.pty.spawn_as(id.clone(), app, &program, &args_ref, &cwd, cols, rows, &env, None);
+        let spawned = state.pty.spawn_as(id.clone(), app, &program, &args_ref, &cwd, cols, rows, &env, None, OutputDelivery::OnAttach);
         if spawned.is_err() {
             state.session_pty.unbind_pty(&id);
         }
         spawned
     } else {
-        state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows, &env)
+        state.pty.spawn(app, &program, &args_ref, &cwd, cols, rows, &env, OutputDelivery::OnAttach)
     };
     let pty_id = match spawn_result {
         Ok(pty_id) => pty_id,
@@ -426,6 +428,11 @@ fn cleanup_clipboard_images(state: &AppState, pty_id: &str) {
             let _ = std::fs::remove_file(path);
         }
     }
+}
+
+#[tauri::command]
+pub fn pty_attach(state: State<AppState>, pty_id: String) -> AppResult<()> {
+    state.pty.attach(&pty_id)
 }
 
 #[tauri::command]

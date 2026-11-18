@@ -1,14 +1,16 @@
 pub mod handle;
 pub mod session_registry;
 pub mod input_activity;
+pub mod output_gate;
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use parking_lot::Mutex;
 use uuid::Uuid;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 use crate::error::{AppError, AppResult};
 use self::handle::PtyHandle;
+use self::output_gate::{OutputDelivery, OutputGate, PtyEvent, PtyEventSink};
 
 #[derive(Default)]
 pub struct PtyManager {
@@ -33,8 +35,9 @@ impl PtyManager {
         cols: u16,
         rows: u16,
         env: &HashMap<String, String>,
+        delivery: OutputDelivery,
     ) -> AppResult<String> {
-        self.spawn_with_exit_hook(app, program, args, cwd, cols, rows, env, None)
+        self.spawn_with_exit_hook(app, program, args, cwd, cols, rows, env, None, delivery)
     }
 
     pub fn spawn_with_exit_hook(
@@ -47,8 +50,9 @@ impl PtyManager {
         rows: u16,
         env: &HashMap<String, String>,
         local_exit_hook: Option<Arc<dyn Fn(String) + Send + Sync>>,
+        delivery: OutputDelivery,
     ) -> AppResult<String> {
-        self.spawn_as(Uuid::new_v4().to_string(), app, program, args, cwd, cols, rows, env, local_exit_hook)
+        self.spawn_as(Uuid::new_v4().to_string(), app, program, args, cwd, cols, rows, env, local_exit_hook, delivery)
     }
 
     pub fn spawn_as(
@@ -62,6 +66,7 @@ impl PtyManager {
         rows: u16,
         env: &HashMap<String, String>,
         local_exit_hook: Option<Arc<dyn Fn(String) + Send + Sync>>,
+        delivery: OutputDelivery,
     ) -> AppResult<String> {
         let global_exit_hook = self.exit_hook.lock().clone();
         let hook = if global_exit_hook.is_some() || local_exit_hook.is_some() {
@@ -76,7 +81,8 @@ impl PtyManager {
         } else {
             None
         };
-        let h = PtyHandle::spawn(app, id.clone(), program, args, cwd, cols, rows, env, hook)?;
+        let gate = Arc::new(OutputGate::new(delivery, tauri_event_sink(app, id.clone())));
+        let h = PtyHandle::spawn(gate, id.clone(), program, args, cwd, cols, rows, env, hook)?;
         self.inner.lock().insert(id.clone(), Arc::new(h));
         Ok(id)
     }
@@ -106,6 +112,26 @@ impl PtyManager {
         if let Some(h) = removed { let _ = h.kill(); }
         Ok(())
     }
+
+    pub fn attach(&self, id: &str) -> AppResult<()> {
+        self.handle(id)?.attach();
+        Ok(())
+    }
+}
+
+fn tauri_event_sink(app: AppHandle, id: String) -> PtyEventSink {
+    let output_event = format!("pty:{id}:output");
+    let exit_event = format!("pty:{id}:exit");
+    Box::new(move |event| match event {
+        PtyEvent::Output(bytes) => {
+            use base64::Engine;
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let _ = app.emit(&output_event, serde_json::json!({ "data": encoded }));
+        }
+        PtyEvent::Exit(code) => {
+            let _ = app.emit(&exit_event, serde_json::json!({ "code": code }));
+        }
+    })
 }
 
 #[cfg(all(test, unix))]
