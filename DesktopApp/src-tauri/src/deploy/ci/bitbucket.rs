@@ -1,7 +1,10 @@
-use super::{call, owned, unexpected_response, CiObservation, CiRun, CiStatus};
+use super::{
+    call, failure_reason, owned, run_error_problem, unexpected_response, CiObservation, CiRun,
+    CiStatus, ToolProblem, CI_TIMEOUT,
+};
 use crate::deploy::excerpt::tail_redacted;
 use crate::deploy::LOG_EXCERPT_LINES;
-use crate::deploy::runner::CommandRunner;
+use crate::deploy::runner::{CommandOutput, CommandRunner};
 use crate::domain::deploy::DeployFlow;
 use serde_json::Value;
 
@@ -57,7 +60,65 @@ pub(super) async fn observe(
     runner: &dyn CommandRunner,
     flow: &DeployFlow,
     commit: &str,
+    run_id: Option<&str>,
 ) -> CiObservation {
+    if let Some(run_id) = run_id.filter(|run_id| is_run_id(run_id)) {
+        if let Some(observation) = observe_known_run(runner, flow, commit, run_id).await {
+            return observation;
+        }
+    }
+    observe_list(runner, flow, commit).await
+}
+
+fn is_run_id(value: &str) -> bool {
+    let inner = value
+        .strip_prefix('{')
+        .and_then(|rest| rest.strip_suffix('}'))
+        .unwrap_or(value);
+    !inner.is_empty()
+        && inner
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '-')
+}
+
+fn says_missing(output: &CommandOutput) -> bool {
+    let text = format!("{}\n{}", output.stdout, output.stderr).to_lowercase();
+    text.contains("404") || text.contains("not found")
+}
+
+async fn observe_known_run(
+    runner: &dyn CommandRunner,
+    flow: &DeployFlow,
+    commit: &str,
+    run_id: &str,
+) -> Option<CiObservation> {
+    let path = format!("/repositories/{}/pipelines/{run_id}", flow.build_repo);
+    let output = match runner.run(TOOL, &owned(&["api", &path]), CI_TIMEOUT).await {
+        Ok(output) => output,
+        Err(error) => return Some(CiObservation::Unavailable(run_error_problem(TOOL, error))),
+    };
+    if output.status != Some(0) {
+        if says_missing(&output) {
+            return None;
+        }
+        return Some(CiObservation::Unavailable(ToolProblem {
+            tool: TOOL.to_string(),
+            reason: failure_reason(&output),
+        }));
+    }
+    let Ok(entry) = serde_json::from_str::<Value>(&output.stdout) else {
+        return Some(CiObservation::Unavailable(unexpected_response(TOOL)));
+    };
+    if !matches_flow(&entry, flow, commit) {
+        return None;
+    }
+    Some(match run_of(&entry, &flow.build_repo) {
+        Some(run) => CiObservation::Run(run),
+        None => CiObservation::Unavailable(unexpected_response(TOOL)),
+    })
+}
+
+async fn observe_list(runner: &dyn CommandRunner, flow: &DeployFlow, commit: &str) -> CiObservation {
     let path = format!("/repositories/{}/pipelines/", flow.build_repo);
     let args = owned(&["api", &path, "-P", "sort=-created_on", "-P", "pagelen=30"]);
     let stdout = match call(runner, TOOL, args).await {
@@ -191,7 +252,7 @@ mod tests {
                 Some("2026-11-23T11:26:47.605337643Z"),
             ),
         ]);
-        let CiObservation::Run(run) = observe(&runner, &flow(), HASH).await else { panic!() };
+        let CiObservation::Run(run) = observe(&runner, &flow(), HASH, None).await else { panic!() };
         assert_eq!(run.id, "{uuid-307}");
         assert_eq!(run.build_number, Some(307));
         assert_eq!(run.url, "https://bitbucket.org/cybercode/hr-management/pipelines/results/307");
@@ -207,7 +268,7 @@ mod tests {
             completed("SUCCESSFUL"),
             None,
         )]);
-        assert_eq!(observe(&runner, &flow(), HASH).await, CiObservation::NoRun);
+        assert_eq!(observe(&runner, &flow(), HASH, None).await, CiObservation::NoRun);
     }
 
     #[tokio::test]
@@ -221,7 +282,7 @@ mod tests {
             ),
             pipeline(8, branch_target(HASH, "master"), completed("FAILED"), None),
         ]);
-        let CiObservation::Run(run) = observe(&runner, &flow(), HASH).await else { panic!() };
+        let CiObservation::Run(run) = observe(&runner, &flow(), HASH, None).await else { panic!() };
         assert_eq!(run.build_number, Some(9));
         assert_eq!(run.status, CiStatus::Running);
     }
@@ -249,7 +310,7 @@ mod tests {
             }
             let runner =
                 runner_with(vec![pipeline(1, branch_target(HASH, "master"), state, None)]);
-            let CiObservation::Run(run) = observe(&runner, &flow(), HASH).await else {
+            let CiObservation::Run(run) = observe(&runner, &flow(), HASH, None).await else {
                 panic!("no run for {stage} {state_name}")
             };
             assert_eq!(run.status, expected, "{stage} {state_name} {result:?}");
@@ -264,7 +325,7 @@ mod tests {
             json!({ "name": "IN_PROGRESS", "stage": { "name": "RUNNING" } }),
             None,
         );
-        let CiObservation::Run(run) = observe(&runner_with(vec![running]), &flow(), HASH).await
+        let CiObservation::Run(run) = observe(&runner_with(vec![running]), &flow(), HASH, None).await
         else {
             panic!()
         };
@@ -275,7 +336,7 @@ mod tests {
             completed("FAILED"),
             Some("2026-11-23T11:26:47Z"),
         );
-        let CiObservation::Run(run) = observe(&runner_with(vec![failed]), &flow(), HASH).await
+        let CiObservation::Run(run) = observe(&runner_with(vec![failed]), &flow(), HASH, None).await
         else {
             panic!()
         };
@@ -290,7 +351,7 @@ mod tests {
             completed("SUCCESSFUL"),
             None,
         )]);
-        assert_eq!(observe(&runner, &flow(), HASH).await, CiObservation::NoRun);
+        assert_eq!(observe(&runner, &flow(), HASH, None).await, CiObservation::NoRun);
     }
 
     #[tokio::test]
@@ -301,14 +362,14 @@ mod tests {
             completed("SUCCESSFUL"),
             None,
         )]);
-        assert_eq!(observe(&runner, &flow(), &HASH[..7]).await, CiObservation::NoRun);
+        assert_eq!(observe(&runner, &flow(), &HASH[..7], None).await, CiObservation::NoRun);
     }
 
     #[tokio::test]
     async fn a_response_without_values_is_unexpected() {
         let runner = FakeRunner::new().on("bkt", &["api"], ok("{\"error\":{}}"));
         assert!(matches!(
-            observe(&runner, &flow(), HASH).await,
+            observe(&runner, &flow(), HASH, None).await,
             CiObservation::Unavailable(problem) if problem.reason == "nieoczekiwana odpowiedź"
         ));
     }
@@ -316,7 +377,7 @@ mod tests {
     #[tokio::test]
     async fn arguments_are_passed_as_separate_values() {
         let runner = FakeRunner::new().on("bkt", &["api"], ok("{\"values\":[]}"));
-        observe(&runner, &flow(), "abc").await;
+        observe(&runner, &flow(), "abc", None).await;
         let (program, args) = &runner.calls()[0];
         assert_eq!(program, "bkt");
         assert_eq!(
@@ -330,6 +391,92 @@ mod tests {
                 "pagelen=30"
             ]
         );
+    }
+
+    const DIRECT_PATH: &str = "/repositories/cybercode/hr-management/pipelines/{uuid-307}";
+
+    fn paused() -> Value {
+        json!({ "name": "IN_PROGRESS", "stage": { "name": "PAUSED" } })
+    }
+
+    fn failing(stdout: &str, stderr: &str) -> crate::deploy::runner::CommandOutput {
+        crate::deploy::runner::CommandOutput {
+            status: Some(1),
+            stdout: stdout.to_string(),
+            stderr: stderr.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_known_run_is_queried_directly_without_the_list() {
+        let entry = pipeline(307, branch_target(HASH, "master"), paused(), None);
+        let runner = FakeRunner::new()
+            .on("bkt", &["api", DIRECT_PATH], ok(&entry.to_string()))
+            .on("bkt", &["api"], ok(&list(vec![])));
+        let CiObservation::Run(run) = observe(&runner, &flow(), HASH, Some("{uuid-307}")).await else {
+            panic!("expected the run")
+        };
+        assert_eq!(run.id, "{uuid-307}");
+        assert_eq!(run.status, CiStatus::Paused);
+        assert_eq!(run.url, "https://bitbucket.org/cybercode/hr-management/pipelines/results/307");
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].1, ["api", DIRECT_PATH]);
+    }
+
+    #[tokio::test]
+    async fn a_known_run_that_no_longer_exists_falls_back_to_the_list() {
+        let listed = pipeline(308, branch_target(HASH, "master"), completed("SUCCESSFUL"), None);
+        for missing in [
+            failing("", "Error: GET https://api.bitbucket.org/2.0/x: 404 Not Found"),
+            failing(r#"{"type":"error","error":{"message":"Not found"}}"#, ""),
+        ] {
+            let runner = FakeRunner::new()
+                .on("bkt", &["api", DIRECT_PATH], Ok(missing.clone()))
+                .on("bkt", &["api"], ok(&list(vec![listed.clone()])));
+            let CiObservation::Run(run) = observe(&runner, &flow(), HASH, Some("{uuid-307}")).await
+            else {
+                panic!("expected the listed run for {missing:?}")
+            };
+            assert_eq!(run.id, "{uuid-308}");
+            let paths: Vec<String> = runner.calls().into_iter().map(|(_, args)| args[1].clone()).collect();
+            assert_eq!(
+                paths,
+                vec![DIRECT_PATH.to_string(), "/repositories/cybercode/hr-management/pipelines/".to_string()]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn any_other_failure_of_the_direct_query_is_a_blocker_without_a_list_call() {
+        let runner = FakeRunner::new()
+            .on("bkt", &["api", DIRECT_PATH], Ok(failing("", "429 Too Many Requests")))
+            .on("bkt", &["api"], ok(&list(vec![])));
+        let observation = observe(&runner, &flow(), HASH, Some("{uuid-307}")).await;
+        assert!(
+            matches!(observation, CiObservation::Unavailable(ref problem) if problem.reason == "429 Too Many Requests"),
+            "{observation:?}"
+        );
+        assert_eq!(runner.calls().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_direct_answer_for_another_commit_or_an_odd_run_id_uses_the_list() {
+        let other = pipeline(307, branch_target(OTHER_HASH, "master"), paused(), None);
+        let runner = FakeRunner::new()
+            .on("bkt", &["api", DIRECT_PATH], ok(&other.to_string()))
+            .on("bkt", &["api"], ok(&list(vec![])));
+        assert_eq!(observe(&runner, &flow(), HASH, Some("{uuid-307}")).await, CiObservation::NoRun);
+        assert_eq!(runner.calls().len(), 2);
+
+        let runner = runner_with(vec![]);
+        for odd in ["../../user", "{a/b}", "", "{x?y=1}"] {
+            assert_eq!(observe(&runner, &flow(), HASH, Some(odd)).await, CiObservation::NoRun, "{odd}");
+        }
+        assert!(runner
+            .calls()
+            .iter()
+            .all(|(_, args)| args[1] == "/repositories/cybercode/hr-management/pipelines/"));
     }
 
     fn failed_run() -> CiRun {

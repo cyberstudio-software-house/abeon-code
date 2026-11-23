@@ -28,5 +28,7 @@ pub const ROLLOUT_LIMIT: Duration = Duration::from_secs(15 * 60);
 pub const PAUSE_LIMIT: Duration = Duration::from_secs(24 * 60 * 60);
 pub const BUILD_POLL: Duration = Duration::from_secs(15);
 pub const CLUSTER_POLL: Duration = Duration::from_secs(10);
+pub const IDLE_CLUSTER_POLL: Duration = Duration::from_secs(60);
+pub const PAUSED_POLL: Duration = Duration::from_secs(60);
 pub const BLOCKED_POLL: Duration = Duration::from_secs(60);
 pub const PUSH_POLL: Duration = Duration::from_secs(3);

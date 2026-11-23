@@ -80,9 +80,14 @@ pub(crate) fn unexpected_response(tool: &str) -> ToolProblem {
     ToolProblem { tool: tool.to_string(), reason: "nieoczekiwana odpowiedź".to_string() }
 }
 
-pub async fn observe(runner: &dyn CommandRunner, flow: &DeployFlow, commit: &str) -> CiObservation {
+pub async fn observe(
+    runner: &dyn CommandRunner,
+    flow: &DeployFlow,
+    commit: &str,
+    run_id: Option<&str>,
+) -> CiObservation {
     match flow.build {
-        BuildProvider::Bitbucket => bitbucket::observe(runner, flow, commit).await,
+        BuildProvider::Bitbucket => bitbucket::observe(runner, flow, commit, run_id).await,
         BuildProvider::Github => github::observe(runner, flow, commit).await,
         BuildProvider::None => CiObservation::NoRun,
     }
@@ -109,7 +114,7 @@ mod tests {
     #[tokio::test]
     async fn a_missing_tool_is_unavailable_not_a_failure() {
         let runner = FakeRunner::new().on("bkt", &["api"], Err(RunError::NotFound));
-        let observation = observe(&runner, &flow(), "abc").await;
+        let observation = observe(&runner, &flow(), "abc", None).await;
         assert_eq!(
             observation,
             CiObservation::Unavailable(ToolProblem {
@@ -130,7 +135,7 @@ mod tests {
                 stderr: "\n  not logged in\nsecond line\n".to_string(),
             }),
         );
-        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc").await else {
+        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc", None).await else {
             panic!("expected unavailable")
         };
         assert_eq!(problem.reason, "not logged in");
@@ -147,7 +152,7 @@ mod tests {
             &["api"],
             Ok(CommandOutput { status: Some(1), stdout: String::new(), stderr }),
         );
-        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc").await else {
+        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc", None).await else {
             panic!("expected unavailable")
         };
         assert!(!problem.reason.contains("hunter2"), "{}", problem.reason);
@@ -167,7 +172,7 @@ mod tests {
                 stderr: stderr.to_string(),
             }),
         );
-        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc").await else {
+        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc", None).await else {
             panic!("expected unavailable")
         };
         problem.reason
@@ -188,7 +193,7 @@ mod tests {
     #[tokio::test]
     async fn a_timeout_is_unavailable() {
         let runner = FakeRunner::new().on("bkt", &["api"], Err(RunError::TimedOut));
-        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc").await else {
+        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc", None).await else {
             panic!("expected unavailable")
         };
         assert_eq!(problem.reason, "przekroczono limit czasu");
@@ -197,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn unparsable_json_is_an_unexpected_response() {
         let runner = FakeRunner::new().on("bkt", &["api"], ok("<html>"));
-        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc").await else {
+        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc", None).await else {
             panic!("expected unavailable")
         };
         assert_eq!(problem.tool, "bkt");
@@ -209,7 +214,7 @@ mod tests {
         let mut github_flow = flow();
         github_flow.build = BuildProvider::Github;
         let runner = FakeRunner::new().on("gh", &["run", "list"], ok("[]"));
-        assert_eq!(observe(&runner, &github_flow, "abc").await, CiObservation::NoRun);
+        assert_eq!(observe(&runner, &github_flow, "abc", None).await, CiObservation::NoRun);
         assert_eq!(runner.calls()[0].0, "gh");
     }
 
@@ -218,7 +223,7 @@ mod tests {
         let mut none_flow = flow();
         none_flow.build = BuildProvider::None;
         let runner = FakeRunner::new();
-        assert_eq!(observe(&runner, &none_flow, "abc").await, CiObservation::NoRun);
+        assert_eq!(observe(&runner, &none_flow, "abc", None).await, CiObservation::NoRun);
         assert!(runner.calls().is_empty());
     }
 }

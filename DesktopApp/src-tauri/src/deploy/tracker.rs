@@ -6,10 +6,12 @@ use crate::deploy::machine::{self, Effect, NotifyKind, Observation};
 use crate::deploy::reflog::PushDetector;
 use crate::deploy::runner::{shell_runner, CommandRunner, SystemRunner};
 use crate::deploy::{
-    notify, vpn, BLOCKED_POLL, BUILD_POLL, CLUSTER_POLL, DEPLOY_CHANGED_EVENT, LOG_EXCERPT_LINES,
-    PUSH_POLL, TRACKING_HISTORY, VPN_SETTING_KEY,
+    notify, vpn, BLOCKED_POLL, BUILD_POLL, CLUSTER_POLL, DEPLOY_CHANGED_EVENT, IDLE_CLUSTER_POLL,
+    LOG_EXCERPT_LINES, PAUSED_POLL, PUSH_POLL, TRACKING_HISTORY, VPN_SETTING_KEY,
 };
-use crate::domain::deploy::{BuildProvider, Delivery, DeployChangedEvent, DeployFlow, Tracking};
+use crate::domain::deploy::{
+    BuildProvider, Delivery, DeployChangedEvent, DeployFlow, Tracking, TrackingState,
+};
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use futures_util::future::join_all;
@@ -306,7 +308,7 @@ impl DeployTracker {
         let (ci_observation, cluster_observation) = tokio::join!(
             async {
                 if *ci {
-                    Some(ci::observe(runner, flow, &original.commit).await)
+                    Some(ci::observe(runner, flow, &original.commit, original.run_id.as_deref()).await)
                 } else {
                     None
                 }
@@ -381,21 +383,26 @@ impl DeployTracker {
     }
 
     fn reschedule(&self, selection: &Selection, outcome: &Outcome, now: i64) {
-        let blocked = machine::blocked(&outcome.tracking);
+        let tracking = &outcome.tracking;
+        let blocked = machine::blocked(tracking);
         let mut ledger = self.ledger.lock();
         let schedule = ledger
             .schedule
             .entry(selection.tracking.id)
             .or_insert(Schedule { next_ci: now, next_cluster: now });
         if selection.ci {
-            schedule.next_ci = now + millis(if blocked.ci { BLOCKED_POLL } else { BUILD_POLL });
+            schedule.next_ci = now + millis(ci_interval(tracking, blocked.ci));
         }
         if selection.cluster {
             schedule.next_cluster = match (outcome.vpn_tried, blocked.cluster) {
                 (true, _) => now,
                 (false, true) => now + millis(BLOCKED_POLL),
-                (false, false) => now + millis(CLUSTER_POLL),
+                (false, false) => now + millis(cluster_interval(tracking)),
             };
+        } else if tracking.state == TrackingState::Delivering
+            && selection.tracking.state != TrackingState::Delivering
+        {
+            schedule.next_cluster = schedule.next_cluster.min(now + millis(CLUSTER_POLL));
         }
     }
 
@@ -412,6 +419,24 @@ impl DeployTracker {
 
 fn flow_of<'a>(flows: &'a [DeployFlow], repo_path: &str) -> Option<&'a DeployFlow> {
     flows.iter().find(|flow| flow.repo_path == repo_path)
+}
+
+fn ci_interval(tracking: &Tracking, blocked: bool) -> Duration {
+    if blocked {
+        BLOCKED_POLL
+    } else if tracking.state == TrackingState::Paused {
+        PAUSED_POLL
+    } else {
+        BUILD_POLL
+    }
+}
+
+fn cluster_interval(tracking: &Tracking) -> Duration {
+    if tracking.state != TrackingState::Delivering && tracking.baseline_images.is_some() {
+        IDLE_CLUSTER_POLL
+    } else {
+        CLUSTER_POLL
+    }
 }
 
 fn tracks_anything(flow: &DeployFlow) -> bool {
@@ -675,18 +700,40 @@ mod tests {
         .to_string()
     }
 
+    fn with_runs(runner: FakeRunner, ci: &str) -> FakeRunner {
+        let body: Value = serde_json::from_str(ci).unwrap();
+        body["values"].as_array().unwrap().iter().fold(runner, |runner, entry| {
+            let path = format!("{PIPELINES_PATH}{}", entry["uuid"].as_str().unwrap());
+            runner.on("bkt", &["api", path.as_str()], ok(&entry.to_string()))
+        })
+    }
+
     fn fake(ci: &str, image: &str) -> FakeRunner {
-        FakeRunner::new()
+        let runner = FakeRunner::new()
             .on("bkt", &["api", PIPELINES_PATH], ok(ci))
             .on(
                 "kubectl",
                 &["-n", "cs-app-hs", "get", "deployments,statefulsets"],
                 ok(&workloads(image)),
             )
-            .on("kubectl", &["-n", "cs-app-hs", "get", "pods"], ok(&pods()))
+            .on("kubectl", &["-n", "cs-app-hs", "get", "pods"], ok(&pods()));
+        with_runs(runner, ci)
     }
 
     fn ci_polls(runner: &FakeRunner) -> usize {
+        runner
+            .calls()
+            .iter()
+            .filter(|(program, args)| {
+                program == "bkt"
+                    && args.get(1).is_some_and(|path| {
+                        path.starts_with(PIPELINES_PATH) && !path.ends_with("/steps/")
+                    })
+            })
+            .count()
+    }
+
+    fn list_polls(runner: &FakeRunner) -> usize {
         runner
             .calls()
             .iter()
@@ -923,7 +970,7 @@ mod tests {
     }
 
     fn unreachable_runner() -> FakeRunner {
-        FakeRunner::new()
+        let runner = FakeRunner::new()
             .on("bkt", &["api", PIPELINES_PATH], ok(&building("b")))
             .on(
                 "kubectl",
@@ -934,7 +981,8 @@ mod tests {
                     stderr: UNREACHABLE.to_string(),
                 }),
             )
-            .on("nmcli", &["connection", "up"], ok("Connection successfully activated"))
+            .on("nmcli", &["connection", "up"], ok("Connection successfully activated"));
+        with_runs(runner, &building("b"))
     }
 
     #[tokio::test]
@@ -978,30 +1026,32 @@ mod tests {
     }
 
     struct SwitchRunner {
-        up: FakeRunner,
-        down: FakeRunner,
-        reachable: AtomicBool,
+        first: FakeRunner,
+        second: FakeRunner,
+        switched: AtomicBool,
     }
 
     impl SwitchRunner {
-        fn new() -> Self {
-            SwitchRunner {
-                up: fake(&building("b"), "app:1"),
-                down: unreachable_runner(),
-                reachable: AtomicBool::new(false),
-            }
+        fn between(first: FakeRunner, second: FakeRunner) -> Self {
+            SwitchRunner { first, second, switched: AtomicBool::new(false) }
         }
 
-        fn set_reachable(&self, reachable: bool) {
-            self.reachable.store(reachable, Ordering::SeqCst);
+        fn new() -> Self {
+            Self::between(unreachable_runner(), fake(&building("b"), "app:1"))
+        }
+
+        fn switch(&self, second: bool) {
+            self.switched.store(second, Ordering::SeqCst);
+        }
+
+        fn calls(&self) -> Vec<(String, Vec<String>)> {
+            let mut calls = self.first.calls();
+            calls.extend(self.second.calls());
+            calls
         }
 
         fn vpn_attempts(&self) -> usize {
-            [&self.up, &self.down]
-                .iter()
-                .flat_map(|runner| runner.calls())
-                .filter(|(program, _)| program == "nmcli")
-                .count()
+            self.calls().iter().filter(|(program, _)| program == "nmcli").count()
         }
     }
 
@@ -1013,10 +1063,10 @@ mod tests {
             args: &[String],
             timeout: Duration,
         ) -> Result<CommandOutput, RunError> {
-            if self.reachable.load(Ordering::SeqCst) {
-                self.up.run(program, args, timeout).await
+            if self.switched.load(Ordering::SeqCst) {
+                self.second.run(program, args, timeout).await
             } else {
-                self.down.run(program, args, timeout).await
+                self.first.run(program, args, timeout).await
             }
         }
     }
@@ -1042,13 +1092,13 @@ mod tests {
         assert_eq!(runner.vpn_attempts(), attempts(1));
         assert_eq!(f.only().vpn_attempted, vpn::supported());
 
-        runner.set_reachable(true);
+        runner.switch(true);
         tracker.tick(at(66)).await;
         let back = f.only();
         assert_eq!(back.cluster_blocker, None);
         assert!(!back.vpn_attempted);
 
-        runner.set_reachable(false);
+        runner.switch(false);
         tracker.tick(at(126)).await;
         assert_eq!(runner.vpn_attempts(), attempts(2));
         assert_eq!(f.only().cluster_blocker, Some(Blocker::ClusterUnreachable));
@@ -1160,8 +1210,91 @@ mod tests {
             }
         }
         assert_eq!(ci_at, vec![3, 18, 33, 48, 63]);
-        assert_eq!(cluster_at, vec![3, 15, 27, 39, 51, 63]);
+        assert_eq!(cluster_at, vec![3, 63]);
+        assert_eq!(list_polls(&runner), 1);
         assert_eq!(f.only().state, TrackingState::Building);
+    }
+
+    async fn ticks_until(
+        tracker: &Arc<DeployTracker>,
+        counts: impl Fn() -> (usize, usize),
+        last: i64,
+        mut before_tick: impl FnMut(i64),
+    ) -> (Vec<i64>, Vec<i64>) {
+        let mut ci_at = Vec::new();
+        let mut cluster_at = Vec::new();
+        for second in (3..=last).step_by(3) {
+            before_tick(second);
+            let (ci_before, cluster_before) = counts();
+            tracker.tick(at(second)).await;
+            let (ci_after, cluster_after) = counts();
+            if ci_after > ci_before {
+                ci_at.push(second);
+            }
+            if cluster_after > cluster_before {
+                cluster_at.push(second);
+            }
+        }
+        (ci_at, cluster_at)
+    }
+
+    #[tokio::test]
+    async fn a_paused_run_is_polled_once_a_minute_and_queried_directly() {
+        let f = Fixture::new();
+        let sink = Arc::new(RecordingSink::default());
+        let paused = json!({ "name": "IN_PROGRESS", "stage": { "name": "PAUSED" } });
+        let runner = Arc::new(fake(&pipelines(vec![pipeline(&commit("b"), 7, paused)]), "app:1"));
+        let tracker = f.tracker(runner.clone(), &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        let counts = || (ci_polls(&runner), cluster_polls(&runner));
+        let (ci_at, cluster_at) = ticks_until(&tracker, counts, 126, |_| {}).await;
+        assert_eq!(ci_at, vec![3, 63, 123]);
+        assert_eq!(cluster_at, vec![3, 63, 123]);
+        assert_eq!(list_polls(&runner), 1);
+        let direct = format!("{PIPELINES_PATH}{{run-7}}");
+        assert!(runner.calls().iter().any(|(_, args)| args.get(1) == Some(&direct)));
+        assert_eq!(f.only().state, TrackingState::Paused);
+        assert_eq!(sink.kinds(), vec![NotifyKind::Paused]);
+    }
+
+    #[tokio::test]
+    async fn delivery_polls_the_cluster_every_ten_seconds_from_the_moment_it_starts() {
+        let f = Fixture::new();
+        let sink = Arc::new(RecordingSink::default());
+        let succeeded = pipelines(vec![pipeline(&commit("b"), 7, completed("SUCCESSFUL"))]);
+        let runner = Arc::new(SwitchRunner::between(
+            fake(&building("b"), "app:1"),
+            fake(&succeeded, "app:1"),
+        ));
+        let tracker = f.tracker(runner.clone(), &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        let count = |calls: &[(String, Vec<String>)], cluster: bool| {
+            calls
+                .iter()
+                .filter(|(program, args)| {
+                    if cluster {
+                        program == "kubectl" && args.iter().any(|arg| arg == "deployments,statefulsets")
+                    } else {
+                        program == "bkt" && args.get(1).is_some_and(|path| path.starts_with(PIPELINES_PATH))
+                    }
+                })
+                .count()
+        };
+        let counts = || {
+            let calls = runner.calls();
+            (count(&calls, false), count(&calls, true))
+        };
+        let (ci_at, cluster_at) = ticks_until(&tracker, counts, 45, |second| {
+            if second == 18 {
+                runner.switch(true);
+            }
+        })
+        .await;
+        assert_eq!(ci_at, vec![3, 18]);
+        assert_eq!(cluster_at, vec![3, 30, 42]);
+        assert_eq!(f.only().state, TrackingState::Delivering);
     }
 
     #[tokio::test]
@@ -1194,10 +1327,26 @@ mod tests {
             }
         }
         assert_eq!(ci_at, vec![3, 63]);
-        assert_eq!(cluster_at, vec![3, 15, 27, 39, 51, 63]);
+        assert_eq!(cluster_at, vec![3, 63]);
         let tracking = f.only();
         assert_eq!(tracking.state, TrackingState::WaitingForRun);
         assert!(matches!(tracking.ci_blocker, Some(Blocker::ToolUnavailable { ref tool, .. }) if tool == "bkt"));
+
+        let f = Fixture::new();
+        let runner = Arc::new(with_runs(
+            FakeRunner::new()
+                .on("bkt", &["api", PIPELINES_PATH], ok(&building("b")))
+                .on("kubectl", &["-n"], Err(RunError::NotFound)),
+            &building("b"),
+        ));
+        let tracker = f.tracker(runner.clone(), &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        let counts = || (ci_polls(&runner), cluster_polls(&runner));
+        let (ci_at, cluster_at) = ticks_until(&tracker, counts, 66, |_| {}).await;
+        assert_eq!(ci_at, vec![3, 18, 33, 48, 63]);
+        assert_eq!(cluster_at, vec![3, 63]);
+        assert!(matches!(f.only().cluster_blocker, Some(Blocker::ToolUnavailable { ref tool, .. }) if tool == "kubectl"));
     }
 
     #[tokio::test]
