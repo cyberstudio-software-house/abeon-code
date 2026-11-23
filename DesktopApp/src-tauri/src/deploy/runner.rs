@@ -45,7 +45,11 @@ impl SystemRunner {
         if program.contains('/') || program.contains(std::path::MAIN_SEPARATOR) {
             return Some(PathBuf::from(program));
         }
-        let path_var = self.env.get("PATH")?;
+        let path_var = self
+            .env
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
+            .map(|(_, value)| value)?;
         std::env::split_paths(path_var)
             .filter(|dir| !dir.as_os_str().is_empty())
             .flat_map(|dir| executable_candidates(&dir, program))
@@ -88,9 +92,7 @@ impl CommandRunner for SystemRunner {
         args: &[String],
         timeout: Duration,
     ) -> Result<CommandOutput, RunError> {
-        let Some(resolved) = self.resolve(program) else {
-            return Err(RunError::NotFound);
-        };
+        let resolved = self.resolve(program).unwrap_or_else(|| PathBuf::from(program));
         let mut command = Command::new(resolved);
         command
             .args(args)
@@ -173,6 +175,32 @@ mod fake {
     }
 }
 
+#[cfg(test)]
+mod resolve_tests {
+    use super::*;
+
+    fn runner_with_key(key: &str, dir: &Path) -> SystemRunner {
+        SystemRunner::new(HashMap::from([(key.to_string(), dir.display().to_string())]))
+    }
+
+    #[test]
+    fn the_path_variable_is_found_whatever_its_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = dir.path().join(if cfg!(windows) { "abeon-tool.exe" } else { "abeon-tool" });
+        std::fs::write(&tool, "").unwrap();
+        for key in ["PATH", "Path", "path"] {
+            let resolved = runner_with_key(key, dir.path()).resolve("abeon-tool");
+            assert_eq!(resolved, Some(dir.path().join(tool.file_name().unwrap())), "{key}");
+        }
+    }
+
+    #[test]
+    fn a_name_that_is_in_no_directory_does_not_resolve() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(runner_with_key("Path", dir.path()).resolve("abeon-tool"), None);
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -207,14 +235,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_empty_environment_finds_nothing() {
+    async fn a_program_outside_the_supplied_path_is_not_found() {
         let dir = tool_dir("abeon-only-here");
         let runner = SystemRunner::new(HashMap::new());
         let result = runner.run("abeon-only-here", &[], Duration::from_secs(5)).await;
         assert_eq!(result, Err(RunError::NotFound));
-        let result = runner.run("sh", &[], Duration::from_secs(5)).await;
-        assert_eq!(result, Err(RunError::NotFound));
         drop(dir);
+    }
+
+    #[tokio::test]
+    async fn without_a_path_in_the_map_the_os_search_still_applies() {
+        let runner = SystemRunner::new(HashMap::new());
+        let output = runner
+            .run("sh", &args(&["-c", "echo os-search"]), Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(output.stdout, "os-search\n");
     }
 
     #[tokio::test]
