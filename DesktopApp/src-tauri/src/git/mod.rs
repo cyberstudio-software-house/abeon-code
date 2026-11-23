@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use git2::{BranchType, Repository, StatusOptions, Status};
 use crate::domain::{DiffHunk, DiffLine, DiffResult, GitFile, GitRepo, GitStatus};
 use crate::error::AppResult;
@@ -13,14 +13,14 @@ pub fn status(path: &Path) -> AppResult<GitStatus> {
     Ok(GitStatus { repos, is_repo })
 }
 
-fn discover_repos(path: &Path) -> AppResult<Vec<GitRepo>> {
-    if let Ok(repo) = Repository::open(path) {
-        return Ok(vec![repo_status(repo, ".")?]);
+fn walk_repos(path: &Path) -> Vec<(String, PathBuf)> {
+    if Repository::open(path).is_ok() {
+        return vec![(".".to_string(), path.to_path_buf())];
     }
     let mut out = Vec::new();
     let entries = match std::fs::read_dir(path) {
         Ok(it) => it,
-        Err(_) => return Ok(out),
+        Err(_) => return out,
     };
     for entry in entries.flatten() {
         let ft = match entry.file_type() {
@@ -39,11 +39,30 @@ fn discover_repos(path: &Path) -> AppResult<Vec<GitRepo>> {
             continue;
         }
         let child_path = entry.path();
-        if let Ok(repo) = Repository::open(&child_path) {
-            out.push(repo_status(repo, name)?);
+        if Repository::open(&child_path).is_ok() {
+            out.push((name.to_string(), child_path));
         }
     }
-    out.sort_by(|a, b| a.label.cmp(&b.label));
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+pub fn repo_roots(path: &Path) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = walk_repos(path)
+        .into_iter()
+        .map(|(_, root)| root.canonicalize().unwrap_or(root))
+        .collect();
+    roots.sort();
+    roots
+}
+
+fn discover_repos(path: &Path) -> AppResult<Vec<GitRepo>> {
+    let mut out = Vec::new();
+    for (label, root) in walk_repos(path) {
+        if let Ok(repo) = Repository::open(&root) {
+            out.push(repo_status(repo, &label)?);
+        }
+    }
     Ok(out)
 }
 
@@ -213,6 +232,38 @@ mod tests {
 
     fn init_repo(path: &Path) {
         git2::Repository::init(path).expect("init repo");
+    }
+
+    #[test]
+    fn a_folder_of_repositories_lists_each_child_repository() {
+        let tmp = TempDir::new().unwrap();
+        for name in ["web", "api"] {
+            fs::create_dir(tmp.path().join(name)).unwrap();
+            init_repo(&tmp.path().join(name));
+        }
+        fs::create_dir(tmp.path().join("docs")).unwrap();
+        fs::create_dir(tmp.path().join(".hidden")).unwrap();
+        init_repo(&tmp.path().join(".hidden"));
+        let names: Vec<_> = repo_roots(tmp.path())
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+        assert_eq!(names, vec!["api", "web"]);
+    }
+
+    #[test]
+    fn a_repository_is_its_own_root_and_hides_its_children() {
+        let tmp = TempDir::new().unwrap();
+        init_repo(tmp.path());
+        fs::create_dir(tmp.path().join("child")).unwrap();
+        init_repo(&tmp.path().join("child"));
+        assert_eq!(repo_roots(tmp.path()), vec![tmp.path().canonicalize().unwrap()]);
+    }
+
+    #[test]
+    fn a_missing_path_has_no_roots() {
+        let tmp = TempDir::new().unwrap();
+        assert!(repo_roots(&tmp.path().join("missing")).is_empty());
     }
 
     #[test]

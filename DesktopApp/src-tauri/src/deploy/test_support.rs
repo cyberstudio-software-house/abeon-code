@@ -1,9 +1,10 @@
 use crate::db::init_pool;
 use crate::domain::deploy::{BuildProvider, DeployFlow, Delivery};
+use crate::domain::Project;
 use rusqlite::Connection;
 use std::ops::Deref;
 use std::path::Path;
-use tempfile::NamedTempFile;
+use tempfile::{NamedTempFile, TempDir};
 
 pub struct TestConn {
     conn: r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
@@ -41,6 +42,45 @@ mod conn_tests {
         assert!(path.exists());
         drop(fixture);
         assert!(!path.exists());
+    }
+}
+
+pub fn init_repo(path: &Path) {
+    std::fs::create_dir_all(path).unwrap();
+    git2::Repository::init(path).unwrap();
+}
+
+pub fn repo_with_remote(name: &str, url: &str) -> TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = git2::Repository::init(dir.path()).unwrap();
+    repo.remote(name, url).unwrap();
+    dir
+}
+
+pub fn write(repo: impl AsRef<Path>, relative: &str, content: &str) {
+    let target = repo.as_ref().join(relative);
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(target, content).unwrap();
+}
+
+pub fn remote_ref(repo: impl AsRef<Path>, remote: &str, branch: &str) {
+    let repo = git2::Repository::open(repo.as_ref()).unwrap();
+    let signature = git2::Signature::now("test", "test@example.com").unwrap();
+    let tree_id = repo.treebuilder(None).unwrap().write().unwrap();
+    let tree = repo.find_tree(tree_id).unwrap();
+    let commit = repo.commit(None, &signature, &signature, "seed", &tree, &[]).unwrap();
+    repo.reference(&format!("refs/remotes/{remote}/{branch}"), commit, true, "test").unwrap();
+}
+
+pub fn project(id: i64, path: &str) -> Project {
+    Project {
+        id,
+        name: format!("project-{id}"),
+        path: path.to_string(),
+        claude_dir: String::new(),
+        color: None,
+        sort_order: id,
+        created_at: 0,
     }
 }
 
