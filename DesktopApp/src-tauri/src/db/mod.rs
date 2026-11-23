@@ -13,6 +13,7 @@ pub mod clickup_config_repo;
 pub mod clickup_links_repo;
 pub mod notes_repo;
 pub mod supervisor_decisions_repo;
+pub mod deploy_flows_repo;
 
 const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/002_session_titles.sql");
@@ -21,6 +22,7 @@ const MIGRATION_004: &str = include_str!("migrations/004_clickup.sql");
 const MIGRATION_005: &str = include_str!("migrations/005_notes.sql");
 const MIGRATION_006: &str = include_str!("migrations/006_supervisor.sql");
 const MIGRATION_007: &str = include_str!("migrations/007_notes_untitled.sql");
+const MIGRATION_008: &str = include_str!("migrations/008_deploy.sql");
 
 pub fn db_path() -> AppResult<PathBuf> {
     let mut dir = dirs::config_dir().ok_or_else(|| AppError::Other("no config dir".into()))?;
@@ -52,6 +54,7 @@ fn run_migrations(pool: &DbPool) -> AppResult<()> {
     if v < 5 { tx.execute_batch(MIGRATION_005)?; }
     if v < 6 { tx.execute_batch(MIGRATION_006)?; }
     if v < 7 { tx.execute_batch(MIGRATION_007)?; }
+    if v < 8 { tx.execute_batch(MIGRATION_008)?; }
     tx.commit()?;
     Ok(())
 }
@@ -125,7 +128,7 @@ mod tests {
             let pool = init_pool(&path).unwrap();
             let conn = pool.get().unwrap();
             let version: i64 = conn.query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0)).unwrap();
-            assert_eq!(version, 7);
+            assert_eq!(version, 8);
             let project = projects_repo::get(&conn, 7).unwrap();
             assert_eq!(project.name, "Existing");
             assert_eq!(project.path, "/existing");
@@ -180,7 +183,7 @@ mod tests {
         let pool = init_pool(&path).unwrap();
         let conn = pool.get().unwrap();
         let version: i64 = conn.query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
         let content_of = |id: i64| -> String {
             conn.query_row("SELECT content FROM notes WHERE id=?", [id], |row| row.get(0)).unwrap()
         };
@@ -195,6 +198,33 @@ mod tests {
         let updated = statement.query_map([], |row| row.get::<_, i64>(0)).unwrap()
             .collect::<rusqlite::Result<Vec<_>>>().unwrap();
         assert_eq!(updated, vec![5, 6, 7]);
+    }
+
+    #[test]
+    fn migration_008_adds_deploy_tables_to_a_v7_database_and_keeps_notes() {
+        let file = NamedTempFile::new().unwrap();
+        let path = file.path().to_path_buf();
+        {
+            let conn = seed_database(&path, &[
+                MIGRATION_001, MIGRATION_002, MIGRATION_003, MIGRATION_004,
+                MIGRATION_005, MIGRATION_006, MIGRATION_007,
+            ]);
+            conn.execute_batch(
+                "INSERT INTO notes(id,project_id,title,content,created_at,updated_at) VALUES(1,NULL,'','Keep',1,5);",
+            ).unwrap();
+        }
+
+        let pool = init_pool(&path).unwrap();
+        let conn = pool.get().unwrap();
+        let version: i64 = conn.query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, 8);
+        let tables: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('deploy_flows','deploy_trackings','deploy_flow_proposals')",
+            [], |row| row.get(0),
+        ).unwrap();
+        assert_eq!(tables, 3);
+        let content: String = conn.query_row("SELECT content FROM notes WHERE id=1", [], |row| row.get(0)).unwrap();
+        assert_eq!(content, "Keep");
     }
 
     #[test]
@@ -217,6 +247,6 @@ mod tests {
 
         let conn = rusqlite::Connection::open(&path).unwrap();
         let version: i64 = conn.query_row("SELECT MAX(version) FROM schema_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
     }
 }

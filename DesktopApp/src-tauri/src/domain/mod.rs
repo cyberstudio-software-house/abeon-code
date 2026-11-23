@@ -14,6 +14,7 @@ pub mod subagent;
 pub mod note;
 pub mod supervisor;
 pub mod files;
+pub mod deploy;
 
 pub use project::*;
 pub use action::*;

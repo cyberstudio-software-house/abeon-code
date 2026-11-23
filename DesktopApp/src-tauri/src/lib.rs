@@ -1,5 +1,6 @@
 pub mod error;
 pub mod db;
+pub mod deploy;
 pub mod domain;
 pub mod sessions;
 pub mod notifications;

@@ -53,3 +53,6 @@ export type { FileSearchResponse } from './FileSearchResponse';
 export type { FileContent } from './FileContent';
 export type { FileReadResponse } from './FileReadResponse';
 export type { FilesDirChangedEvent } from './FilesDirChangedEvent';
+export type { BuildProvider } from './BuildProvider';
+export type { Delivery } from './Delivery';
+export type { DeployFlow } from './DeployFlow';
