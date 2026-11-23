@@ -106,8 +106,8 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
       'Terminal i skill', 'Komenda terminala', 'Zainstaluj komendę',
       'Instaluje komendę abeon-code w ~/.local/bin. Użyj abeon-code ., aby otworzyć projekt i nową sesję z konsoli. Upewnij się, że ten katalog jest w PATH.',
       'Skill dla Claude Code', 'Zainstaluj skill',
-      'Instaluje skille abeon-open-session i abeon-notes w ~/.claude/skills. Pozwalają agentowi uruchomić w tle nową sesję w innym projekcie z gotowym promptem („odpal sesję w ~/projects/x i dodaj endpoint…”) oraz dodawać i czytać notatki projektu („dodaj notatkę z informacją o…”, „przeczytaj notatki”). Instaluje też (aktualizuje) komendę abeon-code w ~/.local/bin, która musi być dostępna w PATH.',
-      'notatki', 'abeon-notes',
+      'Instaluje skille abeon-open-session, abeon-notes i abeon-deploy w ~/.claude/skills. Pozwalają agentowi uruchomić w tle nową sesję w innym projekcie z gotowym promptem („odpal sesję w ~/projects/x i dodaj endpoint…”), dodawać i czytać notatki projektu („dodaj notatkę z informacją o…”, „przeczytaj notatki”) oraz czekać po pushu na wynik wdrożenia i proponować przepływ wdrożenia („czy się wdrożyło”, „ustaw przepływ wdrożenia”). Instaluje też (aktualizuje) komendę abeon-code w ~/.local/bin, która musi być dostępna w PATH.',
+      'notatki', 'abeon-notes', 'wdrożenia', 'abeon-deploy',
     ],
   },
   models: {
