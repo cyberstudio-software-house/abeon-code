@@ -242,8 +242,9 @@ Rules:
   edit the database.
 - A proposal identical to the current flow is refused. Proposing the same flow twice returns the
   existing proposal. A new proposal replaces the older one; a proposal expires after 24 hours.
-- If the user edits the flow in the settings after your proposal, the confirmation is refused as
-  stale; propose again from the new `flow show`.
+- If the user edits the flow in the settings after your proposal, the Discord button refuses the
+  confirmation as stale, while the card in AbeonCode recomputes its change list and still lets the
+  user confirm. If the user reports the refusal, propose again from the new `flow show`.
 - A rejected input ends with exit code 2 and the reasons on stderr. Fix the JSON and send it again.
 "#;
 
