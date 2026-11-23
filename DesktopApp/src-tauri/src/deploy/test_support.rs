@@ -118,3 +118,72 @@ pub fn flow_with(field: &str, value: &str) -> DeployFlow {
     }
     flow
 }
+
+pub struct ReflogFile {
+    file: NamedTempFile,
+}
+
+impl Deref for ReflogFile {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        self.file.path()
+    }
+}
+
+pub fn reflog(lines: &[&str]) -> ReflogFile {
+    let file = NamedTempFile::new().unwrap();
+    let mut content = lines.join("\n");
+    if !lines.is_empty() {
+        content.push('\n');
+    }
+    std::fs::write(file.path(), content).unwrap();
+    ReflogFile { file }
+}
+
+pub fn append(file: &Path, line: &str) {
+    use std::io::Write;
+    let mut handle = std::fs::OpenOptions::new().append(true).open(file).unwrap();
+    writeln!(handle, "{line}").unwrap();
+}
+
+pub fn push_to(repo: impl AsRef<Path>, remote: &str, branch: &str, label: &str) {
+    use std::io::Write;
+    let target = repo
+        .as_ref()
+        .join(".git/logs/refs/remotes")
+        .join(remote)
+        .join(branch);
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    let existing = std::fs::read_to_string(&target).unwrap_or_default();
+    let previous = existing
+        .lines()
+        .last()
+        .and_then(|line| line.split(' ').nth(1))
+        .map(str::to_string)
+        .unwrap_or_else(|| "0".repeat(40));
+    let at = 1_795_009_000 + existing.lines().count();
+    let mut handle = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&target)
+        .unwrap();
+    writeln!(
+        handle,
+        "{previous} {} Test User <test@example.com> {at} +0100\tupdate by push",
+        label.repeat(40)
+    )
+    .unwrap();
+}
+
+pub fn push(repo: impl AsRef<Path>, label: &str) {
+    push_to(repo, "origin", "master", label);
+}
+
+pub fn repo_with_push(label: &str) -> (TempDir, DeployFlow) {
+    let dir = tempfile::tempdir().unwrap();
+    git2::Repository::init(dir.path()).unwrap();
+    push(dir.path(), label);
+    let flow = flow_at(dir.path().to_str().unwrap());
+    (dir, flow)
+}

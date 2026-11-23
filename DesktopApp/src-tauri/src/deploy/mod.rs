@@ -2,6 +2,7 @@ pub mod ci;
 pub mod cluster;
 pub mod detect;
 pub mod excerpt;
+pub mod reflog;
 pub mod repos;
 pub mod runner;
 pub mod validate;
