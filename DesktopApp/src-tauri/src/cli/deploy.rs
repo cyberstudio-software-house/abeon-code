@@ -22,15 +22,16 @@ const GRACE: Duration = Duration::from_secs(30);
 const BLOCKER_LIMIT: Duration = Duration::from_secs(120);
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const RECENT_TRACKING_MS: i64 = 10 * 60 * 1000;
+const FRESH_PUSH_MS: i64 = 60 * 60 * 1000;
 const HISTORY_LIMIT: usize = 20;
 const PAUSED_NOTICE: &str =
     "The pipeline is waiting for the user's approval. Do not try to approve it; tell the user and stop.";
 const BLOCKED_NOTICE: &str =
     "The deployment is blocked and needs the user (see blocked above). Tell the user and stop.";
 const RUNNING_NOTICE: &str =
-    "The deployment is still running. Run `abeon-code deploy wait` again to keep waiting.";
+    "The deployment is still running. Run `abeon-code deploy wait` again to keep waiting. AbeonCode must be running for the tracking to progress; if the state never changes, tell the user to check that AbeonCode is open.";
 const NOT_SEEN_NOTICE: &str =
-    "No tracking has appeared yet. Run `abeon-code deploy wait` again to keep waiting.";
+    "No tracking has appeared yet. Run `abeon-code deploy wait` again to keep waiting. AbeonCode must be running for a tracking to start.";
 const NOT_STARTED_NOTICE: &str =
     "no tracking started (no flow for this repository, tracking is off, or AbeonCode is not running)";
 
@@ -70,8 +71,8 @@ pub struct Finished {
 }
 
 enum Observation {
-    Untracked(String),
-    Seen(Option<Tracking>),
+    NothingToWaitFor(String),
+    Seen(Option<Box<Tracking>>),
 }
 
 pub fn parse(args: &[String]) -> Option<Result<DeployCommand, String>> {
@@ -216,7 +217,24 @@ fn untracked_reason(flow: &crate::domain::deploy::DeployFlow) -> Option<&'static
     None
 }
 
-fn observe(db: &Path, repo: &str, now: i64) -> Result<Observation, String> {
+fn describe_age(age_ms: i64) -> String {
+    let minutes = age_ms.max(0) / 60_000;
+    if minutes < 120 {
+        format!("{minutes} min ago")
+    } else if minutes < 48 * 60 {
+        format!("{} h ago", minutes / 60)
+    } else {
+        format!("{} days ago", minutes / (24 * 60))
+    }
+}
+
+fn is_stale(tracking: &Tracking, pushed_at: i64, started_ms: i64) -> bool {
+    pushed_at < started_ms - FRESH_PUSH_MS
+        && !tracking.is_open()
+        && tracking.finished_at.is_none_or(|finished| finished < started_ms)
+}
+
+fn observe(db: &Path, repo: &str, started_ms: i64) -> Result<Observation, String> {
     let (flow, history) = {
         let conn = Connection::open(db).map_err(|error| error.to_string())?;
         conn.busy_timeout(BUSY_TIMEOUT).map_err(|error| error.to_string())?;
@@ -226,31 +244,43 @@ fn observe(db: &Path, repo: &str, now: i64) -> Result<Observation, String> {
         (flow, history)
     };
     let Some(flow) = flow else {
-        return Ok(Observation::Untracked(
-            "this repository has no deployment flow".to_string(),
+        return Ok(Observation::NothingToWaitFor(
+            "no tracking: this repository has no deployment flow".to_string(),
         ));
     };
     if let Some(reason) = untracked_reason(&flow) {
-        return Ok(Observation::Untracked(reason.to_string()));
+        return Ok(Observation::NothingToWaitFor(format!("no tracking: {reason}")));
     }
     let pushed = reflog_path(Path::new(repo), &flow.remote, &flow.production_branch)
         .and_then(|path| latest_push(&path));
-    let tracking = match pushed {
+    let tracking = match &pushed {
         Some(push) => history
             .into_iter()
             .find(|tracking| tracking.commit.eq_ignore_ascii_case(&push.commit)),
-        None => history
-            .into_iter()
-            .next()
-            .filter(|tracking| tracking.started_at >= now - RECENT_TRACKING_MS),
+        None => history.into_iter().next().filter(|tracking| {
+            tracking.is_open() || tracking.started_at >= started_ms - RECENT_TRACKING_MS
+        }),
     };
-    Ok(Observation::Seen(tracking))
+    if let (Some(push), Some(tracking)) = (&pushed, &tracking) {
+        if is_stale(tracking, push.at, started_ms) {
+            return Ok(Observation::NothingToWaitFor(format!(
+                "no new push to {}/{}: the newest push is {}, {}, state {} \u{2014} check that your push went to this remote and branch",
+                flow.remote,
+                flow.production_branch,
+                push.commit.chars().take(7).collect::<String>(),
+                describe_age(started_ms - push.at),
+                tracking.state.as_str(),
+            )));
+        }
+    }
+    Ok(Observation::Seen(tracking.map(Box::new)))
 }
 
 fn wait_loop(
     db: &Path,
     repo: &str,
     limit: Duration,
+    started_ms: i64,
     elapsed: &dyn Fn() -> Duration,
     pause: &mut dyn FnMut(Duration),
 ) -> Result<Verdict, String> {
@@ -258,15 +288,15 @@ fn wait_loop(
     let mut blocked: Option<(i64, Duration)> = None;
     loop {
         let waited = elapsed();
-        let tracking = match observe(db, repo, now_ms())? {
-            Observation::Untracked(reason) => {
+        let tracking = match observe(db, repo, started_ms)? {
+            Observation::NothingToWaitFor(note) => {
                 return Ok(Verdict {
                     outcome: WaitOutcome::NoTracking,
                     tracking: None,
-                    note: Some(format!("no tracking: {reason}")),
+                    note: Some(note),
                 })
             }
-            Observation::Seen(tracking) => tracking,
+            Observation::Seen(tracking) => tracking.map(|tracking| *tracking),
         };
         let live = tracking
             .as_ref()
@@ -344,12 +374,12 @@ pub fn finish(verdict: Verdict) -> Finished {
     let code = exit_code(&verdict.outcome);
     if verdict.outcome == WaitOutcome::NoTracking {
         let note = verdict.note.unwrap_or_default();
-        let stderr = note
+        let stdout = note
             .lines()
             .map(|line| format!("abeon-code: {line}"))
             .collect::<Vec<_>>()
             .join("\n");
-        return Finished { code, stdout: String::new(), stderr };
+        return Finished { code, stdout, stderr: String::new() };
     }
     let mut parts = Vec::new();
     if let Some(tracking) = &verdict.tracking {
@@ -389,6 +419,7 @@ fn run_command(cmd: &DeployCommand) -> Result<Finished, String> {
         &path,
         &repo,
         Duration::from_secs(timeout_secs),
+        now_ms(),
         &|| started.elapsed(),
         &mut |duration| std::thread::sleep(duration),
     )?;
@@ -637,22 +668,47 @@ mod tests {
         Fixture { repo, conn, flow }
     }
 
-    fn insert(fixture: &Fixture, label: &str, state: TrackingState) -> Tracking {
-        let mut tracking = Tracking::new(&fixture.flow, &sha(label), now_ms());
+    const PUSH_MS: i64 = 1_795_009_000_000;
+    const MINUTE_MS: i64 = 60_000;
+    const HOUR_MS: i64 = 60 * MINUTE_MS;
+
+    fn insert_at(
+        fixture: &Fixture,
+        label: &str,
+        state: TrackingState,
+        started_at: i64,
+        finished_at: Option<i64>,
+    ) -> Tracking {
+        let mut tracking = Tracking::new(&fixture.flow, &sha(label), started_at);
         tracking.state = state;
+        tracking.finished_at = finished_at;
         deploy_trackings_repo::insert(&fixture.conn, &tracking).unwrap()
+    }
+
+    fn insert(fixture: &Fixture, label: &str, state: TrackingState) -> Tracking {
+        insert_at(fixture, label, state, PUSH_MS + 1_000, None)
     }
 
     fn run(fixture: &Fixture, limit: u64) -> (Verdict, Duration) {
         run_with(fixture, limit, |_| {})
     }
 
-    fn run_with(fixture: &Fixture, limit: u64, mut hook: impl FnMut(Duration)) -> (Verdict, Duration) {
+    fn run_with(fixture: &Fixture, limit: u64, hook: impl FnMut(Duration)) -> (Verdict, Duration) {
+        run_from(fixture, limit, PUSH_MS + MINUTE_MS, hook)
+    }
+
+    fn run_from(
+        fixture: &Fixture,
+        limit: u64,
+        started_ms: i64,
+        mut hook: impl FnMut(Duration),
+    ) -> (Verdict, Duration) {
         let clock = Cell::new(Duration::ZERO);
         let verdict = wait_loop(
             fixture.conn.db_path(),
             &fixture.flow.repo_path,
             secs(limit),
+            started_ms,
             &|| clock.get(),
             &mut |duration| {
                 clock.set(clock.get() + duration);
@@ -722,12 +778,49 @@ mod tests {
     }
 
     #[test]
+    fn the_newer_commit_gets_its_own_grace_after_a_supersede() {
+        let fixture = fixture("a");
+        let first = insert(&fixture, "a", TrackingState::Building);
+        let (verdict, waited) = run_with(&fixture, 540, |now| {
+            if now == secs(100) {
+                let mut superseded = first.clone();
+                superseded.state = TrackingState::Superseded;
+                deploy_trackings_repo::update(&fixture.conn, &superseded).unwrap();
+                push(&fixture.flow.repo_path, "b");
+            }
+            if now == secs(116) {
+                insert(&fixture, "b", TrackingState::Succeeded);
+            }
+        });
+        assert_eq!(verdict.outcome, WaitOutcome::Succeeded);
+        assert_eq!(verdict.tracking.unwrap().commit, sha("b"));
+        assert_eq!(waited, secs(116));
+    }
+
+    #[test]
+    fn a_newer_push_that_never_gets_a_tracking_ends_as_no_tracking_after_the_grace() {
+        let fixture = fixture("a");
+        let first = insert(&fixture, "a", TrackingState::Building);
+        let (verdict, waited) = run_with(&fixture, 540, |now| {
+            if now == secs(100) {
+                let mut superseded = first.clone();
+                superseded.state = TrackingState::Superseded;
+                deploy_trackings_repo::update(&fixture.conn, &superseded).unwrap();
+                push(&fixture.flow.repo_path, "b");
+            }
+        });
+        assert_eq!(verdict.outcome, WaitOutcome::NoTracking);
+        assert!(waited >= secs(130) && waited <= secs(132), "{waited:?}");
+    }
+
+    #[test]
     fn a_deployment_that_keeps_running_ends_as_still_running() {
         let fixture = fixture("b");
         insert(&fixture, "b", TrackingState::Building);
         let (verdict, waited) = run(&fixture, 10);
         assert_eq!(verdict.outcome, WaitOutcome::StillRunning);
         assert_eq!(verdict.note.as_deref(), Some(RUNNING_NOTICE));
+        assert!(RUNNING_NOTICE.contains("AbeonCode must be running"));
         assert_eq!(waited, secs(10));
         assert_eq!(finish(verdict).code, 8);
     }
@@ -806,8 +899,8 @@ mod tests {
             assert!(note.contains(reason), "{note}");
             let finished = finish(verdict);
             assert_eq!(finished.code, 3);
-            assert_eq!(finished.stdout, "");
-            assert!(finished.stderr.starts_with("abeon-code: no tracking: "), "{}", finished.stderr);
+            assert_eq!(finished.stderr, "");
+            assert!(finished.stdout.starts_with("abeon-code: no tracking: "), "{}", finished.stdout);
         }
     }
 
@@ -821,36 +914,133 @@ mod tests {
         assert_eq!(verdict.outcome, WaitOutcome::Succeeded);
     }
 
-    #[test]
-    fn after_a_fetch_the_newest_recent_tracking_is_used() {
-        let fixture = fixture("b");
-        let reflog = fixture
-            .repo
-            .path()
-            .join(".git/logs/refs/remotes/origin/master");
+    fn fetch_after_push(fixture: &Fixture) {
         append(
-            &reflog,
+            &fixture
+                .repo
+                .path()
+                .join(".git/logs/refs/remotes/origin/master"),
             &format!(
                 "{} {} Test User <test@example.com> 1795009100 +0100\tfetch origin: fast-forward",
                 sha("b"),
                 sha("c")
             ),
         );
-        let mut old = Tracking::new(&fixture.flow, &sha("d"), now_ms() - 3_600_000);
-        old.state = TrackingState::Succeeded;
-        deploy_trackings_repo::insert(&fixture.conn, &old).unwrap();
-        let (verdict, _) = run(&fixture, 540);
+    }
+
+    #[test]
+    fn an_old_finished_push_is_not_reported_as_a_deployment_of_this_wait() {
+        let fixture = fixture("b");
+        insert_at(&fixture, "b", TrackingState::Succeeded, PUSH_MS + 1_000, Some(PUSH_MS + 5 * MINUTE_MS));
+        let started_ms = PUSH_MS + 3 * HOUR_MS + 10 * MINUTE_MS;
+        let (verdict, waited) = run_from(&fixture, 540, started_ms, |_| {});
+        assert_eq!(verdict.outcome, WaitOutcome::NoTracking);
+        assert_eq!(verdict.tracking, None);
+        assert_eq!(waited, Duration::ZERO);
+        assert_eq!(
+            verdict.note.as_deref(),
+            Some(
+                "no new push to origin/master: the newest push is bbbbbbb, 3 h ago, state succeeded \u{2014} check that your push went to this remote and branch"
+            )
+        );
+        let finished = finish(verdict);
+        assert_eq!(finished.code, 3);
+        assert!(finished.stdout.starts_with("abeon-code: no new push to origin/master"));
+    }
+
+    #[test]
+    fn an_old_push_with_an_open_tracking_is_followed_normally() {
+        let fixture = fixture("b");
+        let open = insert_at(&fixture, "b", TrackingState::Building, PUSH_MS + 1_000, None);
+        let started_ms = PUSH_MS + 3 * HOUR_MS;
+        let (verdict, waited) = run_from(&fixture, 540, started_ms, |now| {
+            if now >= secs(6) {
+                let mut done = open.clone();
+                done.state = TrackingState::Succeeded;
+                done.finished_at = Some(started_ms + 5_000);
+                deploy_trackings_repo::update(&fixture.conn, &done).unwrap();
+            }
+        });
+        assert_eq!(verdict.outcome, WaitOutcome::Succeeded);
+        assert_eq!(waited, secs(6));
+        let (verdict, _) = run_from(&fixture, 10, started_ms + HOUR_MS, |_| {});
+        assert_eq!(verdict.outcome, WaitOutcome::NoTracking);
+    }
+
+    #[test]
+    fn a_push_is_fresh_for_an_hour_and_a_tracking_that_finishes_during_the_wait_is_never_stale() {
+        let finished_early = fixture("b");
+        insert_at(
+            &finished_early,
+            "b",
+            TrackingState::Succeeded,
+            PUSH_MS + 1_000,
+            Some(PUSH_MS + MINUTE_MS),
+        );
+        for (offset_ms, expected) in [
+            (5 * MINUTE_MS, WaitOutcome::Succeeded),
+            (59 * MINUTE_MS, WaitOutcome::Succeeded),
+            (61 * MINUTE_MS, WaitOutcome::NoTracking),
+        ] {
+            let (verdict, _) = run_from(&finished_early, 540, PUSH_MS + offset_ms, |_| {});
+            assert_eq!(verdict.outcome, expected, "{offset_ms}");
+        }
+
+        let finished_during_wait = fixture("b");
+        insert_at(
+            &finished_during_wait,
+            "b",
+            TrackingState::Failed,
+            PUSH_MS + 1_000,
+            Some(PUSH_MS + 4 * HOUR_MS),
+        );
+        let (verdict, _) =
+            run_from(&finished_during_wait, 540, PUSH_MS + 4 * HOUR_MS - 1_000, |_| {});
+        assert_eq!(verdict.outcome, WaitOutcome::Failed);
+    }
+
+    #[test]
+    fn ages_are_described_in_minutes_hours_and_days() {
+        assert_eq!(describe_age(61 * MINUTE_MS), "61 min ago");
+        assert_eq!(describe_age(3 * HOUR_MS + 59 * MINUTE_MS), "3 h ago");
+        assert_eq!(describe_age(49 * HOUR_MS), "2 days ago");
+        assert_eq!(describe_age(-5), "0 min ago");
+    }
+
+    #[test]
+    fn after_a_fetch_the_newest_recent_tracking_is_used() {
+        let fixture = fixture("b");
+        fetch_after_push(&fixture);
+        let started_ms = PUSH_MS + MINUTE_MS;
+        insert_at(&fixture, "d", TrackingState::Succeeded, started_ms - HOUR_MS, None);
+        let (verdict, _) = run_from(&fixture, 540, started_ms, |_| {});
         assert_eq!(verdict.outcome, WaitOutcome::NoTracking);
 
         let recent = insert(&fixture, "e", TrackingState::Failed);
-        let (verdict, waited) = run(&fixture, 540);
+        let (verdict, waited) = run_from(&fixture, 540, started_ms, |_| {});
         assert_eq!(verdict.outcome, WaitOutcome::Failed);
         assert_eq!(verdict.tracking, Some(recent));
         assert_eq!(waited, Duration::ZERO);
     }
 
     #[test]
-    fn finish_prints_the_result_on_stdout_and_a_missing_tracking_on_stderr() {
+    fn in_fallback_mode_a_running_tracking_is_never_dropped_for_its_age() {
+        let fixture = fixture("b");
+        fetch_after_push(&fixture);
+        let started_ms = PUSH_MS + 30 * MINUTE_MS;
+        for age_ms in [9 * MINUTE_MS + 30_000, 11 * MINUTE_MS, 5 * HOUR_MS] {
+            for state in [TrackingState::Building, TrackingState::Delivering] {
+                let tracking = insert_at(&fixture, "d", state, started_ms - age_ms, None);
+                let (verdict, waited) = run_from(&fixture, 120, started_ms, |_| {});
+                assert_eq!(verdict.outcome, WaitOutcome::StillRunning, "{state:?} {age_ms}");
+                assert_eq!(verdict.tracking, Some(tracking));
+                assert_eq!(waited, secs(120));
+            }
+        }
+    }
+
+    #[test]
+    fn finish_prints_every_outcome_on_stdout_and_leaves_stderr_for_errors() {
         let mut failed = tracking_in(TrackingState::Failed);
         failed.failure = Some(TrackingFailure {
             stage: TrackingStage::Build,
@@ -861,8 +1051,8 @@ mod tests {
         assert_eq!(finished, Finished { code: 1, stdout: render(&failed), stderr: String::new() });
         let missing = finish(verdict(WaitOutcome::NoTracking, None));
         assert_eq!(missing.code, 3);
-        assert_eq!(missing.stdout, "");
-        assert_eq!(missing.stderr, format!("abeon-code: {NOT_STARTED_NOTICE}"));
+        assert_eq!(missing.stderr, "");
+        assert_eq!(missing.stdout, format!("abeon-code: {NOT_STARTED_NOTICE}"));
     }
 
     #[test]
