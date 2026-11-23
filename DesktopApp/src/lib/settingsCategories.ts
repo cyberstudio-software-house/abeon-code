@@ -5,7 +5,7 @@ import { FIXED_SHORTCUTS, SHORTCUTS } from './shortcuts';
 export type SettingsCategoryId =
   | 'general' | 'appearance' | 'terminal' | 'notifications' | 'shortcuts'
   | 'providers' | 'models' | 'permissions' | 'supervisor'
-  | 'cloud' | 'clickup';
+  | 'cloud' | 'clickup' | 'deploy';
 
 export type SettingsGroupId = 'app' | 'agents' | 'integrations';
 
@@ -25,7 +25,7 @@ export type SettingsCategory = {
 export const SETTINGS_GROUPS: SettingsGroup[] = [
   { id: 'app', label: 'Aplikacja', categories: ['general', 'appearance', 'terminal', 'notifications', 'shortcuts'] },
   { id: 'agents', label: 'Agenci', categories: ['providers', 'models', 'permissions', 'supervisor'] },
-  { id: 'integrations', label: 'Integracje', categories: ['cloud', 'clickup'] },
+  { id: 'integrations', label: 'Integracje', categories: ['cloud', 'clickup', 'deploy'] },
 ];
 
 export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> = {
@@ -176,6 +176,20 @@ export const SETTINGS_CATEGORIES: Record<SettingsCategoryId, SettingsCategory> =
       'Połączenie', 'Połączono', 'Brak tokenu', 'Token nieprawidłowy', 'Token API',
       'Token wygenerujesz w ClickUp: Settings → Apps → API Token.',
       'Zapisz token', 'Testuj połączenie', 'Usuń token',
+    ],
+  },
+  deploy: {
+    label: 'Wdrożenia',
+    description: 'Śledzenie wdrożeń: połączenie VPN do klastra, narzędzia wiersza poleceń i powiadomienia.',
+    icon: 'branch',
+    keywords: [
+      'vpn', 'pipeline', 'kubectl', 'wdrożenie', 'wdrożenia',
+      'Połączenie VPN', 'Nazwa połączenia w NetworkManagerze',
+      'Gdy klaster jest niedostępny, aplikacja spróbuje włączyć to połączenie i dokończy sprawdzanie wdrożenia.',
+      'Automatyczne łączenie z VPN działa tylko na Linuksie.',
+      'Narzędzia', 'bkt', 'gh', 'nmcli', 'nie znaleziono', 'znaleziono',
+      'Powiadomienia na Discordzie',
+      'Powiadomienia o wstrzymanym i nieudanym wdrożeniu trafiają na Discord tylko wtedy, gdy agent sterujący jest włączony i ma podłączony Discord. Bez tego zostają powiadomienia na pulpicie i oznaczenia w aplikacji.',
     ],
   },
 };

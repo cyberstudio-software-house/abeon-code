@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound, FileEntry, FileSearchResponse, FileReadResponse, FilesDirChangedEvent, DeployFlow, RepoFlow, DeployChangedEvent, TrackingView } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound, FileEntry, FileSearchResponse, FileReadResponse, FilesDirChangedEvent, DeployFlow, RepoFlow, DeployChangedEvent, TrackingView, ToolStatus, DeploySettings } from '../types';
 import type { NotesChangedEvent } from '../types/NotesChangedEvent';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
@@ -262,6 +262,9 @@ export const tauri = {
     invoke<TrackingView[]>('deploy_tracking_history', { repoPath }),
   deployRetry: (trackingId: number) => invoke<void>('deploy_retry', { trackingId }),
   deployDismiss: (trackingId: number) => invoke<void>('deploy_dismiss', { trackingId }),
+  deployToolsStatus: () => invoke<ToolStatus[]>('deploy_tools_status'),
+  deployGetSettings: () => invoke<DeploySettings>('deploy_get_settings'),
+  deploySetVpnConnection: (name: string | null) => invoke<void>('deploy_set_vpn_connection', { name }),
   onDeployChanged: (cb: (event: DeployChangedEvent) => void): Promise<UnlistenFn> =>
     listen<DeployChangedEvent>('deploy://changed', e => cb(e.payload)),
 };

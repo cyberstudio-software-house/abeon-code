@@ -17,6 +17,7 @@ import { PermissionsCategory } from './categories/PermissionsCategory';
 import { SupervisorCategory } from './categories/SupervisorCategory';
 import { CloudCategory } from './categories/CloudCategory';
 import { ClickUpCategory } from './categories/ClickUpCategory';
+import { DeployCategory } from './categories/DeployCategory';
 
 const CATEGORY_PAGES: Record<SettingsCategoryId, ComponentType> = {
   general: GeneralCategory,
@@ -30,6 +31,7 @@ const CATEGORY_PAGES: Record<SettingsCategoryId, ComponentType> = {
   supervisor: SupervisorCategory,
   cloud: CloudCategory,
   clickup: ClickUpCategory,
+  deploy: DeployCategory,
 };
 
 export function SettingsView() {

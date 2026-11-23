@@ -1,18 +1,102 @@
-use crate::db::{deploy_flows_repo, deploy_trackings_repo, projects_repo};
+use crate::db::{deploy_flows_repo, deploy_trackings_repo, projects_repo, settings_repo};
 use crate::deploy::detect::detect_flow;
 use crate::deploy::repos::{is_known_repo, project_repos, projects_of_repo, repo_label};
+use crate::deploy::runner::{shell_runner, CommandOutput, CommandRunner, RunError};
 use crate::deploy::tracker::DeployTracker;
 use crate::deploy::validate::validate_flow;
-use crate::deploy::{DEPLOY_CHANGED_EVENT, TRACKING_HISTORY};
-use crate::domain::deploy::{DeployChangedEvent, DeployFlow, RepoFlow, Tracking, TrackingView};
+use crate::deploy::{vpn, DEPLOY_CHANGED_EVENT, TRACKING_HISTORY, VPN_SETTING_KEY};
+use crate::domain::deploy::{
+    DeployChangedEvent, DeployFlow, DeploySettings, RepoFlow, ToolStatus, Tracking, TrackingView,
+};
 use crate::domain::Project;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use git2::Repository;
+use regex::Regex;
 use rusqlite::Connection;
 use std::path::Path;
-use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use std::sync::{Arc, OnceLock};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter, Manager, State};
+
+const TOOL_TIMEOUT: Duration = Duration::from_secs(5);
+const TOOL_DETAIL_LIMIT: usize = 120;
+const TOOL_MISSING: &str = "nie znaleziono";
+const VPN_NAME_INVALID: &str = "Nazwa połączenia zawiera niedozwolone znaki";
+
+fn vpn_name_pattern() -> &'static Regex {
+    static CELL: OnceLock<Regex> = OnceLock::new();
+    CELL.get_or_init(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9 ._-]*$").unwrap())
+}
+
+fn limit_detail(text: &str) -> String {
+    text.chars().take(TOOL_DETAIL_LIMIT).collect()
+}
+
+fn first_line(text: &str) -> Option<&str> {
+    text.lines().map(str::trim).find(|line| !line.is_empty())
+}
+
+fn tool_status(tool: &str, result: Result<CommandOutput, RunError>) -> ToolStatus {
+    let (found, detail) = match result {
+        Ok(output) => {
+            let line = first_line(&output.stdout).or_else(|| first_line(&output.stderr));
+            let found = output.status == Some(0) || line.is_some();
+            let detail = match (line, output.status) {
+                (Some(line), _) => limit_detail(line),
+                (None, Some(0)) => String::new(),
+                (None, Some(code)) => format!("polecenie zakończyło się kodem {code}"),
+                (None, None) => "polecenie zostało przerwane".to_string(),
+            };
+            (found, detail)
+        }
+        Err(RunError::NotFound) => (false, TOOL_MISSING.to_string()),
+        Err(RunError::TimedOut) => (false, "przekroczono czas oczekiwania".to_string()),
+        Err(RunError::Io(message)) => (false, limit_detail(&message)),
+    };
+    ToolStatus { tool: tool.to_string(), found, detail }
+}
+
+async fn check_tools(runner: &dyn CommandRunner, include_nmcli: bool) -> Vec<ToolStatus> {
+    let mut checks: Vec<(&str, &[&str])> = vec![
+        ("bkt", &["--version"]),
+        ("gh", &["--version"]),
+        ("kubectl", &["version", "--client"]),
+    ];
+    if include_nmcli {
+        checks.push(("nmcli", &["--version"]));
+    }
+    futures_util::future::join_all(checks.into_iter().map(|(tool, args)| async move {
+        let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
+        tool_status(tool, runner.run(tool, &args, TOOL_TIMEOUT).await)
+    }))
+    .await
+}
+
+fn normalize_vpn_connection(name: Option<String>) -> AppResult<Option<String>> {
+    let Some(name) = name.map(|name| name.trim().to_string()).filter(|name| !name.is_empty()) else {
+        return Ok(None);
+    };
+    if vpn_name_pattern().is_match(&name) {
+        Ok(Some(name))
+    } else {
+        Err(AppError::Other(VPN_NAME_INVALID.to_string()))
+    }
+}
+
+fn store_vpn_connection(conn: &Connection, name: Option<String>) -> AppResult<()> {
+    match normalize_vpn_connection(name)? {
+        Some(name) => settings_repo::set(conn, VPN_SETTING_KEY, &name),
+        None => settings_repo::delete(conn, VPN_SETTING_KEY),
+    }
+}
+
+fn load_deploy_settings(conn: &Connection) -> AppResult<DeploySettings> {
+    Ok(DeploySettings {
+        vpn_connection: settings_repo::get(conn, VPN_SETTING_KEY)?,
+        vpn_supported: vpn::supported(),
+    })
+}
 
 fn remote_names(repo_path: &Path) -> Vec<String> {
     let Ok(repo) = Repository::open(repo_path) else { return Vec::new() };
@@ -214,9 +298,30 @@ pub fn deploy_dismiss(app: AppHandle, state: State<AppState>, tracking_id: i64) 
     Ok(())
 }
 
+#[tauri::command(async)]
+pub async fn deploy_tools_status(app: AppHandle) -> AppResult<Vec<ToolStatus>> {
+    let runner = tauri::async_runtime::spawn_blocking(move || shell_runner(&app.state::<AppState>()))
+        .await
+        .map_err(|error| AppError::Other(error.to_string()))?;
+    Ok(check_tools(&runner, vpn::supported()).await)
+}
+
+#[tauri::command(async)]
+pub fn deploy_get_settings(state: State<AppState>) -> AppResult<DeploySettings> {
+    let conn = state.db.get()?;
+    load_deploy_settings(&conn)
+}
+
+#[tauri::command(async)]
+pub fn deploy_set_vpn_connection(state: State<AppState>, name: Option<String>) -> AppResult<()> {
+    let conn = state.db.get()?;
+    store_vpn_connection(&conn, name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deploy::runner::{ok, FakeRunner};
     use crate::deploy::test_support::{conn, flow, flow_at, init_repo, project};
     use crate::domain::deploy::TrackingState;
     use tempfile::tempdir;
@@ -372,6 +477,149 @@ mod tests {
         assert!(matches!(known_tracking(&connection, tracking.id), Err(AppError::InvalidPath { .. })));
         assert!(matches!(dismiss_tracking(&connection, tracking.id), Err(AppError::InvalidPath { .. })));
         assert!(!deploy_trackings_repo::get(&connection, tracking.id).unwrap().dismissed);
+    }
+
+    fn vpn_value(connection: &Connection) -> Option<String> {
+        settings_repo::get(connection, VPN_SETTING_KEY).unwrap()
+    }
+
+    #[test]
+    fn a_stored_vpn_name_is_trimmed_and_read_back() {
+        let connection = conn();
+        store_vpn_connection(&connection, Some("  Office VPN-2 ".to_string())).unwrap();
+
+        assert_eq!(vpn_value(&connection), Some("Office VPN-2".to_string()));
+        let settings = load_deploy_settings(&connection).unwrap();
+        assert_eq!(settings.vpn_connection, Some("Office VPN-2".to_string()));
+        assert_eq!(settings.vpn_supported, vpn::supported());
+    }
+
+    #[test]
+    fn an_invalid_vpn_name_is_refused_and_keeps_the_stored_one() {
+        let connection = conn();
+        store_vpn_connection(&connection, Some("Office".to_string())).unwrap();
+
+        for name in ["-flag", "a;b", "$(id)", "vpn\nname", "ąę"] {
+            let error = store_vpn_connection(&connection, Some(name.to_string())).unwrap_err();
+            let AppError::Other(message) = error else { panic!("expected AppError::Other") };
+            assert_eq!(message, "Nazwa połączenia zawiera niedozwolone znaki", "{name:?}");
+        }
+        assert_eq!(vpn_value(&connection), Some("Office".to_string()));
+    }
+
+    #[test]
+    fn an_empty_or_missing_vpn_name_clears_the_setting() {
+        let connection = conn();
+        for cleared in [None, Some(String::new()), Some("   ".to_string())] {
+            store_vpn_connection(&connection, Some("Office".to_string())).unwrap();
+            store_vpn_connection(&connection, cleared).unwrap();
+            assert_eq!(vpn_value(&connection), None);
+        }
+        assert_eq!(load_deploy_settings(&connection).unwrap().vpn_connection, None);
+    }
+
+    fn output(status: Option<i32>, stdout: &str, stderr: &str) -> Result<CommandOutput, RunError> {
+        Ok(CommandOutput { status, stdout: stdout.to_string(), stderr: stderr.to_string() })
+    }
+
+    #[test]
+    fn a_tool_that_prints_a_version_is_found_with_the_first_line() {
+        let status = tool_status("gh", output(Some(0), "\ngh version 2.40.0\nhttps://example.test\n", ""));
+        assert_eq!(
+            status,
+            ToolStatus { tool: "gh".to_string(), found: true, detail: "gh version 2.40.0".to_string() }
+        );
+    }
+
+    #[test]
+    fn a_version_printed_on_stderr_still_counts_as_found() {
+        let zero = tool_status("bkt", output(Some(0), "", "bkt 1.2.3\n"));
+        assert!(zero.found);
+        assert_eq!(zero.detail, "bkt 1.2.3");
+
+        let nonzero = tool_status("bkt", output(Some(2), "", "bkt 1.2.3\n"));
+        assert!(nonzero.found);
+        assert_eq!(nonzero.detail, "bkt 1.2.3");
+    }
+
+    #[test]
+    fn a_silent_zero_exit_is_found_and_a_silent_failure_is_not() {
+        let silent = tool_status("nmcli", output(Some(0), "", ""));
+        assert!(silent.found);
+        assert_eq!(silent.detail, "");
+
+        let failed = tool_status("nmcli", output(Some(3), "", ""));
+        assert!(!failed.found);
+        assert_eq!(failed.detail, "polecenie zakończyło się kodem 3");
+
+        let killed = tool_status("nmcli", output(None, "", ""));
+        assert!(!killed.found);
+        assert_eq!(killed.detail, "polecenie zostało przerwane");
+    }
+
+    #[test]
+    fn run_errors_map_to_a_missing_tool_with_a_reason() {
+        let missing = tool_status("kubectl", Err(RunError::NotFound));
+        assert_eq!(
+            missing,
+            ToolStatus { tool: "kubectl".to_string(), found: false, detail: "nie znaleziono".to_string() }
+        );
+        let slow = tool_status("kubectl", Err(RunError::TimedOut));
+        assert!(!slow.found);
+        assert_eq!(slow.detail, "przekroczono czas oczekiwania");
+        let broken = tool_status("kubectl", Err(RunError::Io("boom".to_string())));
+        assert!(!broken.found);
+        assert_eq!(broken.detail, "boom");
+    }
+
+    #[test]
+    fn the_detail_is_capped_at_120_characters() {
+        let long = "ł".repeat(300);
+        let from_output = tool_status("gh", output(Some(0), &long, ""));
+        assert_eq!(from_output.detail.chars().count(), 120);
+        let from_error = tool_status("gh", Err(RunError::Io(long)));
+        assert_eq!(from_error.detail.chars().count(), 120);
+    }
+
+    #[tokio::test]
+    async fn every_tool_is_checked_with_its_own_version_command() {
+        let runner = FakeRunner::new()
+            .on("bkt", &["--version"], ok("bkt 1.0\n"))
+            .on("gh", &["--version"], ok("gh 2.0\n"))
+            .on("kubectl", &["version", "--client"], ok("Client Version: v1.30.0\n"))
+            .on("nmcli", &["--version"], Err(RunError::NotFound));
+
+        let statuses = check_tools(&runner, true).await;
+
+        let names: Vec<&str> = statuses.iter().map(|status| status.tool.as_str()).collect();
+        assert_eq!(names, vec!["bkt", "gh", "kubectl", "nmcli"]);
+        assert_eq!(
+            statuses.iter().map(|status| status.found).collect::<Vec<_>>(),
+            vec![true, true, true, false]
+        );
+        assert_eq!(statuses[2].detail, "Client Version: v1.30.0");
+        assert_eq!(statuses[3].detail, "nie znaleziono");
+        let mut calls = runner.calls();
+        calls.sort();
+        assert_eq!(calls.len(), 4);
+        assert!(calls.contains(&(
+            "kubectl".to_string(),
+            vec!["version".to_string(), "--client".to_string()]
+        )));
+    }
+
+    #[tokio::test]
+    async fn nmcli_is_neither_run_nor_listed_when_the_vpn_is_unsupported() {
+        let runner = FakeRunner::new()
+            .on("bkt", &["--version"], ok("bkt 1.0\n"))
+            .on("gh", &["--version"], ok("gh 2.0\n"))
+            .on("kubectl", &["version", "--client"], ok("v1\n"));
+
+        let statuses = check_tools(&runner, false).await;
+
+        let names: Vec<&str> = statuses.iter().map(|status| status.tool.as_str()).collect();
+        assert_eq!(names, vec!["bkt", "gh", "kubectl"]);
+        assert!(runner.calls().iter().all(|(program, _)| program != "nmcli"));
     }
 
     #[test]

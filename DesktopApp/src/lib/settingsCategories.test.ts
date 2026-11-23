@@ -14,6 +14,7 @@ import { PermissionsCategory } from '../components/settings/categories/Permissio
 import { SupervisorCategory } from '../components/settings/categories/SupervisorCategory';
 import { CloudCategory } from '../components/settings/categories/CloudCategory';
 import { ClickUpCategory } from '../components/settings/categories/ClickUpCategory';
+import { DeployCategory } from '../components/settings/categories/DeployCategory';
 import {
   SETTINGS_CATEGORIES, SETTINGS_GROUPS, filterSettingsCategories, normalizeSearch,
   isTerminalCategorySeen, markTerminalCategorySeen, type SettingsCategoryId,
@@ -21,7 +22,7 @@ import {
 
 const ALL: SettingsCategoryId[] = [
   'general', 'appearance', 'terminal', 'notifications', 'shortcuts', 'providers',
-  'models', 'permissions', 'supervisor', 'cloud', 'clickup',
+  'models', 'permissions', 'supervisor', 'cloud', 'clickup', 'deploy',
 ];
 
 describe('settings groups and categories', () => {
@@ -29,7 +30,7 @@ describe('settings groups and categories', () => {
     expect(SETTINGS_GROUPS).toEqual([
       { id: 'app', label: 'Aplikacja', categories: ['general', 'appearance', 'terminal', 'notifications', 'shortcuts'] },
       { id: 'agents', label: 'Agenci', categories: ['providers', 'models', 'permissions', 'supervisor'] },
-      { id: 'integrations', label: 'Integracje', categories: ['cloud', 'clickup'] },
+      { id: 'integrations', label: 'Integracje', categories: ['cloud', 'clickup', 'deploy'] },
     ]);
   });
 
@@ -140,6 +141,7 @@ const PAGES: Record<SettingsCategoryId, ComponentType> = {
   supervisor: SupervisorCategory,
   cloud: CloudCategory,
   clickup: ClickUpCategory,
+  deploy: DeployCategory,
 };
 
 describe('category keywords stay in sync with the rendered rows', () => {
@@ -154,6 +156,11 @@ describe('category keywords stay in sync with the rendered rows', () => {
     vi.spyOn(tauri, 'detectOpencodeModels').mockResolvedValue([]);
     vi.spyOn(tauri, 'detectClaudeOptions').mockResolvedValue({ models: [], effortLevels: ['low', 'high'] });
     vi.spyOn(tauri, 'clickupConnectionStatus').mockResolvedValue('absent');
+    vi.spyOn(tauri, 'deployGetSettings').mockResolvedValue({ vpnConnection: null, vpnSupported: true });
+    vi.spyOn(tauri, 'deployToolsStatus').mockResolvedValue([
+      { tool: 'bkt', found: true, detail: 'bkt 1.0' },
+      { tool: 'nmcli', found: false, detail: 'nie znaleziono' },
+    ]);
     vi.spyOn(tauri, 'supervisorDiscordStatus').mockResolvedValue({
       bunPath: '/usr/bin/bun', tokenStored: true, bot: null, botError: null, pairedUsers: 0,
       pendingPairings: 0, policy: 'allowlist', chatLinked: false, globalPluginEnabled: false,

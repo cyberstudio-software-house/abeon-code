@@ -44,10 +44,25 @@ describe('SettingsView', () => {
     expect(await screen.findByText('claude-opus-5-5')).toBeInTheDocument();
   });
 
+  it('opens the deployment settings from the navigation and finds them by keyword', async () => {
+    vi.spyOn(tauri, 'deployGetSettings').mockResolvedValue({ vpnConnection: null, vpnSupported: true });
+    vi.spyOn(tauri, 'deployToolsStatus').mockResolvedValue([]);
+    render(<SettingsView />);
+
+    fireEvent.click(navItem(/^Wdrożenia$/));
+    expect(useStore.getState().settingsCategory).toBe('deploy');
+    expect(await screen.findByLabelText('Nazwa połączenia w NetworkManagerze')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Szukaj w ustawieniach'), { target: { value: 'kubectl' } });
+    const items = within(nav()).getAllByRole('button');
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveTextContent(/^Wdrożenia/);
+  });
+
   it('draws an icon on every navigation item', () => {
     render(<SettingsView />);
     const items = within(nav()).getAllByRole('button');
-    expect(items).toHaveLength(11);
+    expect(items).toHaveLength(12);
     for (const item of items) {
       expect(item.querySelector('svg')?.childElementCount ?? 0).toBeGreaterThan(0);
     }
@@ -68,7 +83,7 @@ describe('SettingsView', () => {
 
     fireEvent.change(search, { target: { value: '' } });
 
-    expect(within(nav()).getAllByRole('button')).toHaveLength(11);
+    expect(within(nav()).getAllByRole('button')).toHaveLength(12);
     expect(useStore.getState().settingsCategory).toBe('terminal');
   });
 
