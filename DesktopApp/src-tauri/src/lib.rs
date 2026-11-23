@@ -55,7 +55,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(app_state)
-        .manage(deploy::proposals::AnnouncedProposals::default())
+        .manage(deploy::proposals::ProposalNotices::default())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 let file_watches = window.state::<AppState>().file_watches.clone();

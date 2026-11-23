@@ -46,6 +46,7 @@ const view: ProposalView = {
     },
     createdAt: 1,
     expiresAt: 2,
+    baseUpdatedAt: 500,
   },
   repoLabel: 'api',
   projectIds: [1],
@@ -53,14 +54,17 @@ const view: ProposalView = {
     { field: 'productionBranch', label: 'Gałąź produkcyjna', before: 'master', after: 'main' },
     { field: 'namespace', label: 'Namespace', before: null, after: 'cs-app-api' },
   ],
+  currentUpdatedAt: 500,
 };
+
+const STALE = 'Przepływ zmienił się po propozycji — sprawdź w aplikacji';
 
 describe('FlowProposalCard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useStore.setState({ proposals: [view] });
     h.list.mockResolvedValue([]);
-    h.resolve.mockResolvedValue(undefined);
+    h.resolve.mockResolvedValue('resolved');
   });
 
   it('shows the repository and lists the changes', () => {
@@ -72,21 +76,38 @@ describe('FlowProposalCard', () => {
       'Gałąź produkcyjna: master → main',
       'Namespace: cs-app-api',
     ]);
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
-  it('approves with Zatwierdź', async () => {
+  it('approves with Zatwierdź against the flow the card was rendered from', async () => {
     render(<FlowProposalCard view={view} />);
     fireEvent.click(screen.getByRole('button', { name: 'Zatwierdź' }));
-    await waitFor(() => expect(h.resolve).toHaveBeenCalledWith('ab12cd34', true));
+    await waitFor(() => expect(h.resolve).toHaveBeenCalledWith('ab12cd34', true, 500));
     expect(h.resolve).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(useStore.getState().proposals).toEqual([]));
   });
 
   it('rejects with Odrzuć', async () => {
-    render(<FlowProposalCard view={view} />);
+    render(<FlowProposalCard view={{ ...view, currentUpdatedAt: null }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Odrzuć' }));
-    await waitFor(() => expect(h.resolve).toHaveBeenCalledWith('ab12cd34', false));
+    await waitFor(() => expect(h.resolve).toHaveBeenCalledWith('ab12cd34', false, null));
     expect(h.resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it('says so when the flow changed before the decision and keeps the card usable', async () => {
+    h.resolve.mockResolvedValueOnce('stale');
+    h.list.mockResolvedValue([view]);
+    render(<FlowProposalCard view={view} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Zatwierdź' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(STALE);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Zatwierdź' })).toBeEnabled());
+    expect(h.list).toHaveBeenCalled();
+    expect(h.toastError).not.toHaveBeenCalled();
+  });
+
+  it('warns when its changes were recomputed against a flow saved after the proposal', () => {
+    render(<FlowProposalCard view={{ ...view, currentUpdatedAt: 900 }} />);
+    expect(screen.getByRole('alert')).toHaveTextContent(STALE);
   });
 
   it('reports a failed decision and lets the user try again', async () => {

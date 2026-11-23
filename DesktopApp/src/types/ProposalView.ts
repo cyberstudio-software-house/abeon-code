@@ -2,4 +2,4 @@
 import type { FlowChange } from "./FlowChange";
 import type { FlowProposal } from "./FlowProposal";
 
-export type ProposalView = { proposal: FlowProposal, repoLabel: string, projectIds: Array<number>, changes: Array<FlowChange>, };
+export type ProposalView = { proposal: FlowProposal, repoLabel: string, projectIds: Array<number>, changes: Array<FlowChange>, currentUpdatedAt: number | null, };

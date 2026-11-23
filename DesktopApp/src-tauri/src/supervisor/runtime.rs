@@ -19,7 +19,7 @@ use crate::db::{projects_repo, settings_repo};
 #[cfg(unix)]
 use crate::domain::note::NOTES_CHANGED_EVENT;
 use crate::deploy::notify::{discord_payload, DiscordNotice};
-use crate::deploy::proposals::Resolution;
+use crate::deploy::proposals::{ApprovalBase, ProposalNotices, Resolution};
 use crate::deploy::repos::repo_label;
 use crate::domain::supervisor::{
     EscalationChannel, SessionRebound, SupervisorLevel, SupervisorSnapshot,
@@ -623,21 +623,38 @@ fn start_buttons(runtime: &SupervisorRuntime, core: Arc<SupervisorCore>) {
     let _ = runtime.buttons_status.set(status);
 }
 
-fn flow_decision(app: &AppHandle, proposal_id: &str, approve: bool) -> FlowDecision {
-    match crate::commands::deploy::resolve_proposal(app, proposal_id, approve) {
+fn discord_flow_decision(
+    result: &AppResult<Option<Resolution>>,
+    decided_in_app: Option<bool>,
+) -> FlowDecision {
+    match result {
         Ok(Some(resolution)) => {
             let label = repo_label(Path::new(resolution.repo_path()));
             match resolution {
                 Resolution::Approved(_) => FlowDecision::Approved(label),
                 Resolution::Rejected(_) => FlowDecision::Rejected(label),
+                Resolution::Stale(_) => FlowDecision::Stale,
             }
         }
-        Ok(None) => FlowDecision::Expired,
-        Err(error) => {
-            eprintln!("deploy: flow proposal {proposal_id} from Discord failed: {error}");
-            FlowDecision::Failed
-        }
+        Ok(None) => decided_in_app.map_or(FlowDecision::Expired, FlowDecision::DecidedInApp),
+        Err(_) => FlowDecision::Failed,
     }
+}
+
+fn flow_decision(app: &AppHandle, proposal_id: &str, approve: bool) -> FlowDecision {
+    let result = crate::commands::deploy::resolve_proposal(
+        app,
+        proposal_id,
+        approve,
+        ApprovalBase::Stored,
+    );
+    if let Err(error) = &result {
+        eprintln!("deploy: flow proposal {proposal_id} from Discord failed: {error}");
+    }
+    let decided_in_app = app
+        .try_state::<ProposalNotices>()
+        .and_then(|notices| notices.app_decision(proposal_id));
+    discord_flow_decision(&result, decided_in_app)
 }
 
 fn buttons_config(
@@ -1075,6 +1092,39 @@ mod tests {
         assert_eq!(
             buttons_link(Some(GatewayStatus::Failed("odrzucony token".to_string()))),
             (false, Some("odrzucony token".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_discord_flow_click_answers_for_every_resolution() {
+        use crate::deploy::test_support::flow_at;
+        use crate::domain::deploy::FlowProposal;
+        let proposal = FlowProposal {
+            id: "ab12cd34".into(),
+            repo_path: "/p/api".into(),
+            flow: flow_at("/p/api"),
+            created_at: 0,
+            expires_at: 1,
+            base_updated_at: None,
+        };
+        let decide = |result: AppResult<Option<Resolution>>, in_app: Option<bool>| {
+            discord_flow_decision(&result, in_app)
+        };
+        assert_eq!(
+            decide(Ok(Some(Resolution::Approved(flow_at("/p/api")))), None),
+            FlowDecision::Approved("api".into())
+        );
+        assert_eq!(
+            decide(Ok(Some(Resolution::Rejected(proposal.clone()))), None),
+            FlowDecision::Rejected("api".into())
+        );
+        assert_eq!(decide(Ok(Some(Resolution::Stale(proposal))), Some(true)), FlowDecision::Stale);
+        assert_eq!(decide(Ok(None), Some(true)), FlowDecision::DecidedInApp(true));
+        assert_eq!(decide(Ok(None), Some(false)), FlowDecision::DecidedInApp(false));
+        assert_eq!(decide(Ok(None), None), FlowDecision::Expired);
+        assert_eq!(
+            decide(Err(crate::error::AppError::Other("busy".into())), None),
+            FlowDecision::Failed
         );
     }
 

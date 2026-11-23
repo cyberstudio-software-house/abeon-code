@@ -1,14 +1,14 @@
 use crate::db::{deploy_flows_repo, deploy_trackings_repo, projects_repo, settings_repo};
 use crate::deploy::detect::detect_flow;
-use crate::deploy::proposals::{self, AnnouncedProposals, Resolution};
-use crate::deploy::repos::{is_known_repo, normalize, project_repos, projects_of_repo, repo_label};
+use crate::deploy::flows::{known_repo_path, save_flow};
+use crate::deploy::proposals::{self, ApprovalBase, ProposalNotices, Resolution};
+use crate::deploy::repos::{project_repos, projects_of_repo, repo_label};
 use crate::deploy::runner::{shell_runner, CommandOutput, CommandRunner, RunError};
 use crate::deploy::tracker::DeployTracker;
-use crate::deploy::validate::validate_flow;
 use crate::deploy::{vpn, DEPLOY_CHANGED_EVENT, TRACKING_HISTORY, VPN_SETTING_KEY};
 use crate::domain::deploy::{
-    DeployChangedEvent, DeployFlow, DeploySettings, FlowProposal, ProposalView, RepoFlow,
-    ToolStatus, Tracking, TrackingView,
+    DeployChangedEvent, DeployFlow, DeploySettings, FlowProposal, ProposalOutcome, ProposalView,
+    RepoFlow, ToolStatus, Tracking, TrackingView,
 };
 use crate::domain::Project;
 use crate::error::{AppError, AppResult};
@@ -141,59 +141,13 @@ fn proposal_views(conn: &Connection, pending: Vec<FlowProposal>) -> AppResult<Ve
             let current = deploy_flows_repo::get(conn, &proposal.repo_path)?;
             Ok(ProposalView {
                 changes: proposals::diff(current.as_ref(), &proposal.flow),
+                current_updated_at: current.map(|flow| flow.updated_at),
                 project_ids: projects_of_repo(&projects, repo),
                 repo_label: repo_label(repo),
                 proposal,
             })
         })
         .collect()
-}
-
-pub(crate) fn normalize_flow(flow: DeployFlow) -> DeployFlow {
-    DeployFlow {
-        repo_path: flow.repo_path.trim().to_string(),
-        remote: flow.remote.trim().to_string(),
-        build_repo: flow.build_repo.trim().to_string(),
-        production_branch: flow.production_branch.trim().to_string(),
-        namespace: flow.namespace.trim().to_string(),
-        workloads: flow
-            .workloads
-            .iter()
-            .map(|workload| workload.trim().to_string())
-            .filter(|workload| !workload.is_empty())
-            .collect(),
-        kube_context: flow
-            .kube_context
-            .map(|context| context.trim().to_string())
-            .filter(|context| !context.is_empty()),
-        ..flow
-    }
-}
-
-fn persist_flow(conn: &Connection, flow: DeployFlow) -> AppResult<DeployFlow> {
-    let flow = normalize_flow(flow);
-    if let Err(errors) = validate_flow(&flow) {
-        let message = errors
-            .iter()
-            .map(|error| error.message.as_str())
-            .collect::<Vec<_>>()
-            .join("; ");
-        return Err(AppError::Other(message));
-    }
-    deploy_flows_repo::upsert(conn, &flow)
-}
-
-pub(crate) fn known_repo_path(conn: &Connection, repo_path: &str) -> AppResult<String> {
-    let projects = projects_repo::list(conn)?;
-    let path = Path::new(repo_path.trim());
-    if is_known_repo(&projects, path) {
-        Ok(normalize(path).to_string_lossy().to_string())
-    } else {
-        Err(AppError::InvalidPath {
-            path: repo_path.to_string(),
-            reason: "not a repository of any project".to_string(),
-        })
-    }
 }
 
 fn announce_change(app: &AppHandle, repo_path: &str) {
@@ -249,11 +203,6 @@ pub fn deploy_list_repo_flows(state: State<AppState>, project_id: i64) -> AppRes
 fn detect_repo_flow(conn: &Connection, repo_path: &str) -> AppResult<DeployFlow> {
     let canonical = known_repo_path(conn, repo_path)?;
     Ok(detect_flow(Path::new(&canonical)))
-}
-
-pub(crate) fn save_flow(conn: &Connection, flow: DeployFlow) -> AppResult<DeployFlow> {
-    let repo_path = known_repo_path(conn, &flow.repo_path)?;
-    persist_flow(conn, DeployFlow { repo_path, ..flow })
 }
 
 fn delete_flow(conn: &Connection, repo_path: &str) -> AppResult<String> {
@@ -351,32 +300,50 @@ pub fn resolve_proposal(
     app: &AppHandle,
     proposal_id: &str,
     approve: bool,
+    base: ApprovalBase,
 ) -> AppResult<Option<Resolution>> {
     let resolution = {
         let conn = app.state::<AppState>().db.get()?;
-        proposals::resolve(&conn, proposal_id, approve, now_ms())?
+        proposals::resolve(&conn, proposal_id, approve, base, now_ms())?
     };
-    if let Some(resolution) = &resolution {
+    if let Some(resolved @ (Resolution::Approved(_) | Resolution::Rejected(_))) = &resolution {
         if let Some(tracker) = app.try_state::<Arc<DeployTracker>>() {
             tracker.flows_changed();
         }
-        announce_change(app, resolution.repo_path());
+        announce_change(app, resolved.repo_path());
     }
     Ok(resolution)
 }
 
-#[tauri::command(async)]
-pub fn deploy_resolve_proposal(app: AppHandle, proposal_id: String, approve: bool) -> AppResult<()> {
-    match resolve_proposal(&app, &proposal_id, approve)? {
-        Some(_) => Ok(()),
+fn app_outcome(resolution: Option<&Resolution>) -> AppResult<ProposalOutcome> {
+    match resolution {
+        Some(Resolution::Approved(_) | Resolution::Rejected(_)) => Ok(ProposalOutcome::Resolved),
+        Some(Resolution::Stale(_)) => Ok(ProposalOutcome::Stale),
         None => Err(AppError::Other(proposals::EXPIRED_TEXT.to_string())),
     }
+}
+
+#[tauri::command(async)]
+pub fn deploy_resolve_proposal(
+    app: AppHandle,
+    proposal_id: String,
+    approve: bool,
+    expected_base: Option<i64>,
+) -> AppResult<ProposalOutcome> {
+    let resolution = resolve_proposal(&app, &proposal_id, approve, ApprovalBase::Rendered(expected_base))?;
+    let outcome = app_outcome(resolution.as_ref())?;
+    if outcome == ProposalOutcome::Resolved {
+        if let Some(notices) = app.try_state::<ProposalNotices>() {
+            notices.record_app_decision(&proposal_id, approve);
+        }
+    }
+    Ok(outcome)
 }
 
 fn new_proposals(app: &AppHandle) -> AppResult<Vec<ProposalView>> {
     let conn = app.state::<AppState>().db.get()?;
     let pending = proposals::pending(&conn, now_ms())?;
-    let fresh = match app.try_state::<AnnouncedProposals>() {
+    let fresh = match app.try_state::<ProposalNotices>() {
         Some(announced) => announced.take_new(&pending),
         None => Vec::new(),
     };
@@ -467,74 +434,6 @@ mod tests {
         assert!(entries[0].remotes.is_empty());
         assert_eq!(entries[1].remotes, vec!["origin".to_string()]);
         assert!(entries.iter().all(|entry| entry.proposal.is_none()));
-    }
-
-    #[test]
-    fn normalizes_text_workloads_and_a_blank_kube_context() {
-        let mut dirty = flow();
-        dirty.remote = " origin ".to_string();
-        dirty.build_repo = " cybercode/hr-management ".to_string();
-        dirty.production_branch = "\tmaster\n".to_string();
-        dirty.namespace = " cs-app-hs ".to_string();
-        dirty.workloads = vec![" app ".to_string(), "  ".to_string(), String::new(), "worker".to_string()];
-        dirty.kube_context = Some("   ".to_string());
-
-        let clean = normalize_flow(dirty);
-
-        assert_eq!(clean.remote, "origin");
-        assert_eq!(clean.build_repo, "cybercode/hr-management");
-        assert_eq!(clean.production_branch, "master");
-        assert_eq!(clean.namespace, "cs-app-hs");
-        assert_eq!(clean.workloads, vec!["app".to_string(), "worker".to_string()]);
-        assert_eq!(clean.kube_context, None);
-    }
-
-    #[test]
-    fn keeps_a_trimmed_kube_context() {
-        let mut with_context = flow();
-        with_context.kube_context = Some(" prod-cluster ".to_string());
-        assert_eq!(normalize_flow(with_context).kube_context, Some("prod-cluster".to_string()));
-    }
-
-    #[test]
-    fn persists_a_normalized_flow() {
-        let connection = conn();
-        let mut dirty = flow();
-        dirty.namespace = " cs-app-hs ".to_string();
-        dirty.workloads = vec![" app ".to_string(), String::new()];
-        dirty.kube_context = Some(String::new());
-
-        let saved = persist_flow(&connection, dirty).unwrap();
-
-        assert_eq!(saved.namespace, "cs-app-hs");
-        assert_eq!(saved.workloads, vec!["app".to_string()]);
-        let stored = deploy_flows_repo::get(&connection, &saved.repo_path).unwrap().unwrap();
-        assert_eq!(stored.kube_context, None);
-    }
-
-    #[test]
-    fn joins_validation_messages_and_stores_nothing() {
-        let connection = conn();
-        let mut invalid = flow();
-        invalid.namespace = "x; rm -rf ~".to_string();
-        invalid.production_branch = String::new();
-
-        let error = persist_flow(&connection, invalid).unwrap_err();
-
-        let AppError::Other(message) = error else { panic!("expected AppError::Other") };
-        assert!(message.contains("Gałąź produkcyjna"));
-        assert!(message.contains("Pole „Namespace” zawiera niedozwolone znaki"));
-        assert!(message.contains("; "));
-        assert!(deploy_flows_repo::get(&connection, "/r/a").unwrap().is_none());
-    }
-
-    #[test]
-    fn rejects_a_path_that_belongs_to_no_project() {
-        let connection = conn();
-        let dir = tempdir().unwrap();
-        init_repo(&dir.path().join("api"));
-        let error = known_repo_path(&connection, dir.path().join("api").to_str().unwrap()).unwrap_err();
-        assert!(matches!(error, AppError::InvalidPath { .. }));
     }
 
     fn registered_repo(connection: &Connection) -> (tempfile::TempDir, String, i64) {
@@ -850,7 +749,7 @@ mod tests {
         let connection = conn();
         let (dir, _, project_id) = registered_repo(&connection);
         let canonical = canonical_of(&dir);
-        deploy_flows_repo::upsert(&connection, &flow_at(&canonical)).unwrap();
+        let current = deploy_flows_repo::upsert(&connection, &flow_at(&canonical)).unwrap();
         let mut proposed = flow_at(&canonical);
         proposed.production_branch = "main".to_string();
         let proposal = proposals::create(&connection, proposed, now_ms()).unwrap();
@@ -869,16 +768,57 @@ mod tests {
                     before: Some("master".to_string()),
                     after: "main".to_string(),
                 }],
+                current_updated_at: Some(current.updated_at),
             }]
         );
     }
 
     #[test]
-    fn accepts_a_repository_inside_a_registered_project() {
+    fn a_view_recomputes_its_changes_against_the_current_flow_and_names_its_base() {
         let connection = conn();
-        let dir = tempdir().unwrap();
-        init_repo(&dir.path().join("api"));
-        projects_repo::insert(&connection, "p", dir.path().to_str().unwrap(), "-p", None).unwrap();
-        assert!(known_repo_path(&connection, dir.path().join("api").to_str().unwrap()).is_ok());
+        let (dir, _, _) = registered_repo(&connection);
+        let canonical = canonical_of(&dir);
+        deploy_flows_repo::upsert(&connection, &flow_at(&canonical)).unwrap();
+        let mut proposed = flow_at(&canonical);
+        proposed.namespace = "cs-app-b".to_string();
+        let proposal = proposals::create(&connection, proposed, now_ms()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let mut edited = flow_at(&canonical);
+        edited.production_branch = "release".to_string();
+        let current = deploy_flows_repo::upsert(&connection, &edited).unwrap();
+
+        let view = proposal_views(&connection, vec![proposal]).unwrap().remove(0);
+
+        assert_eq!(view.current_updated_at, Some(current.updated_at));
+        assert_ne!(view.proposal.base_updated_at, view.current_updated_at);
+        let fields: Vec<&str> = view.changes.iter().map(|change| change.field.as_str()).collect();
+        assert_eq!(fields, vec!["productionBranch", "namespace"]);
+        assert_eq!(view.changes[0].before.as_deref(), Some("release"));
+        assert_eq!(view.changes[0].after, "master");
+    }
+
+    #[test]
+    fn the_app_hears_whether_its_decision_was_applied() {
+        let proposal = FlowProposal {
+            id: "ab12cd34".to_string(),
+            repo_path: "/r/a".to_string(),
+            flow: flow(),
+            created_at: 0,
+            expires_at: 1,
+            base_updated_at: None,
+        };
+        assert_eq!(
+            app_outcome(Some(&Resolution::Approved(flow()))).unwrap(),
+            ProposalOutcome::Resolved
+        );
+        assert_eq!(
+            app_outcome(Some(&Resolution::Rejected(proposal.clone()))).unwrap(),
+            ProposalOutcome::Resolved
+        );
+        assert_eq!(app_outcome(Some(&Resolution::Stale(proposal))).unwrap(), ProposalOutcome::Stale);
+        let AppError::Other(message) = app_outcome(None).unwrap_err() else {
+            panic!("expected AppError::Other")
+        };
+        assert_eq!(message, "Propozycja wygasła");
     }
 }

@@ -62,12 +62,16 @@ function proposalView(id: string): ProposalView {
       },
       createdAt: 1,
       expiresAt: 2,
+      baseUpdatedAt: null,
     },
     repoLabel: 'api',
     projectIds: [1],
     changes: [],
+    currentUpdatedAt: null,
   };
 }
+
+const ids = () => useStore.getState().proposals.map(view => view.proposal.id);
 
 describe('deploySlice proposals', () => {
   beforeEach(() => {
@@ -94,19 +98,56 @@ describe('deploySlice proposals', () => {
 
   it('drops a resolved proposal at once and ignores a list loaded before the decision', async () => {
     const stale = deferred<ProposalView[]>();
+    const reload = deferred<ProposalView[]>();
     vi.spyOn(tauri, 'deployListProposals')
       .mockReturnValueOnce(stale.promise)
-      .mockResolvedValueOnce([proposalView('bbbbbbbb')]);
-    const resolve = vi.spyOn(tauri, 'deployResolveProposal').mockResolvedValue(undefined);
+      .mockReturnValueOnce(reload.promise);
+    const resolve = vi.spyOn(tauri, 'deployResolveProposal').mockResolvedValue('resolved');
     useStore.setState({ proposals: [proposalView('aaaaaaaa'), proposalView('bbbbbbbb')] });
 
     const loading = useStore.getState().loadProposals();
-    await useStore.getState().resolveProposal('aaaaaaaa', true);
+    const deciding = useStore.getState().resolveProposal('aaaaaaaa', true, 7);
+    await vi.waitFor(() => expect(ids()).toEqual(['bbbbbbbb']));
     stale.resolve([proposalView('aaaaaaaa'), proposalView('bbbbbbbb')]);
     await loading;
+    expect(ids()).toEqual(['bbbbbbbb']);
+    reload.resolve([proposalView('bbbbbbbb')]);
 
-    expect(resolve).toHaveBeenCalledWith('aaaaaaaa', true);
-    expect(useStore.getState().proposals.map(view => view.proposal.id)).toEqual(['bbbbbbbb']);
+    await expect(deciding).resolves.toBe('resolved');
+    expect(resolve).toHaveBeenCalledWith('aaaaaaaa', true, 7);
+    expect(ids()).toEqual(['bbbbbbbb']);
+  });
+
+  it('reloads after the decision settles, so a list from during the call cannot leave stale entries', async () => {
+    const decision = deferred<'resolved' | 'stale'>();
+    const during = deferred<ProposalView[]>();
+    const list = vi.spyOn(tauri, 'deployListProposals')
+      .mockReturnValueOnce(during.promise)
+      .mockResolvedValueOnce([proposalView('bbbbbbbb'), proposalView('cccccccc')]);
+    vi.spyOn(tauri, 'deployResolveProposal').mockReturnValue(decision.promise);
+    useStore.setState({ proposals: [proposalView('aaaaaaaa'), proposalView('bbbbbbbb')] });
+
+    const deciding = useStore.getState().resolveProposal('aaaaaaaa', true, null);
+    const loading = useStore.getState().loadProposals();
+    decision.resolve('resolved');
+    await deciding;
+    during.resolve([proposalView('aaaaaaaa'), proposalView('bbbbbbbb')]);
+    await loading;
+
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(ids()).toEqual(['bbbbbbbb', 'cccccccc']);
+  });
+
+  it('keeps a stale proposal, reloads it and reports the outcome', async () => {
+    vi.spyOn(tauri, 'deployResolveProposal').mockResolvedValue('stale');
+    const recomputed = { ...proposalView('aaaaaaaa'), currentUpdatedAt: 9 };
+    const list = vi.spyOn(tauri, 'deployListProposals').mockResolvedValue([recomputed]);
+    useStore.setState({ proposals: [proposalView('aaaaaaaa')] });
+
+    await expect(useStore.getState().resolveProposal('aaaaaaaa', true, 3)).resolves.toBe('stale');
+
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(useStore.getState().proposals).toEqual([recomputed]);
   });
 
   it('reloads the proposals and rethrows when a decision fails', async () => {
@@ -114,7 +155,7 @@ describe('deploySlice proposals', () => {
     const list = vi.spyOn(tauri, 'deployListProposals').mockResolvedValue([]);
     useStore.setState({ proposals: [proposalView('aaaaaaaa')] });
 
-    await expect(useStore.getState().resolveProposal('aaaaaaaa', false)).rejects.toEqual({
+    await expect(useStore.getState().resolveProposal('aaaaaaaa', false, null)).rejects.toEqual({
       message: 'Propozycja wygasła',
     });
     expect(list).toHaveBeenCalledTimes(1);

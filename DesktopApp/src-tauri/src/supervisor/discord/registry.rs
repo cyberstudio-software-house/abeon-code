@@ -167,6 +167,22 @@ fn push_unique(list: &mut Vec<String>, value: &str) {
     }
 }
 
+pub fn flow_target(custom_id: &str) -> Option<ButtonTarget> {
+    let parts: Vec<&str> = custom_id.split(':').collect();
+    if parts.len() != 4 || parts[0] != "abeon" || parts[1] != proposals::BUTTON_KIND {
+        return None;
+    }
+    let approve = match parts[3] {
+        proposals::APPROVE_ACTION => true,
+        proposals::REJECT_ACTION => false,
+        _ => return None,
+    };
+    proposals::is_proposal_id(parts[2]).then(|| ButtonTarget::FlowProposal {
+        proposal_id: parts[2].to_string(),
+        approve,
+    })
+}
+
 fn push_changed(list: &mut Vec<u64>, message: u64) {
     if !list.contains(&message) {
         list.push(message);
@@ -493,17 +509,7 @@ impl ButtonRegistry {
                     approve,
                 })
             }
-            proposals::BUTTON_KIND => {
-                let approve = match parts[3] {
-                    proposals::APPROVE_ACTION => true,
-                    proposals::REJECT_ACTION => false,
-                    _ => return None,
-                };
-                proposals::is_proposal_id(parts[2]).then(|| ButtonTarget::FlowProposal {
-                    proposal_id: parts[2].to_string(),
-                    approve,
-                })
-            }
+            proposals::BUTTON_KIND => flow_target(custom_id),
             _ => None,
         }
     }

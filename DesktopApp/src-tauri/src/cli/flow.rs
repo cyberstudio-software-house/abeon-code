@@ -405,7 +405,11 @@ mod tests {
         assert_eq!(proposal.flow.updated_at, 0);
         assert_eq!(proposal.created_at, 5);
         assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
-        assert_eq!(proposals::pending(&conn, 6).unwrap(), vec![proposal]);
+        assert_eq!(proposals::pending(&conn, 6).unwrap(), vec![proposal.clone()]);
+
+        let again = propose(&conn, dir.path(), INPUT, 9).unwrap();
+        assert_eq!(again, proposal);
+        assert_eq!(proposals::pending(&conn, 10).unwrap().len(), 1);
     }
 
     #[test]

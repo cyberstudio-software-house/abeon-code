@@ -86,6 +86,9 @@ pub struct FlowProposal {
     pub created_at: i64,
     #[ts(type = "number")]
     pub expires_at: i64,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub base_updated_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -107,6 +110,16 @@ pub struct ProposalView {
     #[ts(type = "Array<number>")]
     pub project_ids: Vec<i64>,
     pub changes: Vec<FlowChange>,
+    #[ts(type = "number | null")]
+    pub current_updated_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub enum ProposalOutcome {
+    Resolved,
+    Stale,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

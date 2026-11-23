@@ -59,6 +59,7 @@ export type { DeployFlow } from './DeployFlow';
 export type { FlowProposal } from './FlowProposal';
 export type { FlowChange } from './FlowChange';
 export type { ProposalView } from './ProposalView';
+export type { ProposalOutcome } from './ProposalOutcome';
 export type { RepoFlow } from './RepoFlow';
 export type { DeployChangedEvent } from './DeployChangedEvent';
 export type { ToolStatus } from './ToolStatus';

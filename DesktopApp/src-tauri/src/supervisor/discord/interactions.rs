@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 
 use super::gateway::Interaction;
-use super::registry::{ButtonRegistry, ButtonTarget, ClickedOption};
+use super::registry::{flow_target, ButtonRegistry, ButtonTarget, ClickedOption};
 use super::render::{render, replace_row, v2_payload, ApprovalMark, STALE_TEXT};
 use super::BUTTON_PREFIX;
 use crate::deploy::proposals;
@@ -13,11 +13,15 @@ pub const NOT_ALLOWED: &str = "Brak uprawnień.";
 pub const SUPERVISOR_OFF: &str = "Agent sterujący jest wyłączony — odpowiedz w aplikacji.";
 pub const FLOW_FAILED: &str = "Nie udało się rozstrzygnąć propozycji — sprawdź w aplikacji.";
 
+pub const FLOW_STALE: &str = "Przepływ zmienił się po propozycji — sprawdź w aplikacji";
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum FlowDecision {
     Approved(String),
     Rejected(String),
     Expired,
+    Stale,
+    DecidedInApp(bool),
     Failed,
 }
 
@@ -28,8 +32,51 @@ fn flow_outcome_text(decision: &FlowDecision) -> Option<String> {
         FlowDecision::Approved(label) => Some(format!("Zatwierdzono przepływ: {label}")),
         FlowDecision::Rejected(label) => Some(format!("Odrzucono przepływ: {label}")),
         FlowDecision::Expired => Some(proposals::EXPIRED_TEXT.to_string()),
+        FlowDecision::Stale => Some(FLOW_STALE.to_string()),
+        FlowDecision::DecidedInApp(true) => Some("Zatwierdzono w aplikacji".to_string()),
+        FlowDecision::DecidedInApp(false) => Some("Odrzucono w aplikacji".to_string()),
         FlowDecision::Failed => None,
     }
+}
+
+fn is_allowed(interaction: &Interaction, allow_from: &[String]) -> bool {
+    allow_from
+        .iter()
+        .any(|allowed| *allowed == interaction.user_id)
+}
+
+fn flow_outcome(
+    interaction: &Interaction,
+    proposal_id: &str,
+    approve: bool,
+    flows: &dyn Fn(&str, bool) -> FlowDecision,
+) -> InteractionOutcome {
+    match flow_outcome_text(&flows(proposal_id, approve)) {
+        Some(text) => without_answer(InteractionReply::Update(v2_payload(replace_row(
+            &interaction.message_components,
+            &interaction.custom_id,
+            &text,
+        )))),
+        None => without_answer(InteractionReply::Ephemeral(FLOW_FAILED)),
+    }
+}
+
+pub fn decide_flow(
+    interaction: &Interaction,
+    allow_from: &[String],
+    flows: &dyn Fn(&str, bool) -> FlowDecision,
+) -> Option<InteractionOutcome> {
+    let Some(ButtonTarget::FlowProposal {
+        proposal_id,
+        approve,
+    }) = flow_target(&interaction.custom_id)
+    else {
+        return None;
+    };
+    if !is_allowed(interaction, allow_from) {
+        return Some(without_answer(InteractionReply::Ephemeral(NOT_ALLOWED)));
+    }
+    Some(flow_outcome(interaction, &proposal_id, approve, flows))
 }
 
 const EPHEMERAL_FLAG: u64 = 1 << 6;
@@ -123,10 +170,7 @@ pub fn decide(
     core: &SupervisorCore,
     flows: &dyn Fn(&str, bool) -> FlowDecision,
 ) -> InteractionOutcome {
-    if !allow_from
-        .iter()
-        .any(|allowed| *allowed == interaction.user_id)
-    {
+    if !is_allowed(interaction, allow_from) {
         return without_answer(InteractionReply::Ephemeral(NOT_ALLOWED));
     }
     let target = interaction
@@ -144,14 +188,7 @@ pub fn decide(
         Some(ButtonTarget::FlowProposal {
             proposal_id,
             approve,
-        }) => match flow_outcome_text(&flows(&proposal_id, approve)) {
-            Some(text) => without_answer(InteractionReply::Update(v2_payload(replace_row(
-                &interaction.message_components,
-                &interaction.custom_id,
-                &text,
-            )))),
-            None => without_answer(InteractionReply::Ephemeral(FLOW_FAILED)),
-        },
+        }) => flow_outcome(interaction, &proposal_id, approve, flows),
         Some(ButtonTarget::Approval {
             message,
             approval_id,
@@ -850,6 +887,13 @@ mod tests {
             ("approve", FlowDecision::Approved("api".into()), "Zatwierdzono przepływ: api"),
             ("reject", FlowDecision::Rejected("api".into()), "Odrzucono przepływ: api"),
             ("approve", FlowDecision::Expired, "Propozycja wygasła"),
+            (
+                "approve",
+                FlowDecision::Stale,
+                "Przepływ zmienił się po propozycji — sprawdź w aplikacji",
+            ),
+            ("approve", FlowDecision::DecidedInApp(true), "Zatwierdzono w aplikacji"),
+            ("reject", FlowDecision::DecidedInApp(false), "Odrzucono w aplikacji"),
         ] {
             let calls = Calls::default();
             let interaction = flow_click(OWNER, &flow_id(action));
@@ -893,6 +937,28 @@ mod tests {
         assert!(texts.contains(&STALE_TEXT.to_string()), "{texts:?}");
         assert!(!texts.iter().any(|text| text.starts_with("Zatwierdzono")));
         assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_flow_button_is_decided_without_the_registry() {
+        let calls = Calls::default();
+        let flows = |proposal_id: &str, approve: bool| {
+            calls.lock().unwrap().push((proposal_id.to_string(), approve));
+            FlowDecision::Approved("api".into())
+        };
+        let owners = [OWNER.to_string()];
+
+        let outcome = decide_flow(&flow_click(OWNER, &flow_id("approve")), &owners, &flows).unwrap();
+        assert!(strings(updated(&outcome.reply), "content")
+            .contains(&"Zatwierdzono przepływ: api".to_string()));
+
+        let refused = decide_flow(&flow_click(STRANGER, &flow_id("reject")), &owners, &flows).unwrap();
+        assert_eq!(refused.reply, InteractionReply::Ephemeral(NOT_ALLOWED));
+
+        for other in ["abeon:a:ap-1:y", "abeon:q:00000000:0", "abeon:flow:ab12cd34:yes"] {
+            assert_eq!(decide_flow(&flow_click(OWNER, other), &owners, &flows), None, "{other}");
+        }
+        assert_eq!(*calls.lock().unwrap(), vec![(PROPOSAL_ID.to_string(), true)]);
     }
 
     #[test]

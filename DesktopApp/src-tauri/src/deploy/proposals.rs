@@ -1,5 +1,5 @@
-use crate::commands::deploy::{known_repo_path, normalize_flow, save_flow};
 use crate::db::{deploy_flows_repo, deploy_proposals_repo};
+use crate::deploy::flows::{known_repo_path, normalize_flow, save_flow};
 use crate::deploy::notify::{DiscordButton, DiscordNotice};
 use crate::deploy::repos::repo_for_dir;
 use crate::deploy::validate::validate_flow;
@@ -10,7 +10,7 @@ use crate::error::{AppError, AppResult};
 use crate::supervisor::discord::BUTTON_PREFIX;
 use parking_lot::Mutex;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 
 pub const PROPOSAL_LIFETIME_MS: i64 = 24 * 60 * 60 * 1000;
@@ -23,35 +23,62 @@ const EMPTY_VALUE: &str = "—";
 const APPROVE_LABEL: &str = "Zatwierdź";
 const REJECT_LABEL: &str = "Odrzuć";
 
+const RECENT_APP_DECISIONS: usize = 50;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Resolution {
     Approved(DeployFlow),
     Rejected(FlowProposal),
+    Stale(FlowProposal),
 }
 
 impl Resolution {
     pub fn repo_path(&self) -> &str {
         match self {
             Resolution::Approved(flow) => &flow.repo_path,
-            Resolution::Rejected(proposal) => &proposal.repo_path,
+            Resolution::Rejected(proposal) | Resolution::Stale(proposal) => &proposal.repo_path,
         }
     }
 }
 
-#[derive(Default)]
-pub struct AnnouncedProposals {
-    ids: Mutex<HashSet<String>>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalBase {
+    Stored,
+    Rendered(Option<i64>),
 }
 
-impl AnnouncedProposals {
+#[derive(Default)]
+pub struct ProposalNotices {
+    announced: Mutex<HashSet<String>>,
+    app_decisions: Mutex<VecDeque<(String, bool)>>,
+}
+
+impl ProposalNotices {
     pub fn take_new(&self, pending: &[FlowProposal]) -> Vec<FlowProposal> {
-        let mut ids = self.ids.lock();
+        let mut ids = self.announced.lock();
         ids.retain(|id| pending.iter().any(|proposal| &proposal.id == id));
         pending
             .iter()
             .filter(|proposal| ids.insert(proposal.id.clone()))
             .cloned()
             .collect()
+    }
+
+    pub fn record_app_decision(&self, proposal_id: &str, approved: bool) {
+        let mut decisions = self.app_decisions.lock();
+        decisions.retain(|(id, _)| id != proposal_id);
+        decisions.push_back((proposal_id.to_string(), approved));
+        while decisions.len() > RECENT_APP_DECISIONS {
+            decisions.pop_front();
+        }
+    }
+
+    pub fn app_decision(&self, proposal_id: &str) -> Option<bool> {
+        self.app_decisions
+            .lock()
+            .iter()
+            .find(|(id, _)| id == proposal_id)
+            .map(|(_, approved)| *approved)
     }
 }
 
@@ -94,12 +121,27 @@ fn canonical_repo(conn: &Connection, requested: &str) -> Result<String, String> 
     Ok(repo_path)
 }
 
-fn store(conn: &Connection, flow: DeployFlow, now: i64) -> AppResult<FlowProposal> {
-    let tx = immediate(conn)?;
-    deploy_proposals_repo::delete_for_repo(&tx, &flow.repo_path)?;
+fn text(error: AppError) -> String {
+    error.to_string()
+}
+
+fn store(conn: &Connection, flow: DeployFlow, now: i64) -> Result<FlowProposal, String> {
+    let tx = immediate(conn).map_err(text)?;
+    let current = deploy_flows_repo::get(&tx, &flow.repo_path).map_err(text)?;
+    if current.is_some() && diff(current.as_ref(), &flow).is_empty() {
+        return Err(format!("the flow of {} already has these values", flow.repo_path));
+    }
+    let base_updated_at = current.map(|current| current.updated_at);
+    let existing = deploy_proposals_repo::get_for_repo(&tx, &flow.repo_path).map_err(text)?;
+    if let Some(existing) = existing.filter(|existing| {
+        existing.expires_at > now && existing.flow == flow && existing.base_updated_at == base_updated_at
+    }) {
+        return Ok(existing);
+    }
+    deploy_proposals_repo::delete_for_repo(&tx, &flow.repo_path).map_err(text)?;
     let id = loop {
         let candidate = random_id();
-        if deploy_proposals_repo::get(&tx, &candidate)?.is_none() {
+        if deploy_proposals_repo::get(&tx, &candidate).map_err(text)?.is_none() {
             break candidate;
         }
     };
@@ -109,9 +151,10 @@ fn store(conn: &Connection, flow: DeployFlow, now: i64) -> AppResult<FlowProposa
         flow,
         created_at: now,
         expires_at: now + PROPOSAL_LIFETIME_MS,
+        base_updated_at,
     };
-    deploy_proposals_repo::insert(&tx, &proposal)?;
-    tx.commit()?;
+    deploy_proposals_repo::insert(&tx, &proposal).map_err(text)?;
+    tx.commit().map_err(|error| error.to_string())?;
     Ok(proposal)
 }
 
@@ -130,11 +173,7 @@ pub fn create(conn: &Connection, flow: DeployFlow, now: i64) -> Result<FlowPropo
             .collect::<Vec<_>>()
             .join("\n")
     })?;
-    let current = deploy_flows_repo::get(conn, &repo_path).map_err(|error| error.to_string())?;
-    if current.is_some() && diff(current.as_ref(), &flow).is_empty() {
-        return Err(format!("the flow of {repo_path} already has these values"));
-    }
-    store(conn, flow, now).map_err(|error| error.to_string())
+    store(conn, flow, now)
 }
 
 pub fn pending(conn: &Connection, now: i64) -> AppResult<Vec<FlowProposal>> {
@@ -146,6 +185,7 @@ pub fn resolve(
     conn: &Connection,
     id: &str,
     approve: bool,
+    base: ApprovalBase,
     now: i64,
 ) -> AppResult<Option<Resolution>> {
     if !is_proposal_id(id) {
@@ -158,6 +198,15 @@ pub fn resolve(
         return Ok(None);
     };
     let resolution = if approve {
+        let expected = match base {
+            ApprovalBase::Stored => proposal.base_updated_at,
+            ApprovalBase::Rendered(rendered) => rendered,
+        };
+        let current = deploy_flows_repo::get(&tx, &proposal.repo_path)?.map(|flow| flow.updated_at);
+        if current != expected {
+            tx.commit()?;
+            return Ok(Some(Resolution::Stale(proposal)));
+        }
         Resolution::Approved(save_flow(&tx, proposal.flow.clone())?)
     } else {
         Resolution::Rejected(proposal)
@@ -310,7 +359,7 @@ mod tests {
         assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
         assert_eq!(pending(&conn, 1).unwrap(), vec![p.clone()]);
 
-        let resolved = resolve(&conn, &p.id, true, 1).unwrap();
+        let resolved = resolve(&conn, &p.id, true, ApprovalBase::Stored, 1).unwrap();
         assert_eq!(approved_namespace(resolved), Some("cs-app-hs".into()));
         assert!(deploy_flows_repo::get(&conn, &repo).unwrap().is_some());
         assert!(pending(&conn, 2).unwrap().is_empty());
@@ -320,7 +369,7 @@ mod tests {
     fn a_rejected_or_expired_proposal_leaves_the_flow_untouched() {
         let Registered { _dir, conn, repo } = registered();
         let rejected = create(&conn, flow_at(&repo), 0).unwrap();
-        match resolve(&conn, &rejected.id, false, 1).unwrap() {
+        match resolve(&conn, &rejected.id, false, ApprovalBase::Stored, 1).unwrap() {
             Some(Resolution::Rejected(proposal)) => assert_eq!(proposal, rejected),
             other => panic!("expected a rejection, got {other:?}"),
         }
@@ -328,13 +377,13 @@ mod tests {
         assert!(pending(&conn, 2).unwrap().is_empty());
 
         let expired = create(&conn, flow_at(&repo), 0).unwrap();
-        assert!(resolve(&conn, &expired.id, true, DAY + 1).unwrap().is_none());
+        assert!(resolve(&conn, &expired.id, true, ApprovalBase::Stored, DAY + 1).unwrap().is_none());
         assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
 
         let at_the_limit = create(&conn, flow_at(&repo), 0).unwrap();
-        assert!(resolve(&conn, &at_the_limit.id, true, DAY).unwrap().is_none());
-        assert!(resolve(&conn, "deadbeef", true, 1).unwrap().is_none());
-        assert!(resolve(&conn, "not-an-id", false, 1).unwrap().is_none());
+        assert!(resolve(&conn, &at_the_limit.id, true, ApprovalBase::Stored, DAY).unwrap().is_none());
+        assert!(resolve(&conn, "deadbeef", true, ApprovalBase::Stored, 1).unwrap().is_none());
+        assert!(resolve(&conn, "not-an-id", false, ApprovalBase::Stored, 1).unwrap().is_none());
         assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
     }
 
@@ -360,9 +409,9 @@ mod tests {
         assert_ne!(first.id, second.id);
         assert_eq!(pending(&conn, 20).unwrap(), vec![second.clone()]);
 
-        assert!(resolve(&conn, &first.id, true, 30).unwrap().is_none());
+        assert!(resolve(&conn, &first.id, true, ApprovalBase::Stored, 30).unwrap().is_none());
         assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
-        let resolved = resolve(&conn, &second.id, true, 40).unwrap();
+        let resolved = resolve(&conn, &second.id, true, ApprovalBase::Stored, 40).unwrap();
         assert_eq!(approved_namespace(resolved), Some("cs-app-other".into()));
     }
 
@@ -430,11 +479,11 @@ mod tests {
         )
         .unwrap();
 
-        assert!(resolve(&conn, &p.id, true, 1).is_err());
+        assert!(resolve(&conn, &p.id, true, ApprovalBase::Stored, 1).is_err());
         assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
         assert_eq!(pending(&conn, 2).unwrap().len(), 1);
         assert!(matches!(
-            resolve(&conn, &p.id, false, 3).unwrap(),
+            resolve(&conn, &p.id, false, ApprovalBase::Stored, 3).unwrap(),
             Some(Resolution::Rejected(_))
         ));
         assert!(pending(&conn, 4).unwrap().is_empty());
@@ -444,12 +493,137 @@ mod tests {
     fn approval_writes_the_flow_through_the_settings_save_path() {
         let Registered { _dir, conn, repo } = registered();
         let p = create(&conn, flow_at(&repo), 0).unwrap();
-        let Some(Resolution::Approved(saved)) = resolve(&conn, &p.id, true, 1).unwrap() else {
+        let Some(Resolution::Approved(saved)) = resolve(&conn, &p.id, true, ApprovalBase::Stored, 1).unwrap() else {
             panic!("expected an approval");
         };
         assert!(saved.updated_at > 0);
         assert_eq!(DeployFlow { updated_at: 0, ..saved.clone() }, p.flow);
         assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), Some(saved));
+    }
+
+    fn saved_later(conn: &Connection, flow: &DeployFlow) -> DeployFlow {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        deploy_flows_repo::upsert(conn, flow).unwrap()
+    }
+
+    fn with_namespace(repo: &str, namespace: &str) -> DeployFlow {
+        DeployFlow { namespace: namespace.to_string(), ..flow_at(repo) }
+    }
+
+    fn is_stale(resolution: Option<Resolution>) -> bool {
+        matches!(resolution, Some(Resolution::Stale(_)))
+    }
+
+    #[test]
+    fn a_proposal_remembers_the_flow_it_was_compared_against() {
+        let Registered { _dir, conn, repo } = registered();
+        let fresh = create(&conn, with_namespace(&repo, "a"), 0).unwrap();
+        assert_eq!(fresh.base_updated_at, None);
+        resolve(&conn, &fresh.id, false, ApprovalBase::Stored, 1).unwrap();
+
+        let current = deploy_flows_repo::upsert(&conn, &with_namespace(&repo, "a")).unwrap();
+        let proposal = create(&conn, with_namespace(&repo, "b"), 2).unwrap();
+        assert_eq!(proposal.base_updated_at, Some(current.updated_at));
+        assert_eq!(pending(&conn, 3).unwrap()[0].base_updated_at, Some(current.updated_at));
+    }
+
+    #[test]
+    fn approving_from_discord_after_the_user_saved_the_flow_is_refused_and_keeps_the_edit() {
+        let Registered { _dir, conn, repo } = registered();
+        deploy_flows_repo::upsert(&conn, &with_namespace(&repo, "a")).unwrap();
+        let proposal = create(&conn, with_namespace(&repo, "b"), 0).unwrap();
+        let edited = DeployFlow { production_branch: "release".to_string(), ..with_namespace(&repo, "a") };
+        let saved = saved_later(&conn, &edited);
+
+        assert!(is_stale(resolve(&conn, &proposal.id, true, ApprovalBase::Stored, 1).unwrap()));
+
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), Some(saved));
+        assert_eq!(pending(&conn, 2).unwrap(), vec![proposal]);
+    }
+
+    #[test]
+    fn approving_after_the_flow_was_deleted_or_created_is_refused() {
+        let Registered { _dir, conn, repo } = registered();
+        deploy_flows_repo::upsert(&conn, &with_namespace(&repo, "a")).unwrap();
+        let against_existing = create(&conn, with_namespace(&repo, "b"), 0).unwrap();
+        deploy_flows_repo::delete(&conn, &repo).unwrap();
+        assert!(is_stale(resolve(&conn, &against_existing.id, true, ApprovalBase::Stored, 1).unwrap()));
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
+
+        let against_nothing = create(&conn, with_namespace(&repo, "b"), 2).unwrap();
+        let created = saved_later(&conn, &with_namespace(&repo, "c"));
+        assert!(is_stale(resolve(&conn, &against_nothing.id, true, ApprovalBase::Stored, 3).unwrap()));
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), Some(created));
+    }
+
+    #[test]
+    fn approving_with_an_unchanged_base_applies_the_proposal() {
+        let Registered { _dir, conn, repo } = registered();
+        deploy_flows_repo::upsert(&conn, &with_namespace(&repo, "a")).unwrap();
+        let proposal = create(&conn, with_namespace(&repo, "b"), 0).unwrap();
+        let resolved = resolve(&conn, &proposal.id, true, ApprovalBase::Stored, 1).unwrap();
+        assert_eq!(approved_namespace(resolved), Some("b".into()));
+        assert!(pending(&conn, 2).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_app_approves_against_the_flow_its_card_was_rendered_from() {
+        let Registered { _dir, conn, repo } = registered();
+        let first = deploy_flows_repo::upsert(&conn, &with_namespace(&repo, "a")).unwrap();
+        let proposal = create(&conn, with_namespace(&repo, "b"), 0).unwrap();
+        let edited = DeployFlow { production_branch: "release".to_string(), ..with_namespace(&repo, "a") };
+        let second = saved_later(&conn, &edited);
+
+        let outdated = resolve(&conn, &proposal.id, true, ApprovalBase::Rendered(Some(first.updated_at)), 1);
+        assert!(is_stale(outdated.unwrap()));
+        assert!(is_stale(resolve(&conn, &proposal.id, true, ApprovalBase::Rendered(None), 2).unwrap()));
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), Some(second.clone()));
+
+        let rerendered = resolve(&conn, &proposal.id, true, ApprovalBase::Rendered(Some(second.updated_at)), 3);
+        assert_eq!(approved_namespace(rerendered.unwrap()), Some("b".into()));
+        assert!(pending(&conn, 4).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_rejection_is_never_refused_as_stale() {
+        let Registered { _dir, conn, repo } = registered();
+        deploy_flows_repo::upsert(&conn, &with_namespace(&repo, "a")).unwrap();
+        let proposal = create(&conn, with_namespace(&repo, "b"), 0).unwrap();
+        let saved = saved_later(&conn, &with_namespace(&repo, "c"));
+        assert!(matches!(
+            resolve(&conn, &proposal.id, false, ApprovalBase::Rendered(Some(-1)), 1).unwrap(),
+            Some(Resolution::Rejected(_))
+        ));
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), Some(saved));
+        assert!(pending(&conn, 2).unwrap().is_empty());
+    }
+
+    #[test]
+    fn proposing_the_same_flow_again_keeps_the_pending_proposal() {
+        let Registered { _dir, conn, repo } = registered();
+        deploy_flows_repo::upsert(&conn, &with_namespace(&repo, "a")).unwrap();
+        let first = create(&conn, with_namespace(&repo, "b"), 0).unwrap();
+        let mut spaced = with_namespace(&repo, " b ");
+        spaced.updated_at = 77;
+        assert_eq!(create(&conn, spaced, 10).unwrap(), first);
+        assert_eq!(pending(&conn, 11).unwrap(), vec![first.clone()]);
+
+        let other = create(&conn, with_namespace(&repo, "c"), 20).unwrap();
+        assert_ne!(other.id, first.id);
+
+        saved_later(&conn, &with_namespace(&repo, "a2"));
+        let rebased = create(&conn, with_namespace(&repo, "c"), 30).unwrap();
+        assert_ne!(rebased.id, other.id);
+        assert_eq!(pending(&conn, 31).unwrap(), vec![rebased]);
+    }
+
+    #[test]
+    fn an_expired_proposal_is_replaced_by_the_same_flow() {
+        let Registered { _dir, conn, repo } = registered();
+        let first = create(&conn, flow_at(&repo), 0).unwrap();
+        let again = create(&conn, flow_at(&repo), DAY).unwrap();
+        assert_ne!(again.id, first.id);
+        assert_eq!(again.expires_at, 2 * DAY);
     }
 
     fn change(field: &str, label: &str, before: Option<&str>, after: &str) -> FlowChange {
@@ -548,12 +722,30 @@ mod tests {
             flow: flow_at("/r/a"),
             created_at: 0,
             expires_at: DAY,
+            base_updated_at: None,
         }
     }
 
     #[test]
+    fn decisions_taken_in_the_app_are_remembered_for_the_last_fifty_proposals() {
+        let notices = ProposalNotices::default();
+        assert_eq!(notices.app_decision("aaaaaaaa"), None);
+        notices.record_app_decision("aaaaaaaa", true);
+        notices.record_app_decision("bbbbbbbb", false);
+        assert_eq!(notices.app_decision("aaaaaaaa"), Some(true));
+        assert_eq!(notices.app_decision("bbbbbbbb"), Some(false));
+
+        for index in 0..49 {
+            notices.record_app_decision(&format!("{index:08x}"), true);
+        }
+        assert_eq!(notices.app_decision("aaaaaaaa"), None);
+        assert_eq!(notices.app_decision("bbbbbbbb"), Some(false));
+        assert_eq!(notices.app_decision(&format!("{:08x}", 48)), Some(true));
+    }
+
+    #[test]
     fn each_pending_proposal_is_announced_once() {
-        let announced = AnnouncedProposals::default();
+        let announced = ProposalNotices::default();
         let (first, second) = (proposal("aaaaaaaa"), proposal("bbbbbbbb"));
         assert_eq!(announced.take_new(&[first.clone()]), vec![first.clone()]);
         assert!(announced.take_new(&[first.clone()]).is_empty());
@@ -576,6 +768,7 @@ mod tests {
                 change("productionBranch", "Gałąź produkcyjna", Some("master"), "main"),
                 change("namespace", "Namespace", None, "cs_app"),
             ],
+            current_updated_at: None,
         };
         let notice = discord_notice(&view);
         assert_eq!(notice.title, "Agent proponuje przepływ wdrożenia: api");

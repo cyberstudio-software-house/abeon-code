@@ -2,6 +2,7 @@ pub mod ci;
 pub mod cluster;
 pub mod detect;
 pub mod excerpt;
+pub mod flows;
 pub mod machine;
 pub mod notify;
 pub mod proposals;

@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import { tauri } from '../lib/tauri';
-import type { DeployFlow, ProposalView, RepoFlow, TrackingView } from '../types';
+import type { DeployFlow, ProposalOutcome, ProposalView, RepoFlow, TrackingView } from '../types';
 
 export type DeploySlice = {
   repoFlowsByProject: Record<number, RepoFlow[]>;
@@ -13,7 +13,7 @@ export type DeploySlice = {
   retryTracking: (id: number) => Promise<void>;
   dismissTracking: (id: number) => Promise<void>;
   loadProposals: () => Promise<void>;
-  resolveProposal: (proposalId: string, approve: boolean) => Promise<void>;
+  resolveProposal: (proposalId: string, approve: boolean, expectedBase: number | null) => Promise<ProposalOutcome>;
 };
 
 let loadSequence = 0;
@@ -57,16 +57,22 @@ export const createDeploySlice: StateCreator<DeploySlice> = (set, get) => ({
     const proposals = await tauri.deployListProposals();
     if (token === proposalSequence) set({ proposals });
   },
-  resolveProposal: async (proposalId, approve) => {
+  resolveProposal: async (proposalId, approve, expectedBase) => {
+    const reload = () => get().loadProposals().catch(error => {
+      console.error('[deploy] reloading proposals failed', error);
+    });
+    proposalSequence += 1;
+    let outcome: ProposalOutcome;
     try {
-      await tauri.deployResolveProposal(proposalId, approve);
+      outcome = await tauri.deployResolveProposal(proposalId, approve, expectedBase);
     } catch (error) {
-      await get().loadProposals().catch(reloadError => {
-        console.error('[deploy] reloading proposals failed', reloadError);
-      });
+      await reload();
       throw error;
     }
-    proposalSequence += 1;
-    set({ proposals: get().proposals.filter(view => view.proposal.id !== proposalId) });
+    if (outcome === 'resolved') {
+      set({ proposals: get().proposals.filter(view => view.proposal.id !== proposalId) });
+    }
+    await reload();
+    return outcome;
   },
 });

@@ -4,15 +4,24 @@ import { useStore } from '../../store';
 import { formatTauriError } from '../../lib/errors';
 import type { ProposalView } from '../../types';
 
+const STALE_MESSAGE = 'Przepływ zmienił się po propozycji — sprawdź w aplikacji';
+
 export function FlowProposalCard({ view }: { view: ProposalView }) {
   const resolveProposal = useStore(state => state.resolveProposal);
   const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState(false);
   const title = `Agent proponuje przepływ wdrożenia: ${view.repoLabel}`;
+  const outdated = refused || view.proposal.baseUpdatedAt !== view.currentUpdatedAt;
 
   const decide = async (approve: boolean) => {
     setBusy(true);
+    setRefused(false);
     try {
-      await resolveProposal(view.proposal.id, approve);
+      const outcome = await resolveProposal(view.proposal.id, approve, view.currentUpdatedAt);
+      if (outcome === 'stale') {
+        setRefused(true);
+        setBusy(false);
+      }
     } catch (error) {
       toast.error(formatTauriError(error));
       setBusy(false);
@@ -43,6 +52,7 @@ export function FlowProposalCard({ view }: { view: ProposalView }) {
           </li>
         ))}
       </ul>
+      {outdated && <p role="alert" className="text-[11px] text-danger">{STALE_MESSAGE}</p>}
       <div className="flex items-center justify-end gap-2">
         <button type="button" onClick={() => void decide(false)} disabled={busy} className="btn-secondary">
           Odrzuć

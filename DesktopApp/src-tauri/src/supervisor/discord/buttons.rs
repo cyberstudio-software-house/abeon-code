@@ -12,7 +12,7 @@ use tokio::time::{interval_at, sleep, timeout, Instant, MissedTickBehavior};
 
 use super::client::{DiscordClient, DiscordError};
 use super::gateway::{run_gateway, GatewayStatus, Interaction, SharedIdentifyBudget};
-use super::interactions::{callback_payload, decide, FlowResolver};
+use super::interactions::{callback_payload, decide, decide_flow, FlowResolver};
 use super::jobs::{ButtonJob, ButtonsHandle, ERROR_BUTTONS_OFFLINE};
 use super::registry::{ButtonRegistry, PostRequest, PostResult};
 use super::render::{render, ApprovalMark};
@@ -309,6 +309,9 @@ async fn handle_interaction(shared: Arc<Shared>, interaction: Interaction) {
         let interaction = interaction.clone();
         tokio::task::spawn_blocking(move || {
             let allow_from = shared.allow_from();
+            if let Some(outcome) = decide_flow(&interaction, &allow_from, &*shared.flows) {
+                return outcome;
+            }
             let mut registry = shared.registry.lock();
             decide(
                 &interaction,
@@ -1306,6 +1309,43 @@ mod tests {
             assert!(strings(&payload, "custom_id").is_empty());
             assert_eq!(*flow_calls.lock(), vec![("ab12cd34".to_string(), true)]);
             gateway.abort();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_flow_click_is_answered_while_the_registry_is_locked() {
+        timeout(TEST_TIMEOUT, async {
+            let server = MockServer::start().await;
+            respond_to_callback(&server, "i-8", ResponseTemplate::new(204)).await;
+            let (_, core) = setup();
+            let shared = Arc::new(shared_for(core));
+            *shared.current.lock() = Ok(Arc::new(live_for(&server)));
+            let interaction = Interaction {
+                id: "i-8".into(),
+                token: INTERACTION_TOKEN.into(),
+                user_id: OWNER.into(),
+                custom_id: "abeon:flow:ab12cd34:reject".into(),
+                message_id: "d-9".into(),
+                message_components: json!([{ "type": 1, "components": [
+                    { "type": 2, "style": 2, "label": "Odrzuć", "custom_id": "abeon:flow:ab12cd34:reject" },
+                ]}]),
+            };
+
+            let held = shared.registry.lock();
+            let answered = timeout(
+                Duration::from_secs(2),
+                handle_interaction(shared.clone(), interaction),
+            )
+            .await;
+            drop(held);
+
+            assert!(answered.is_ok(), "the flow click waited for the registry lock");
+            let callbacks = requests(&server, "POST", &callback_path("i-8")).await;
+            assert_eq!(callbacks.len(), 1);
+            assert!(strings(&body(&callbacks[0]), "content")
+                .contains(&"Zatwierdzono przepływ: api".to_string()));
         })
         .await
         .unwrap();
