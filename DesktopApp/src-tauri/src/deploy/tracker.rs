@@ -6,7 +6,7 @@ use crate::deploy::machine::{self, Effect, NotifyKind, Observation};
 use crate::deploy::reflog::PushDetector;
 use crate::deploy::runner::{shell_runner, CommandRunner, SystemRunner};
 use crate::deploy::{
-    vpn, BLOCKED_POLL, BUILD_POLL, CLUSTER_POLL, DEPLOY_CHANGED_EVENT, LOG_EXCERPT_LINES,
+    notify, vpn, BLOCKED_POLL, BUILD_POLL, CLUSTER_POLL, DEPLOY_CHANGED_EVENT, LOG_EXCERPT_LINES,
     PUSH_POLL, TRACKING_HISTORY, VPN_SETTING_KEY,
 };
 use crate::domain::deploy::{BuildProvider, Delivery, DeployChangedEvent, DeployFlow, Tracking};
@@ -506,10 +506,7 @@ impl TrackerSink for AppSink {
     }
 
     fn notify(&self, kind: NotifyKind, tracking: &Tracking, flow: &DeployFlow) {
-        eprintln!(
-            "deploy: {kind:?} for {} at {} ({})",
-            flow.repo_path, tracking.commit, flow.production_branch
-        );
+        notify::announce(&self.app, kind, tracking, flow);
     }
 }
 

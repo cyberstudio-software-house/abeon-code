@@ -23,6 +23,10 @@ pub enum ButtonJob {
         reply: mpsc::Sender<Result<Vec<String>, String>>,
     },
     Sync(DiscordSync),
+    Notice {
+        payload: serde_json::Value,
+        reply: tokio::sync::oneshot::Sender<bool>,
+    },
     Reconfigure,
 }
 
@@ -46,6 +50,17 @@ impl ButtonsHandle {
 
     pub fn reconfigure(&self) {
         let _ = self.jobs.send(ButtonJob::Reconfigure);
+    }
+
+    pub async fn notice(&self, payload: serde_json::Value) -> bool {
+        let (reply, receiver) = tokio::sync::oneshot::channel();
+        if self.jobs.send(ButtonJob::Notice { payload, reply }).is_err() {
+            return false;
+        }
+        matches!(
+            tokio::time::timeout(REPLY_TIMEOUT, receiver).await,
+            Ok(Ok(true))
+        )
     }
 
     pub fn post(&self, request: PostRequest) -> Result<PostResult, String> {

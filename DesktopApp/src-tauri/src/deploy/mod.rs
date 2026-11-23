@@ -3,6 +3,7 @@ pub mod cluster;
 pub mod detect;
 pub mod excerpt;
 pub mod machine;
+pub mod notify;
 pub mod reflog;
 pub mod repos;
 pub mod runner;

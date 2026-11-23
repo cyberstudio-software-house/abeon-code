@@ -1222,6 +1222,11 @@ impl SupervisorCore {
         self.publish_with(&settings);
     }
 
+    pub fn notice_channel(&self) -> EscalationChannel {
+        let settings = self.effects.settings();
+        self.state.lock().channel(&settings, now())
+    }
+
     pub fn accepts_discord_answers(&self) -> bool {
         let settings = self.effects.settings();
         settings.level != SupervisorLevel::Off
@@ -2565,6 +2570,27 @@ mod tests {
         assert!(effects.notifications().is_empty());
         assert_eq!(effects.attentions().len(), 1);
         assert_eq!(escalation_channels(&core), vec![EscalationChannel::Discord]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn notices_follow_the_escalation_routing() {
+        let (effects, core) = setup();
+        assert_eq!(core.notice_channel(), EscalationChannel::App);
+
+        core.set_discord_active(true);
+        core.set_away(true);
+        assert_eq!(core.notice_channel(), EscalationChannel::Discord);
+
+        core.set_away(false);
+        core.report_activity(None);
+        assert!(effects.settings.lock().discord_mute_when_present);
+        assert_eq!(core.notice_channel(), EscalationChannel::App);
+
+        effects.settings.lock().discord_mute_when_present = false;
+        assert_eq!(core.notice_channel(), EscalationChannel::Discord);
+
+        core.set_discord_active(false);
+        assert_eq!(core.notice_channel(), EscalationChannel::App);
     }
 
     #[tokio::test(start_paused = true)]

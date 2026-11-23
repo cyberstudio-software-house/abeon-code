@@ -18,7 +18,10 @@ use crate::db::DbPool;
 use crate::db::{projects_repo, settings_repo};
 #[cfg(unix)]
 use crate::domain::note::NOTES_CHANGED_EVENT;
-use crate::domain::supervisor::{SessionRebound, SupervisorLevel, SupervisorSnapshot};
+use crate::deploy::notify::{discord_payload, DiscordNotice};
+use crate::domain::supervisor::{
+    EscalationChannel, SessionRebound, SupervisorLevel, SupervisorSnapshot,
+};
 #[cfg(unix)]
 use crate::domain::NotesChangedEvent;
 use crate::domain::SessionActivity;
@@ -754,6 +757,19 @@ pub fn buttons_status(app: &AppHandle) -> Option<GatewayStatus> {
     let runtime = runtime(app)?;
     let status = runtime.buttons_status.get()?.borrow().clone();
     Some(status)
+}
+
+pub async fn post_discord_notice(app: &AppHandle, notice: DiscordNotice) -> bool {
+    let (Some(runtime), Some(core)) = (runtime(app), core(app)) else {
+        return false;
+    };
+    if core.notice_channel() != EscalationChannel::Discord {
+        return false;
+    }
+    let Some(buttons) = runtime.effects.buttons.get().cloned() else {
+        return false;
+    };
+    buttons.notice(discord_payload(&notice)).await
 }
 
 fn buttons_link(status: Option<GatewayStatus>) -> (bool, Option<String>) {

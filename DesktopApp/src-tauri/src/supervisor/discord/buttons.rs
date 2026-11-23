@@ -372,6 +372,26 @@ impl Service {
                     let _ = reply.send(Err(ERROR_BUTTONS_OFFLINE.to_string()));
                 }
             },
+            ButtonJob::Notice { payload, reply } => {
+                let sent = match &current {
+                    Ok(live) => {
+                        let deadline = Instant::now() + POST_DEADLINE;
+                        match send_message(live, &payload, deadline).await {
+                            Ok(_) => true,
+                            Err(SendFailure::Discord(error)) => {
+                                log_error(&error);
+                                false
+                            }
+                            Err(SendFailure::Deadline) => {
+                                log_error(&"notice did not finish before its deadline");
+                                false
+                            }
+                        }
+                    }
+                    Err(_) => false,
+                };
+                let _ = reply.send(sent);
+            }
             ButtonJob::Sync(change) => {
                 let changed = apply_sync(&mut self.shared.registry.lock(), change);
                 match &current {
@@ -883,6 +903,50 @@ mod tests {
             assert_eq!(again.posted, 0);
             assert_eq!(again.skipped, vec!["q1".to_string()]);
             assert_eq!(again.keys, result.keys);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_notice_is_sent_as_given_through_the_live_client() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness { server, handle, .. } = harness(Ok(config_with(BOT_TOKEN))).await;
+            Mock::given(method("POST"))
+                .and(path(MESSAGES_PATH))
+                .and(header("Authorization", "Bot bot-token"))
+                .respond_with(posted_reply("d-9"))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let payload = json!({
+                "flags": 32768,
+                "components": [{ "type": 10, "content": "**T**\nB" }],
+            });
+            assert!(handle.notice(payload.clone()).await);
+            let posted = requests(&server, "POST", MESSAGES_PATH).await;
+            assert_eq!(posted.len(), 1);
+            assert_eq!(body(&posted[0]), payload);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_notice_is_not_sent_while_discord_is_unconfigured_or_refuses_it() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness { server, handle, .. } = harness(Err(NO_TOKEN.into())).await;
+            assert!(!handle.notice(json!({ "components": [] })).await);
+            assert!(requests(&server, "POST", MESSAGES_PATH).await.is_empty());
+
+            let Harness { server, handle, .. } = harness(Ok(config_with(BOT_TOKEN))).await;
+            Mock::given(method("POST"))
+                .and(path(MESSAGES_PATH))
+                .respond_with(ResponseTemplate::new(400))
+                .mount(&server)
+                .await;
+            assert!(!handle.notice(json!({ "components": [] })).await);
+            assert_eq!(requests(&server, "POST", MESSAGES_PATH).await.len(), 1);
         })
         .await
         .unwrap();
