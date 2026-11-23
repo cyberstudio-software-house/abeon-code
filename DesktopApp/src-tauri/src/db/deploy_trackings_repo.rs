@@ -1,6 +1,9 @@
 use crate::domain::deploy::{Tracking, TrackingState};
 use crate::error::{AppError, AppResult};
+use parking_lot::Mutex;
 use rusqlite::{params, Connection, Params};
+use std::collections::HashSet;
+use std::sync::OnceLock;
 
 fn open_states() -> String {
     TrackingState::OPEN
@@ -24,6 +27,34 @@ fn select(conn: &Connection, sql: &str, params: impl Params) -> AppResult<Vec<Tr
     let mut statement = conn.prepare(sql)?;
     let rows = statement.query_map(params, row_to_tracking)?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn first_report(id: i64) -> bool {
+    static REPORTED: OnceLock<Mutex<HashSet<i64>>> = OnceLock::new();
+    REPORTED.get_or_init(Default::default).lock().insert(id)
+}
+
+fn select_readable(conn: &Connection, sql: &str, params: impl Params) -> AppResult<Vec<Tracking>> {
+    let mut statement = conn.prepare(sql)?;
+    let rows = statement.query_map(params, |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut trackings = Vec::new();
+    for row in rows {
+        let (id, body) = row?;
+        match serde_json::from_str::<Tracking>(&body) {
+            Ok(mut tracking) => {
+                tracking.id = id;
+                trackings.push(tracking);
+            }
+            Err(error) => {
+                if first_report(id) {
+                    eprintln!("deploy: skipping tracking {id}, its stored body does not parse: {error}");
+                }
+            }
+        }
+    }
+    Ok(trackings)
 }
 
 fn count(value: usize) -> i64 {
@@ -97,7 +128,7 @@ pub fn update_open(conn: &Connection, tracking: &Tracking) -> AppResult<bool> {
 }
 
 pub fn open(conn: &Connection) -> AppResult<Vec<Tracking>> {
-    select(
+    select_readable(
         conn,
         &format!(
             "SELECT id, body FROM deploy_trackings WHERE state IN ({}) ORDER BY id",
@@ -108,7 +139,7 @@ pub fn open(conn: &Connection) -> AppResult<Vec<Tracking>> {
 }
 
 pub fn latest_per_repo(conn: &Connection) -> AppResult<Vec<Tracking>> {
-    select(
+    select_readable(
         conn,
         &format!(
             "SELECT id, body FROM deploy_trackings AS latest
@@ -122,7 +153,7 @@ pub fn latest_per_repo(conn: &Connection) -> AppResult<Vec<Tracking>> {
 }
 
 pub fn history(conn: &Connection, repo_path: &str, limit: usize) -> AppResult<Vec<Tracking>> {
-    select(
+    select_readable(
         conn,
         "SELECT id, body FROM deploy_trackings WHERE repo_path = ? ORDER BY id DESC LIMIT ?",
         params![repo_path, count(limit)],
@@ -358,6 +389,32 @@ mod tests {
             ]
         );
         assert!(history(&conn, "/r/none", 3).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_row_whose_body_does_not_parse_is_skipped_by_the_lists() {
+        let conn = conn();
+        insert(&conn, &tracking("/r/a", "good", TrackingState::Building)).unwrap();
+        let bad = insert(&conn, &tracking("/r/a", "bad", TrackingState::Building)).unwrap();
+        insert(&conn, &tracking("/r/b", "other", TrackingState::Failed)).unwrap();
+        conn.execute(
+            "UPDATE deploy_trackings SET body = '{not json' WHERE id = ?",
+            [bad.id],
+        )
+        .unwrap();
+
+        assert_eq!(commits(&open(&conn).unwrap()), vec![pair("/r/a", "good")]);
+        assert_eq!(commits(&history(&conn, "/r/a", 10).unwrap()), vec![pair("/r/a", "good")]);
+        assert_eq!(commits(&latest_per_repo(&conn).unwrap()), vec![pair("/r/b", "other")]);
+        assert!(get(&conn, bad.id).is_err());
+    }
+
+    #[test]
+    fn a_bad_row_is_reported_once() {
+        let id = i64::MIN + 17;
+        assert!(first_report(id));
+        assert!(!first_report(id));
+        assert!(first_report(id + 1));
     }
 
     #[test]

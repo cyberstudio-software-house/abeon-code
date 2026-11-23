@@ -1204,6 +1204,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_stored_tracking_that_does_not_parse_does_not_stop_the_tracker() {
+        let f = Fixture::new();
+        let broken = deploy_trackings_repo::insert(
+            &f.pool.get().unwrap(),
+            &Tracking::new(&f.flow, &commit("x"), at(-60)),
+        )
+        .unwrap();
+        f.pool
+            .get()
+            .unwrap()
+            .execute("UPDATE deploy_trackings SET body = '{' WHERE id = ?", [broken.id])
+            .unwrap();
+        let sink = Arc::new(RecordingSink::default());
+        let runner = Arc::new(fake(&building("b"), "app:1"));
+        let tracker = f.tracker(runner.clone(), &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        tracker.tick(at(3)).await;
+        let tracking = f.only();
+        assert_eq!(tracking.commit, commit("b"));
+        assert_eq!(tracking.state, TrackingState::Building);
+        assert_eq!((ci_polls(&runner), cluster_polls(&runner)), (1, 1));
+    }
+
+    #[tokio::test]
     async fn removing_the_project_stops_tracking_its_repository_until_it_is_added_again() {
         let f = Fixture::new();
         let sink = Arc::new(RecordingSink::default());
