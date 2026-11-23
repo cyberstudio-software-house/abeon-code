@@ -8,7 +8,9 @@ const PRIVATE_KEY_PLACEHOLDER: &str = "*** private key ***";
 
 const KEY: &str = r"(?:[A-Za-z0-9_.\-]*(?:token|secret|password|passwd|key|auth|credential)[A-Za-z0-9_.\-]*|\b(?:[A-Za-z0-9]+[_.\-])*pat(?:[_.\-][A-Za-z0-9]+)*)";
 const AFTER_KEY: &str = r#"(?:\\?["'\]])*\s*"#;
-const QUOTED: &str = r#"\\?"[^"]*"|\\?'[^']*'"#;
+const QUOTED: &str = r#"\\"(?:[^"\\]|\\[^"])*\\"|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'"#;
+const FLAG_VALUE: &str = r"-?[^\s\-]\S*";
+const USER_VALUE: &str = r#""[^"]*:[^"]*"|'[^']*:[^']*'|[^\s:]*:\S*"#;
 
 static ANSI: Lazy<Regex> = Lazy::new(|| {
     Regex::new(
@@ -35,16 +37,16 @@ static COOKIE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)\b((?:set-)?cookie\s*:\s*)\S.*").unwrap());
 static LONG_FLAG: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!(
-        r#"(?i)(--[A-Za-z0-9\-]*(?:{SENSITIVE_WORDS})[A-Za-z0-9\-]*\s+)({QUOTED}|\S+)"#
+        r#"(?i)(--[A-Za-z0-9\-]*(?:{SENSITIVE_WORDS})[A-Za-z0-9\-]*\s+)({QUOTED}|{FLAG_VALUE})"#
     ))
     .unwrap()
 });
 static LOGIN_PASSWORD_FLAG: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(&format!(r#"((?i:\blogin\b).*?\s-p\s+)({QUOTED}|\S+)"#)).unwrap()
+    Regex::new(&format!(r#"((?i:\blogin\b).*?\s-p\s+)({QUOTED}|{FLAG_VALUE})"#)).unwrap()
 });
 static USER_FLAG: Lazy<Regex> = Lazy::new(|| {
     Regex::new(&format!(
-        r#"(\s(?:-u|--user|--proxy-user)(?:\s+|=))({QUOTED}|[^\s:]+:\S+)"#
+        r#"(\s(?:-u|--user|--proxy-user)(?:\s+|=))({USER_VALUE})"#
     ))
     .unwrap()
 });
@@ -72,15 +74,7 @@ fn redact(line: &str) -> String {
     text = URL_USER_INFO.replace_all(&text, format!("${{1}}{MASK}@")).into_owned();
     text = BEARER.replace_all(&text, mask_value).into_owned();
     text = COOKIE.replace_all(&text, mask_value).into_owned();
-    text = LONG_FLAG
-        .replace_all(&text, |captures: &Captures| {
-            if captures[2].starts_with('-') {
-                captures[0].to_string()
-            } else {
-                mask_value(captures)
-            }
-        })
-        .into_owned();
+    text = LONG_FLAG.replace_all(&text, mask_value).into_owned();
     text = LOGIN_PASSWORD_FLAG.replace_all(&text, mask_value).into_owned();
     text = USER_FLAG.replace_all(&text, mask_value).into_owned();
     text = ASSIGNMENT.replace_all(&text, mask_value).into_owned();
@@ -261,6 +255,49 @@ mod tests {
         assert_hidden("curl -u bob:hunter2 https://example.com", &["hunter2"]);
         assert_hidden("curl --user bob:hunter2 https://example.com", &["hunter2"]);
         assert_hidden("docker login -p \"hunter 2\"", &["hunter 2", "hunter"]);
+    }
+
+    #[test]
+    fn a_sensitive_flag_without_a_value_does_not_hide_the_next_secret_flag() {
+        let out = assert_hidden(
+            "helm repo add r https://x --pass-credentials --password hunter2",
+            &["hunter2"],
+        );
+        assert!(out.contains("--pass-credentials"), "{out}");
+        assert_hidden("tool --token --password hunter2 run", &["hunter2"]);
+    }
+
+    #[test]
+    fn a_secret_that_starts_with_a_dash_is_masked() {
+        let out = assert_hidden("tool --password -Xhunter2 run", &["hunter2"]);
+        assert!(out.ends_with(" run"), "{out}");
+        assert_hidden("docker login -p -hunter2 registry", &["hunter2"]);
+    }
+
+    #[test]
+    fn a_following_long_flag_is_never_swallowed() {
+        let out = tail_redacted("cli --secret --verbose --output json", 1);
+        assert_eq!(out, "cli --secret --verbose --output json");
+    }
+
+    #[test]
+    fn escaped_quotes_inside_a_quoted_value_do_not_end_the_mask() {
+        let out = assert_hidden(r#"{"password":"hun\"ter2","user":"bob"}"#, &["ter2", "hun"]);
+        assert!(!out.contains("ter2\""), "{out}");
+        assert_hidden(r"PASSWORD='hun\'ter2' --next", &["ter2", "hun"]);
+        assert_hidden(r#"secret: "a\\\"b\"c" tail"#, &["c\""]);
+    }
+
+    #[test]
+    fn masks_user_flag_values_with_an_empty_part() {
+        assert_hidden("curl https://x -u sk_test_hunter2:", &["hunter2"]);
+        assert_hidden("curl https://x -u :hunter2token", &["hunter2token"]);
+        assert_hidden("curl https://x --user=:hunter2", &["hunter2"]);
+        assert_hidden("curl https://x -u \"bob:hunter2\"", &["hunter2"]);
+        assert_eq!(
+            tail_redacted("curl -u bob https://example.com", 1),
+            "curl -u bob https://example.com"
+        );
     }
 
     #[test]
