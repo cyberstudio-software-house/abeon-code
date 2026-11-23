@@ -13,6 +13,8 @@ export type DeploySlice = {
   dismissTracking: (id: number) => Promise<void>;
 };
 
+let loadSequence = 0;
+
 export const createDeploySlice: StateCreator<DeploySlice> = (set, get) => ({
   repoFlowsByProject: {},
   trackings: [],
@@ -29,7 +31,10 @@ export const createDeploySlice: StateCreator<DeploySlice> = (set, get) => ({
     await get().loadRepoFlows(projectId);
   },
   loadTrackings: async () => {
-    set({ trackings: await tauri.deployListTrackings() });
+    loadSequence += 1;
+    const token = loadSequence;
+    const trackings = await tauri.deployListTrackings();
+    if (token === loadSequence) set({ trackings });
   },
   retryTracking: async (id) => {
     await tauri.deployRetry(id);

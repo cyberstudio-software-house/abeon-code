@@ -1,13 +1,13 @@
 import { useMemo } from 'react';
 import { useStore } from '../../store';
-import { visibleViews } from '../../lib/deployStatus';
+import { pausedViews } from '../../lib/deployStatus';
 import { Icon } from '../shared/Icon';
 import { openPipeline } from './openPipeline';
 
 export function DeployBanner({ projectId }: { projectId: number | null }) {
   const trackings = useStore(s => s.trackings);
   const paused = useMemo(
-    () => (projectId === null ? [] : visibleViews(trackings, projectId).filter(view => view.tracking.state === 'paused')),
+    () => (projectId === null ? [] : pausedViews(trackings, projectId)),
     [trackings, projectId],
   );
   if (paused.length === 0) return null;

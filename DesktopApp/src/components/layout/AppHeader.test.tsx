@@ -108,7 +108,23 @@ describe('AppHeader', () => {
       useStore.setState({ trackings: [makeView({ state: 'paused', runUrl: 'https://ci.example/run/1' }, [1])] });
       render(<AppHeader variant={{ kind: 'main' }} />);
       expect(screen.getByText('Pipeline czeka na Twoją akceptację')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'api: Pipeline czeka na Ciebie' })).toHaveTextContent('Pipeline czeka na Ciebie');
+      expect(screen.getByRole('button', { name: 'api: Pipeline czeka na Ciebie' })).not.toHaveTextContent('Pipeline czeka na Ciebie');
+    });
+
+    it('labels the chip when no banner is shown', () => {
+      seed([liveSession]);
+      useStore.setState({ trackings: [makeView({ state: 'failed' }, [1])] });
+      render(<AppHeader variant={{ kind: 'main' }} />);
+      expect(screen.getByRole('button', { name: 'api: Wdrożenie nie powiodło się' })).toHaveTextContent('Wdrożenie nie powiodło się');
+    });
+
+    it('keeps the paused accent pill with a blocker set', () => {
+      seed([liveSession]);
+      useStore.setState({
+        trackings: [makeView({ state: 'paused', clusterBlocker: { type: 'clusterUnreachable' } }, [1])],
+      });
+      render(<AppHeader variant={{ kind: 'main' }} />);
+      expect(screen.getByRole('button', { name: 'api: Pipeline czeka na Ciebie' })).toHaveClass('bg-accent');
     });
 
     it('shows nothing for a project without trackings', () => {

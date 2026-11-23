@@ -3,7 +3,10 @@ import { makeTracking, makeView } from '../test-helpers/deploy';
 import {
   failureSummary,
   imageCarriesBuildNumber,
+  openBlocker,
+  pausedViews,
   projectTracking,
+  stageLines,
   shownBlocker,
   singleLineForTerminal,
   trackingLabel,
@@ -40,6 +43,17 @@ describe('trackingLabel and trackingTone', () => {
     const tracking = makeTracking({ state: 'delivering', clusterBlocker: TOOL_BLOCKER });
     expect(trackingLabel(tracking)).toBe('Nie mogę sprawdzić');
     expect(trackingTone(tracking)).toBe('problem');
+  });
+
+  it.each([
+    ['a cluster blocker', { clusterBlocker: CLUSTER_BLOCKER }],
+    ['a CI tool blocker', { ciBlocker: TOOL_BLOCKER }],
+  ])('keeps the paused label and tone with %s', (_name, blockers) => {
+    const tracking = makeTracking({ state: 'paused', ...blockers });
+    expect(trackingLabel(tracking)).toBe('Pipeline czeka na Ciebie');
+    expect(trackingTone(tracking)).toBe('attention');
+    expect(trackingPriority(tracking)).toBe(trackingPriority(makeTracking({ state: 'paused' })));
+    expect(openBlocker(tracking)).not.toBeNull();
   });
 
   it('ignores a blocker on a closed tracking', () => {
@@ -109,6 +123,89 @@ describe('projectTracking', () => {
     const older = makeView({ id: 1, state: 'building', startedAt: 10 });
     const newer = makeView({ id: 2, state: 'building', startedAt: 20 });
     expect(projectTracking([older, newer], 1)?.top).toBe(newer);
+  });
+});
+
+describe('pausedViews', () => {
+  it('lists only paused, visible views of the project', () => {
+    const paused = makeView({ id: 1, state: 'paused', repoPath: '/a' });
+    const views = [
+      paused,
+      makeView({ id: 2, state: 'building', repoPath: '/b' }),
+      makeView({ id: 3, state: 'paused', repoPath: '/c' }, [2]),
+      makeView({ id: 4, state: 'paused', repoPath: '/d', dismissed: true }),
+    ];
+    expect(pausedViews(views, 1)).toEqual([paused]);
+  });
+});
+
+describe('stageLines', () => {
+  const at = (hours: number, minutes: number, day = new Date()) => {
+    const date = new Date(day);
+    date.setHours(hours, minutes, 0, 0);
+    return date.getTime();
+  };
+  const NOW = at(15, 0);
+
+  it('has no build line for a stall from waitingForRun', () => {
+    const tracking = makeTracking({ state: 'stalled', startedAt: at(10, 0), finishedAt: at(11, 0), runId: null });
+    expect(stageLines(tracking, NOW)).toEqual([]);
+  });
+
+  it('shows an ongoing build once a run was seen', () => {
+    const tracking = makeTracking({ state: 'building', runId: '12', startedAt: at(10, 0) });
+    expect(stageLines(tracking, NOW)).toEqual(['Budowanie: 10:00 – trwa']);
+  });
+
+  it('shows the build and an ongoing delivery', () => {
+    const tracking = makeTracking({
+      state: 'delivering', runId: '12', startedAt: at(10, 0), buildFinishedAt: at(10, 5),
+    });
+    expect(stageLines(tracking, NOW)).toEqual(['Budowanie: 10:00 – 10:05', 'Wdrażanie na klaster: 10:05 – trwa']);
+  });
+
+  it('shows a closed delivery that ran after the build', () => {
+    const tracking = makeTracking({
+      state: 'succeeded', runId: '12', startedAt: at(10, 0), buildFinishedAt: at(10, 5), finishedAt: at(10, 9),
+    });
+    expect(stageLines(tracking, NOW)).toEqual(['Budowanie: 10:00 – 10:05', 'Wdrażanie na klaster: 10:05 – 10:09']);
+  });
+
+  it('has no zero-length delivery line when the tracking closed with the build', () => {
+    const tracking = makeTracking({
+      state: 'succeeded', runId: '12', startedAt: at(10, 0), buildFinishedAt: at(10, 5), finishedAt: at(10, 5),
+    });
+    expect(stageLines(tracking, NOW)).toEqual(['Budowanie: 10:00 – 10:05']);
+  });
+
+  it('has no delivery line for a build failure that closed after the build ended', () => {
+    const tracking = makeTracking({
+      state: 'failed',
+      runId: '12',
+      startedAt: at(10, 0),
+      buildFinishedAt: at(10, 5),
+      finishedAt: at(10, 6),
+      failure: { stage: 'build', reason: 'tests', logExcerpt: null },
+    });
+    expect(stageLines(tracking, NOW)).toEqual(['Budowanie: 10:00 – 10:05']);
+  });
+
+  it('closes an unfinished build line at the end of a stalled tracking', () => {
+    const tracking = makeTracking({ state: 'stalled', runId: '12', startedAt: at(10, 0), finishedAt: at(12, 0) });
+    expect(stageLines(tracking, NOW)).toEqual(['Budowanie: 10:00 – 12:00']);
+  });
+
+  it('adds the date to every time of a tracking that did not start today', () => {
+    const yesterday = new Date(NOW - 36 * 3_600_000);
+    const day = String(yesterday.getDate()).padStart(2, '0');
+    const month = String(yesterday.getMonth() + 1).padStart(2, '0');
+    const tracking = makeTracking({
+      state: 'delivering', runId: '12', startedAt: at(10, 0, yesterday), buildFinishedAt: at(10, 5, yesterday),
+    });
+    expect(stageLines(tracking, NOW)).toEqual([
+      `Budowanie: ${day}.${month} 10:00 – ${day}.${month} 10:05`,
+      `Wdrażanie na klaster: ${day}.${month} 10:05 – trwa`,
+    ]);
   });
 });
 

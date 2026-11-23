@@ -3,50 +3,27 @@ import { toast } from 'sonner';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
-import { formatClock } from '../../lib/formatClock';
 import {
+  TONE_DOT,
   failureSummary,
   imageCarriesBuildNumber,
   isOpenTracking,
+  openBlocker,
   shortCommit,
-  shownBlocker,
   singleLineForTerminal,
+  stageLines,
   stageWord,
   trackingLabel,
   trackingTone,
   visibleViews,
-  type DeployTone,
 } from '../../lib/deployStatus';
-import type { Blocker, Tracking, TrackingView } from '../../types';
+import type { Blocker, TrackingView } from '../../types';
 import type { Tab } from '../../store/tabsSlice';
 import { selectPaneOfTab } from '../../store/panesSlice';
 import { Icon } from '../shared/Icon';
 import { openPipeline } from './openPipeline';
 
 type SessionTab = Extract<Tab, { kind: 'session' }>;
-
-const TONE_DOT: Record<DeployTone, string> = {
-  running: 'bg-accent activity-pulse',
-  attention: 'bg-accent',
-  problem: 'bg-danger',
-  done: 'bg-success',
-  muted: 'bg-muted',
-};
-
-function timeRange(start: number, end: number | null, ongoing: boolean): string {
-  if (end !== null) return `${formatClock(start)} – ${formatClock(end)}`;
-  return `${formatClock(start)} – ${ongoing ? 'trwa' : '—'}`;
-}
-
-function stageLines(tracking: Tracking): string[] {
-  const open = isOpenTracking(tracking);
-  const buildEnd = tracking.buildFinishedAt ?? (open ? null : tracking.finishedAt);
-  const lines = [`Budowanie: ${timeRange(tracking.startedAt, buildEnd, open)}`];
-  if (tracking.buildFinishedAt !== null) {
-    lines.push(`Wdrażanie: ${timeRange(tracking.buildFinishedAt, open ? null : tracking.finishedAt, open)}`);
-  }
-  return lines;
-}
 
 function blockerText(blocker: Blocker): string {
   if (blocker.type === 'clusterUnreachable') {
@@ -113,7 +90,8 @@ function TrackingBlock({ view, projectId, onClose }: { view: TrackingView; proje
   const dismissTracking = useStore(s => s.dismissTracking);
   const { tracking } = view;
   const open = isOpenTracking(tracking);
-  const blocker = shownBlocker(tracking);
+  const blocker = openBlocker(tracking);
+  const lines = stageLines(tracking);
   const tone = trackingTone(tracking);
   const summary = tracking.state === 'failed' ? failureSummary(tracking) : null;
 
@@ -131,9 +109,11 @@ function TrackingBlock({ view, projectId, onClose }: { view: TrackingView; proje
         <span className="ml-auto shrink-0 text-[12px] font-medium text-fg-secondary">{trackingLabel(tracking)}</span>
       </div>
 
-      <ul className="flex flex-col gap-0.5 text-[12px] text-fg-secondary">
-        {stageLines(tracking).map(line => <li key={line}>{line}</li>)}
-      </ul>
+      {lines.length > 0 && (
+        <ul className="flex flex-col gap-0.5 text-[12px] text-fg-secondary">
+          {lines.map(line => <li key={line}>{line}</li>)}
+        </ul>
+      )}
 
       {imageCarriesBuildNumber(tracking) && (
         <p className="text-[12px] text-success">{`Obraz zawiera numer builda ${tracking.buildNumber}`}</p>

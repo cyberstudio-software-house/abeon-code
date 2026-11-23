@@ -36,18 +36,49 @@ describe('DeployDetailsDialog', () => {
   const renderDialog = (onClose = vi.fn()) => render(<DeployDetailsDialog projectId={1} onClose={onClose} />);
 
   it('shows the repository, the short commit and the stage times', () => {
+    const today = (hours: number, minutes: number) => {
+      const date = new Date();
+      date.setHours(hours, minutes, 0, 0);
+      return date.getTime();
+    };
     useStore.setState({
       trackings: [makeView({
         state: 'delivering',
-        startedAt: new Date(2026, 10, 23, 10, 0).getTime(),
-        buildFinishedAt: new Date(2026, 10, 23, 10, 5).getTime(),
+        runId: '12',
+        startedAt: today(10, 0),
+        buildFinishedAt: today(10, 5),
       })],
     });
     renderDialog();
     expect(screen.getByText('api')).toBeInTheDocument();
     expect(screen.getByText('abcdef1')).toBeInTheDocument();
-    expect(screen.getByText(/Budowanie: 10:00 – 10:05/)).toBeInTheDocument();
-    expect(screen.getByText(/Wdrażanie: 10:05 – trwa/)).toBeInTheDocument();
+    expect(screen.getByText('Budowanie: 10:00 – 10:05')).toBeInTheDocument();
+    expect(screen.getByText('Wdrażanie na klaster: 10:05 – trwa')).toBeInTheDocument();
+  });
+
+  it('shows no stage line for a stall from waitingForRun and the date of an old tracking', () => {
+    useStore.setState({
+      trackings: [makeView({ id: 1, state: 'stalled', repoPath: '/a', startedAt: Date.now(), finishedAt: Date.now() })],
+    });
+    const { unmount } = renderDialog();
+    expect(screen.queryByText(/Budowanie:/)).toBeNull();
+    unmount();
+
+    const old = new Date(2020, 0, 5, 10, 0).getTime();
+    useStore.setState({ trackings: [makeView({ id: 2, state: 'building', runId: '3', startedAt: old })] });
+    renderDialog();
+    expect(screen.getByText('Budowanie: 05.01 10:00 – trwa')).toBeInTheDocument();
+  });
+
+  it('keeps the blocker text and the retry button for a paused tracking', async () => {
+    useStore.setState({
+      trackings: [makeView({ id: 9, state: 'paused', clusterBlocker: { type: 'clusterUnreachable' } })],
+    });
+    renderDialog();
+    expect(screen.getByText(/Nie mogę połączyć się z klastrem/)).toBeInTheDocument();
+    expect(screen.getByText('Pipeline czeka na Ciebie')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Spróbuj ponownie' }));
+    await waitFor(() => expect(tauri.deployRetry).toHaveBeenCalledWith(9));
   });
 
   it('opens the pipeline with the run url', () => {

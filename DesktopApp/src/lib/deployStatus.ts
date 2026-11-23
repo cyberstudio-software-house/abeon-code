@@ -1,4 +1,5 @@
 import type { Blocker, Tracking, TrackingView } from '../types';
+import { formatClock } from './formatClock';
 
 export type DeployTone = 'running' | 'attention' | 'problem' | 'done' | 'muted';
 
@@ -53,22 +54,33 @@ export function shownBlocker(tracking: Tracking): Blocker | null {
   return tracking.ciBlocker ?? tracking.clusterBlocker;
 }
 
-function openBlocker(tracking: Tracking): Blocker | null {
+export function openBlocker(tracking: Tracking): Blocker | null {
   return isOpenTracking(tracking) ? shownBlocker(tracking) : null;
 }
 
+function labelBlocker(tracking: Tracking): Blocker | null {
+  return tracking.state === 'paused' ? null : openBlocker(tracking);
+}
+
+export const TONE_DOT: Record<DeployTone, string> = {
+  running: 'bg-accent activity-pulse',
+  attention: 'bg-accent',
+  problem: 'bg-danger',
+  done: 'bg-success',
+  muted: 'bg-muted',
+};
+
 export function trackingTone(tracking: Tracking): DeployTone {
-  return openBlocker(tracking) ? 'problem' : STATE_TONE[tracking.state];
+  return labelBlocker(tracking) ? 'problem' : STATE_TONE[tracking.state];
 }
 
 export function trackingLabel(tracking: Tracking): string {
-  const blocker = openBlocker(tracking);
+  const blocker = labelBlocker(tracking);
   return blocker ? BLOCKER_LABEL[blocker.type] : STATE_LABEL[tracking.state];
 }
 
 export function trackingPriority(tracking: Tracking): number {
-  if (tracking.state === 'paused' || !isOpenTracking(tracking)) return STATE_PRIORITY[tracking.state];
-  return openBlocker(tracking) ? BLOCKER_PRIORITY : STATE_PRIORITY[tracking.state];
+  return labelBlocker(tracking) ? BLOCKER_PRIORITY : STATE_PRIORITY[tracking.state];
 }
 
 export function compareViewsByNeed(a: TrackingView, b: TrackingView): number {
@@ -83,6 +95,10 @@ export function visibleViews(views: TrackingView[], projectId: number): Tracking
   return views
     .filter(view => view.projectIds.includes(projectId) && !view.tracking.dismissed)
     .sort(compareViewsByNeed);
+}
+
+export function pausedViews(views: TrackingView[], projectId: number): TrackingView[] {
+  return visibleViews(views, projectId).filter(view => view.tracking.state === 'paused');
 }
 
 export function projectTracking(
@@ -115,6 +131,48 @@ export function singleLineForTerminal(text: string): string {
     .map(line => line.replace(/\t/g, ' ').replace(CONTROL_CHARACTERS, '').trim())
     .filter(line => line.length > 0)
     .join(' ');
+}
+
+const pad = (value: number) => String(value).padStart(2, '0');
+
+function sameDay(first: Date, second: Date): boolean {
+  return first.getFullYear() === second.getFullYear()
+    && first.getMonth() === second.getMonth()
+    && first.getDate() === second.getDate();
+}
+
+function stageTime(timestamp: number, withDate: boolean): string {
+  const date = new Date(timestamp);
+  const clock = formatClock(timestamp);
+  return withDate ? `${pad(date.getDate())}.${pad(date.getMonth() + 1)} ${clock}` : clock;
+}
+
+function stageRange(start: number, end: number | null, ongoing: boolean, withDate: boolean): string {
+  const from = stageTime(start, withDate);
+  if (end !== null) return `${from} – ${stageTime(end, withDate)}`;
+  return `${from} – ${ongoing ? 'trwa' : '—'}`;
+}
+
+function reachedDelivery(tracking: Tracking): boolean {
+  if (tracking.state === 'delivering') return true;
+  if (isOpenTracking(tracking)) return false;
+  const { buildFinishedAt, finishedAt } = tracking;
+  if (buildFinishedAt === null || finishedAt === null || finishedAt <= buildFinishedAt) return false;
+  return tracking.failure?.stage !== 'build';
+}
+
+export function stageLines(tracking: Tracking, now: number = Date.now()): string[] {
+  const open = isOpenTracking(tracking);
+  const withDate = !sameDay(new Date(tracking.startedAt), new Date(now));
+  const lines: string[] = [];
+  if (tracking.runId !== null || tracking.buildFinishedAt !== null) {
+    const buildEnd = tracking.buildFinishedAt ?? (open ? null : tracking.finishedAt);
+    lines.push(`Budowanie: ${stageRange(tracking.startedAt, buildEnd, open, withDate)}`);
+  }
+  if (reachedDelivery(tracking) && tracking.buildFinishedAt !== null) {
+    lines.push(`Wdrażanie na klaster: ${stageRange(tracking.buildFinishedAt, open ? null : tracking.finishedAt, open, withDate)}`);
+  }
+  return lines;
 }
 
 export function failureSummary(tracking: Tracking): string | null {

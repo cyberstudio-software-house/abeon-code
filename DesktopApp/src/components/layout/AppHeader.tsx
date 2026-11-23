@@ -3,6 +3,7 @@ import { getProjectColor } from '../../lib/projectColors';
 import { SETTINGS_CATEGORIES } from '../../lib/settingsCategories';
 import { HeaderProjectRow } from '../center/HeaderProjectRow';
 import { usePaneTabs } from '../center/PaneBar';
+import { pausedViews } from '../../lib/deployStatus';
 import { DeployBanner } from '../deploy/DeployBanner';
 import { DeployStatusChip } from '../deploy/DeployStatusChip';
 
@@ -75,11 +76,12 @@ function HeaderDeploy({ fixedProjectId }: { fixedProjectId: number | null }) {
   const focusedPaneId = useStore(s => s.focusedPaneId);
   const { selectedProjectId } = usePaneTabs(focusedPaneId);
   const projectId = fixedProjectId ?? selectedProjectId;
+  const bannerShown = useStore(s => projectId !== null && pausedViews(s.trackings, projectId).length > 0);
   if (projectId === null) return null;
   return (
     <>
       <DeployBanner projectId={projectId} />
-      <DeployStatusChip projectId={projectId} showLabel />
+      <DeployStatusChip projectId={projectId} showLabel={!bannerShown} />
     </>
   );
 }

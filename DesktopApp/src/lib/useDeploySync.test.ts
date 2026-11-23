@@ -33,13 +33,41 @@ describe('useDeploySync', () => {
     expect(list).toHaveBeenCalledTimes(2);
   });
 
+  it('attaches the listener before the first load', async () => {
+    const order: string[] = [];
+    vi.mocked(tauri.onDeployChanged).mockImplementation(async (cb) => {
+      order.push('listen');
+      emit = cb;
+      return unlisten;
+    });
+    vi.spyOn(tauri, 'deployListTrackings').mockImplementation(async () => {
+      order.push('load');
+      return [];
+    });
+    renderHook(() => useDeploySync());
+    await waitFor(() => expect(order).toEqual(['listen', 'load']));
+  });
+
   it('stops listening on unmount', async () => {
     vi.spyOn(tauri, 'deployListTrackings').mockResolvedValue([]);
     const { unmount } = renderHook(() => useDeploySync());
-    await waitFor(() => expect(tauri.onDeployChanged).toHaveBeenCalled());
-    await act(async () => { await Promise.resolve(); });
+    await waitFor(() => expect(tauri.deployListTrackings).toHaveBeenCalled());
     unmount();
     expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('unlistens when unmounted before the listener is attached and does not load', async () => {
+    let resolveListen: (fn: () => void) => void = () => {};
+    vi.mocked(tauri.onDeployChanged).mockImplementation(
+      () => new Promise<() => void>(resolve => { resolveListen = resolve; }),
+    );
+    const list = vi.spyOn(tauri, 'deployListTrackings').mockResolvedValue([]);
+    const { unmount } = renderHook(() => useDeploySync());
+    unmount();
+    expect(unlisten).not.toHaveBeenCalled();
+    await act(async () => { resolveListen(unlisten); });
+    expect(unlisten).toHaveBeenCalledTimes(1);
+    expect(list).not.toHaveBeenCalled();
   });
 
   it('survives a failing load', async () => {
@@ -48,5 +76,15 @@ describe('useDeploySync', () => {
     renderHook(() => useDeploySync());
     await waitFor(() => expect(error).toHaveBeenCalled());
     expect(useStore.getState().trackings).toEqual([]);
+  });
+
+  it('still loads when the listener cannot be attached', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.mocked(tauri.onDeployChanged).mockRejectedValue(new Error('no listener'));
+    const loaded = [makeView({ id: 5 })];
+    vi.spyOn(tauri, 'deployListTrackings').mockResolvedValue(loaded);
+    renderHook(() => useDeploySync());
+    await waitFor(() => expect(useStore.getState().trackings).toEqual(loaded));
+    expect(error).toHaveBeenCalled();
   });
 });

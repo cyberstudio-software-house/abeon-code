@@ -58,6 +58,16 @@ describe('DeployStatusChip', () => {
     expect(chip).toHaveTextContent('Pipeline czeka na Ciebie');
   });
 
+  it('keeps the paused accent pill when a blocker is set', () => {
+    useStore.setState({
+      trackings: [makeView({ state: 'paused', clusterBlocker: { type: 'clusterUnreachable' } })],
+    });
+    render(<DeployStatusChip projectId={1} showLabel />);
+    const chip = screen.getByRole('button');
+    expect(chip).toHaveClass('bg-accent');
+    expect(chip).toHaveTextContent('Pipeline czeka na Ciebie');
+  });
+
   it('opens the details dialog on click', () => {
     useStore.setState({ trackings: [makeView({ state: 'building' })] });
     render(<DeployStatusChip projectId={1} />);

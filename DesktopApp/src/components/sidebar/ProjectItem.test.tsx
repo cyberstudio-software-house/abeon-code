@@ -7,9 +7,18 @@ vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
 import { makeView } from '../../test-helpers/deploy';
+import type { Project } from '../../types';
 import { ProjectItem } from './ProjectItem';
 
-const project = { id: 1, name: 'Alfa', path: '/a', color: null } as never;
+const project: Project = {
+  id: 1,
+  name: 'Alfa',
+  path: '/a',
+  claudeDir: '/a/.claude',
+  color: null,
+  sortOrder: 0,
+  createdAt: 0,
+};
 
 describe('ProjectItem deployment status', () => {
   beforeEach(() => {

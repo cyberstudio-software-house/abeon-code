@@ -1,17 +1,9 @@
 import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from '../../store';
-import { projectTracking, trackingLabel, trackingTone, type DeployTone } from '../../lib/deployStatus';
+import { TONE_DOT, projectTracking, trackingLabel, trackingTone, type DeployTone } from '../../lib/deployStatus';
 import { Icon } from '../shared/Icon';
 import { DeployDetailsDialog } from './DeployDetailsDialog';
-
-const TONE_DOT: Record<DeployTone, string> = {
-  running: 'bg-accent activity-pulse',
-  attention: 'bg-accent',
-  problem: 'bg-danger',
-  done: 'bg-success',
-  muted: 'bg-muted',
-};
 
 const TONE_TEXT: Record<DeployTone, string> = {
   running: 'text-accent',

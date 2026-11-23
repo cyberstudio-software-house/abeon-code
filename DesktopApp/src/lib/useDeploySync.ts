@@ -11,13 +11,17 @@ export function useDeploySync() {
         console.error('[deploy] loading trackings failed', error);
       });
     };
-    reload();
-    tauri.onDeployChanged(reload)
-      .then(fn => {
+    const start = async () => {
+      try {
+        const fn = await tauri.onDeployChanged(reload);
         if (disposed) fn();
         else unlisten = fn;
-      })
-      .catch(error => console.error('[deploy] change listener failed', error));
+      } catch (error) {
+        console.error('[deploy] change listener failed', error);
+      }
+      if (!disposed) reload();
+    };
+    void start();
     return () => {
       disposed = true;
       if (unlisten) unlisten();
