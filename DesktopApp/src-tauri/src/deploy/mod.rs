@@ -1,5 +1,8 @@
+pub mod ci;
 pub mod detect;
+pub mod excerpt;
 pub mod repos;
+pub mod runner;
 pub mod validate;
 
 #[cfg(test)]
