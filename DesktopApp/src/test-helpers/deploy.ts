@@ -24,6 +24,7 @@ export function makeTracking(overrides: Partial<Tracking> = {}): Tracking {
     dismissed: false,
     hasBuild: true,
     hasDelivery: true,
+    deliveryKey: null,
     ...overrides,
   };
 }

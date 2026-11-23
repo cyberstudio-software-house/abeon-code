@@ -225,6 +225,39 @@ pub struct TrackingFailure {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
 #[ts(export, export_to = "../../src/types/")]
 #[serde(rename_all = "camelCase")]
+pub struct DeliveryKey {
+    pub delivery: Delivery,
+    pub namespace: String,
+    pub workloads: Vec<String>,
+    pub kube_context: Option<String>,
+}
+
+impl DeliveryKey {
+    pub fn of(flow: &DeployFlow) -> DeliveryKey {
+        let mut workloads: Vec<String> = flow
+            .workloads
+            .iter()
+            .map(|workload| workload.trim().to_string())
+            .filter(|workload| !workload.is_empty())
+            .collect();
+        workloads.sort();
+        DeliveryKey {
+            delivery: flow.delivery,
+            namespace: flow.namespace.trim().to_string(),
+            workloads,
+            kube_context: flow
+                .kube_context
+                .as_deref()
+                .map(str::trim)
+                .filter(|context| !context.is_empty())
+                .map(str::to_string),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
 pub struct Tracking {
     #[ts(type = "number")]
     pub id: i64,
@@ -257,6 +290,8 @@ pub struct Tracking {
     pub has_build: bool,
     #[serde(default = "default_true")]
     pub has_delivery: bool,
+    #[serde(default)]
+    pub delivery_key: Option<DeliveryKey>,
 }
 
 fn default_true() -> bool {
@@ -293,6 +328,7 @@ impl Tracking {
             dismissed: false,
             has_build: builds,
             has_delivery: flow.delivery != Delivery::None,
+            delivery_key: Some(DeliveryKey::of(flow)),
         }
     }
 
@@ -442,6 +478,41 @@ mod tests {
         let tracking: Tracking = serde_json::from_value(value).unwrap();
         assert!(tracking.has_build);
         assert!(tracking.has_delivery);
+    }
+
+    #[test]
+    fn the_delivery_key_sorts_the_workloads_and_trims_the_context() {
+        let mut flow = flow();
+        flow.namespace = " cs-app-hs ".to_string();
+        flow.workloads = vec![" worker".to_string(), "app".to_string(), "  ".to_string()];
+        flow.kube_context = Some("  ".to_string());
+        assert_eq!(
+            DeliveryKey::of(&flow),
+            DeliveryKey {
+                delivery: Delivery::Image,
+                namespace: "cs-app-hs".to_string(),
+                workloads: vec!["app".to_string(), "worker".to_string()],
+                kube_context: None,
+            }
+        );
+        flow.kube_context = Some(" prod ".to_string());
+        flow.workloads.reverse();
+        assert_eq!(DeliveryKey::of(&flow).kube_context.as_deref(), Some("prod"));
+        assert_eq!(
+            DeliveryKey::of(&flow).workloads,
+            vec!["app".to_string(), "worker".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_new_tracking_freezes_the_delivery_key_and_an_old_row_has_none() {
+        let tracking = Tracking::new(&flow(), "abc", 5);
+        assert_eq!(tracking.delivery_key, Some(DeliveryKey::of(&flow())));
+        let mut value = serde_json::to_value(&tracking).unwrap();
+        assert_eq!(value["deliveryKey"]["namespace"], json!("cs-app-hs"));
+        value.as_object_mut().unwrap().remove("deliveryKey");
+        let old: Tracking = serde_json::from_value(value).unwrap();
+        assert_eq!(old.delivery_key, None);
     }
 
     #[test]

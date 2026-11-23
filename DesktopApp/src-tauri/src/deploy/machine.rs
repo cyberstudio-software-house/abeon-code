@@ -2,7 +2,8 @@ use crate::deploy::ci::{CiObservation, CiRun, CiStatus, ToolProblem};
 use crate::deploy::cluster::{ClusterObservation, WorkloadState};
 use crate::deploy::{PAUSE_LIMIT, ROLLOUT_LIMIT, RUN_APPEAR_LIMIT};
 use crate::domain::deploy::{
-    Blocker, Delivery, DeployFlow, Tracking, TrackingFailure, TrackingStage, TrackingState,
+    Blocker, Delivery, DeliveryKey, DeployFlow, Tracking, TrackingFailure, TrackingStage,
+    TrackingState,
 };
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -89,6 +90,10 @@ pub fn advance(tracking: &Tracking, flow: &DeployFlow, observation: Observation,
     if !tracking.is_open() {
         return step;
     }
+    follow_delivery_switch(&mut step, flow, now);
+    if !step.tracking.is_open() {
+        return step;
+    }
     match observation {
         Observation::Ci(ci) => observe_ci(&mut step, flow, ci, now),
         Observation::Cluster(cluster) => observe_cluster(&mut step, flow, cluster, now),
@@ -96,6 +101,47 @@ pub fn advance(tracking: &Tracking, flow: &DeployFlow, observation: Observation,
     }
     enforce_time_limit(&mut step, now);
     step
+}
+
+fn follow_delivery_switch(step: &mut Step, flow: &DeployFlow, now: i64) {
+    let tracking = &mut step.tracking;
+    let has_delivery = flow.delivery != Delivery::None;
+    if tracking.has_delivery == has_delivery {
+        return;
+    }
+    tracking.has_delivery = has_delivery;
+    if has_delivery {
+        return;
+    }
+    unblock(tracking, Side::Cluster, now);
+    if tracking.state != TrackingState::Delivering {
+        return;
+    }
+    if tracking.has_build {
+        close(tracking, TrackingState::Succeeded, now);
+        step.effects.push(Effect::Notify(NotifyKind::Succeeded));
+    } else {
+        close(tracking, TrackingState::Superseded, now);
+    }
+}
+
+fn follow_delivery_key(tracking: &mut Tracking, flow: &DeployFlow, now: i64) -> bool {
+    let key = DeliveryKey::of(flow);
+    match &tracking.delivery_key {
+        Some(current) if *current == key => false,
+        None => {
+            tracking.delivery_key = Some(key);
+            false
+        }
+        Some(_) => {
+            tracking.delivery_key = Some(key);
+            tracking.baseline_images = None;
+            tracking.baseline_at = None;
+            tracking.current_images = Vec::new();
+            unblock(tracking, Side::Cluster, now);
+            true
+        }
+    }
 }
 
 fn observe_ci(step: &mut Step, flow: &DeployFlow, observation: CiObservation, now: i64) {
@@ -155,6 +201,7 @@ fn observe_cluster(step: &mut Step, flow: &DeployFlow, observation: ClusterObser
     if !needs(&step.tracking, flow).cluster {
         return;
     }
+    let rebaselined = follow_delivery_key(&mut step.tracking, flow, now);
     let tracking = &mut step.tracking;
     match observation {
         ClusterObservation::Unreachable => {
@@ -175,7 +222,7 @@ fn observe_cluster(step: &mut Step, flow: &DeployFlow, observation: ClusterObser
                 tracking.baseline_at = Some(now);
             }
             tracking.current_images = images;
-            if tracking.state == TrackingState::Delivering {
+            if tracking.state == TrackingState::Delivering && !rebaselined {
                 judge_delivery(step, flow, &workloads, now);
             }
         }
@@ -1515,5 +1562,186 @@ mod tests {
     fn supersede_leaves_a_closed_tracking_alone() {
         let succeeded = closed(TrackingState::Succeeded);
         assert_eq!(supersede(&succeeded, t(500)), succeeded);
+    }
+
+    fn named(name: &str, images: &[&str], complete: bool) -> WorkloadState {
+        let mut state = workload(images, complete, Some(t(-3600)));
+        state.name = name.to_string();
+        state
+    }
+
+    #[test]
+    fn narrowing_the_workloads_mid_build_rebaselines_instead_of_reporting_a_rollout() {
+        let mut every = flow();
+        every.workloads = Vec::new();
+        let mut s = step(
+            Tracking::new(&every, "abc", t(0)),
+            &every,
+            cluster(ClusterObservation::Snapshot(vec![
+                named("app", &["app:1"], true),
+                named("redis", &["redis:7"], true),
+            ])),
+            t(1),
+        );
+        assert_eq!(
+            s.tracking.baseline_images,
+            Some(vec!["app:1".to_string(), "redis:7".to_string()])
+        );
+        s = step(s.tracking, &every, ci(CiStatus::Running), t(15));
+
+        let mut narrowed = every.clone();
+        narrowed.workloads = vec!["app".to_string()];
+        let only_app = || cluster(ClusterObservation::Snapshot(vec![named("app", &["app:1"], true)]));
+        s = step(s.tracking, &narrowed, only_app(), t(30));
+        assert_eq!(s.tracking.baseline_images, Some(vec!["app:1".to_string()]));
+        assert_eq!(s.tracking.baseline_at, Some(t(30)));
+        assert_eq!(s.tracking.delivery_key, Some(DeliveryKey::of(&narrowed)));
+
+        s = step(s.tracking, &narrowed, ci(CiStatus::Succeeded), t(300));
+        assert_eq!(s.tracking.state, TrackingState::Delivering);
+        s = step(s.tracking, &narrowed, only_app(), t(310));
+        assert_eq!(s.tracking.state, TrackingState::Delivering);
+        assert!(s.effects.is_empty());
+
+        s = step(
+            s.tracking,
+            &narrowed,
+            cluster(ClusterObservation::Snapshot(vec![named("app", &["app:2"], true)])),
+            t(320),
+        );
+        assert_eq!(s.tracking.state, TrackingState::Succeeded);
+        assert_eq!(s.effects, vec![Effect::Notify(NotifyKind::Succeeded)]);
+    }
+
+    #[test]
+    fn a_namespace_change_rebaselines_from_the_snapshot_and_clears_the_old_blocker() {
+        let f = flow();
+        let mut s = step(
+            Tracking::new(&f, "abc", t(0)),
+            &f,
+            cluster(snapshot(&["app:1"], true)),
+            t(1),
+        );
+        s = step(s.tracking, &f, ci(CiStatus::Succeeded), t(300));
+        s = step(
+            s.tracking,
+            &f,
+            cluster(ClusterObservation::Unavailable(kubectl_problem("nie znaleziono zasobu app"))),
+            t(310),
+        );
+        assert!(s.tracking.cluster_blocker.is_some());
+
+        let mut moved = f.clone();
+        moved.namespace = "cs-app-other".to_string();
+        s = step(s.tracking, &moved, cluster(snapshot(&["app:9"], true)), t(400));
+        assert_eq!(s.tracking.state, TrackingState::Delivering);
+        assert!(s.effects.is_empty());
+        assert_eq!(s.tracking.cluster_blocker, None);
+        assert_eq!(s.tracking.stage_started_at, t(400));
+        assert_eq!(s.tracking.baseline_images, Some(vec!["app:9".to_string()]));
+        assert_eq!(s.tracking.baseline_at, Some(t(400)));
+        assert_eq!(s.tracking.delivery_key, Some(DeliveryKey::of(&moved)));
+
+        s = step(s.tracking, &moved, cluster(snapshot(&["app:9"], true)), t(410));
+        assert_eq!(s.tracking.state, TrackingState::Delivering);
+        s = step(s.tracking, &moved, cluster(snapshot(&["app:10"], true)), t(420));
+        assert_eq!(s.tracking.state, TrackingState::Succeeded);
+    }
+
+    #[test]
+    fn a_key_change_seen_while_unreachable_drops_the_old_baseline() {
+        let f = flow();
+        let mut s = step(
+            Tracking::new(&f, "abc", t(0)),
+            &f,
+            cluster(snapshot(&["app:1"], true)),
+            t(1),
+        );
+        let mut moved = f.clone();
+        moved.kube_context = Some("prod".to_string());
+        s = step(s.tracking, &moved, cluster(ClusterObservation::Unreachable), t(20));
+        assert_eq!(s.tracking.baseline_images, None);
+        assert_eq!(s.tracking.cluster_blocker, Some(Blocker::ClusterUnreachable));
+        assert_eq!(s.tracking.delivery_key, Some(DeliveryKey::of(&moved)));
+        s = step(s.tracking, &moved, cluster(snapshot(&["app:5"], true)), t(40));
+        assert_eq!(s.tracking.baseline_images, Some(vec!["app:5".to_string()]));
+        assert_eq!(s.tracking.baseline_at, Some(t(40)));
+        s = step(s.tracking, &moved, ci(CiStatus::Succeeded), t(300));
+        s = step(s.tracking, &moved, cluster(snapshot(&["app:5"], true)), t(310));
+        assert_eq!(s.tracking.state, TrackingState::Delivering);
+    }
+
+    #[test]
+    fn an_old_tracking_without_a_key_takes_the_first_flow_it_sees() {
+        let f = flow();
+        let mut old = delivering(&f, t(300));
+        old.delivery_key = None;
+        old.baseline_images = Some(vec!["app:1".to_string()]);
+        old.baseline_at = Some(t(1));
+        let s = step(old, &f, cluster(snapshot(&["app:2"], true)), t(310));
+        assert_eq!(s.tracking.state, TrackingState::Succeeded);
+        assert_eq!(s.tracking.delivery_key, Some(DeliveryKey::of(&f)));
+    }
+
+    #[test]
+    fn switching_the_delivery_off_mid_build_ends_at_the_build_without_a_cluster_blocker() {
+        let f = flow();
+        let mut s = step(
+            Tracking::new(&f, "abc", t(0)),
+            &f,
+            cluster(ClusterObservation::Unreachable),
+            t(1),
+        );
+        s = step(s.tracking, &f, ci(CiStatus::Running), t(15));
+        assert_eq!(s.tracking.cluster_blocker, Some(Blocker::ClusterUnreachable));
+
+        let without = flow_delivering(Delivery::None);
+        s = step(s.tracking, &without, Observation::Tick, t(20));
+        assert_eq!(s.tracking.state, TrackingState::Building);
+        assert_eq!(s.tracking.cluster_blocker, None);
+        assert!(!s.tracking.has_delivery);
+        assert!(s.effects.is_empty());
+
+        s = step(s.tracking, &without, ci(CiStatus::Succeeded), t(300));
+        assert_eq!(s.tracking.state, TrackingState::Succeeded);
+        assert_eq!(s.tracking.cluster_blocker, None);
+        assert_eq!(s.effects, vec![Effect::Notify(NotifyKind::Succeeded)]);
+    }
+
+    #[test]
+    fn switching_the_delivery_off_while_delivering_finishes_by_the_build() {
+        let f = flow();
+        let mut tracking = delivering(&f, t(300));
+        tracking.cluster_blocker = Some(Blocker::ClusterUnreachable);
+        let without = flow_delivering(Delivery::None);
+        let s = step(tracking, &without, Observation::Tick, t(320));
+        assert_eq!(s.tracking.state, TrackingState::Succeeded);
+        assert_eq!(s.tracking.finished_at, Some(t(320)));
+        assert_eq!(s.tracking.cluster_blocker, None);
+        assert!(!s.tracking.has_delivery);
+        assert_eq!(s.effects, vec![Effect::Notify(NotifyKind::Succeeded)]);
+
+        let mut no_build = flow_building(BuildProvider::None);
+        let tracking = Tracking::new(&no_build, "abc", t(0));
+        no_build.build = BuildProvider::Bitbucket;
+        no_build.delivery = Delivery::None;
+        let s = step(tracking, &no_build, Observation::Tick, t(20));
+        assert_eq!(s.tracking.state, TrackingState::Superseded);
+        assert!(s.effects.is_empty());
+    }
+
+    #[test]
+    fn a_delivery_added_mid_build_is_followed_and_shown() {
+        let without = flow_delivering(Delivery::None);
+        let tracking = Tracking::new(&without, "abc", t(0));
+        assert!(!tracking.has_delivery);
+        let f = flow();
+        let mut s = step(tracking, &f, cluster(snapshot(&["app:1"], true)), t(10));
+        assert!(s.tracking.has_delivery);
+        assert_eq!(s.tracking.baseline_images, Some(vec!["app:1".to_string()]));
+        s = step(s.tracking, &f, ci(CiStatus::Succeeded), t(300));
+        assert_eq!(s.tracking.state, TrackingState::Delivering);
+        s = step(s.tracking, &f, cluster(snapshot(&["app:2"], true)), t(310));
+        assert_eq!(s.tracking.state, TrackingState::Succeeded);
     }
 }
