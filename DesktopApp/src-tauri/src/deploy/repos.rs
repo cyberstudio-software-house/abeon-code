@@ -3,7 +3,7 @@ use crate::git;
 use git2::Repository;
 use std::path::{Path, PathBuf};
 
-fn normalize(path: &Path) -> PathBuf {
+pub fn normalize(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.components().collect())
 }
 

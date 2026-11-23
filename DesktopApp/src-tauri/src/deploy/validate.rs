@@ -65,30 +65,30 @@ pub fn validate_flow(flow: &DeployFlow) -> Result<(), Vec<FlowError>> {
 
     if flow.build_repo.is_empty() {
         if flow.build != BuildProvider::None {
-            errors.push(error("buildRepo", "Repozytorium builda jest wymagane"));
+            errors.push(error("buildRepo", "Pole „Repozytorium (CI)” jest wymagane"));
         }
     } else if !build_repo_name().is_match(&flow.build_repo) {
-        errors.push(error("buildRepo", "Repozytorium builda musi mieć postać właściciel/nazwa"));
+        errors.push(error("buildRepo", "Pole „Repozytorium (CI)” musi mieć postać właściciel/nazwa"));
     }
 
     if flow.namespace.is_empty() {
         if flow.delivery != Delivery::None {
-            errors.push(error("namespace", "Przestrzeń nazw jest wymagana"));
+            errors.push(error("namespace", "Pole „Namespace” jest wymagane"));
         }
     } else if !namespace_name().is_match(&flow.namespace) {
-        errors.push(error("namespace", "Przestrzeń nazw zawiera niedozwolone znaki"));
+        errors.push(error("namespace", "Pole „Namespace” zawiera niedozwolone znaki"));
     }
 
     if flow.workloads.len() > MAX_WORKLOADS {
-        errors.push(error("workloads", "Zbyt wiele workloadów (maksymalnie 20)"));
+        errors.push(error("workloads", "Pole „Zasoby” może zawierać najwyżej 20 pozycji"));
     }
     if flow.workloads.iter().any(|workload| !workload_name().is_match(workload)) {
-        errors.push(error("workloads", "Nazwa workloadu zawiera niedozwolone znaki"));
+        errors.push(error("workloads", "Pole „Zasoby” zawiera niedozwolone znaki"));
     }
 
     if let Some(context) = &flow.kube_context {
         if !context.trim().is_empty() && !context_name().is_match(context) {
-            errors.push(error("kubeContext", "Kontekst klastra zawiera niedozwolone znaki"));
+            errors.push(error("kubeContext", "Pole „Kontekst kubectl” zawiera niedozwolone znaki"));
         }
     }
 
@@ -176,6 +176,49 @@ mod tests {
             let f = flow_with("kubeContext", value);
             assert_eq!(validate_flow(&f), Ok(()), "{value:?}");
         }
+    }
+
+    fn message_for(flow: &DeployFlow, field: &str) -> String {
+        validate_flow(flow)
+            .unwrap_err()
+            .into_iter()
+            .find(|e| e.field == field)
+            .map(|e| e.message)
+            .unwrap_or_else(|| panic!("no error for {field}"))
+    }
+
+    #[test]
+    fn messages_name_the_fields_by_their_labels_on_the_form() {
+        let mut f = flow();
+        f.build_repo = String::new();
+        f.namespace = String::new();
+        assert_eq!(message_for(&f, "buildRepo"), "Pole „Repozytorium (CI)” jest wymagane");
+        assert_eq!(message_for(&f, "namespace"), "Pole „Namespace” jest wymagane");
+
+        assert_eq!(
+            message_for(&flow_with("buildRepo", "ws/repo/../x"), "buildRepo"),
+            "Pole „Repozytorium (CI)” musi mieć postać właściciel/nazwa"
+        );
+        assert_eq!(
+            message_for(&flow_with("namespace", "x; rm -rf ~"), "namespace"),
+            "Pole „Namespace” zawiera niedozwolone znaki"
+        );
+        assert_eq!(
+            message_for(&flow_with("workloads", "App Name"), "workloads"),
+            "Pole „Zasoby” zawiera niedozwolone znaki"
+        );
+        let mut many = flow();
+        many.workloads = (0..21).map(|index| format!("w{index}")).collect();
+        assert_eq!(message_for(&many, "workloads"), "Pole „Zasoby” może zawierać najwyżej 20 pozycji");
+        assert_eq!(
+            message_for(&flow_with("kubeContext", "$(id)"), "kubeContext"),
+            "Pole „Kontekst kubectl” zawiera niedozwolone znaki"
+        );
+        assert_eq!(message_for(&flow_with("remote", ""), "remote"), "Pole „Zdalne repozytorium” jest wymagane");
+        assert_eq!(
+            message_for(&flow_with("productionBranch", "-f"), "productionBranch"),
+            "Pole „Gałąź produkcyjna” zawiera niedozwolone znaki"
+        );
     }
 
     #[test]

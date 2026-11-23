@@ -136,11 +136,11 @@ describe('DeployFlowSection', () => {
   });
 
   it('shows the backend validation message', async () => {
-    h.save.mockRejectedValue({ code: 'other', message: 'Przestrzeń nazw jest wymagana' });
+    h.save.mockRejectedValue({ code: 'other', message: 'Pole „Namespace” jest wymagane' });
     render(<DeployFlowSection projectId={1} />);
     fireEvent.click(await screen.findByText('Obraz + Bandzior/Argo'));
     fireEvent.click(screen.getByText('Zapisz przepływ'));
-    expect(await screen.findByText('Przestrzeń nazw jest wymagana')).toBeInTheDocument();
+    expect(await screen.findByText('Pole „Namespace” jest wymagane')).toBeInTheDocument();
     expect(screen.queryByText('Zapisano')).toBeNull();
   });
 
@@ -161,6 +161,58 @@ describe('DeployFlowSection', () => {
     fireEvent.click(screen.getByText('Usuń przepływ'));
     await waitFor(() => expect(h.remove).toHaveBeenCalledWith('/p/api'));
     await waitFor(() => expect(screen.queryByText('Usuń przepływ')).toBeNull());
+  });
+
+  it('does not send the build repository when the build is brak', async () => {
+    render(<DeployFlowSection projectId={1} />);
+    fireEvent.click(await screen.findByText('GitHub Actions'));
+    fireEvent.change(screen.getByLabelText('Repozytorium (CI)'), { target: { value: 'not a valid repo' } });
+    fireEvent.click(screen.getAllByText('brak')[0]);
+    fireEvent.click(screen.getByText('Zapisz przepływ'));
+    await waitFor(() => expect(h.save).toHaveBeenCalledTimes(1));
+    expect(h.save).toHaveBeenCalledWith(expect.objectContaining({ build: 'none', buildRepo: '' }));
+  });
+
+  it('does not send the cluster fields when delivery is brak', async () => {
+    render(<DeployFlowSection projectId={1} />);
+    fireEvent.click(await screen.findByText('Obraz + Bandzior/Argo'));
+    fireEvent.change(screen.getByLabelText('Namespace'), { target: { value: 'Bad Namespace' } });
+    fireEvent.change(screen.getByLabelText('Zasoby'), { target: { value: 'app, worker' } });
+    fireEvent.change(screen.getByLabelText('Kontekst kubectl'), { target: { value: 'prod' } });
+    fireEvent.click(screen.getAllByText('brak')[1]);
+    fireEvent.click(screen.getByText('Zapisz przepływ'));
+    await waitFor(() => expect(h.save).toHaveBeenCalledTimes(1));
+    expect(h.save).toHaveBeenCalledWith(expect.objectContaining({
+      delivery: 'none',
+      namespace: '',
+      workloads: [],
+      kubeContext: null,
+    }));
+  });
+
+  it('clears the saved marker and the form after the flow is removed', async () => {
+    const stored = { ...detected, namespace: 'cs-app-api', workloads: ['app'], kubeContext: 'prod', updatedAt: 5 };
+    h.list
+      .mockResolvedValueOnce([repo('/p/api', 'api', stored)])
+      .mockResolvedValueOnce([repo('/p/api', 'api', stored)])
+      .mockResolvedValue([repo('/p/api', 'api')]);
+    render(<DeployFlowSection projectId={1} />);
+    fireEvent.change(await screen.findByLabelText('Namespace'), { target: { value: 'cs-app-other' } });
+    fireEvent.click(screen.getByText('Zapisz przepływ'));
+    expect(await screen.findByText('Zapisano')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Usuń przepływ'));
+
+    await waitFor(() => expect(h.remove).toHaveBeenCalledWith('/p/api'));
+    await waitFor(() => expect(screen.queryByText('Zapisano')).toBeNull());
+    await waitFor(() => expect(screen.queryByText('Usuń przepływ')).toBeNull());
+    expect((screen.getByLabelText('Gałąź produkcyjna') as HTMLInputElement).value).toBe('main');
+    expect(screen.queryByLabelText('Namespace')).toBeNull();
+    expect(screen.queryByLabelText('Repozytorium (CI)')).toBeNull();
+    fireEvent.click(screen.getByText('Obraz + Bandzior/Argo'));
+    expect((screen.getByLabelText('Namespace') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Zasoby') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Kontekst kubectl') as HTMLInputElement).value).toBe('');
   });
 
   it('does not show the form when the repositories cannot be loaded', async () => {

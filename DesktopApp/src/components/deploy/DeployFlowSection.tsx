@@ -113,11 +113,11 @@ function FlowForm({ projectId, repo }: { projectId: number; repo: RepoFlow }) {
       ...draft,
       repoPath: repo.repoPath,
       remote: draft.remote.trim(),
-      buildRepo: draft.buildRepo.trim(),
+      buildRepo: draft.build === 'none' ? '' : draft.buildRepo.trim(),
       productionBranch: draft.productionBranch.trim(),
-      namespace: draft.namespace.trim(),
-      workloads: parseWorkloads(workloadsText),
-      kubeContext: draft.kubeContext?.trim() ? draft.kubeContext.trim() : null,
+      namespace: draft.delivery === 'none' ? '' : draft.namespace.trim(),
+      workloads: draft.delivery === 'none' ? [] : parseWorkloads(workloadsText),
+      kubeContext: draft.delivery !== 'none' && draft.kubeContext?.trim() ? draft.kubeContext.trim() : null,
     };
     setBusy(true);
     setError(null);
@@ -139,6 +139,9 @@ function FlowForm({ projectId, repo }: { projectId: number; repo: RepoFlow }) {
     setError(null);
     try {
       await deleteFlow(projectId, repo.repoPath);
+      setDraft(blankFlow(repo));
+      setWorkloadsText('');
+      setSaved(false);
     } catch (e) {
       setError(errorMessage(e));
     } finally {

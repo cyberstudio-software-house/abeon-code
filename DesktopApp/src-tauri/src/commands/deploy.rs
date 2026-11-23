@@ -1,6 +1,6 @@
 use crate::db::{deploy_flows_repo, deploy_trackings_repo, projects_repo, settings_repo};
 use crate::deploy::detect::detect_flow;
-use crate::deploy::repos::{is_known_repo, project_repos, projects_of_repo, repo_label};
+use crate::deploy::repos::{is_known_repo, normalize, project_repos, projects_of_repo, repo_label};
 use crate::deploy::runner::{shell_runner, CommandOutput, CommandRunner, RunError};
 use crate::deploy::tracker::DeployTracker;
 use crate::deploy::validate::validate_flow;
@@ -159,10 +159,11 @@ fn persist_flow(conn: &Connection, flow: DeployFlow) -> AppResult<DeployFlow> {
     deploy_flows_repo::upsert(conn, &flow)
 }
 
-fn ensure_known_repo(conn: &Connection, repo_path: &str) -> AppResult<()> {
+fn known_repo_path(conn: &Connection, repo_path: &str) -> AppResult<String> {
     let projects = projects_repo::list(conn)?;
-    if is_known_repo(&projects, Path::new(repo_path)) {
-        Ok(())
+    let path = Path::new(repo_path.trim());
+    if is_known_repo(&projects, path) {
+        Ok(normalize(path).to_string_lossy().to_string())
     } else {
         Err(AppError::InvalidPath {
             path: repo_path.to_string(),
@@ -195,7 +196,7 @@ fn tracking_views(conn: &Connection, trackings: Vec<Tracking>) -> AppResult<Vec<
 
 fn known_tracking(conn: &Connection, tracking_id: i64) -> AppResult<Tracking> {
     let tracking = deploy_trackings_repo::get(conn, tracking_id)?;
-    ensure_known_repo(conn, &tracking.repo_path)?;
+    known_repo_path(conn, &tracking.repo_path)?;
     Ok(tracking)
 }
 
@@ -221,11 +222,32 @@ pub fn deploy_list_repo_flows(state: State<AppState>, project_id: i64) -> AppRes
     repo_flows(&conn, &project)
 }
 
+fn detect_repo_flow(conn: &Connection, repo_path: &str) -> AppResult<DeployFlow> {
+    let canonical = known_repo_path(conn, repo_path)?;
+    Ok(detect_flow(Path::new(&canonical)))
+}
+
+fn save_flow(conn: &Connection, flow: DeployFlow) -> AppResult<DeployFlow> {
+    let repo_path = known_repo_path(conn, &flow.repo_path)?;
+    persist_flow(conn, DeployFlow { repo_path, ..flow })
+}
+
+fn delete_flow(conn: &Connection, repo_path: &str) -> AppResult<String> {
+    let canonical = known_repo_path(conn, repo_path)?;
+    deploy_flows_repo::delete(conn, &canonical)?;
+    Ok(canonical)
+}
+
+fn repo_history(conn: &Connection, repo_path: &str) -> AppResult<Vec<TrackingView>> {
+    let canonical = known_repo_path(conn, repo_path)?;
+    let history = deploy_trackings_repo::history(conn, &canonical, TRACKING_HISTORY)?;
+    tracking_views(conn, history)
+}
+
 #[tauri::command(async)]
 pub fn deploy_detect_flow(state: State<AppState>, repo_path: String) -> AppResult<DeployFlow> {
     let conn = state.db.get()?;
-    ensure_known_repo(&conn, &repo_path)?;
-    Ok(detect_flow(Path::new(&repo_path)))
+    detect_repo_flow(&conn, &repo_path)
 }
 
 #[tauri::command(async)]
@@ -236,8 +258,7 @@ pub fn deploy_save_flow(
     flow: DeployFlow,
 ) -> AppResult<DeployFlow> {
     let conn = state.db.get()?;
-    ensure_known_repo(&conn, flow.repo_path.trim())?;
-    let saved = persist_flow(&conn, flow)?;
+    let saved = save_flow(&conn, flow)?;
     tracker.flows_changed();
     announce_change(&app, &saved.repo_path);
     Ok(saved)
@@ -251,10 +272,9 @@ pub fn deploy_delete_flow(
     repo_path: String,
 ) -> AppResult<()> {
     let conn = state.db.get()?;
-    ensure_known_repo(&conn, &repo_path)?;
-    deploy_flows_repo::delete(&conn, &repo_path)?;
+    let canonical = delete_flow(&conn, &repo_path)?;
     tracker.flows_changed();
-    announce_change(&app, &repo_path);
+    announce_change(&app, &canonical);
     Ok(())
 }
 
@@ -271,9 +291,7 @@ pub fn deploy_tracking_history(
     repo_path: String,
 ) -> AppResult<Vec<TrackingView>> {
     let conn = state.db.get()?;
-    ensure_known_repo(&conn, &repo_path)?;
-    let history = deploy_trackings_repo::history(&conn, &repo_path, TRACKING_HISTORY)?;
-    tracking_views(&conn, history)
+    repo_history(&conn, &repo_path)
 }
 
 #[tauri::command(async)]
@@ -406,7 +424,7 @@ mod tests {
 
         let AppError::Other(message) = error else { panic!("expected AppError::Other") };
         assert!(message.contains("Gałąź produkcyjna"));
-        assert!(message.contains("Przestrzeń nazw"));
+        assert!(message.contains("Pole „Namespace” zawiera niedozwolone znaki"));
         assert!(message.contains("; "));
         assert!(deploy_flows_repo::get(&connection, "/r/a").unwrap().is_none());
     }
@@ -416,7 +434,7 @@ mod tests {
         let connection = conn();
         let dir = tempdir().unwrap();
         init_repo(&dir.path().join("api"));
-        let error = ensure_known_repo(&connection, dir.path().join("api").to_str().unwrap()).unwrap_err();
+        let error = known_repo_path(&connection, dir.path().join("api").to_str().unwrap()).unwrap_err();
         assert!(matches!(error, AppError::InvalidPath { .. }));
     }
 
@@ -622,12 +640,96 @@ mod tests {
         assert!(runner.calls().iter().all(|(program, _)| program != "nmcli"));
     }
 
+    #[cfg(unix)]
+    fn spellings_of(dir: &tempfile::TempDir) -> Vec<String> {
+        let alias = dir.path().parent().unwrap().join(format!(
+            "alias-{}",
+            dir.path().file_name().unwrap().to_string_lossy()
+        ));
+        std::os::unix::fs::symlink(dir.path().join("api"), &alias).unwrap();
+        vec![
+            format!("{}/", dir.path().join("api").display()),
+            format!("{}/./", dir.path().join("api").display()),
+            alias.to_string_lossy().to_string(),
+        ]
+    }
+
+    #[cfg(not(unix))]
+    fn spellings_of(dir: &tempfile::TempDir) -> Vec<String> {
+        vec![format!("{}\\", dir.path().join("api").display())]
+    }
+
+    fn canonical_of(dir: &tempfile::TempDir) -> String {
+        dir.path().join("api").canonicalize().unwrap().to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn a_flow_saved_under_another_spelling_is_stored_and_listed_under_the_canonical_path() {
+        let connection = conn();
+        let (dir, _, project_id) = registered_repo(&connection);
+        let canonical = canonical_of(&dir);
+        for spelling in spellings_of(&dir) {
+            let saved = save_flow(&connection, flow_at(&format!(" {spelling} "))).unwrap();
+            assert_eq!(saved.repo_path, canonical, "{spelling}");
+            let project = projects_repo::list(&connection)
+                .unwrap()
+                .into_iter()
+                .find(|project| project.id == project_id)
+                .unwrap();
+            let listed = repo_flows(&connection, &project).unwrap();
+            assert_eq!(
+                listed[0].flow.as_ref().map(|flow| flow.repo_path.as_str()),
+                Some(canonical.as_str()),
+                "{spelling}"
+            );
+        }
+    }
+
+    #[test]
+    fn deleting_under_another_spelling_removes_the_canonical_flow() {
+        let connection = conn();
+        let (dir, _, _) = registered_repo(&connection);
+        let canonical = canonical_of(&dir);
+        for spelling in spellings_of(&dir) {
+            save_flow(&connection, flow_at(&canonical)).unwrap();
+            let deleted = delete_flow(&connection, &spelling).unwrap();
+            assert_eq!(deleted, canonical);
+            assert!(deploy_flows_repo::get(&connection, &canonical).unwrap().is_none(), "{spelling}");
+        }
+    }
+
+    #[test]
+    fn detection_and_history_resolve_another_spelling_to_the_canonical_path() {
+        let connection = conn();
+        let (dir, _, _) = registered_repo(&connection);
+        let canonical = canonical_of(&dir);
+        stored(&connection, &canonical, TrackingState::Failed);
+        for spelling in spellings_of(&dir) {
+            assert_eq!(detect_repo_flow(&connection, &spelling).unwrap().repo_path, canonical, "{spelling}");
+            let history = repo_history(&connection, &spelling).unwrap();
+            assert_eq!(history.len(), 1, "{spelling}");
+            assert_eq!(history[0].tracking.repo_path, canonical);
+        }
+    }
+
+    #[test]
+    fn an_unknown_repository_is_refused_by_every_repository_command() {
+        let connection = conn();
+        let outside = tempdir().unwrap();
+        init_repo(outside.path());
+        let path = outside.path().to_str().unwrap();
+        assert!(matches!(save_flow(&connection, flow_at(path)), Err(AppError::InvalidPath { .. })));
+        assert!(matches!(delete_flow(&connection, path), Err(AppError::InvalidPath { .. })));
+        assert!(matches!(detect_repo_flow(&connection, path), Err(AppError::InvalidPath { .. })));
+        assert!(matches!(repo_history(&connection, path), Err(AppError::InvalidPath { .. })));
+    }
+
     #[test]
     fn accepts_a_repository_inside_a_registered_project() {
         let connection = conn();
         let dir = tempdir().unwrap();
         init_repo(&dir.path().join("api"));
         projects_repo::insert(&connection, "p", dir.path().to_str().unwrap(), "-p", None).unwrap();
-        assert!(ensure_known_repo(&connection, dir.path().join("api").to_str().unwrap()).is_ok());
+        assert!(known_repo_path(&connection, dir.path().join("api").to_str().unwrap()).is_ok());
     }
 }
