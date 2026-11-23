@@ -65,7 +65,7 @@ struct FlowInput {
     _updated_at: serde::de::IgnoredAny,
 }
 
-enum Target {
+pub(crate) enum Target {
     Repo(String),
     Repos(Vec<String>),
 }
@@ -100,7 +100,7 @@ fn outside(dir: &Path) -> String {
     format!("{} is not inside a repository of an AbeonCode project", dir.display())
 }
 
-fn target(conn: &Connection, dir: &Path) -> Result<Target, String> {
+pub(crate) fn target(conn: &Connection, dir: &Path) -> Result<Target, String> {
     let projects = projects_repo::list(conn).map_err(|error| error.to_string())?;
     if let Some(repo) = repo_for_dir(dir).filter(|repo| is_known_repo(&projects, repo)) {
         return Ok(Target::Repo(repo.to_string_lossy().to_string()));

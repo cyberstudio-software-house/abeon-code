@@ -34,6 +34,9 @@ pub fn run() {
     if let Some(code) = cli::flow::try_run(&std::env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
     }
+    if let Some(code) = cli::deploy::try_run(&std::env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     #[cfg(unix)]
     if let Some(code) = supervisor::entry::try_run_subcommand(&std::env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
