@@ -58,6 +58,7 @@ const view: ProposalView = {
 };
 
 const STALE = 'Przepływ zmienił się po propozycji — sprawdź w aplikacji';
+const CHANGED_NOTE = 'Przepływ zmienił się od czasu propozycji — lista zmian jest aktualna.';
 
 describe('FlowProposalCard', () => {
   beforeEach(() => {
@@ -77,6 +78,7 @@ describe('FlowProposalCard', () => {
       'Namespace: cs-app-api',
     ]);
     expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(CHANGED_NOTE)).toBeNull();
   });
 
   it('approves with Zatwierdź against the flow the card was rendered from', async () => {
@@ -105,9 +107,13 @@ describe('FlowProposalCard', () => {
     expect(h.toastError).not.toHaveBeenCalled();
   });
 
-  it('warns when its changes were recomputed against a flow saved after the proposal', () => {
+  it('notes calmly that the list was recomputed against a flow saved after the proposal and still approves it', async () => {
     render(<FlowProposalCard view={{ ...view, currentUpdatedAt: 900 }} />);
-    expect(screen.getByRole('alert')).toHaveTextContent(STALE);
+    expect(screen.getByText(CHANGED_NOTE)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByText(STALE)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Zatwierdź' }));
+    await waitFor(() => expect(h.resolve).toHaveBeenCalledWith('ab12cd34', true, 900));
   });
 
   it('reports a failed decision and lets the user try again', async () => {
