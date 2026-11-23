@@ -3,7 +3,10 @@
 Pomysły z przeglądu aplikacji i sposobu pracy z 2026-11-23, odłożone na później. Żaden nie ma
 jeszcze specyfikacji. Kolejność w pliku nie oznacza priorytetu.
 
-W realizacji (poza tym plikiem): polityki zgód per projekt oraz śledzenie wdrożenia po pushu.
+Stan na 2026-11-24: śledzenie wdrożenia po pushu jest zaimplementowane na lokalnym `main`
+(specyfikacja `specs/2026-11-23-deployment-tracking-design.md`, lista QA
+`specs/2026-11-23-deployment-tracking-qa-checklist.md`); jego pozostałości są w sekcji na końcu
+tego pliku. Polityki zgód per projekt czekają na własną specyfikację.
 
 Dane z historii promptów (60 dni przed 2026-11-23), na których opiera się uzasadnienie: mediana
 7 projektów dziennie, 21 przełączeń między projektami dziennie, 393 sesje z medianą 4 promptów,
@@ -97,3 +100,40 @@ braku, zanim polecenie się wywali.
 Decyzja 13 ze specyfikacji agenta sterującego (2026-10-28): telefon nie jest kanałem, a funkcja
 zdalnego sterowania (`remote/`, MobileApp) ma zostać usunięta jako osobny projekt. Rolę kanału
 zdalnego pełni Discord.
+
+## Śledzenie wdrożeń — pozostałości po implementacji
+
+Rzeczy znalezione w recenzjach i świadomie niepoprawione przed wydaniem (2026-11-24).
+
+Do sprawdzenia na żywo, bo nie dało się tego zweryfikować testami:
+- start pętli śledzenia w działającej aplikacji (nie ma testu automatycznego i nie była uruchomiona);
+- rozpoznanie wstrzymanego pipeline'u Bitbucketa (stan `PAUSED`) i pobranie logu nieudanego kroku,
+  na prawdziwym przebiegu w `hs-training`;
+- kliknięcie powiadomienia i przycisk z linkiem na Discordzie; wygląd w obu motywach;
+- budowanie i działanie na Windowsie i macOS.
+
+Drobna poprawka tekstu:
+- skill `abeon-deploy` (`cli/skill.rs`, okolice wiersza 245) nadal mówi, że zatwierdzenie w
+  aplikacji jest odrzucane jako nieaktualne; odrzuca tylko przycisk na Discordzie.
+
+Zachowanie do poprawy w kolejnej iteracji:
+- `abeon-code flow` i `deploy wait` nie działają w worktree gita;
+- pipeline Bitbucketa zatrzymany ręcznie (`STOPPED`) jest pokazywany jako nieudany;
+- na GitHubie liczą się też przebiegi innych zdarzeń niż push (harmonogram, ręczne uruchomienie);
+- okno edycji projektu ma dwa przyciski zapisu, a główny „Zapisz” gubi niezapisane zmiany przepływu;
+- śledzenie z trwałą przeszkodą (zła nazwa zasobu, wylogowane `bkt`) nie zamyka się samo;
+- środowisko powłoki pętli śledzenia jest wczytywane raz, przy starcie;
+- druga uruchomiona instancja aplikacji podwaja powiadomienia;
+- przy dwóch szybkich pushach łańcuch z obrazem może zgłosić „Wdrożono” dla drugiego, gdy na
+  klastrze jest obraz pierwszego (aplikacja nie wylicza oczekiwanego tagu);
+- propozycja przepływu złożona przy zamkniętej aplikacji albo przy obecnym użytkowniku nie trafia
+  później na Discord;
+- czas startu śledzenia jest brany przed odczytem reflogu, co w rzadkim przypadku daje fałszywe
+  „brak śledzenia” w `deploy wait`;
+- wykrywanie pushy nie działa dla repozytoriów z `core.logAllRefUpdates=false`, klonów jednej
+  gałęzi i formatu reftable, a interfejs tego nie sygnalizuje;
+- lista sesji w „Wyślij do sesji” obejmuje tylko zakładki bieżącego okna.
+
+Porządki w kodzie: zależność cykliczna `deploy/notify` ↔ `supervisor/runtime` oraz
+`deploy/proposals` ↔ `supervisor/discord`; kodowanie base64 w komponencie zamiast w `lib/tauri.ts`;
+test `spellings_of` zostawia dowiązania w `/tmp`; wersja przepływu to znacznik czasu, nie licznik.
