@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-pub(crate) const TOOL: &str = "kubectl";
+const TOOL: &str = "kubectl";
 const KUBECTL_TIMEOUT: Duration = Duration::from_secs(20);
 const REQUEST_TIMEOUT_FLAG: &str = "--request-timeout=10s";
 const POD_LOG_TAIL_FLAG: &str = "--tail=60";

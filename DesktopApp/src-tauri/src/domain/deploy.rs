@@ -181,7 +181,8 @@ pub struct Tracking {
     pub branch: String,
     pub commit: String,
     pub state: TrackingState,
-    pub blocker: Option<Blocker>,
+    pub ci_blocker: Option<Blocker>,
+    pub cluster_blocker: Option<Blocker>,
     pub run_id: Option<String>,
     pub run_url: Option<String>,
     #[ts(type = "number | null")]
@@ -216,7 +217,8 @@ impl Tracking {
             } else {
                 TrackingState::Delivering
             },
-            blocker: None,
+            ci_blocker: None,
+            cluster_blocker: None,
             run_id: None,
             run_url: None,
             build_number: None,
@@ -236,12 +238,54 @@ impl Tracking {
     pub fn is_open(&self) -> bool {
         self.state.is_open()
     }
+
+    pub fn blocker(&self) -> Option<&Blocker> {
+        let (owning, other) = match self.state {
+            TrackingState::Delivering => (&self.cluster_blocker, &self.ci_blocker),
+            _ => (&self.ci_blocker, &self.cluster_blocker),
+        };
+        owning.as_ref().or(other.as_ref())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deploy::test_support::flow;
     use serde_json::json;
+
+    fn tool_problem(tool: &str) -> Blocker {
+        Blocker::ToolUnavailable {
+            tool: tool.to_string(),
+            reason: "not logged in".to_string(),
+        }
+    }
+
+    #[test]
+    fn the_shown_blocker_is_the_one_of_the_side_that_owns_the_state() {
+        let mut tracking = Tracking::new(&flow(), "abc", 5);
+        assert_eq!(tracking.blocker(), None);
+
+        tracking.ci_blocker = Some(tool_problem("bkt"));
+        tracking.cluster_blocker = Some(Blocker::ClusterUnreachable);
+        for state in [
+            TrackingState::WaitingForRun,
+            TrackingState::Building,
+            TrackingState::Paused,
+        ] {
+            tracking.state = state;
+            assert_eq!(tracking.blocker(), Some(&tool_problem("bkt")), "{state:?}");
+        }
+        tracking.state = TrackingState::Delivering;
+        assert_eq!(tracking.blocker(), Some(&Blocker::ClusterUnreachable));
+
+        tracking.cluster_blocker = None;
+        assert_eq!(tracking.blocker(), Some(&tool_problem("bkt")));
+        tracking.state = TrackingState::WaitingForRun;
+        tracking.ci_blocker = None;
+        tracking.cluster_blocker = Some(Blocker::ClusterUnreachable);
+        assert_eq!(tracking.blocker(), Some(&Blocker::ClusterUnreachable));
+    }
 
     #[test]
     fn tracking_states_are_stored_under_their_wire_names() {
@@ -295,30 +339,25 @@ mod tests {
 
     #[test]
     fn a_tracking_round_trips_through_camel_case_json() {
-        let mut flow = DeployFlow {
-            repo_path: "/r/a".to_string(),
-            enabled: true,
-            remote: "origin".to_string(),
-            build: BuildProvider::Github,
-            build_repo: "o/r".to_string(),
-            production_branch: "main".to_string(),
-            delivery: Delivery::Image,
-            namespace: "cs-app-a".to_string(),
-            workloads: Vec::new(),
-            kube_context: None,
-            updated_at: 0,
-        };
+        let mut flow = flow();
         let mut tracking = Tracking::new(&flow, "abc", 5);
         tracking.failure = Some(TrackingFailure {
             stage: TrackingStage::Delivery,
             reason: "app-x: CrashLoopBackOff".to_string(),
             log_excerpt: Some("boom".to_string()),
         });
+        tracking.ci_blocker = Some(tool_problem("bkt"));
+        tracking.cluster_blocker = Some(Blocker::ClusterUnreachable);
         let value = serde_json::to_value(&tracking).unwrap();
         assert_eq!(value["state"], json!("waitingForRun"));
         assert_eq!(value["stageStartedAt"], json!(5));
         assert_eq!(value["failure"]["stage"], json!("delivery"));
         assert_eq!(value["failure"]["logExcerpt"], json!("boom"));
+        assert_eq!(value["ciBlocker"]["type"], json!("toolUnavailable"));
+        assert_eq!(
+            value["clusterBlocker"],
+            json!({ "type": "clusterUnreachable" })
+        );
         assert_eq!(serde_json::from_value::<Tracking>(value).unwrap(), tracking);
 
         flow.build = BuildProvider::None;

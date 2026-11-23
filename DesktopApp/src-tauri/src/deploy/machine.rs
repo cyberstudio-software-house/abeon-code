@@ -1,5 +1,5 @@
 use crate::deploy::ci::{CiObservation, CiRun, CiStatus, ToolProblem};
-use crate::deploy::cluster::{self, ClusterObservation, WorkloadState};
+use crate::deploy::cluster::{ClusterObservation, WorkloadState};
 use crate::deploy::{PAUSE_LIMIT, ROLLOUT_LIMIT, RUN_APPEAR_LIMIT};
 use crate::domain::deploy::{
     Blocker, Delivery, DeployFlow, Tracking, TrackingFailure, TrackingStage, TrackingState,
@@ -44,10 +44,23 @@ pub struct Needs {
     pub cluster: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Blocked {
+    pub ci: bool,
+    pub cluster: bool,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Side {
     Ci,
     Cluster,
+}
+
+pub fn blocked(tracking: &Tracking) -> Blocked {
+    Blocked {
+        ci: tracking.ci_blocker.is_some(),
+        cluster: tracking.cluster_blocker.is_some(),
+    }
 }
 
 pub fn needs(tracking: &Tracking, flow: &DeployFlow) -> Needs {
@@ -90,7 +103,9 @@ fn observe_ci(step: &mut Step, flow: &DeployFlow, observation: CiObservation, no
         return;
     }
     match observation {
-        CiObservation::Unavailable(problem) => block(&mut step.tracking, problem_blocker(problem)),
+        CiObservation::Unavailable(problem) => {
+            block(&mut step.tracking, Side::Ci, problem_blocker(problem))
+        }
         CiObservation::NoRun => unblock(&mut step.tracking, Side::Ci, now),
         CiObservation::Run(run) => {
             unblock(&mut step.tracking, Side::Ci, now);
@@ -143,13 +158,15 @@ fn observe_cluster(step: &mut Step, flow: &DeployFlow, observation: ClusterObser
     let tracking = &mut step.tracking;
     match observation {
         ClusterObservation::Unreachable => {
-            block(tracking, Blocker::ClusterUnreachable);
+            block(tracking, Side::Cluster, Blocker::ClusterUnreachable);
             if !tracking.vpn_attempted {
                 tracking.vpn_attempted = true;
                 step.effects.push(Effect::ConnectVpn);
             }
         }
-        ClusterObservation::Unavailable(problem) => block(tracking, problem_blocker(problem)),
+        ClusterObservation::Unavailable(problem) => {
+            block(tracking, Side::Cluster, problem_blocker(problem))
+        }
         ClusterObservation::Snapshot(workloads) => {
             unblock(tracking, Side::Cluster, now);
             let images = image_union(&workloads);
@@ -237,7 +254,7 @@ fn image_union(workloads: &[WorkloadState]) -> Vec<String> {
 
 fn enforce_time_limit(step: &mut Step, now: i64) {
     let tracking = &mut step.tracking;
-    if tracking.blocker.is_some() {
+    if slot(tracking, owning_side(tracking.state)).is_some() {
         return;
     }
     let limit = match tracking.state {
@@ -259,32 +276,34 @@ fn problem_blocker(problem: ToolProblem) -> Blocker {
     }
 }
 
-fn side_of(blocker: &Blocker) -> Side {
-    match blocker {
-        Blocker::ClusterUnreachable => Side::Cluster,
-        Blocker::ToolUnavailable { tool, .. } if tool == cluster::TOOL => Side::Cluster,
-        Blocker::ToolUnavailable { .. } => Side::Ci,
+fn slot(tracking: &mut Tracking, side: Side) -> &mut Option<Blocker> {
+    match side {
+        Side::Ci => &mut tracking.ci_blocker,
+        Side::Cluster => &mut tracking.cluster_blocker,
     }
 }
 
-fn block(tracking: &mut Tracking, blocker: Blocker) {
-    tracking.blocker = Some(blocker);
+fn block(tracking: &mut Tracking, side: Side, blocker: Blocker) {
+    *slot(tracking, side) = Some(blocker);
+}
+
+fn owning_side(state: TrackingState) -> Side {
+    match state {
+        TrackingState::Delivering => Side::Cluster,
+        _ => Side::Ci,
+    }
 }
 
 fn unblock(tracking: &mut Tracking, side: Side, now: i64) {
-    if tracking
-        .blocker
-        .as_ref()
-        .is_some_and(|blocker| side_of(blocker) == side)
-    {
-        tracking.blocker = None;
+    if slot(tracking, side).take().is_some() && side == owning_side(tracking.state) {
         tracking.stage_started_at = now;
     }
 }
 
 fn close(tracking: &mut Tracking, state: TrackingState, now: i64) {
     tracking.state = state;
-    tracking.blocker = None;
+    tracking.ci_blocker = None;
+    tracking.cluster_blocker = None;
     tracking.finished_at = Some(now);
 }
 
@@ -404,7 +423,8 @@ mod tests {
         assert_eq!(tracking.stage_started_at, t(0));
         assert_eq!(tracking.build_finished_at, None);
         assert_eq!(tracking.finished_at, None);
-        assert_eq!(tracking.blocker, None);
+        assert_eq!(tracking.ci_blocker, None);
+        assert_eq!(tracking.cluster_blocker, None);
         assert_eq!(tracking.baseline_images, None);
         assert!(tracking.current_images.is_empty());
         assert!(!tracking.vpn_attempted);
@@ -663,12 +683,13 @@ mod tests {
             t(10),
         );
         assert_eq!(
-            s.tracking.blocker,
+            s.tracking.ci_blocker,
             Some(Blocker::ToolUnavailable {
                 tool: "bkt".to_string(),
                 reason: "not logged in".to_string()
             })
         );
+        assert_eq!(s.tracking.cluster_blocker, None);
         assert_eq!(s.tracking.state, TrackingState::WaitingForRun);
         assert!(s.effects.is_empty());
         s = step(s.tracking, &f, Observation::Tick, t(900));
@@ -679,7 +700,7 @@ mod tests {
             Observation::Ci(CiObservation::NoRun),
             t(1000),
         );
-        assert_eq!(s.tracking.blocker, None);
+        assert_eq!(s.tracking.ci_blocker, None);
         assert_eq!(s.tracking.stage_started_at, t(1000));
         s = step(s.tracking, &f, Observation::Tick, t(1000 + 299));
         assert_eq!(s.tracking.state, TrackingState::WaitingForRun);
@@ -703,8 +724,9 @@ mod tests {
         s = step(s.tracking, &f, cluster(snapshot(&["app:1"], true)), t(20));
         assert_eq!(s.tracking.baseline_images, Some(vec!["app:1".to_string()]));
         assert!(
-            matches!(s.tracking.blocker, Some(Blocker::ToolUnavailable { ref tool, .. }) if tool == "bkt")
+            matches!(s.tracking.ci_blocker, Some(Blocker::ToolUnavailable { ref tool, .. }) if tool == "bkt")
         );
+        assert_eq!(s.tracking.cluster_blocker, None);
 
         let mut s = step(
             Tracking::new(&f, "abc", t(0)),
@@ -713,7 +735,11 @@ mod tests {
             t(10),
         );
         s = step(s.tracking, &f, Observation::Ci(CiObservation::NoRun), t(20));
-        assert_eq!(s.tracking.blocker, Some(Blocker::ClusterUnreachable));
+        assert_eq!(
+            s.tracking.cluster_blocker,
+            Some(Blocker::ClusterUnreachable)
+        );
+        assert_eq!(s.tracking.ci_blocker, None);
         assert_eq!(s.tracking.stage_started_at, t(0));
     }
 
@@ -726,7 +752,10 @@ mod tests {
             cluster(ClusterObservation::Unreachable),
             t(10),
         );
-        assert_eq!(s.tracking.blocker, Some(Blocker::ClusterUnreachable));
+        assert_eq!(
+            s.tracking.cluster_blocker,
+            Some(Blocker::ClusterUnreachable)
+        );
         assert_eq!(s.effects, vec![Effect::ConnectVpn]);
         assert_eq!(s.tracking.state, TrackingState::Delivering);
         assert!(s.tracking.vpn_attempted);
@@ -737,12 +766,15 @@ mod tests {
             t(20),
         );
         assert!(s.effects.is_empty());
-        assert_eq!(s.tracking.blocker, Some(Blocker::ClusterUnreachable));
+        assert_eq!(
+            s.tracking.cluster_blocker,
+            Some(Blocker::ClusterUnreachable)
+        );
         s = step(s.tracking, &f, Observation::Tick, t(10 + 16 * 60));
         assert_eq!(s.tracking.state, TrackingState::Delivering);
         assert!(s.effects.is_empty());
         s = step(s.tracking, &f, cluster(snapshot(&["app:1"], true)), t(2000));
-        assert_eq!(s.tracking.blocker, None);
+        assert_eq!(s.tracking.cluster_blocker, None);
         assert_eq!(s.tracking.stage_started_at, t(2000));
         assert_eq!(s.tracking.state, TrackingState::Delivering);
         s = step(s.tracking, &f, Observation::Tick, t(2000 + 899));
@@ -792,7 +824,10 @@ mod tests {
         );
         s = step(s.tracking, &f, ci(CiStatus::Succeeded), t(300));
         assert_eq!(s.tracking.state, TrackingState::Delivering);
-        assert_eq!(s.tracking.blocker, Some(Blocker::ClusterUnreachable));
+        assert_eq!(
+            s.tracking.cluster_blocker,
+            Some(Blocker::ClusterUnreachable)
+        );
         assert_eq!(s.tracking.baseline_images, None);
         let fresh = ClusterObservation::Snapshot(vec![workload(&["app:2"], true, Some(t(350)))]);
         s = step(s.tracking, &f, cluster(fresh), t(400));
@@ -861,12 +896,13 @@ mod tests {
         let s = step(s, &f, Observation::Tick, t(1300));
         assert_eq!(s.tracking.state, TrackingState::Delivering);
         assert_eq!(
-            s.tracking.blocker,
+            s.tracking.cluster_blocker,
             Some(Blocker::ToolUnavailable {
                 tool: "kubectl".to_string(),
                 reason: reason.to_string()
             })
         );
+        assert_eq!(s.tracking.ci_blocker, None);
         assert!(!s.tracking.vpn_attempted);
     }
 
@@ -882,7 +918,7 @@ mod tests {
             t(10),
         );
         let s = step(s.tracking, &f, cluster(snapshot(&["app:1"], true)), t(500));
-        assert_eq!(s.tracking.blocker, None);
+        assert_eq!(s.tracking.cluster_blocker, None);
         assert_eq!(s.tracking.stage_started_at, t(500));
     }
 
@@ -1084,7 +1120,8 @@ mod tests {
             cluster(ClusterObservation::Unreachable),
             t(10),
         );
-        assert_eq!(s.tracking.blocker, None);
+        assert_eq!(s.tracking.cluster_blocker, None);
+        assert_eq!(s.tracking.ci_blocker, None);
         assert!(s.effects.is_empty());
         assert!(!s.tracking.vpn_attempted);
     }
@@ -1174,8 +1211,31 @@ mod tests {
         }
     }
 
+    fn blocked_on_both_sides(f: &DeployFlow) -> Tracking {
+        let s = step(
+            Tracking::new(f, "abc", t(0)),
+            f,
+            Observation::Ci(CiObservation::Unavailable(bkt_problem())),
+            t(10),
+        );
+        let s = step(
+            s.tracking,
+            f,
+            cluster(ClusterObservation::Unreachable),
+            t(20),
+        );
+        s.tracking
+    }
+
+    fn bkt_problem() -> ToolProblem {
+        ToolProblem {
+            tool: "bkt".to_string(),
+            reason: "not logged in".to_string(),
+        }
+    }
+
     #[test]
-    fn closing_the_tracking_drops_its_blocker() {
+    fn closing_the_tracking_drops_its_blockers() {
         let f = flow();
         let s = step(
             Tracking::new(&f, "abc", t(0)),
@@ -1185,7 +1245,252 @@ mod tests {
         );
         let s = step(s.tracking, &f, ci(CiStatus::Failed), t(200));
         assert_eq!(s.tracking.state, TrackingState::Failed);
-        assert_eq!(s.tracking.blocker, None);
+        assert_eq!(s.tracking.cluster_blocker, None);
+        assert_eq!(s.tracking.ci_blocker, None);
+
+        let superseded = supersede(&blocked_on_both_sides(&f), t(30));
+        assert_eq!(superseded.ci_blocker, None);
+        assert_eq!(superseded.cluster_blocker, None);
+        assert_eq!(superseded.blocker(), None);
+    }
+
+    #[test]
+    fn a_cluster_blocker_does_not_hold_the_wait_for_the_run() {
+        let f = flow();
+        let mut s = step(
+            Tracking::new(&f, "abc", t(0)),
+            &f,
+            cluster(ClusterObservation::Unreachable),
+            t(1),
+        );
+        assert_eq!(s.effects, vec![Effect::ConnectVpn]);
+        s = step(
+            s.tracking,
+            &f,
+            Observation::Ci(CiObservation::NoRun),
+            t(299),
+        );
+        assert_eq!(s.tracking.state, TrackingState::WaitingForRun);
+        assert_eq!(
+            s.tracking.cluster_blocker,
+            Some(Blocker::ClusterUnreachable)
+        );
+        s = step(
+            s.tracking,
+            &f,
+            Observation::Ci(CiObservation::NoRun),
+            t(301),
+        );
+        assert_eq!(s.tracking.state, TrackingState::Stalled);
+        assert_eq!(s.effects, vec![Effect::Notify(NotifyKind::Stalled)]);
+        assert_eq!(s.tracking.finished_at, Some(t(301)));
+        assert_eq!(s.tracking.cluster_blocker, None);
+    }
+
+    #[test]
+    fn a_cluster_recovery_during_the_wait_for_the_run_keeps_its_window() {
+        let f = flow();
+        let mut s = step(
+            Tracking::new(&f, "abc", t(0)),
+            &f,
+            cluster(ClusterObservation::Unreachable),
+            t(1),
+        );
+        s = step(s.tracking, &f, cluster(snapshot(&["app:1"], true)), t(200));
+        assert_eq!(s.tracking.cluster_blocker, None);
+        assert_eq!(s.tracking.stage_started_at, t(0));
+        s = step(
+            s.tracking,
+            &f,
+            Observation::Ci(CiObservation::NoRun),
+            t(301),
+        );
+        assert_eq!(s.tracking.state, TrackingState::Stalled);
+    }
+
+    #[test]
+    fn a_pause_expires_after_a_day_even_with_the_cluster_blocked() {
+        let f = flow();
+        let mut s = step(
+            Tracking::new(&f, "abc", t(0)),
+            &f,
+            ci(CiStatus::Paused),
+            t(600),
+        );
+        s = step(
+            s.tracking,
+            &f,
+            cluster(ClusterObservation::Unreachable),
+            t(700),
+        );
+        s = step(s.tracking, &f, cluster(snapshot(&["app:1"], true)), t(800));
+        assert_eq!(s.tracking.stage_started_at, t(600));
+        s = step(
+            s.tracking,
+            &f,
+            cluster(ClusterObservation::Unreachable),
+            t(900),
+        );
+        s = step(s.tracking, &f, Observation::Tick, t(600 + 86_399));
+        assert_eq!(s.tracking.state, TrackingState::Paused);
+        s = step(s.tracking, &f, Observation::Tick, t(600 + 86_401));
+        assert_eq!(s.tracking.state, TrackingState::Stalled);
+        assert_eq!(s.effects, vec![Effect::Notify(NotifyKind::Stalled)]);
+    }
+
+    #[test]
+    fn both_sides_keep_their_own_blocker_and_clear_only_their_own() {
+        let f = flow();
+        let both = blocked_on_both_sides(&f);
+        assert_eq!(
+            both.ci_blocker,
+            Some(Blocker::ToolUnavailable {
+                tool: "bkt".to_string(),
+                reason: "not logged in".to_string()
+            })
+        );
+        assert_eq!(both.cluster_blocker, Some(Blocker::ClusterUnreachable));
+        assert_eq!(
+            blocked(&both),
+            Blocked {
+                ci: true,
+                cluster: true
+            }
+        );
+
+        let mut current = both.clone();
+        for (seconds, observation) in [
+            (
+                30,
+                Observation::Ci(CiObservation::Unavailable(bkt_problem())),
+            ),
+            (40, cluster(ClusterObservation::Unreachable)),
+            (
+                50,
+                Observation::Ci(CiObservation::Unavailable(bkt_problem())),
+            ),
+            (60, cluster(ClusterObservation::Unreachable)),
+            (70, Observation::Tick),
+        ] {
+            let s = step(current, &f, observation, t(seconds));
+            assert_eq!(s.tracking, both);
+            assert!(s.effects.is_empty());
+            current = s.tracking;
+        }
+
+        let s = step(current, &f, Observation::Ci(CiObservation::NoRun), t(80));
+        assert_eq!(s.tracking.ci_blocker, None);
+        assert_eq!(
+            s.tracking.cluster_blocker,
+            Some(Blocker::ClusterUnreachable)
+        );
+        assert_eq!(s.tracking.stage_started_at, t(80));
+        assert_eq!(
+            blocked(&s.tracking),
+            Blocked {
+                ci: false,
+                cluster: true
+            }
+        );
+    }
+
+    #[test]
+    fn the_shown_blocker_follows_the_side_that_owns_the_stage() {
+        let f = flow();
+        let both = blocked_on_both_sides(&f);
+        assert_eq!(both.blocker(), both.ci_blocker.as_ref());
+        let s = step(both, &f, ci(CiStatus::Succeeded), t(300));
+        assert_eq!(s.tracking.state, TrackingState::Delivering);
+        assert_eq!(s.tracking.ci_blocker, None);
+        assert_eq!(s.tracking.blocker(), Some(&Blocker::ClusterUnreachable));
+    }
+
+    #[test]
+    fn in_delivery_only_the_cluster_governs_the_rollout_limit() {
+        let f = flow();
+        let tracking = delivering(&f, t(0));
+        assert_eq!(
+            needs(&tracking, &f),
+            Needs {
+                ci: false,
+                cluster: true
+            }
+        );
+        let s = step(
+            tracking.clone(),
+            &f,
+            Observation::Ci(CiObservation::Unavailable(bkt_problem())),
+            t(10),
+        );
+        assert_eq!(s.tracking, tracking);
+
+        let mut stray = tracking.clone();
+        stray.ci_blocker = Some(Blocker::ToolUnavailable {
+            tool: "bkt".to_string(),
+            reason: "not logged in".to_string(),
+        });
+        let s = step(stray, &f, Observation::Tick, t(901));
+        assert_eq!(s.tracking.state, TrackingState::Stalled);
+
+        let s = step(
+            tracking,
+            &f,
+            cluster(ClusterObservation::Unavailable(kubectl_problem(
+                "forbidden",
+            ))),
+            t(10),
+        );
+        let s = step(s.tracking, &f, Observation::Tick, t(2000));
+        assert_eq!(s.tracking.state, TrackingState::Delivering);
+    }
+
+    #[test]
+    fn a_success_seen_after_the_rollout_limit_still_counts() {
+        let f = flow();
+        let mut s = step(
+            Tracking::new(&f, "abc", t(0)),
+            &f,
+            cluster(snapshot(&["app:1"], true)),
+            t(1),
+        );
+        s = step(s.tracking, &f, ci(CiStatus::Succeeded), t(300));
+        s = step(
+            s.tracking,
+            &f,
+            cluster(snapshot(&["app:2"], true)),
+            t(300 + 1000),
+        );
+        assert_eq!(s.tracking.state, TrackingState::Succeeded);
+        assert_eq!(s.effects, vec![Effect::Notify(NotifyKind::Succeeded)]);
+    }
+
+    #[test]
+    fn a_paused_build_can_fail_or_succeed() {
+        let f = flow();
+        let paused = step(
+            Tracking::new(&f, "abc", t(0)),
+            &f,
+            ci(CiStatus::Paused),
+            t(60),
+        )
+        .tracking;
+
+        let s = step(paused.clone(), &f, ci(CiStatus::Failed), t(120));
+        assert_eq!(s.tracking.state, TrackingState::Failed);
+        assert_eq!(
+            s.effects,
+            vec![Effect::FetchBuildLog, Effect::Notify(NotifyKind::Failed)]
+        );
+
+        let s = step(paused.clone(), &f, ci(CiStatus::Succeeded), t(120));
+        assert_eq!(s.tracking.state, TrackingState::Delivering);
+        assert_eq!(s.tracking.stage_started_at, t(120));
+        assert!(s.effects.is_empty());
+
+        let without_delivery = flow_delivering(Delivery::None);
+        let s = step(paused, &without_delivery, ci(CiStatus::Succeeded), t(120));
+        assert_eq!(s.tracking.state, TrackingState::Succeeded);
+        assert_eq!(s.effects, vec![Effect::Notify(NotifyKind::Succeeded)]);
     }
 
     #[test]

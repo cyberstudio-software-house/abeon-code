@@ -179,7 +179,11 @@ mod tests {
 
         let mut changed = first.clone();
         changed.state = TrackingState::Delivering;
-        changed.blocker = Some(Blocker::ToolUnavailable {
+        changed.ci_blocker = Some(Blocker::ToolUnavailable {
+            tool: "bkt".to_string(),
+            reason: "not logged in".to_string(),
+        });
+        changed.cluster_blocker = Some(Blocker::ToolUnavailable {
             tool: "kubectl".to_string(),
             reason: "forbidden".to_string(),
         });
