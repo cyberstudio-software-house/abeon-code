@@ -25,6 +25,8 @@ import { openPipeline } from './openPipeline';
 
 type SessionTab = Extract<Tab, { kind: 'session' }>;
 
+const RETRY_STARTED = 'Sprawdzam ponownie…';
+
 function blockerText(blocker: Blocker): string {
   if (blocker.type === 'clusterUnreachable') {
     return 'Nie mogę połączyć się z klastrem. Sprawdź VPN, będę próbować dalej.';
@@ -140,7 +142,10 @@ function TrackingBlock({ view, projectId, onClose }: { view: TrackingView; proje
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => run(() => retryTracking(tracking.id), 'Nie udało się ponowić sprawdzania')}
+            onClick={() => run(async () => {
+              await retryTracking(tracking.id);
+              toast.info(RETRY_STARTED);
+            }, 'Nie udało się ponowić sprawdzania')}
           >
             Spróbuj ponownie
           </button>

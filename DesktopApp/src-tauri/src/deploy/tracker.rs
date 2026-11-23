@@ -41,6 +41,7 @@ struct Ledger {
     schedule: HashMap<i64, Schedule>,
     in_flight: HashSet<i64>,
     forced: HashSet<i64>,
+    vpn_reset: HashSet<i64>,
 }
 
 #[derive(Default)]
@@ -96,6 +97,7 @@ struct Selection {
     flow: DeployFlow,
     ci: bool,
     cluster: bool,
+    reset_vpn: bool,
 }
 
 struct InFlight {
@@ -174,7 +176,11 @@ impl DeployTracker {
     }
 
     pub fn retry(&self, tracking_id: i64) {
-        self.ledger.lock().forced.insert(tracking_id);
+        {
+            let mut ledger = self.ledger.lock();
+            ledger.forced.insert(tracking_id);
+            ledger.vpn_reset.insert(tracking_id);
+        }
         self.wake.notify_one();
     }
 
@@ -250,12 +256,14 @@ impl DeployTracker {
         let open_ids: HashSet<i64> = open.iter().map(|tracking| tracking.id).collect();
         ledger.schedule.retain(|id, _| open_ids.contains(id));
         ledger.forced.retain(|id| open_ids.contains(id));
+        ledger.vpn_reset.retain(|id| open_ids.contains(id));
         for tracking in open {
             let Some(flow) = flow_of(flows, &tracking.repo_path) else { continue };
             if ledger.in_flight.contains(&tracking.id) {
                 continue;
             }
             let forced = ledger.forced.remove(&tracking.id);
+            let reset_vpn = ledger.vpn_reset.remove(&tracking.id);
             let due = ledger.schedule.get(&tracking.id).copied();
             let needs = machine::needs(&tracking, flow);
             ledger.in_flight.insert(tracking.id);
@@ -266,6 +274,7 @@ impl DeployTracker {
                     ci: needs.ci && (forced || due.is_none_or(|due| due.next_ci <= now)),
                     cluster: needs.cluster
                         && (forced || due.is_none_or(|due| due.next_cluster <= now)),
+                    reset_vpn,
                     flow: flow.clone(),
                     tracking,
                 },
@@ -292,7 +301,7 @@ impl DeployTracker {
     }
 
     async fn observe(&self, runner: &dyn CommandRunner, selection: &Selection, now: i64) -> Outcome {
-        let Selection { tracking: original, flow, ci, cluster } = selection;
+        let Selection { tracking: original, flow, ci, cluster, reset_vpn } = selection;
         let new_pods_since = original.build_finished_at.unwrap_or(original.started_at);
         let (ci_observation, cluster_observation) = tokio::join!(
             async {
@@ -316,6 +325,9 @@ impl DeployTracker {
             .chain(cluster_observation.map(Observation::Cluster))
             .chain([Observation::Tick]);
         let mut tracking = original.clone();
+        if *reset_vpn {
+            tracking.vpn_attempted = false;
+        }
         let mut effects = Vec::new();
         for observation in observations {
             let step = machine::advance(&tracking, flow, observation, now);
@@ -363,6 +375,7 @@ impl DeployTracker {
                 };
                 vpn::connect(runner, &name).await;
                 outcome.vpn_tried = true;
+                outcome.tracking.vpn_attempted = true;
             }
         }
     }
@@ -959,9 +972,128 @@ mod tests {
             let tracking = f.only();
             assert_eq!(tracking.state, TrackingState::Building);
             assert_eq!(tracking.cluster_blocker, Some(Blocker::ClusterUnreachable));
-            assert!(tracking.vpn_attempted);
+            assert_eq!(tracking.vpn_attempted, name == Some("wg0") && vpn::supported(), "{name:?}");
             assert!(sink.kinds().is_empty());
         }
+    }
+
+    struct SwitchRunner {
+        up: FakeRunner,
+        down: FakeRunner,
+        reachable: AtomicBool,
+    }
+
+    impl SwitchRunner {
+        fn new() -> Self {
+            SwitchRunner {
+                up: fake(&building("b"), "app:1"),
+                down: unreachable_runner(),
+                reachable: AtomicBool::new(false),
+            }
+        }
+
+        fn set_reachable(&self, reachable: bool) {
+            self.reachable.store(reachable, Ordering::SeqCst);
+        }
+
+        fn vpn_attempts(&self) -> usize {
+            [&self.up, &self.down]
+                .iter()
+                .flat_map(|runner| runner.calls())
+                .filter(|(program, _)| program == "nmcli")
+                .count()
+        }
+    }
+
+    #[async_trait]
+    impl CommandRunner for SwitchRunner {
+        async fn run(
+            &self,
+            program: &str,
+            args: &[String],
+            timeout: Duration,
+        ) -> Result<CommandOutput, RunError> {
+            if self.reachable.load(Ordering::SeqCst) {
+                self.up.run(program, args, timeout).await
+            } else {
+                self.down.run(program, args, timeout).await
+            }
+        }
+    }
+
+    fn attempts(count: usize) -> usize {
+        if vpn::supported() {
+            count
+        } else {
+            0
+        }
+    }
+
+    #[tokio::test]
+    async fn the_vpn_is_tried_again_after_the_cluster_came_back_and_dropped_again() {
+        let f = Fixture::new();
+        let sink = Arc::new(RecordingSink::default());
+        let runner = Arc::new(SwitchRunner::new());
+        let tracker = f.tracker(runner.clone(), &sink, Some("wg0"));
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        tracker.tick(at(3)).await;
+        tracker.tick(at(6)).await;
+        assert_eq!(runner.vpn_attempts(), attempts(1));
+        assert_eq!(f.only().vpn_attempted, vpn::supported());
+
+        runner.set_reachable(true);
+        tracker.tick(at(66)).await;
+        let back = f.only();
+        assert_eq!(back.cluster_blocker, None);
+        assert!(!back.vpn_attempted);
+
+        runner.set_reachable(false);
+        tracker.tick(at(126)).await;
+        assert_eq!(runner.vpn_attempts(), attempts(2));
+        assert_eq!(f.only().cluster_blocker, Some(Blocker::ClusterUnreachable));
+    }
+
+    #[tokio::test]
+    async fn a_vpn_name_set_after_the_first_unreachable_poll_is_used_on_the_next_one() {
+        let f = Fixture::new();
+        let sink = Arc::new(RecordingSink::default());
+        let runner = Arc::new(unreachable_runner());
+        let name: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let configured = name.clone();
+        let tracker = DeployTracker::with_parts(f.pool.clone(), runner.clone(), sink.clone(), move || {
+            configured.lock().clone()
+        });
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        tracker.tick(at(3)).await;
+        assert!(!f.only().vpn_attempted);
+        assert!(runner.calls().iter().all(|(program, _)| program != "nmcli"));
+
+        *name.lock() = Some("wg0".to_string());
+        tracker.tick(at(63)).await;
+        let nmcli = runner.calls().iter().filter(|(program, _)| program == "nmcli").count();
+        assert_eq!(nmcli, attempts(1));
+        assert_eq!(f.only().vpn_attempted, vpn::supported());
+    }
+
+    #[tokio::test]
+    async fn retry_clears_the_vpn_attempt_so_the_next_poll_tries_again() {
+        let f = Fixture::new();
+        let sink = Arc::new(RecordingSink::default());
+        let runner = Arc::new(unreachable_runner());
+        let tracker = f.tracker(runner.clone(), &sink, Some("wg0"));
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        tracker.tick(at(3)).await;
+        tracker.tick(at(6)).await;
+        let nmcli = || runner.calls().iter().filter(|(program, _)| program == "nmcli").count();
+        assert_eq!(nmcli(), attempts(1));
+
+        tracker.retry(f.only().id);
+        tracker.tick(at(9)).await;
+        assert_eq!(nmcli(), attempts(2));
+        assert_eq!(f.only().vpn_attempted, vpn::supported());
     }
 
     #[tokio::test]

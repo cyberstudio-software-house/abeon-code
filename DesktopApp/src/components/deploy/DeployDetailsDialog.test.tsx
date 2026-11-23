@@ -3,6 +3,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
 
+const toastMock = vi.hoisted(() => ({ info: vi.fn(), error: vi.fn(), success: vi.fn() }));
+vi.mock('sonner', () => ({ toast: toastMock }));
+
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { useStore } from '../../store';
 import { tauri } from '../../lib/tauri';
@@ -94,11 +97,22 @@ describe('DeployDetailsDialog', () => {
     expect(screen.queryByRole('button', { name: 'Otwórz pipeline' })).toBeNull();
   });
 
-  it('offers a retry only with a blocker and calls deployRetry', async () => {
+  it('offers a retry only with a blocker, calls deployRetry and says it checks again', async () => {
     useStore.setState({ trackings: [makeView({ id: 7, state: 'building', ciBlocker: { type: 'clusterUnreachable' } })] });
     renderDialog();
     fireEvent.click(screen.getByRole('button', { name: 'Spróbuj ponownie' }));
     await waitFor(() => expect(tauri.deployRetry).toHaveBeenCalledWith(7));
+    await waitFor(() => expect(toastMock.info).toHaveBeenCalledWith('Sprawdzam ponownie…'));
+    expect(toastMock.error).not.toHaveBeenCalled();
+  });
+
+  it('reports a failed retry without the checking toast', async () => {
+    vi.mocked(tauri.deployRetry).mockRejectedValueOnce(new Error('boom'));
+    useStore.setState({ trackings: [makeView({ id: 7, state: 'building', ciBlocker: { type: 'clusterUnreachable' } })] });
+    renderDialog();
+    fireEvent.click(screen.getByRole('button', { name: 'Spróbuj ponownie' }));
+    await waitFor(() => expect(toastMock.error).toHaveBeenCalledWith('Nie udało się ponowić sprawdzania'));
+    expect(toastMock.info).not.toHaveBeenCalled();
   });
 
   it('has no retry without a blocker', () => {

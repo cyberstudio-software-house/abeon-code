@@ -269,6 +269,7 @@ pub fn deploy_tracking_history(
 
 #[tauri::command(async)]
 pub fn deploy_retry(
+    app: AppHandle,
     state: State<AppState>,
     tracker: State<Arc<DeployTracker>>,
     tracking_id: i64,
@@ -277,6 +278,7 @@ pub fn deploy_retry(
     let tracking = known_tracking(&conn, tracking_id)?;
     if tracking.is_open() {
         tracker.retry(tracking.id);
+        announce_change(&app, &tracking.repo_path);
     }
     Ok(())
 }

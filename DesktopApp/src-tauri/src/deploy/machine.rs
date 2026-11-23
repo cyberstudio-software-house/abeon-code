@@ -207,7 +207,6 @@ fn observe_cluster(step: &mut Step, flow: &DeployFlow, observation: ClusterObser
         ClusterObservation::Unreachable => {
             block(tracking, Side::Cluster, Blocker::ClusterUnreachable);
             if !tracking.vpn_attempted {
-                tracking.vpn_attempted = true;
                 step.effects.push(Effect::ConnectVpn);
             }
         }
@@ -216,6 +215,7 @@ fn observe_cluster(step: &mut Step, flow: &DeployFlow, observation: ClusterObser
         }
         ClusterObservation::Snapshot(workloads) => {
             unblock(tracking, Side::Cluster, now);
+            tracking.vpn_attempted = false;
             let images = image_union(&workloads);
             if tracking.baseline_images.is_none() {
                 tracking.baseline_images = Some(images.clone());
@@ -791,7 +791,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unreachable_cluster_blocks_without_failing_and_asks_for_the_vpn_once() {
+    fn an_unreachable_cluster_blocks_without_failing_and_asks_for_the_vpn_once_per_attempt() {
         let f = flow();
         let mut s = step(
             delivering(&f, t(0)),
@@ -805,7 +805,8 @@ mod tests {
         );
         assert_eq!(s.effects, vec![Effect::ConnectVpn]);
         assert_eq!(s.tracking.state, TrackingState::Delivering);
-        assert!(s.tracking.vpn_attempted);
+        assert!(!s.tracking.vpn_attempted);
+        s.tracking.vpn_attempted = true;
         s = step(
             s.tracking,
             &f,
@@ -1265,12 +1266,13 @@ mod tests {
             Observation::Ci(CiObservation::Unavailable(bkt_problem())),
             t(10),
         );
-        let s = step(
+        let mut s = step(
             s.tracking,
             f,
             cluster(ClusterObservation::Unreachable),
             t(20),
         );
+        s.tracking.vpn_attempted = true;
         s.tracking
     }
 
@@ -1743,5 +1745,26 @@ mod tests {
         assert_eq!(s.tracking.state, TrackingState::Delivering);
         s = step(s.tracking, &f, cluster(snapshot(&["app:2"], true)), t(310));
         assert_eq!(s.tracking.state, TrackingState::Succeeded);
+    }
+
+    #[test]
+    fn the_vpn_is_asked_for_until_an_attempt_is_recorded_and_again_after_the_cluster_returns() {
+        let f = flow();
+        let unreachable = || cluster(ClusterObservation::Unreachable);
+        let mut s = step(delivering(&f, t(0)), &f, unreachable(), t(10));
+        assert_eq!(s.effects, vec![Effect::ConnectVpn]);
+        assert!(!s.tracking.vpn_attempted);
+        s = step(s.tracking, &f, unreachable(), t(20));
+        assert_eq!(s.effects, vec![Effect::ConnectVpn]);
+
+        s.tracking.vpn_attempted = true;
+        s = step(s.tracking, &f, unreachable(), t(30));
+        assert!(s.effects.is_empty());
+        assert!(s.tracking.vpn_attempted);
+
+        s = step(s.tracking, &f, cluster(snapshot(&["app:1"], true)), t(40));
+        assert!(!s.tracking.vpn_attempted);
+        s = step(s.tracking, &f, unreachable(), t(50));
+        assert_eq!(s.effects, vec![Effect::ConnectVpn]);
     }
 }
