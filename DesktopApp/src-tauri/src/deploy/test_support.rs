@@ -2,10 +2,18 @@ use crate::db::init_pool;
 use crate::domain::deploy::{BuildProvider, DeployFlow, Delivery};
 use rusqlite::Connection;
 use std::ops::Deref;
+use std::path::Path;
 use tempfile::NamedTempFile;
 
 pub struct TestConn {
     conn: r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+    file: NamedTempFile,
+}
+
+impl TestConn {
+    pub fn db_path(&self) -> &Path {
+        self.file.path()
+    }
 }
 
 impl Deref for TestConn {
@@ -18,10 +26,22 @@ impl Deref for TestConn {
 
 pub fn conn() -> TestConn {
     let file = NamedTempFile::new().unwrap();
-    let path = file.path().to_path_buf();
-    std::mem::forget(file);
-    let pool = init_pool(&path).unwrap();
-    TestConn { conn: pool.get().unwrap() }
+    let pool = init_pool(&file.path().to_path_buf()).unwrap();
+    TestConn { conn: pool.get().unwrap(), file }
+}
+
+#[cfg(test)]
+mod conn_tests {
+    use super::*;
+
+    #[test]
+    fn the_temp_database_is_removed_when_the_fixture_drops() {
+        let fixture = conn();
+        let path = fixture.db_path().to_path_buf();
+        assert!(path.exists());
+        drop(fixture);
+        assert!(!path.exists());
+    }
 }
 
 pub fn flow_at(path: &str) -> DeployFlow {

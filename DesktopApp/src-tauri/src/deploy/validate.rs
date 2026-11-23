@@ -63,20 +63,20 @@ pub fn validate_flow(flow: &DeployFlow) -> Result<(), Vec<FlowError>> {
     check_ref(&mut errors, "remote", "Zdalne repozytorium", &flow.remote);
     check_ref(&mut errors, "productionBranch", "Gałąź produkcyjna", &flow.production_branch);
 
-    if flow.build != BuildProvider::None {
-        if flow.build_repo.is_empty() {
+    if flow.build_repo.is_empty() {
+        if flow.build != BuildProvider::None {
             errors.push(error("buildRepo", "Repozytorium builda jest wymagane"));
-        } else if !build_repo_name().is_match(&flow.build_repo) {
-            errors.push(error("buildRepo", "Repozytorium builda musi mieć postać właściciel/nazwa"));
         }
+    } else if !build_repo_name().is_match(&flow.build_repo) {
+        errors.push(error("buildRepo", "Repozytorium builda musi mieć postać właściciel/nazwa"));
     }
 
-    if flow.delivery != Delivery::None {
-        if flow.namespace.is_empty() {
+    if flow.namespace.is_empty() {
+        if flow.delivery != Delivery::None {
             errors.push(error("namespace", "Przestrzeń nazw jest wymagana"));
-        } else if !namespace_name().is_match(&flow.namespace) {
-            errors.push(error("namespace", "Przestrzeń nazw zawiera niedozwolone znaki"));
         }
+    } else if !namespace_name().is_match(&flow.namespace) {
+        errors.push(error("namespace", "Przestrzeń nazw zawiera niedozwolone znaki"));
     }
 
     if flow.workloads.len() > MAX_WORKLOADS {
@@ -87,7 +87,7 @@ pub fn validate_flow(flow: &DeployFlow) -> Result<(), Vec<FlowError>> {
     }
 
     if let Some(context) = &flow.kube_context {
-        if !context_name().is_match(context) {
+        if !context.trim().is_empty() && !context_name().is_match(context) {
             errors.push(error("kubeContext", "Kontekst klastra zawiera niedozwolone znaki"));
         }
     }
@@ -156,6 +156,26 @@ mod tests {
     fn accepts_a_cluster_context_with_separators() {
         let f = flow_with("kubeContext", "user@cluster:prod/eu");
         assert_eq!(validate_flow(&f), Ok(()));
+    }
+
+    #[test]
+    fn checks_the_pattern_of_a_filled_value_even_when_the_stage_is_off() {
+        let mut f = flow();
+        f.build = BuildProvider::None;
+        f.build_repo = "ws/repo/../x".to_string();
+        f.delivery = Delivery::None;
+        f.namespace = "x; rm -rf ~".to_string();
+        let errors = validate_flow(&f).unwrap_err();
+        assert!(errors.iter().any(|e| e.field == "buildRepo"));
+        assert!(errors.iter().any(|e| e.field == "namespace"));
+    }
+
+    #[test]
+    fn an_empty_or_blank_kube_context_counts_as_absent() {
+        for value in ["", "   "] {
+            let f = flow_with("kubeContext", value);
+            assert_eq!(validate_flow(&f), Ok(()), "{value:?}");
+        }
     }
 
     #[test]
