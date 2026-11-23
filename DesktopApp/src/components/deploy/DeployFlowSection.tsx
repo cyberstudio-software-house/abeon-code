@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { tauri } from '../../lib/tauri';
 import { useStore } from '../../store';
 import type { BuildProvider, DeployFlow, Delivery, RepoFlow } from '../../types';
@@ -42,6 +42,14 @@ function parseWorkloads(text: string): string[] {
   return text.split(',').map(item => item.trim()).filter(Boolean);
 }
 
+function sameFlow(left: DeployFlow | null, right: DeployFlow | null): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function storedFlow(projectId: number, repoPath: string): DeployFlow | null {
+  return useStore.getState().repoFlowsByProject[projectId]?.find(repo => repo.repoPath === repoPath)?.flow ?? null;
+}
+
 function Row({ label, labelId, children }: { label: string; labelId: string; children: ReactNode }) {
   return (
     <div className="flex items-center gap-3">
@@ -81,13 +89,35 @@ function FlowForm({ projectId, repo }: { projectId: number; repo: RepoFlow }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [changedOutside, setChangedOutside] = useState(false);
+  const baseline = useRef<DeployFlow | null>(repo.flow);
+  const edited = useRef(false);
+  const writing = useRef(false);
   const enabledId = useId();
   const remoteId = useId();
   const buildId = useId();
   const deliveryId = useId();
 
+  const adopt = (flow: DeployFlow | null) => {
+    baseline.current = flow;
+    edited.current = false;
+    setDraft(flow ?? blankFlow(repo));
+    setWorkloadsText((flow?.workloads ?? []).join(', '));
+    setChangedOutside(false);
+  };
+
+  useEffect(() => {
+    if (writing.current || sameFlow(repo.flow, baseline.current)) return;
+    if (edited.current) {
+      setChangedOutside(true);
+      return;
+    }
+    adopt(repo.flow);
+  }, [repo.flow]);
+
   const patch = (changes: Partial<DeployFlow>) => {
     setDraft(current => ({ ...current, ...changes }));
+    edited.current = true;
     setSaved(false);
   };
 
@@ -100,12 +130,19 @@ function FlowForm({ projectId, repo }: { projectId: number; repo: RepoFlow }) {
       const detected = await tauri.deployDetectFlow(repo.repoPath);
       setDraft({ ...detected, repoPath: repo.repoPath });
       setWorkloadsText(detected.workloads.join(', '));
+      edited.current = true;
       setSaved(false);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
+  };
+
+  const settleWrite = () => {
+    baseline.current = storedFlow(projectId, repo.repoPath);
+    edited.current = false;
+    setChangedOutside(false);
   };
 
   const save = async () => {
@@ -121,8 +158,10 @@ function FlowForm({ projectId, repo }: { projectId: number; repo: RepoFlow }) {
     };
     setBusy(true);
     setError(null);
+    writing.current = true;
     try {
       await saveFlow(projectId, payload);
+      settleWrite();
       setDraft(payload);
       setWorkloadsText(payload.workloads.join(', '));
       setSaved(true);
@@ -130,6 +169,7 @@ function FlowForm({ projectId, repo }: { projectId: number; repo: RepoFlow }) {
       setError(errorMessage(e));
       setSaved(false);
     } finally {
+      writing.current = false;
       setBusy(false);
     }
   };
@@ -137,14 +177,17 @@ function FlowForm({ projectId, repo }: { projectId: number; repo: RepoFlow }) {
   const remove = async () => {
     setBusy(true);
     setError(null);
+    writing.current = true;
     try {
       await deleteFlow(projectId, repo.repoPath);
+      settleWrite();
       setDraft(blankFlow(repo));
       setWorkloadsText('');
       setSaved(false);
     } catch (e) {
       setError(errorMessage(e));
     } finally {
+      writing.current = false;
       setBusy(false);
     }
   };
@@ -195,7 +238,7 @@ function FlowForm({ projectId, repo }: { projectId: number; repo: RepoFlow }) {
           <TextRow
             label="Zasoby"
             value={workloadsText}
-            onChange={text => { setWorkloadsText(text); setSaved(false); }}
+            onChange={text => { setWorkloadsText(text); edited.current = true; setSaved(false); }}
             placeholder="app, worker (puste = wszystkie Deployments)"
             mono
           />
@@ -209,6 +252,14 @@ function FlowForm({ projectId, repo }: { projectId: number; repo: RepoFlow }) {
         </>
       )}
       {error && <p role="alert" className="text-[11px] text-danger">{error}</p>}
+      {changedOutside && (
+        <div role="status" className="flex items-center gap-2 text-[11px] text-fg-secondary">
+          <span>Przepływ zmienił się poza formularzem.</span>
+          <button type="button" onClick={() => adopt(repo.flow)} disabled={busy} className="btn-secondary">
+            Wczytaj
+          </button>
+        </div>
+      )}
       <div className="flex items-center justify-end gap-2">
         {saved && <span className="mr-auto text-[11px] text-success">Zapisano</span>}
         {repo.flow && (
@@ -236,6 +287,28 @@ export function DeployFlowSection({ projectId }: { projectId: number }) {
       .catch(e => { if (active) setLoadError(errorMessage(e)); })
       .finally(() => { if (active) setLoaded(true); });
     return () => { active = false; };
+  }, [projectId, loadRepoFlows]);
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    const reload = () => {
+      loadRepoFlows(projectId).catch(e => {
+        console.error('[deploy] reloading repository flows failed', e);
+      });
+    };
+    tauri.onDeployChanged(reload)
+      .then(fn => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(e => {
+        console.error('[deploy] change listener failed', e);
+      });
+    return () => {
+      disposed = true;
+      if (unlisten) unlisten();
+    };
   }, [projectId, loadRepoFlows]);
 
   let body: ReactNode;

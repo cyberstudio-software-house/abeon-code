@@ -46,6 +46,10 @@ pub enum IpcRequest {
         #[serde(default)]
         created_note_id: Option<i64>,
     },
+    DeployChanged {
+        #[serde(default)]
+        repo_path: Option<String>,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -204,7 +208,9 @@ mod tests {
                         ok: name != "fail",
                         result: json!({ "name": name, "args": args }),
                     },
-                    IpcRequest::NotesChanged { .. } => IpcResponse::Ack,
+                    IpcRequest::NotesChanged { .. } | IpcRequest::DeployChanged { .. } => {
+                        IpcResponse::Ack
+                    }
                 }
             })
         }
@@ -470,6 +476,24 @@ mod tests {
                 created_note_id: None
             }
         );
+    }
+
+    #[test]
+    fn deploy_changed_request_round_trips() {
+        let request = IpcRequest::DeployChanged {
+            repo_path: Some("/p/api".into()),
+        };
+        let encoded = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            encoded,
+            json!({ "type": "deployChanged", "repo_path": "/p/api" })
+        );
+        assert_eq!(
+            serde_json::from_value::<IpcRequest>(encoded).unwrap(),
+            request
+        );
+        let bare: IpcRequest = serde_json::from_value(json!({ "type": "deployChanged" })).unwrap();
+        assert_eq!(bare, IpcRequest::DeployChanged { repo_path: None });
     }
 
     #[test]

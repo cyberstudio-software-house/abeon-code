@@ -29,7 +29,7 @@ set -euo pipefail
 exe="{exe_path}"
 max_prompt_bytes={MAX_INITIAL_PROMPT_BYTES}
 unset_args=({unset_args})
-wrapper_features="note"
+wrapper_features="note flow"
 
 fail() {{
   echo "abeon-code: $1" >&2
@@ -40,6 +40,12 @@ if [ "${{1:-}}" = "note" ]; then
   [ -x "$exe" ] || fail "AbeonCode executable not found: $exe (reinstall the command in AbeonCode settings)"
   shift
   exec env "${{unset_args[@]}}" "$exe" note "$@" --cwd "$(pwd -P)"
+fi
+
+if [ "${{1:-}}" = "flow" ]; then
+  [ -x "$exe" ] || fail "AbeonCode executable not found: $exe (reinstall the command in AbeonCode settings)"
+  shift
+  exec env "${{unset_args[@]}}" "$exe" flow "$@" --cwd "$(pwd -P)"
 fi
 
 if [ "${{1:-}}" = "session" ]; then
@@ -321,8 +327,37 @@ mod tests {
     }
 
     #[test]
-    fn wrapper_declares_the_note_feature() {
-        assert!(wrapper_script("/opt/AbeonCode/abeoncode").contains("wrapper_features=\"note\""));
+    fn wrapper_declares_the_note_and_flow_features() {
+        assert!(wrapper_script("/opt/AbeonCode/abeoncode").contains("wrapper_features=\"note flow\""));
+    }
+
+    #[test]
+    fn flow_branch_runs_synchronously_with_cwd_and_stdin() {
+        let dir = tempdir().unwrap();
+        let work = dir.path().join("work");
+        std::fs::create_dir(&work).unwrap();
+        let exe = recording_exe(dir.path(), 2);
+        let wrapper = install(&exe.to_string_lossy(), dir.path()).unwrap();
+        let out = dir.path().join("argv");
+        let res = run_wrapper_in(&wrapper, &["flow", "propose"], "{\"remote\":\"origin\"}", &out, Some(&work));
+        assert_eq!(res.status.code(), Some(2));
+        let canonical = std::fs::canonicalize(&work).unwrap();
+        assert_eq!(
+            wait_for_argv(&out),
+            vec![
+                "flow".to_string(),
+                "propose".to_string(),
+                "--cwd".to_string(),
+                canonical.to_string_lossy().to_string(),
+            ]
+        );
+        assert_eq!(
+            std::fs::read_to_string(format!("{}.stdin", out.display())).unwrap(),
+            "{\"remote\":\"origin\"}"
+        );
+        let env = read_env(&out);
+        assert!(!env.contains("CLAUDECODE="));
+        assert!(!env.contains("CLAUDE_CODE_SESSION_ID="));
     }
 
     fn recording_exe(dir: &Path, exit_code: i32) -> PathBuf {

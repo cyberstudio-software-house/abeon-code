@@ -1,0 +1,603 @@
+use crate::commands::deploy::{known_repo_path, normalize_flow, save_flow};
+use crate::db::{deploy_flows_repo, deploy_proposals_repo};
+use crate::deploy::notify::{DiscordButton, DiscordNotice};
+use crate::deploy::repos::repo_for_dir;
+use crate::deploy::validate::validate_flow;
+use crate::domain::deploy::{
+    BuildProvider, DeployFlow, Delivery, FlowChange, FlowProposal, ProposalView,
+};
+use crate::error::{AppError, AppResult};
+use crate::supervisor::discord::BUTTON_PREFIX;
+use parking_lot::Mutex;
+use rusqlite::{Connection, Transaction, TransactionBehavior};
+use std::collections::HashSet;
+use std::path::Path;
+
+pub const PROPOSAL_LIFETIME_MS: i64 = 24 * 60 * 60 * 1000;
+pub const BUTTON_KIND: &str = "flow";
+pub const APPROVE_ACTION: &str = "approve";
+pub const REJECT_ACTION: &str = "reject";
+pub const EXPIRED_TEXT: &str = "Propozycja wygasła";
+const ID_LENGTH: usize = 8;
+const EMPTY_VALUE: &str = "—";
+const APPROVE_LABEL: &str = "Zatwierdź";
+const REJECT_LABEL: &str = "Odrzuć";
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Resolution {
+    Approved(DeployFlow),
+    Rejected(FlowProposal),
+}
+
+impl Resolution {
+    pub fn repo_path(&self) -> &str {
+        match self {
+            Resolution::Approved(flow) => &flow.repo_path,
+            Resolution::Rejected(proposal) => &proposal.repo_path,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct AnnouncedProposals {
+    ids: Mutex<HashSet<String>>,
+}
+
+impl AnnouncedProposals {
+    pub fn take_new(&self, pending: &[FlowProposal]) -> Vec<FlowProposal> {
+        let mut ids = self.ids.lock();
+        ids.retain(|id| pending.iter().any(|proposal| &proposal.id == id));
+        pending
+            .iter()
+            .filter(|proposal| ids.insert(proposal.id.clone()))
+            .cloned()
+            .collect()
+    }
+}
+
+pub fn is_proposal_id(value: &str) -> bool {
+    value.len() == ID_LENGTH
+        && value
+            .chars()
+            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character))
+}
+
+fn random_id() -> String {
+    uuid::Uuid::new_v4()
+        .simple()
+        .to_string()
+        .chars()
+        .take(ID_LENGTH)
+        .collect()
+}
+
+pub fn button_id(proposal_id: &str, approve: bool) -> String {
+    let action = if approve { APPROVE_ACTION } else { REJECT_ACTION };
+    format!("{BUTTON_PREFIX}{BUTTON_KIND}:{proposal_id}:{action}")
+}
+
+fn immediate(conn: &Connection) -> AppResult<Transaction<'_>> {
+    Ok(Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?)
+}
+
+fn canonical_repo(conn: &Connection, requested: &str) -> Result<String, String> {
+    let repo_path = match known_repo_path(conn, requested) {
+        Ok(path) => path,
+        Err(AppError::InvalidPath { .. }) => {
+            return Err(format!("{requested} is not a repository of an AbeonCode project"))
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    if repo_for_dir(Path::new(&repo_path)).as_deref() != Some(Path::new(&repo_path)) {
+        return Err(format!("{requested} is not the root of a git repository"));
+    }
+    Ok(repo_path)
+}
+
+fn store(conn: &Connection, flow: DeployFlow, now: i64) -> AppResult<FlowProposal> {
+    let tx = immediate(conn)?;
+    deploy_proposals_repo::delete_for_repo(&tx, &flow.repo_path)?;
+    let id = loop {
+        let candidate = random_id();
+        if deploy_proposals_repo::get(&tx, &candidate)?.is_none() {
+            break candidate;
+        }
+    };
+    let proposal = FlowProposal {
+        id,
+        repo_path: flow.repo_path.clone(),
+        flow,
+        created_at: now,
+        expires_at: now + PROPOSAL_LIFETIME_MS,
+    };
+    deploy_proposals_repo::insert(&tx, &proposal)?;
+    tx.commit()?;
+    Ok(proposal)
+}
+
+pub fn create(conn: &Connection, flow: DeployFlow, now: i64) -> Result<FlowProposal, String> {
+    let requested = flow.repo_path.trim().to_string();
+    let repo_path = canonical_repo(conn, &requested)?;
+    let flow = normalize_flow(DeployFlow {
+        repo_path: repo_path.clone(),
+        updated_at: 0,
+        ..flow
+    });
+    validate_flow(&flow).map_err(|errors| {
+        errors
+            .iter()
+            .map(|error| format!("{}: {}", error.field, error.message))
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    let current = deploy_flows_repo::get(conn, &repo_path).map_err(|error| error.to_string())?;
+    if current.is_some() && diff(current.as_ref(), &flow).is_empty() {
+        return Err(format!("the flow of {repo_path} already has these values"));
+    }
+    store(conn, flow, now).map_err(|error| error.to_string())
+}
+
+pub fn pending(conn: &Connection, now: i64) -> AppResult<Vec<FlowProposal>> {
+    deploy_proposals_repo::delete_expired(conn, now)?;
+    deploy_proposals_repo::list(conn)
+}
+
+pub fn resolve(
+    conn: &Connection,
+    id: &str,
+    approve: bool,
+    now: i64,
+) -> AppResult<Option<Resolution>> {
+    if !is_proposal_id(id) {
+        return Ok(None);
+    }
+    let tx = immediate(conn)?;
+    deploy_proposals_repo::delete_expired(&tx, now)?;
+    let Some(proposal) = deploy_proposals_repo::get(&tx, id)? else {
+        tx.commit()?;
+        return Ok(None);
+    };
+    let resolution = if approve {
+        Resolution::Approved(save_flow(&tx, proposal.flow.clone())?)
+    } else {
+        Resolution::Rejected(proposal)
+    };
+    deploy_proposals_repo::delete(&tx, id)?;
+    tx.commit()?;
+    Ok(Some(resolution))
+}
+
+fn yes_no(value: bool) -> &'static str {
+    if value {
+        "tak"
+    } else {
+        "nie"
+    }
+}
+
+fn build_name(build: BuildProvider) -> &'static str {
+    match build {
+        BuildProvider::Bitbucket => "Bitbucket Pipelines",
+        BuildProvider::Github => "GitHub Actions",
+        BuildProvider::None => "brak",
+    }
+}
+
+fn delivery_name(delivery: Delivery) -> &'static str {
+    match delivery {
+        Delivery::Image => "Obraz + Bandzior/Argo",
+        Delivery::Kubemeter => "Webhook Kubemeter",
+        Delivery::None => "brak",
+    }
+}
+
+fn shown(value: &str) -> String {
+    if value.is_empty() {
+        EMPTY_VALUE.to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn fields(flow: &DeployFlow) -> [(&'static str, &'static str, String); 9] {
+    [
+        ("enabled", "Śledź wdrożenia", yes_no(flow.enabled).to_string()),
+        ("remote", "Zdalne repozytorium", shown(&flow.remote)),
+        ("build", "Budowanie", build_name(flow.build).to_string()),
+        ("buildRepo", "Repozytorium (CI)", shown(&flow.build_repo)),
+        ("productionBranch", "Gałąź produkcyjna", shown(&flow.production_branch)),
+        ("delivery", "Dostarczenie", delivery_name(flow.delivery).to_string()),
+        ("namespace", "Namespace", shown(&flow.namespace)),
+        ("workloads", "Zasoby", shown(&flow.workloads.join(", "))),
+        (
+            "kubeContext",
+            "Kontekst kubectl",
+            shown(flow.kube_context.as_deref().unwrap_or_default()),
+        ),
+    ]
+}
+
+pub fn diff(current: Option<&DeployFlow>, proposed: &DeployFlow) -> Vec<FlowChange> {
+    let before = current.map(fields);
+    fields(proposed)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, (field, label, after))| {
+            let previous = before.as_ref().map(|values| values[index].2.clone());
+            if previous.as_deref() == Some(after.as_str()) {
+                return None;
+            }
+            Some(FlowChange {
+                field: field.to_string(),
+                label: label.to_string(),
+                before: previous,
+                after,
+            })
+        })
+        .collect()
+}
+
+fn change_line(change: &FlowChange) -> String {
+    match &change.before {
+        Some(before) => format!("{}: `{before}` → `{}`", change.label, change.after),
+        None => format!("{}: `{}`", change.label, change.after),
+    }
+}
+
+pub fn notice_title(repo_label: &str) -> String {
+    format!("Agent proponuje przepływ wdrożenia: {repo_label}")
+}
+
+pub fn discord_notice(view: &ProposalView) -> DiscordNotice {
+    let mut lines = vec![format!("`{}`", view.proposal.repo_path)];
+    lines.extend(view.changes.iter().map(change_line));
+    DiscordNotice {
+        title: notice_title(&view.repo_label),
+        body: lines.join("\n"),
+        link: None,
+        buttons: vec![
+            DiscordButton {
+                label: APPROVE_LABEL.to_string(),
+                custom_id: button_id(&view.proposal.id, true),
+                primary: true,
+            },
+            DiscordButton {
+                label: REJECT_LABEL.to_string(),
+                custom_id: button_id(&view.proposal.id, false),
+                primary: false,
+            },
+        ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::projects_repo;
+    use crate::deploy::test_support::{conn, flow_at, init_repo, TestConn};
+    use tempfile::{tempdir, TempDir};
+
+    const DAY: i64 = 24 * 60 * 60 * 1000;
+
+    struct Registered {
+        _dir: TempDir,
+        conn: TestConn,
+        repo: String,
+    }
+
+    fn registered() -> Registered {
+        let dir = tempdir().unwrap();
+        init_repo(&dir.path().join("api"));
+        let conn = conn();
+        projects_repo::insert(&conn, "p", dir.path().to_str().unwrap(), "-p", None).unwrap();
+        let repo = dir.path().join("api").canonicalize().unwrap().to_string_lossy().to_string();
+        Registered { _dir: dir, conn, repo }
+    }
+
+    fn approved_namespace(resolution: Option<Resolution>) -> Option<String> {
+        match resolution {
+            Some(Resolution::Approved(flow)) => Some(flow.namespace),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn a_proposal_changes_nothing_until_it_is_approved() {
+        let Registered { _dir, conn, repo } = registered();
+        let p = create(&conn, flow_at(&repo), 0).unwrap();
+        assert!(is_proposal_id(&p.id), "{}", p.id);
+        assert_eq!(p.expires_at, DAY);
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
+        assert_eq!(pending(&conn, 1).unwrap(), vec![p.clone()]);
+
+        let resolved = resolve(&conn, &p.id, true, 1).unwrap();
+        assert_eq!(approved_namespace(resolved), Some("cs-app-hs".into()));
+        assert!(deploy_flows_repo::get(&conn, &repo).unwrap().is_some());
+        assert!(pending(&conn, 2).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_rejected_or_expired_proposal_leaves_the_flow_untouched() {
+        let Registered { _dir, conn, repo } = registered();
+        let rejected = create(&conn, flow_at(&repo), 0).unwrap();
+        match resolve(&conn, &rejected.id, false, 1).unwrap() {
+            Some(Resolution::Rejected(proposal)) => assert_eq!(proposal, rejected),
+            other => panic!("expected a rejection, got {other:?}"),
+        }
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
+        assert!(pending(&conn, 2).unwrap().is_empty());
+
+        let expired = create(&conn, flow_at(&repo), 0).unwrap();
+        assert!(resolve(&conn, &expired.id, true, DAY + 1).unwrap().is_none());
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
+
+        let at_the_limit = create(&conn, flow_at(&repo), 0).unwrap();
+        assert!(resolve(&conn, &at_the_limit.id, true, DAY).unwrap().is_none());
+        assert!(resolve(&conn, "deadbeef", true, 1).unwrap().is_none());
+        assert!(resolve(&conn, "not-an-id", false, 1).unwrap().is_none());
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
+    }
+
+    #[test]
+    fn an_expired_proposal_is_dropped_from_the_pending_list() {
+        let Registered { _dir, conn, repo } = registered();
+        let p = create(&conn, flow_at(&repo), 0).unwrap();
+        assert_eq!(pending(&conn, DAY - 1).unwrap(), vec![p]);
+        assert!(pending(&conn, DAY).unwrap().is_empty());
+        let rows: i64 = conn
+            .query_row("SELECT COUNT(*) FROM deploy_flow_proposals", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(rows, 0);
+    }
+
+    #[test]
+    fn a_newer_proposal_replaces_the_older_one_for_the_same_repository() {
+        let Registered { _dir, conn, repo } = registered();
+        let first = create(&conn, flow_at(&repo), 0).unwrap();
+        let mut other = flow_at(&repo);
+        other.namespace = "cs-app-other".to_string();
+        let second = create(&conn, other, 10).unwrap();
+        assert_ne!(first.id, second.id);
+        assert_eq!(pending(&conn, 20).unwrap(), vec![second.clone()]);
+
+        assert!(resolve(&conn, &first.id, true, 30).unwrap().is_none());
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
+        let resolved = resolve(&conn, &second.id, true, 40).unwrap();
+        assert_eq!(approved_namespace(resolved), Some("cs-app-other".into()));
+    }
+
+    #[test]
+    fn an_invalid_proposal_is_refused_with_the_field_names() {
+        let Registered { _dir, conn, repo } = registered();
+        let mut invalid = flow_at(&repo);
+        invalid.namespace = "x; rm".to_string();
+        invalid.production_branch = String::new();
+        let error = create(&conn, invalid, 0).unwrap_err();
+        let lines: Vec<&str> = error.lines().collect();
+        assert!(lines.contains(&"namespace: Pole „Namespace” zawiera niedozwolone znaki"), "{error}");
+        assert!(lines.contains(&"productionBranch: Pole „Gałąź produkcyjna” jest wymagane"), "{error}");
+        assert!(pending(&conn, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_proposal_outside_registered_projects_or_off_a_repository_root_is_refused() {
+        let Registered { _dir: dir, conn, .. } = registered();
+        let outside = tempdir().unwrap();
+        init_repo(outside.path());
+        let path = outside.path().to_str().unwrap();
+        let error = create(&conn, flow_at(path), 0).unwrap_err();
+        assert_eq!(error, format!("{path} is not a repository of an AbeonCode project"));
+
+        let docs = dir.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        let error = create(&conn, flow_at(docs.to_str().unwrap()), 0).unwrap_err();
+        assert!(error.ends_with("is not the root of a git repository"), "{error}");
+        assert!(pending(&conn, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_proposal_is_stored_normalized_under_the_canonical_path() {
+        let Registered { _dir, conn, repo } = registered();
+        let mut dirty = flow_at(&format!(" {repo}/ "));
+        dirty.namespace = " cs-app-hs ".to_string();
+        dirty.workloads = vec![" app ".to_string(), String::new()];
+        dirty.kube_context = Some("  ".to_string());
+        dirty.updated_at = 99;
+        let p = create(&conn, dirty, 0).unwrap();
+        assert_eq!(p.repo_path, repo);
+        assert_eq!(p.flow, DeployFlow { updated_at: 0, ..flow_at(&repo) });
+        assert_eq!(pending(&conn, 1).unwrap(), vec![p]);
+    }
+
+    #[test]
+    fn a_proposal_equal_to_the_current_flow_is_refused() {
+        let Registered { _dir, conn, repo } = registered();
+        deploy_flows_repo::upsert(&conn, &flow_at(&repo)).unwrap();
+        let error = create(&conn, flow_at(&repo), 0).unwrap_err();
+        assert_eq!(error, format!("the flow of {repo} already has these values"));
+        assert!(pending(&conn, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_stored_body_is_validated_again_on_approval() {
+        let Registered { _dir, conn, repo } = registered();
+        let p = create(&conn, flow_at(&repo), 0).unwrap();
+        let mut tampered = flow_at(&repo);
+        tampered.namespace = "x; rm -rf ~".to_string();
+        conn.execute(
+            "UPDATE deploy_flow_proposals SET body = ? WHERE id = ?",
+            rusqlite::params![serde_json::to_string(&tampered).unwrap(), p.id],
+        )
+        .unwrap();
+
+        assert!(resolve(&conn, &p.id, true, 1).is_err());
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), None);
+        assert_eq!(pending(&conn, 2).unwrap().len(), 1);
+        assert!(matches!(
+            resolve(&conn, &p.id, false, 3).unwrap(),
+            Some(Resolution::Rejected(_))
+        ));
+        assert!(pending(&conn, 4).unwrap().is_empty());
+    }
+
+    #[test]
+    fn approval_writes_the_flow_through_the_settings_save_path() {
+        let Registered { _dir, conn, repo } = registered();
+        let p = create(&conn, flow_at(&repo), 0).unwrap();
+        let Some(Resolution::Approved(saved)) = resolve(&conn, &p.id, true, 1).unwrap() else {
+            panic!("expected an approval");
+        };
+        assert!(saved.updated_at > 0);
+        assert_eq!(DeployFlow { updated_at: 0, ..saved.clone() }, p.flow);
+        assert_eq!(deploy_flows_repo::get(&conn, &repo).unwrap(), Some(saved));
+    }
+
+    fn change(field: &str, label: &str, before: Option<&str>, after: &str) -> FlowChange {
+        FlowChange {
+            field: field.to_string(),
+            label: label.to_string(),
+            before: before.map(str::to_string),
+            after: after.to_string(),
+        }
+    }
+
+    #[test]
+    fn the_diff_lists_only_changed_fields() {
+        let current = flow_at("/r/a");
+        let mut proposed = flow_at("/r/a");
+        proposed.production_branch = "main".to_string();
+        proposed.updated_at = 1234;
+        assert_eq!(
+            diff(Some(&current), &proposed),
+            vec![change("productionBranch", "Gałąź produkcyjna", Some("master"), "main")]
+        );
+        assert!(diff(Some(&current), &current).is_empty());
+    }
+
+    #[test]
+    fn the_diff_names_values_the_way_the_form_does() {
+        let current = flow_at("/r/a");
+        let mut proposed = flow_at("/r/a");
+        proposed.enabled = false;
+        proposed.build = BuildProvider::Github;
+        proposed.delivery = Delivery::Kubemeter;
+        proposed.workloads = vec!["app".to_string(), "worker".to_string()];
+        proposed.kube_context = Some("prod".to_string());
+        assert_eq!(
+            diff(Some(&current), &proposed),
+            vec![
+                change("enabled", "Śledź wdrożenia", Some("tak"), "nie"),
+                change("build", "Budowanie", Some("Bitbucket Pipelines"), "GitHub Actions"),
+                change("delivery", "Dostarczenie", Some("Obraz + Bandzior/Argo"), "Webhook Kubemeter"),
+                change("workloads", "Zasoby", Some("app"), "app, worker"),
+                change("kubeContext", "Kontekst kubectl", Some("—"), "prod"),
+            ]
+        );
+
+        let mut off = flow_at("/r/a");
+        off.build = BuildProvider::None;
+        off.build_repo = String::new();
+        off.delivery = Delivery::None;
+        off.namespace = String::new();
+        off.workloads = Vec::new();
+        assert_eq!(
+            diff(Some(&current), &off),
+            vec![
+                change("build", "Budowanie", Some("Bitbucket Pipelines"), "brak"),
+                change("buildRepo", "Repozytorium (CI)", Some("cybercode/hr-management"), "—"),
+                change("delivery", "Dostarczenie", Some("Obraz + Bandzior/Argo"), "brak"),
+                change("namespace", "Namespace", Some("cs-app-hs"), "—"),
+                change("workloads", "Zasoby", Some("app"), "—"),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_diff_of_a_repository_without_a_flow_lists_every_field() {
+        assert_eq!(
+            diff(None, &flow_at("/r/a")),
+            vec![
+                change("enabled", "Śledź wdrożenia", None, "tak"),
+                change("remote", "Zdalne repozytorium", None, "origin"),
+                change("build", "Budowanie", None, "Bitbucket Pipelines"),
+                change("buildRepo", "Repozytorium (CI)", None, "cybercode/hr-management"),
+                change("productionBranch", "Gałąź produkcyjna", None, "master"),
+                change("delivery", "Dostarczenie", None, "Obraz + Bandzior/Argo"),
+                change("namespace", "Namespace", None, "cs-app-hs"),
+                change("workloads", "Zasoby", None, "app"),
+                change("kubeContext", "Kontekst kubectl", None, "—"),
+            ]
+        );
+    }
+
+    #[test]
+    fn proposal_ids_are_eight_lowercase_hex_characters() {
+        assert!(is_proposal_id("ab12cd34"));
+        for invalid in ["AB12CD34", "ab12cd3", "ab12cd345", "ab12cd3g", "", "ab12:d34"] {
+            assert!(!is_proposal_id(invalid), "{invalid:?}");
+        }
+        for _ in 0..50 {
+            assert!(is_proposal_id(&random_id()));
+        }
+    }
+
+    fn proposal(id: &str) -> FlowProposal {
+        FlowProposal {
+            id: id.to_string(),
+            repo_path: "/r/a".to_string(),
+            flow: flow_at("/r/a"),
+            created_at: 0,
+            expires_at: DAY,
+        }
+    }
+
+    #[test]
+    fn each_pending_proposal_is_announced_once() {
+        let announced = AnnouncedProposals::default();
+        let (first, second) = (proposal("aaaaaaaa"), proposal("bbbbbbbb"));
+        assert_eq!(announced.take_new(&[first.clone()]), vec![first.clone()]);
+        assert!(announced.take_new(&[first.clone()]).is_empty());
+        assert_eq!(
+            announced.take_new(&[first.clone(), second.clone()]),
+            vec![second.clone()]
+        );
+        assert!(announced.take_new(&[second.clone()]).is_empty());
+        assert!(announced.take_new(&[]).is_empty());
+        assert_eq!(announced.take_new(&[second.clone()]), vec![second]);
+    }
+
+    #[test]
+    fn the_discord_notice_lists_the_changes_with_two_buttons() {
+        let view = ProposalView {
+            proposal: proposal("ab12cd34"),
+            repo_label: "api".to_string(),
+            project_ids: vec![1],
+            changes: vec![
+                change("productionBranch", "Gałąź produkcyjna", Some("master"), "main"),
+                change("namespace", "Namespace", None, "cs_app"),
+            ],
+        };
+        let notice = discord_notice(&view);
+        assert_eq!(notice.title, "Agent proponuje przepływ wdrożenia: api");
+        assert_eq!(
+            notice.body,
+            "`/r/a`\nGałąź produkcyjna: `master` → `main`\nNamespace: `cs_app`"
+        );
+        assert_eq!(notice.link, None);
+        assert_eq!(
+            notice.buttons,
+            vec![
+                DiscordButton {
+                    label: "Zatwierdź".to_string(),
+                    custom_id: "abeon:flow:ab12cd34:approve".to_string(),
+                    primary: true,
+                },
+                DiscordButton {
+                    label: "Odrzuć".to_string(),
+                    custom_id: "abeon:flow:ab12cd34:reject".to_string(),
+                    primary: false,
+                },
+            ]
+        );
+    }
+}

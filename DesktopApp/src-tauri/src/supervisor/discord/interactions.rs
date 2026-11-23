@@ -1,13 +1,36 @@
+use std::sync::Arc;
+
 use serde_json::{json, Value};
 
 use super::gateway::Interaction;
 use super::registry::{ButtonRegistry, ButtonTarget, ClickedOption};
 use super::render::{render, replace_row, v2_payload, ApprovalMark, STALE_TEXT};
 use super::BUTTON_PREFIX;
+use crate::deploy::proposals;
 use crate::supervisor::core::{ApprovalSource, ApprovalState, SupervisorCore};
 
 pub const NOT_ALLOWED: &str = "Brak uprawnień.";
 pub const SUPERVISOR_OFF: &str = "Agent sterujący jest wyłączony — odpowiedz w aplikacji.";
+pub const FLOW_FAILED: &str = "Nie udało się rozstrzygnąć propozycji — sprawdź w aplikacji.";
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum FlowDecision {
+    Approved(String),
+    Rejected(String),
+    Expired,
+    Failed,
+}
+
+pub type FlowResolver = Arc<dyn Fn(&str, bool) -> FlowDecision + Send + Sync>;
+
+fn flow_outcome_text(decision: &FlowDecision) -> Option<String> {
+    match decision {
+        FlowDecision::Approved(label) => Some(format!("Zatwierdzono przepływ: {label}")),
+        FlowDecision::Rejected(label) => Some(format!("Odrzucono przepływ: {label}")),
+        FlowDecision::Expired => Some(proposals::EXPIRED_TEXT.to_string()),
+        FlowDecision::Failed => None,
+    }
+}
 
 const EPHEMERAL_FLAG: u64 = 1 << 6;
 const CHANNEL_MESSAGE_CALLBACK: u64 = 4;
@@ -62,9 +85,12 @@ fn current(
     }
 }
 
-fn target_message(target: &ButtonTarget) -> u64 {
+fn target_message(target: &ButtonTarget) -> Option<u64> {
     match target {
-        ButtonTarget::Option { message, .. } | ButtonTarget::Approval { message, .. } => *message,
+        ButtonTarget::Option { message, .. } | ButtonTarget::Approval { message, .. } => {
+            Some(*message)
+        }
+        ButtonTarget::FlowProposal { .. } => None,
     }
 }
 
@@ -95,6 +121,7 @@ pub fn decide(
     allow_from: &[String],
     registry: &mut ButtonRegistry,
     core: &SupervisorCore,
+    flows: &dyn Fn(&str, bool) -> FlowDecision,
 ) -> InteractionOutcome {
     if !allow_from
         .iter()
@@ -108,12 +135,23 @@ pub fn decide(
         .then(|| registry.target(&interaction.custom_id))
         .flatten()
         .filter(|target| {
-            registry
-                .discord_id(target_message(target))
+            target_message(target)
+                .and_then(|message| registry.discord_id(message))
                 .is_none_or(|posted| posted == interaction.message_id)
         });
     match target {
         None => without_answer(stale(interaction)),
+        Some(ButtonTarget::FlowProposal {
+            proposal_id,
+            approve,
+        }) => match flow_outcome_text(&flows(&proposal_id, approve)) {
+            Some(text) => without_answer(InteractionReply::Update(v2_payload(replace_row(
+                &interaction.message_components,
+                &interaction.custom_id,
+                &text,
+            )))),
+            None => without_answer(InteractionReply::Ephemeral(FLOW_FAILED)),
+        },
         Some(ButtonTarget::Approval {
             message,
             approval_id,
@@ -160,6 +198,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::deploy::notify::{discord_payload, DiscordButton, DiscordNotice};
     use crate::domain::supervisor::{ApprovalView, EscalationChannel, SupervisorLevel};
     use crate::supervisor::core::decision_kind;
     use crate::supervisor::discord::registry::{PostApproval, PostBlock, PostItem, PostRequest};
@@ -173,6 +212,11 @@ mod tests {
     const POSTED_ID: &str = "d-1";
     const TOKEN: &str = "interaction-token-secret";
     const LABEL: &str = "projekt · s1";
+    const PROPOSAL_ID: &str = "ab12cd34";
+
+    fn no_flow_decision(proposal_id: &str, approve: bool) -> FlowDecision {
+        panic!("unexpected flow decision for {proposal_id} ({approve})")
+    }
 
     struct Fixture {
         effects: Arc<FakeEffects>,
@@ -292,6 +336,7 @@ mod tests {
                 &[OWNER.to_string()],
                 &mut self.registry,
                 &self.core,
+                &no_flow_decision,
             )
         }
 
@@ -366,7 +411,13 @@ mod tests {
         let before = fixture.view();
         for user_id in [OWNER, STRANGER, ""] {
             let interaction = fixture.click(user_id, &fixture.approve_id());
-            let outcome = decide(&interaction, &[], &mut fixture.registry, &fixture.core);
+            let outcome = decide(
+                &interaction,
+                &[],
+                &mut fixture.registry,
+                &fixture.core,
+                &no_flow_decision,
+            );
             assert_eq!(outcome.reply, InteractionReply::Ephemeral(NOT_ALLOWED));
             assert_eq!(outcome.answer, None);
         }
@@ -703,6 +754,155 @@ mod tests {
         assert!(texts.contains(&"✅ P1: tak".to_string()));
         assert!(!texts.contains(&"✅ P1: nie".to_string()));
         assert_eq!(fixture.press(&first).answer, None);
+    }
+
+    fn flow_id(action: &str) -> String {
+        format!("abeon:flow:{PROPOSAL_ID}:{action}")
+    }
+
+    fn flow_click(user_id: &str, custom_id: &str) -> Interaction {
+        let notice = discord_payload(&DiscordNotice {
+            title: "Agent proponuje przepływ wdrożenia: api".into(),
+            body: "Gałąź produkcyjna: `master` → `main`".into(),
+            link: None,
+            buttons: vec![
+                DiscordButton {
+                    label: "Zatwierdź".into(),
+                    custom_id: flow_id("approve"),
+                    primary: true,
+                },
+                DiscordButton {
+                    label: "Odrzuć".into(),
+                    custom_id: flow_id("reject"),
+                    primary: false,
+                },
+            ],
+        });
+        Interaction {
+            id: "i-9".into(),
+            token: TOKEN.into(),
+            user_id: user_id.into(),
+            custom_id: custom_id.into(),
+            message_id: "d-notice".into(),
+            message_components: notice["components"].clone(),
+        }
+    }
+
+    type Calls = std::sync::Mutex<Vec<(String, bool)>>;
+
+    fn press_flow(
+        interaction: &Interaction,
+        core: &SupervisorCore,
+        calls: &Calls,
+        decision: FlowDecision,
+    ) -> InteractionOutcome {
+        let mut registry = ButtonRegistry::default();
+        decide(
+            interaction,
+            &[OWNER.to_string()],
+            &mut registry,
+            core,
+            &|proposal_id, approve| {
+                calls.lock().unwrap().push((proposal_id.to_string(), approve));
+                decision.clone()
+            },
+        )
+    }
+
+    #[test]
+    fn a_flow_button_decodes_to_its_proposal_and_a_malformed_one_is_ignored() {
+        let registry = ButtonRegistry::default();
+        assert_eq!(
+            registry.target("abeon:flow:ab12cd34:approve"),
+            Some(ButtonTarget::FlowProposal {
+                proposal_id: "ab12cd34".into(),
+                approve: true,
+            })
+        );
+        assert_eq!(
+            registry.target("abeon:flow:ab12cd34:reject"),
+            Some(ButtonTarget::FlowProposal {
+                proposal_id: "ab12cd34".into(),
+                approve: false,
+            })
+        );
+        for malformed in [
+            "abeon:flow:ab12cd34:yes",
+            "abeon:flow:ab12cd34:y",
+            "abeon:flow:AB12CD34:approve",
+            "abeon:flow:ab12cd3:approve",
+            "abeon:flow:ab12cd3z:approve",
+            "abeon:flow::approve",
+            "abeon:flow:ab12cd34",
+            "abeon:flow:ab12cd34:approve:x",
+            "abeon:flows:ab12cd34:approve",
+            "perm:flow:ab12cd34:approve",
+        ] {
+            assert_eq!(registry.target(malformed), None, "{malformed}");
+        }
+    }
+
+    #[test]
+    fn a_flow_click_resolves_the_proposal_and_shows_the_outcome_in_place_of_the_buttons() {
+        let (effects, core) = setup();
+        effects.settings.lock().level = SupervisorLevel::Off;
+        for (action, decision, text) in [
+            ("approve", FlowDecision::Approved("api".into()), "Zatwierdzono przepływ: api"),
+            ("reject", FlowDecision::Rejected("api".into()), "Odrzucono przepływ: api"),
+            ("approve", FlowDecision::Expired, "Propozycja wygasła"),
+        ] {
+            let calls = Calls::default();
+            let interaction = flow_click(OWNER, &flow_id(action));
+            let outcome = press_flow(&interaction, &core, &calls, decision);
+            assert_eq!(
+                *calls.lock().unwrap(),
+                vec![(PROPOSAL_ID.to_string(), action == "approve")]
+            );
+            assert_eq!(outcome.answer, None);
+            assert_eq!(outcome.message, None);
+            let payload = updated(&outcome.reply);
+            assert_eq!(payload["flags"], json!(32768));
+            let texts = strings(payload, "content");
+            assert!(texts.contains(&text.to_string()), "{texts:?}");
+            assert!(texts.iter().any(|content| content.contains("`master` → `main`")));
+            assert!(strings(payload, "custom_id").is_empty());
+            assert!(!callback_payload(&outcome.reply).to_string().contains(TOKEN));
+        }
+    }
+
+    #[test]
+    fn a_flow_click_from_another_account_or_with_a_malformed_id_resolves_nothing() {
+        let (_effects, core) = setup();
+        let calls = Calls::default();
+        let stranger = flow_click(STRANGER, &flow_id("approve"));
+        let outcome = press_flow(&stranger, &core, &calls, FlowDecision::Approved("api".into()));
+        assert_eq!(outcome.reply, InteractionReply::Ephemeral(NOT_ALLOWED));
+
+        let malformed = Interaction {
+            message_components: json!([
+                {"type": 10, "content": "**Agent proponuje przepływ wdrożenia: api**"},
+                {"type": 1, "components": [
+                    {"type": 2, "style": 3, "label": "Zatwierdź", "custom_id": "abeon:flow:ab12cd34:yes"},
+                ]},
+            ]),
+            ..flow_click(OWNER, "abeon:flow:ab12cd34:yes")
+        };
+        let outcome = press_flow(&malformed, &core, &calls, FlowDecision::Approved("api".into()));
+        let payload = updated(&outcome.reply);
+        let texts = strings(payload, "content");
+        assert!(texts.contains(&STALE_TEXT.to_string()), "{texts:?}");
+        assert!(!texts.iter().any(|text| text.starts_with("Zatwierdzono")));
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_flow_decision_that_fails_keeps_the_buttons() {
+        let (_effects, core) = setup();
+        let calls = Calls::default();
+        let interaction = flow_click(OWNER, &flow_id("approve"));
+        let outcome = press_flow(&interaction, &core, &calls, FlowDecision::Failed);
+        assert_eq!(outcome.reply, InteractionReply::Ephemeral(FLOW_FAILED));
+        assert_eq!(calls.lock().unwrap().len(), 1);
     }
 
     #[test]

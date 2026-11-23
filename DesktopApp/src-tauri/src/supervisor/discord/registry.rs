@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::deploy::proposals;
+
 use super::render::{
     footer, header, project_and_title, split, ApprovalMark, ApprovalRow, BlockView, ItemState,
     ItemView, MessageView,
@@ -78,6 +80,10 @@ pub enum ButtonTarget {
     Approval {
         message: u64,
         approval_id: String,
+        approve: bool,
+    },
+    FlowProposal {
+        proposal_id: String,
         approve: bool,
     },
 }
@@ -484,6 +490,17 @@ impl ButtonRegistry {
                 Some(ButtonTarget::Approval {
                     message: approval.message,
                     approval_id: approval.approval_id.clone(),
+                    approve,
+                })
+            }
+            proposals::BUTTON_KIND => {
+                let approve = match parts[3] {
+                    proposals::APPROVE_ACTION => true,
+                    proposals::REJECT_ACTION => false,
+                    _ => return None,
+                };
+                proposals::is_proposal_id(parts[2]).then(|| ButtonTarget::FlowProposal {
+                    proposal_id: parts[2].to_string(),
                     approve,
                 })
             }

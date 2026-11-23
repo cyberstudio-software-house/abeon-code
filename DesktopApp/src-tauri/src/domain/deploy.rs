@@ -88,6 +88,27 @@ pub struct FlowProposal {
     pub expires_at: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct FlowChange {
+    pub field: String,
+    pub label: String,
+    pub before: Option<String>,
+    pub after: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct ProposalView {
+    pub proposal: FlowProposal,
+    pub repo_label: String,
+    #[ts(type = "Array<number>")]
+    pub project_ids: Vec<i64>,
+    pub changes: Vec<FlowChange>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export, export_to = "../../src/types/")]
 #[serde(rename_all = "camelCase")]

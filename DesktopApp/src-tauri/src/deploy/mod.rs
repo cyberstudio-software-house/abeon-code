@@ -4,6 +4,7 @@ pub mod detect;
 pub mod excerpt;
 pub mod machine;
 pub mod notify;
+pub mod proposals;
 pub mod reflog;
 pub mod repos;
 pub mod runner;

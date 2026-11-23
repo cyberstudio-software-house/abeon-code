@@ -3,6 +3,7 @@ pub mod installer;
 pub mod skill;
 pub mod request;
 pub mod notes;
+pub mod flow;
 
 use tauri::{AppHandle, Emitter, Manager};
 use crate::state::AppState;

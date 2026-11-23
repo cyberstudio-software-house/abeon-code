@@ -1,15 +1,18 @@
 use crate::db::{deploy_flows_repo, deploy_trackings_repo, projects_repo, settings_repo};
 use crate::deploy::detect::detect_flow;
+use crate::deploy::proposals::{self, AnnouncedProposals, Resolution};
 use crate::deploy::repos::{is_known_repo, normalize, project_repos, projects_of_repo, repo_label};
 use crate::deploy::runner::{shell_runner, CommandOutput, CommandRunner, RunError};
 use crate::deploy::tracker::DeployTracker;
 use crate::deploy::validate::validate_flow;
 use crate::deploy::{vpn, DEPLOY_CHANGED_EVENT, TRACKING_HISTORY, VPN_SETTING_KEY};
 use crate::domain::deploy::{
-    DeployChangedEvent, DeployFlow, DeploySettings, RepoFlow, ToolStatus, Tracking, TrackingView,
+    DeployChangedEvent, DeployFlow, DeploySettings, FlowProposal, ProposalView, RepoFlow,
+    ToolStatus, Tracking, TrackingView,
 };
 use crate::domain::Project;
 use crate::error::{AppError, AppResult};
+use crate::sessions::reader::now_ms;
 use crate::state::AppState;
 use git2::Repository;
 use regex::Regex;
@@ -109,6 +112,7 @@ fn remote_names(repo_path: &Path) -> Vec<String> {
 }
 
 fn repo_flows(conn: &Connection, project: &Project) -> AppResult<Vec<RepoFlow>> {
+    let pending = proposals::pending(conn, now_ms())?;
     project_repos(project)
         .into_iter()
         .map(|repo| {
@@ -117,7 +121,10 @@ fn repo_flows(conn: &Connection, project: &Project) -> AppResult<Vec<RepoFlow>> 
             Ok(RepoFlow {
                 flow: deploy_flows_repo::get(conn, &repo_path)?,
                 remotes: remote_names(&repo),
-                proposal: None,
+                proposal: pending
+                    .iter()
+                    .find(|proposal| proposal.repo_path == repo_path)
+                    .cloned(),
                 repo_path,
                 label,
             })
@@ -125,7 +132,24 @@ fn repo_flows(conn: &Connection, project: &Project) -> AppResult<Vec<RepoFlow>> 
         .collect()
 }
 
-fn normalize_flow(flow: DeployFlow) -> DeployFlow {
+fn proposal_views(conn: &Connection, pending: Vec<FlowProposal>) -> AppResult<Vec<ProposalView>> {
+    let projects = projects_repo::list(conn)?;
+    pending
+        .into_iter()
+        .map(|proposal| {
+            let repo = Path::new(&proposal.repo_path);
+            let current = deploy_flows_repo::get(conn, &proposal.repo_path)?;
+            Ok(ProposalView {
+                changes: proposals::diff(current.as_ref(), &proposal.flow),
+                project_ids: projects_of_repo(&projects, repo),
+                repo_label: repo_label(repo),
+                proposal,
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn normalize_flow(flow: DeployFlow) -> DeployFlow {
     DeployFlow {
         repo_path: flow.repo_path.trim().to_string(),
         remote: flow.remote.trim().to_string(),
@@ -159,7 +183,7 @@ fn persist_flow(conn: &Connection, flow: DeployFlow) -> AppResult<DeployFlow> {
     deploy_flows_repo::upsert(conn, &flow)
 }
 
-fn known_repo_path(conn: &Connection, repo_path: &str) -> AppResult<String> {
+pub(crate) fn known_repo_path(conn: &Connection, repo_path: &str) -> AppResult<String> {
     let projects = projects_repo::list(conn)?;
     let path = Path::new(repo_path.trim());
     if is_known_repo(&projects, path) {
@@ -227,7 +251,7 @@ fn detect_repo_flow(conn: &Connection, repo_path: &str) -> AppResult<DeployFlow>
     Ok(detect_flow(Path::new(&canonical)))
 }
 
-fn save_flow(conn: &Connection, flow: DeployFlow) -> AppResult<DeployFlow> {
+pub(crate) fn save_flow(conn: &Connection, flow: DeployFlow) -> AppResult<DeployFlow> {
     let repo_path = known_repo_path(conn, &flow.repo_path)?;
     persist_flow(conn, DeployFlow { repo_path, ..flow })
 }
@@ -317,6 +341,81 @@ pub fn deploy_dismiss(app: AppHandle, state: State<AppState>, tracking_id: i64) 
 }
 
 #[tauri::command(async)]
+pub fn deploy_list_proposals(state: State<AppState>) -> AppResult<Vec<ProposalView>> {
+    let conn = state.db.get()?;
+    let pending = proposals::pending(&conn, now_ms())?;
+    proposal_views(&conn, pending)
+}
+
+pub fn resolve_proposal(
+    app: &AppHandle,
+    proposal_id: &str,
+    approve: bool,
+) -> AppResult<Option<Resolution>> {
+    let resolution = {
+        let conn = app.state::<AppState>().db.get()?;
+        proposals::resolve(&conn, proposal_id, approve, now_ms())?
+    };
+    if let Some(resolution) = &resolution {
+        if let Some(tracker) = app.try_state::<Arc<DeployTracker>>() {
+            tracker.flows_changed();
+        }
+        announce_change(app, resolution.repo_path());
+    }
+    Ok(resolution)
+}
+
+#[tauri::command(async)]
+pub fn deploy_resolve_proposal(app: AppHandle, proposal_id: String, approve: bool) -> AppResult<()> {
+    match resolve_proposal(&app, &proposal_id, approve)? {
+        Some(_) => Ok(()),
+        None => Err(AppError::Other(proposals::EXPIRED_TEXT.to_string())),
+    }
+}
+
+fn new_proposals(app: &AppHandle) -> AppResult<Vec<ProposalView>> {
+    let conn = app.state::<AppState>().db.get()?;
+    let pending = proposals::pending(&conn, now_ms())?;
+    let fresh = match app.try_state::<AnnouncedProposals>() {
+        Some(announced) => announced.take_new(&pending),
+        None => Vec::new(),
+    };
+    proposal_views(&conn, fresh)
+}
+
+pub fn proposals_changed(app: &AppHandle, repo_path: Option<String>) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let reader = app.clone();
+        let fresh = tauri::async_runtime::spawn_blocking(move || new_proposals(&reader))
+            .await
+            .map_err(|error| AppError::Other(error.to_string()))
+            .and_then(|views| views);
+        if let Err(error) = app.emit(DEPLOY_CHANGED_EVENT, DeployChangedEvent { repo_path }) {
+            eprintln!("deploy: change event failed: {error}");
+        }
+        let views = match fresh {
+            Ok(views) => views,
+            Err(error) => {
+                eprintln!("deploy: reading flow proposals failed: {error}");
+                return;
+            }
+        };
+        for view in views {
+            let notice = proposals::discord_notice(&view);
+            let outcome = match crate::supervisor::runtime::post_discord_notice(&app, notice).await {
+                Ok(()) => "sent to Discord".to_string(),
+                Err(reason) => format!("not sent to Discord ({reason})"),
+            };
+            eprintln!(
+                "deploy: flow proposal {} for {}: {outcome}",
+                view.proposal.id, view.repo_label
+            );
+        }
+    });
+}
+
+#[tauri::command(async)]
 pub async fn deploy_tools_status(app: AppHandle) -> AppResult<Vec<ToolStatus>> {
     let runner = tauri::async_runtime::spawn_blocking(move || shell_runner(&app.state::<AppState>()))
         .await
@@ -341,7 +440,7 @@ mod tests {
     use super::*;
     use crate::deploy::runner::{ok, FakeRunner};
     use crate::deploy::test_support::{conn, flow, flow_at, init_repo, project};
-    use crate::domain::deploy::TrackingState;
+    use crate::domain::deploy::{FlowChange, TrackingState};
     use tempfile::tempdir;
 
     #[test]
@@ -722,6 +821,56 @@ mod tests {
         assert!(matches!(delete_flow(&connection, path), Err(AppError::InvalidPath { .. })));
         assert!(matches!(detect_repo_flow(&connection, path), Err(AppError::InvalidPath { .. })));
         assert!(matches!(repo_history(&connection, path), Err(AppError::InvalidPath { .. })));
+    }
+
+    fn project_of(connection: &Connection, project_id: i64) -> Project {
+        projects_repo::list(connection)
+            .unwrap()
+            .into_iter()
+            .find(|project| project.id == project_id)
+            .unwrap()
+    }
+
+    #[test]
+    fn a_pending_proposal_is_listed_with_its_repository() {
+        let connection = conn();
+        let (dir, _, project_id) = registered_repo(&connection);
+        let canonical = canonical_of(&dir);
+        let proposal = proposals::create(&connection, flow_at(&canonical), now_ms()).unwrap();
+
+        let listed = repo_flows(&connection, &project_of(&connection, project_id)).unwrap();
+
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].proposal, Some(proposal));
+        assert_eq!(listed[0].flow, None);
+    }
+
+    #[test]
+    fn proposal_views_carry_the_label_the_projects_and_the_changes() {
+        let connection = conn();
+        let (dir, _, project_id) = registered_repo(&connection);
+        let canonical = canonical_of(&dir);
+        deploy_flows_repo::upsert(&connection, &flow_at(&canonical)).unwrap();
+        let mut proposed = flow_at(&canonical);
+        proposed.production_branch = "main".to_string();
+        let proposal = proposals::create(&connection, proposed, now_ms()).unwrap();
+
+        let views = proposal_views(&connection, vec![proposal.clone()]).unwrap();
+
+        assert_eq!(
+            views,
+            vec![ProposalView {
+                proposal,
+                repo_label: "api".to_string(),
+                project_ids: vec![project_id],
+                changes: vec![FlowChange {
+                    field: "productionBranch".to_string(),
+                    label: "Gałąź produkcyjna".to_string(),
+                    before: Some("master".to_string()),
+                    after: "main".to_string(),
+                }],
+            }]
+        );
     }
 
     #[test]

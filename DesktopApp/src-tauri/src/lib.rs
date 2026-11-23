@@ -31,6 +31,9 @@ pub fn run() {
     if let Some(code) = cli::notes::try_run(&std::env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
     }
+    if let Some(code) = cli::flow::try_run(&std::env::args().collect::<Vec<_>>()) {
+        std::process::exit(code);
+    }
     #[cfg(unix)]
     if let Some(code) = supervisor::entry::try_run_subcommand(&std::env::args().collect::<Vec<_>>()) {
         std::process::exit(code);
@@ -52,6 +55,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(app_state)
+        .manage(deploy::proposals::AnnouncedProposals::default())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Destroyed = event {
                 let file_watches = window.state::<AppState>().file_watches.clone();
@@ -126,6 +130,8 @@ pub fn run() {
             commands::deploy::deploy_tracking_history,
             commands::deploy::deploy_retry,
             commands::deploy::deploy_dismiss,
+            commands::deploy::deploy_list_proposals,
+            commands::deploy::deploy_resolve_proposal,
             commands::deploy::deploy_tools_status,
             commands::deploy::deploy_get_settings,
             commands::deploy::deploy_set_vpn_connection,

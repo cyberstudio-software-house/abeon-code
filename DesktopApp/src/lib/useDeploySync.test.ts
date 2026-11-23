@@ -13,11 +13,30 @@ describe('useDeploySync', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     unlisten.mockClear();
-    useStore.setState({ trackings: [] });
+    useStore.setState({ trackings: [], proposals: [] });
     vi.spyOn(tauri, 'onDeployChanged').mockImplementation(async (cb) => {
       emit = cb;
       return unlisten;
     });
+    vi.spyOn(tauri, 'deployListProposals').mockResolvedValue([]);
+  });
+
+  it('loads the proposals on mount, on every change event and when the window regains focus', async () => {
+    vi.spyOn(tauri, 'deployListTrackings').mockResolvedValue([]);
+    const proposals = vi.mocked(tauri.deployListProposals);
+
+    const { unmount } = renderHook(() => useDeploySync());
+    await waitFor(() => expect(proposals).toHaveBeenCalledTimes(1));
+
+    act(() => { emit({ repoPath: '/repos/api' } as DeployChangedEvent); });
+    await waitFor(() => expect(proposals).toHaveBeenCalledTimes(2));
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    await waitFor(() => expect(proposals).toHaveBeenCalledTimes(3));
+
+    unmount();
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(proposals).toHaveBeenCalledTimes(3);
   });
 
   it('loads the trackings on mount and again on every change event', async () => {

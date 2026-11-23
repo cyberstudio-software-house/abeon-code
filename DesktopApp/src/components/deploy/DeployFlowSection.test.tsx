@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import type { DeployFlow, RepoFlow } from '../../types';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import type { DeployChangedEvent, DeployFlow, RepoFlow } from '../../types';
 
 const h = vi.hoisted(() => ({
   list: vi.fn(),
   detect: vi.fn(),
   save: vi.fn(),
   remove: vi.fn(),
+  onChanged: vi.fn(),
+  unlisten: vi.fn(),
+  emit: null as ((event: DeployChangedEvent) => void) | null,
 }));
 
 vi.mock('../../lib/tauri', () => ({
@@ -15,6 +18,7 @@ vi.mock('../../lib/tauri', () => ({
     deployDetectFlow: h.detect,
     deploySaveFlow: h.save,
     deployDeleteFlow: h.remove,
+    onDeployChanged: h.onChanged,
   },
 }));
 
@@ -66,6 +70,69 @@ describe('DeployFlowSection', () => {
     h.detect.mockResolvedValue(detected);
     h.save.mockResolvedValue(detected);
     h.remove.mockResolvedValue(undefined);
+    h.emit = null;
+    h.onChanged.mockImplementation(async (cb: (event: DeployChangedEvent) => void) => {
+      h.emit = cb;
+      return h.unlisten;
+    });
+  });
+
+  const approved: DeployFlow = { ...detected, namespace: 'cs-app-api', workloads: ['app'], updatedAt: 9 };
+
+  const announceOutsideChange = async () => {
+    await waitFor(() => expect(h.emit).not.toBeNull());
+    act(() => { h.emit?.({ repoPath: '/p/api' }); });
+  };
+
+  it('follows a flow approved outside the form when nothing was edited', async () => {
+    h.list.mockResolvedValueOnce([repo('/p/api', 'api')]).mockResolvedValue([repo('/p/api', 'api', approved)]);
+    render(<DeployFlowSection projectId={1} />);
+    await screen.findByText('Wykryj z repozytorium');
+    await announceOutsideChange();
+    expect((await screen.findByLabelText('Namespace') as HTMLInputElement).value).toBe('cs-app-api');
+    expect((screen.getByLabelText('Gałąź produkcyjna') as HTMLInputElement).value).toBe('master');
+    expect(screen.getByText('Usuń przepływ')).toBeInTheDocument();
+    expect(screen.queryByText('Przepływ zmienił się poza formularzem.')).toBeNull();
+  });
+
+  it('keeps unsaved edits and offers to load a flow changed outside the form', async () => {
+    h.list.mockResolvedValueOnce([repo('/p/api', 'api')]).mockResolvedValue([repo('/p/api', 'api', approved)]);
+    render(<DeployFlowSection projectId={1} />);
+    fireEvent.change(await screen.findByLabelText('Gałąź produkcyjna'), { target: { value: 'release' } });
+    await announceOutsideChange();
+    expect(await screen.findByText('Przepływ zmienił się poza formularzem.')).toBeInTheDocument();
+    expect((screen.getByLabelText('Gałąź produkcyjna') as HTMLInputElement).value).toBe('release');
+    expect(screen.queryByLabelText('Namespace')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Wczytaj' }));
+
+    expect((screen.getByLabelText('Gałąź produkcyjna') as HTMLInputElement).value).toBe('master');
+    expect((screen.getByLabelText('Namespace') as HTMLInputElement).value).toBe('cs-app-api');
+    expect((screen.getByLabelText('Zasoby') as HTMLInputElement).value).toBe('app');
+    expect(screen.queryByText('Przepływ zmienił się poza formularzem.')).toBeNull();
+  });
+
+  it('does not flag its own save as an outside change', async () => {
+    h.list.mockResolvedValueOnce([repo('/p/api', 'api')]).mockResolvedValue([repo('/p/api', 'api', approved)]);
+    h.save.mockImplementation(async () => {
+      h.emit?.({ repoPath: '/p/api' });
+      return approved;
+    });
+    render(<DeployFlowSection projectId={1} />);
+    fireEvent.change(await screen.findByLabelText('Gałąź produkcyjna'), { target: { value: 'master' } });
+    await waitFor(() => expect(h.emit).not.toBeNull());
+    fireEvent.click(screen.getByText('Zapisz przepływ'));
+    expect(await screen.findByText('Zapisano')).toBeInTheDocument();
+    await waitFor(() => expect(h.list).toHaveBeenCalledTimes(3));
+    expect(screen.queryByText('Przepływ zmienił się poza formularzem.')).toBeNull();
+  });
+
+  it('stops listening for changes when it closes', async () => {
+    const { unmount } = render(<DeployFlowSection projectId={1} />);
+    await screen.findByText('Wykryj z repozytorium');
+    await waitFor(() => expect(h.emit).not.toBeNull());
+    unmount();
+    expect(h.unlisten).toHaveBeenCalledTimes(1);
   });
 
   it('fills the form from detection without saving', async () => {

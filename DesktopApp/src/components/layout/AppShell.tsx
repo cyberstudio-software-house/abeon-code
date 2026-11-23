@@ -34,6 +34,7 @@ import { useUnsavedFilesPrompt } from '../dialogs/useUnsavedFilesPrompt';
 import { RestoreSessionsDialog } from '../dialogs/RestoreSessionsDialog';
 import { useWindowCloseGuard } from './useWindowCloseGuard';
 import { SettingsView } from '../settings/SettingsView';
+import { FlowProposalCard } from '../deploy/FlowProposalCard';
 
 const LEFT_MIN = 200;
 const LEFT_MAX = 420;
@@ -61,6 +62,7 @@ export function AppShell() {
     return tab ? (s.projects.find(p => p.id === tab.projectId)?.name ?? null) : null;
   });
   const projects = useStore(s => s.projects);
+  const flowProposals = useStore(s => s.proposals);
   const pendingResumeTabIds = useStore(s => s.pendingResumeTabIds);
   const resumePendingSessions = useStore(s => s.resumePendingSessions);
   const dismissPendingResume = useStore(s => s.dismissPendingResume);
@@ -320,6 +322,11 @@ export function AppShell() {
         )}
       </div>
       {settingsOpen && <SettingsView />}
+      {flowProposals.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-[45] flex max-h-[calc(100vh-2rem)] w-[380px] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-y-auto">
+          {flowProposals.map(view => <FlowProposalCard key={view.proposal.id} view={view} />)}
+        </div>
+      )}
       <TabSwitcher />
       <ProjectLauncher />
       {restorableSessions.length > 0 && (

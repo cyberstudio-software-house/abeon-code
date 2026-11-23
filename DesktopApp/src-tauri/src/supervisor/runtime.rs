@@ -19,6 +19,8 @@ use crate::db::{projects_repo, settings_repo};
 #[cfg(unix)]
 use crate::domain::note::NOTES_CHANGED_EVENT;
 use crate::deploy::notify::{discord_payload, DiscordNotice};
+use crate::deploy::proposals::Resolution;
+use crate::deploy::repos::repo_label;
 use crate::domain::supervisor::{
     EscalationChannel, SessionRebound, SupervisorLevel, SupervisorSnapshot,
 };
@@ -39,6 +41,7 @@ use crate::supervisor::discord::buttons::{self, ButtonsConfig, Endpoints};
 use crate::supervisor::discord::client::{DiscordClient, API_BASE};
 use crate::supervisor::discord::files::DiscordFiles;
 use crate::supervisor::discord::gateway::{GatewayStatus, GATEWAY_URL};
+use crate::supervisor::discord::interactions::{FlowDecision, FlowResolver};
 use crate::supervisor::discord::jobs::{ButtonsHandle, ERROR_BUTTONS_OFFLINE};
 use crate::supervisor::discord::poll::{poll_approvals, POLL_INTERVAL};
 use crate::supervisor::discord::registry::{KeyAnswer, PostRequest, PostResult};
@@ -609,11 +612,32 @@ fn start_buttons(runtime: &SupervisorRuntime, core: Arc<SupervisorCore>) {
         api_base: API_BASE.to_string(),
         gateway_url: GATEWAY_URL.to_string(),
     };
+    let app = runtime.effects.app.clone();
+    let flows: FlowResolver = Arc::new(move |proposal_id: &str, approve: bool| {
+        flow_decision(&app, proposal_id, approve)
+    });
     let async_runtime = tauri::async_runtime::handle();
     let _context = async_runtime.inner().enter();
-    let (handle, status) = buttons::start(core, config, endpoints);
+    let (handle, status) = buttons::start(core, config, endpoints, flows);
     runtime.effects.set_buttons(handle);
     let _ = runtime.buttons_status.set(status);
+}
+
+fn flow_decision(app: &AppHandle, proposal_id: &str, approve: bool) -> FlowDecision {
+    match crate::commands::deploy::resolve_proposal(app, proposal_id, approve) {
+        Ok(Some(resolution)) => {
+            let label = repo_label(Path::new(resolution.repo_path()));
+            match resolution {
+                Resolution::Approved(_) => FlowDecision::Approved(label),
+                Resolution::Rejected(_) => FlowDecision::Rejected(label),
+            }
+        }
+        Ok(None) => FlowDecision::Expired,
+        Err(error) => {
+            eprintln!("deploy: flow proposal {proposal_id} from Discord failed: {error}");
+            FlowDecision::Failed
+        }
+    }
 }
 
 fn buttons_config(
@@ -930,6 +954,15 @@ pub fn session_hooks_path(app: &AppHandle) -> Option<PathBuf> {
 type NotesNotifier = Arc<dyn Fn(Option<i64>) + Send + Sync>;
 
 #[cfg(unix)]
+type DeployNotifier = Arc<dyn Fn(Option<String>) + Send + Sync>;
+
+#[cfg(unix)]
+struct ExternalChanges {
+    notes: NotesNotifier,
+    deploy: DeployNotifier,
+}
+
+#[cfg(unix)]
 fn emit_external_notes_change(app: &AppHandle, created_note_id: Option<i64>) {
     let event = NotesChangedEvent {
         created_note_id,
@@ -951,10 +984,17 @@ struct IpcRouter {
 #[cfg(unix)]
 impl IpcHandler for IpcRouter {
     fn handle(&self, req: IpcRequest) -> Pin<Box<dyn Future<Output = IpcResponse> + Send>> {
-        let app = self.app.clone();
-        let notify: NotesNotifier =
-            Arc::new(move |created_note_id| emit_external_notes_change(&app, created_note_id));
-        Box::pin(route(self.core.clone(), self.process.clone(), notify, req))
+        let notes_app = self.app.clone();
+        let deploy_app = self.app.clone();
+        let changes = ExternalChanges {
+            notes: Arc::new(move |created_note_id| {
+                emit_external_notes_change(&notes_app, created_note_id)
+            }),
+            deploy: Arc::new(move |repo_path| {
+                crate::commands::deploy::proposals_changed(&deploy_app, repo_path)
+            }),
+        };
+        Box::pin(route(self.core.clone(), self.process.clone(), changes, req))
     }
 }
 
@@ -962,7 +1002,7 @@ impl IpcHandler for IpcRouter {
 async fn route(
     core: Arc<SupervisorCore>,
     process: Arc<SupervisorProcess>,
-    notify_notes: NotesNotifier,
+    changes: ExternalChanges,
     req: IpcRequest,
 ) -> IpcResponse {
     match req {
@@ -994,7 +1034,11 @@ async fn route(
             IpcResponse::Hook { stdout: None }
         }
         IpcRequest::NotesChanged { created_note_id } => {
-            notify_notes(created_note_id);
+            (changes.notes)(created_note_id);
+            IpcResponse::Ack
+        }
+        IpcRequest::DeployChanged { repo_path } => {
+            (changes.deploy)(repo_path);
             IpcResponse::Ack
         }
         IpcRequest::Tool { name, args } => {
@@ -1378,8 +1422,11 @@ mod tests {
         use crate::supervisor::test_support::{setup, FakeEffects};
         use serde_json::{json, Value};
 
-        fn no_notes() -> NotesNotifier {
-            Arc::new(|_| {})
+        fn no_notes() -> ExternalChanges {
+            ExternalChanges {
+                notes: Arc::new(|_| {}),
+                deploy: Arc::new(|_| {}),
+            }
         }
 
         async fn route_to(core: &Arc<SupervisorCore>, req: IpcRequest) -> IpcResponse {
@@ -1574,7 +1621,10 @@ mod tests {
             let response = route(
                 core.clone(),
                 SupervisorProcess::new(core.clone()),
-                Arc::new(move |id| recorder.lock().unwrap().push(id)),
+                ExternalChanges {
+                    notes: Arc::new(move |id| recorder.lock().unwrap().push(id)),
+                    ..no_notes()
+                },
                 IpcRequest::NotesChanged {
                     created_note_id: Some(7),
                 },
@@ -1582,6 +1632,31 @@ mod tests {
             .await;
             assert_eq!(response, IpcResponse::Ack);
             assert_eq!(*seen.lock().unwrap(), vec![Some(7)]);
+        }
+
+        #[tokio::test]
+        async fn deploy_changed_is_announced_and_acknowledged() {
+            let (_effects, core) = setup();
+            let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let notes = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let recorder = seen.clone();
+            let notes_recorder = notes.clone();
+            let changes = ExternalChanges {
+                notes: Arc::new(move |id| notes_recorder.lock().unwrap().push(id)),
+                deploy: Arc::new(move |repo_path| recorder.lock().unwrap().push(repo_path)),
+            };
+            let response = route(
+                core.clone(),
+                SupervisorProcess::new(core.clone()),
+                changes,
+                IpcRequest::DeployChanged {
+                    repo_path: Some("/p/api".into()),
+                },
+            )
+            .await;
+            assert_eq!(response, IpcResponse::Ack);
+            assert_eq!(*seen.lock().unwrap(), vec![Some("/p/api".to_string())]);
+            assert!(notes.lock().unwrap().is_empty());
         }
     }
 }

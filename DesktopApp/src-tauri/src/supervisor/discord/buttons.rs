@@ -12,7 +12,7 @@ use tokio::time::{interval_at, sleep, timeout, Instant, MissedTickBehavior};
 
 use super::client::{DiscordClient, DiscordError};
 use super::gateway::{run_gateway, GatewayStatus, Interaction, SharedIdentifyBudget};
-use super::interactions::{callback_payload, decide};
+use super::interactions::{callback_payload, decide, FlowResolver};
 use super::jobs::{ButtonJob, ButtonsHandle, ERROR_BUTTONS_OFFLINE};
 use super::registry::{ButtonRegistry, PostRequest, PostResult};
 use super::render::{render, ApprovalMark};
@@ -63,6 +63,7 @@ struct Shared {
     registry: Mutex<ButtonRegistry>,
     current: Mutex<Current>,
     dirty: Mutex<BTreeSet<u64>>,
+    flows: FlowResolver,
 }
 
 impl Shared {
@@ -309,7 +310,13 @@ async fn handle_interaction(shared: Arc<Shared>, interaction: Interaction) {
         tokio::task::spawn_blocking(move || {
             let allow_from = shared.allow_from();
             let mut registry = shared.registry.lock();
-            decide(&interaction, &allow_from, &mut registry, &shared.core)
+            decide(
+                &interaction,
+                &allow_from,
+                &mut registry,
+                &shared.core,
+                &*shared.flows,
+            )
         })
         .await
     };
@@ -504,6 +511,7 @@ pub fn start(
     core: Arc<SupervisorCore>,
     config: Arc<dyn Fn() -> Result<ButtonsConfig, String> + Send + Sync>,
     endpoints: Endpoints,
+    flows: FlowResolver,
 ) -> (ButtonsHandle, watch::Receiver<GatewayStatus>) {
     let (jobs, job_receiver) = mpsc::unbounded_channel();
     let (interactions, interaction_receiver) = mpsc::unbounded_channel();
@@ -514,6 +522,7 @@ pub fn start(
         registry: Mutex::new(ButtonRegistry::default()),
         current: Mutex::new(Err(String::new())),
         dirty: Mutex::new(BTreeSet::new()),
+        flows,
     });
     tokio::spawn(dispatch_interactions(shared.clone(), interaction_receiver));
     let service = Service {
@@ -543,6 +552,7 @@ mod tests {
         KeyAnswer, PostApproval, PostBlock, PostItem, PostedKey,
     };
     use crate::supervisor::events::SupervisorEvent;
+    use crate::supervisor::discord::interactions::FlowDecision;
     use crate::supervisor::test_support::{bash, link_discord, setup};
 
     const TEST_TIMEOUT: Duration = Duration::from_secs(10);
@@ -567,6 +577,16 @@ mod tests {
         handle: ButtonsHandle,
         status: watch::Receiver<GatewayStatus>,
         core: Arc<SupervisorCore>,
+        flow_calls: FlowCalls,
+    }
+
+    type FlowCalls = Arc<Mutex<Vec<(String, bool)>>>;
+
+    fn recording_flows(calls: FlowCalls) -> FlowResolver {
+        Arc::new(move |proposal_id: &str, approve: bool| {
+            calls.lock().push((proposal_id.to_string(), approve));
+            FlowDecision::Approved("api".into())
+        })
     }
 
     fn config_with(token: &str) -> ButtonsConfig {
@@ -588,6 +608,7 @@ mod tests {
         core.set_away(true);
         let config: SharedConfig = Arc::new(Mutex::new(initial));
         let source = config.clone();
+        let flow_calls = FlowCalls::default();
         let (handle, status) = start(
             core.clone(),
             Arc::new(move || source.lock().clone()),
@@ -595,6 +616,7 @@ mod tests {
                 api_base: server.uri(),
                 gateway_url,
             },
+            recording_flows(flow_calls.clone()),
         );
         Harness {
             server,
@@ -603,6 +625,7 @@ mod tests {
             handle,
             status,
             core,
+            flow_calls,
         }
     }
 
@@ -732,6 +755,7 @@ mod tests {
             registry: Mutex::new(ButtonRegistry::default()),
             current: Mutex::new(Err(String::new())),
             dirty: Mutex::new(BTreeSet::new()),
+            flows: recording_flows(FlowCalls::default()),
         }
     }
 
@@ -1242,6 +1266,45 @@ mod tests {
                 ApprovalState::Approved
             );
             assert_eq!(*status.borrow(), GatewayStatus::Connected);
+            gateway.abort();
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn gateway_click_resolves_a_flow_proposal_and_edits_the_notice() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness {
+                server,
+                listener,
+                handle: _handle,
+                mut status,
+                flow_calls,
+                ..
+            } = harness(Ok(config_with(BOT_TOKEN))).await;
+            respond_to_callback(&server, "i-7", ResponseTemplate::new(204)).await;
+            let (clicks, pending_clicks) = mpsc::unbounded_channel();
+            let gateway = serve_clicks(listener, pending_clicks);
+            connected(&mut status).await;
+
+            let mut frame = click("i-7", "abeon:flow:ab12cd34:approve");
+            frame["d"]["message"]["components"] = json!([
+                { "type": 10, "content": "**Agent proponuje przepływ wdrożenia: api**" },
+                { "type": 1, "components": [
+                    { "type": 2, "style": 3, "label": "Zatwierdź", "custom_id": "abeon:flow:ab12cd34:approve" },
+                    { "type": 2, "style": 2, "label": "Odrzuć", "custom_id": "abeon:flow:ab12cd34:reject" },
+                ]},
+            ]);
+            clicks.send(frame).unwrap();
+
+            let callbacks = wait_for_requests(&server, "POST", &callback_path("i-7"), 1).await;
+            let payload = body(&callbacks[0]);
+            assert_eq!(payload["type"], 7);
+            let texts = strings(&payload, "content");
+            assert!(texts.contains(&"Zatwierdzono przepływ: api".to_string()), "{texts:?}");
+            assert!(strings(&payload, "custom_id").is_empty());
+            assert_eq!(*flow_calls.lock(), vec![("ab12cd34".to_string(), true)]);
             gateway.abort();
         })
         .await
@@ -1835,6 +1898,7 @@ mod tests {
                 handle,
                 mut status,
                 core,
+                ..
             } = harness(Ok(config_with(BOT_TOKEN))).await;
             core.on_session_hook(bash("s1", "git push origin main"))
                 .await;
