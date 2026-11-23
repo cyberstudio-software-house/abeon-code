@@ -231,7 +231,15 @@ fn describe_age(age_ms: i64) -> String {
 fn is_stale(tracking: &Tracking, pushed_at: i64, started_ms: i64) -> bool {
     pushed_at < started_ms - FRESH_PUSH_MS
         && !tracking.is_open()
-        && tracking.finished_at.is_none_or(|finished| finished < started_ms)
+        && tracking.finished_at.unwrap_or(tracking.started_at) < started_ms - RECENT_TRACKING_MS
+}
+
+fn is_recent(tracking: &Tracking, started_ms: i64) -> bool {
+    tracking.is_open()
+        || tracking.started_at >= started_ms - RECENT_TRACKING_MS
+        || tracking
+            .finished_at
+            .is_some_and(|finished| finished >= started_ms - RECENT_TRACKING_MS)
 }
 
 fn observe(db: &Path, repo: &str, started_ms: i64) -> Result<Observation, String> {
@@ -257,9 +265,10 @@ fn observe(db: &Path, repo: &str, started_ms: i64) -> Result<Observation, String
         Some(push) => history
             .into_iter()
             .find(|tracking| tracking.commit.eq_ignore_ascii_case(&push.commit)),
-        None => history.into_iter().next().filter(|tracking| {
-            tracking.is_open() || tracking.started_at >= started_ms - RECENT_TRACKING_MS
-        }),
+        None => history
+            .into_iter()
+            .next()
+            .filter(|tracking| is_recent(tracking, started_ms)),
     };
     if let (Some(push), Some(tracking)) = (&pushed, &tracking) {
         if is_stale(tracking, push.at, started_ms) {
@@ -1000,6 +1009,65 @@ mod tests {
     }
 
     #[test]
+    fn a_deployment_that_finished_just_before_the_wait_is_reported_whatever_the_age_of_the_push() {
+        for (state, expected, code) in [
+            (TrackingState::Succeeded, WaitOutcome::Succeeded, 0),
+            (TrackingState::Failed, WaitOutcome::Failed, 1),
+        ] {
+            let fixture = fixture("b");
+            let started_ms = PUSH_MS + 61 * MINUTE_MS + 10_000;
+            insert_at(&fixture, "b", state, PUSH_MS + 1_000, Some(started_ms - 10_000));
+            let (verdict, waited) = run_from(&fixture, 540, started_ms, |_| {});
+            assert_eq!(verdict.outcome, expected, "{state:?}");
+            assert_eq!(waited, Duration::ZERO);
+            assert_eq!(finish(verdict).code, code);
+        }
+    }
+
+    #[test]
+    fn the_staleness_boundary_is_ten_minutes_after_the_tracking_finished() {
+        let started_ms = PUSH_MS + 3 * HOUR_MS;
+        for (finished_before_ms, expected) in [
+            (0, WaitOutcome::Succeeded),
+            (10 * MINUTE_MS - 1, WaitOutcome::Succeeded),
+            (10 * MINUTE_MS, WaitOutcome::Succeeded),
+            (10 * MINUTE_MS + 1, WaitOutcome::NoTracking),
+            (2 * HOUR_MS, WaitOutcome::NoTracking),
+        ] {
+            let fixture = fixture("b");
+            insert_at(
+                &fixture,
+                "b",
+                TrackingState::Succeeded,
+                PUSH_MS + 1_000,
+                Some(started_ms - finished_before_ms),
+            );
+            let (verdict, _) = run_from(&fixture, 540, started_ms, |_| {});
+            assert_eq!(verdict.outcome, expected, "{finished_before_ms}");
+        }
+    }
+
+    #[test]
+    fn a_closed_tracking_without_a_finish_time_counts_as_finished_when_it_started() {
+        let started_ms = PUSH_MS + 3 * HOUR_MS;
+        for (started_before_ms, expected) in [
+            (5 * MINUTE_MS, WaitOutcome::Succeeded),
+            (11 * MINUTE_MS, WaitOutcome::NoTracking),
+        ] {
+            let fixture = fixture("b");
+            insert_at(
+                &fixture,
+                "b",
+                TrackingState::Succeeded,
+                started_ms - started_before_ms,
+                None,
+            );
+            let (verdict, _) = run_from(&fixture, 540, started_ms, |_| {});
+            assert_eq!(verdict.outcome, expected, "{started_before_ms}");
+        }
+    }
+
+    #[test]
     fn ages_are_described_in_minutes_hours_and_days() {
         assert_eq!(describe_age(61 * MINUTE_MS), "61 min ago");
         assert_eq!(describe_age(3 * HOUR_MS + 59 * MINUTE_MS), "3 h ago");
@@ -1037,6 +1105,65 @@ mod tests {
                 assert_eq!(waited, secs(120));
             }
         }
+    }
+
+    #[test]
+    fn in_fallback_mode_a_tracking_that_finishes_during_the_wait_keeps_its_real_outcome() {
+        let started_ms = PUSH_MS + 30 * MINUTE_MS;
+        for (state, expected, code) in [
+            (TrackingState::Succeeded, WaitOutcome::Succeeded, 0),
+            (TrackingState::Failed, WaitOutcome::Failed, 1),
+        ] {
+            let fixture = fixture("b");
+            fetch_after_push(&fixture);
+            let running = insert_at(
+                &fixture,
+                "d",
+                TrackingState::Building,
+                started_ms - 11 * MINUTE_MS,
+                None,
+            );
+            let (verdict, waited) = run_from(&fixture, 540, started_ms, |now| {
+                if now >= secs(4) {
+                    let mut done = running.clone();
+                    done.state = state;
+                    done.finished_at = Some(started_ms + 4_000);
+                    deploy_trackings_repo::update(&fixture.conn, &done).unwrap();
+                }
+            });
+            assert_eq!(verdict.outcome, expected, "{state:?}");
+            assert_eq!(verdict.tracking.as_ref().unwrap().state, state);
+            assert_eq!(waited, secs(4));
+            assert_eq!(finish(verdict).code, code);
+        }
+    }
+
+    #[test]
+    fn in_fallback_mode_a_tracking_that_finished_within_ten_minutes_is_still_reported() {
+        let started_ms = PUSH_MS + 30 * MINUTE_MS;
+        let fixture = fixture("b");
+        fetch_after_push(&fixture);
+        insert_at(
+            &fixture,
+            "d",
+            TrackingState::Failed,
+            started_ms - 15 * MINUTE_MS,
+            Some(started_ms - 5 * MINUTE_MS),
+        );
+        let (verdict, _) = run_from(&fixture, 540, started_ms, |_| {});
+        assert_eq!(verdict.outcome, WaitOutcome::Failed);
+
+        let stale = self::fixture("b");
+        fetch_after_push(&stale);
+        insert_at(
+            &stale,
+            "d",
+            TrackingState::Failed,
+            started_ms - 25 * MINUTE_MS,
+            Some(started_ms - 11 * MINUTE_MS),
+        );
+        let (verdict, _) = run_from(&stale, 60, started_ms, |_| {});
+        assert_eq!(verdict.outcome, WaitOutcome::NoTracking);
     }
 
     #[test]
