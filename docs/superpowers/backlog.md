@@ -112,10 +112,6 @@ Do sprawdzenia na żywo, bo nie dało się tego zweryfikować testami:
 - kliknięcie powiadomienia i przycisk z linkiem na Discordzie; wygląd w obu motywach;
 - budowanie i działanie na Windowsie i macOS.
 
-Drobna poprawka tekstu:
-- skill `abeon-deploy` (`cli/skill.rs`, okolice wiersza 245) nadal mówi, że zatwierdzenie w
-  aplikacji jest odrzucane jako nieaktualne; odrzuca tylko przycisk na Discordzie.
-
 Zachowanie do poprawy w kolejnej iteracji:
 - `abeon-code flow` i `deploy wait` nie działają w worktree gita;
 - pipeline Bitbucketa zatrzymany ręcznie (`STOPPED`) jest pokazywany jako nieudany;
