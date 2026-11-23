@@ -14,6 +14,7 @@ pub mod clickup_links_repo;
 pub mod notes_repo;
 pub mod supervisor_decisions_repo;
 pub mod deploy_flows_repo;
+pub mod deploy_trackings_repo;
 
 const MIGRATION_001: &str = include_str!("migrations/001_initial.sql");
 const MIGRATION_002: &str = include_str!("migrations/002_session_titles.sql");

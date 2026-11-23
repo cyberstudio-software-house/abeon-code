@@ -105,3 +105,225 @@ pub struct RepoFlow {
 pub struct DeployChangedEvent {
     pub repo_path: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub enum TrackingState {
+    WaitingForRun,
+    Building,
+    Paused,
+    Delivering,
+    Succeeded,
+    Failed,
+    Stalled,
+    Superseded,
+}
+
+impl TrackingState {
+    pub const OPEN: [TrackingState; 4] = [
+        TrackingState::WaitingForRun,
+        TrackingState::Building,
+        TrackingState::Paused,
+        TrackingState::Delivering,
+    ];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TrackingState::WaitingForRun => "waitingForRun",
+            TrackingState::Building => "building",
+            TrackingState::Paused => "paused",
+            TrackingState::Delivering => "delivering",
+            TrackingState::Succeeded => "succeeded",
+            TrackingState::Failed => "failed",
+            TrackingState::Stalled => "stalled",
+            TrackingState::Superseded => "superseded",
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        Self::OPEN.contains(self)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub enum TrackingStage {
+    Build,
+    Delivery,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Blocker {
+    ClusterUnreachable,
+    ToolUnavailable { tool: String, reason: String },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct TrackingFailure {
+    pub stage: TrackingStage,
+    pub reason: String,
+    pub log_excerpt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct Tracking {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub repo_path: String,
+    pub branch: String,
+    pub commit: String,
+    pub state: TrackingState,
+    pub blocker: Option<Blocker>,
+    pub run_id: Option<String>,
+    pub run_url: Option<String>,
+    #[ts(type = "number | null")]
+    pub build_number: Option<i64>,
+    pub failure: Option<TrackingFailure>,
+    pub baseline_images: Option<Vec<String>>,
+    #[ts(type = "number | null")]
+    pub baseline_at: Option<i64>,
+    pub current_images: Vec<String>,
+    #[ts(type = "number")]
+    pub started_at: i64,
+    #[ts(type = "number")]
+    pub stage_started_at: i64,
+    #[ts(type = "number | null")]
+    pub build_finished_at: Option<i64>,
+    #[ts(type = "number | null")]
+    pub finished_at: Option<i64>,
+    pub vpn_attempted: bool,
+    pub dismissed: bool,
+}
+
+impl Tracking {
+    pub fn new(flow: &DeployFlow, commit: &str, now: i64) -> Tracking {
+        let builds = flow.build != BuildProvider::None;
+        Tracking {
+            id: 0,
+            repo_path: flow.repo_path.clone(),
+            branch: flow.production_branch.clone(),
+            commit: commit.to_string(),
+            state: if builds {
+                TrackingState::WaitingForRun
+            } else {
+                TrackingState::Delivering
+            },
+            blocker: None,
+            run_id: None,
+            run_url: None,
+            build_number: None,
+            failure: None,
+            baseline_images: None,
+            baseline_at: None,
+            current_images: Vec::new(),
+            started_at: now,
+            stage_started_at: now,
+            build_finished_at: if builds { None } else { Some(now) },
+            finished_at: None,
+            vpn_attempted: false,
+            dismissed: false,
+        }
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.state.is_open()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn tracking_states_are_stored_under_their_wire_names() {
+        for state in [
+            TrackingState::WaitingForRun,
+            TrackingState::Building,
+            TrackingState::Paused,
+            TrackingState::Delivering,
+            TrackingState::Succeeded,
+            TrackingState::Failed,
+            TrackingState::Stalled,
+            TrackingState::Superseded,
+        ] {
+            assert_eq!(serde_json::to_value(state).unwrap(), json!(state.as_str()));
+        }
+    }
+
+    #[test]
+    fn only_the_four_running_states_are_open() {
+        let open: Vec<_> = [
+            TrackingState::WaitingForRun,
+            TrackingState::Building,
+            TrackingState::Paused,
+            TrackingState::Delivering,
+            TrackingState::Succeeded,
+            TrackingState::Failed,
+            TrackingState::Stalled,
+            TrackingState::Superseded,
+        ]
+        .into_iter()
+        .filter(TrackingState::is_open)
+        .collect();
+        assert_eq!(open, TrackingState::OPEN.to_vec());
+    }
+
+    #[test]
+    fn a_blocker_is_tagged_by_its_type() {
+        assert_eq!(
+            serde_json::to_value(Blocker::ClusterUnreachable).unwrap(),
+            json!({ "type": "clusterUnreachable" })
+        );
+        assert_eq!(
+            serde_json::to_value(Blocker::ToolUnavailable {
+                tool: "kubectl".to_string(),
+                reason: "forbidden".to_string(),
+            })
+            .unwrap(),
+            json!({ "type": "toolUnavailable", "tool": "kubectl", "reason": "forbidden" })
+        );
+    }
+
+    #[test]
+    fn a_tracking_round_trips_through_camel_case_json() {
+        let mut flow = DeployFlow {
+            repo_path: "/r/a".to_string(),
+            enabled: true,
+            remote: "origin".to_string(),
+            build: BuildProvider::Github,
+            build_repo: "o/r".to_string(),
+            production_branch: "main".to_string(),
+            delivery: Delivery::Image,
+            namespace: "cs-app-a".to_string(),
+            workloads: Vec::new(),
+            kube_context: None,
+            updated_at: 0,
+        };
+        let mut tracking = Tracking::new(&flow, "abc", 5);
+        tracking.failure = Some(TrackingFailure {
+            stage: TrackingStage::Delivery,
+            reason: "app-x: CrashLoopBackOff".to_string(),
+            log_excerpt: Some("boom".to_string()),
+        });
+        let value = serde_json::to_value(&tracking).unwrap();
+        assert_eq!(value["state"], json!("waitingForRun"));
+        assert_eq!(value["stageStartedAt"], json!(5));
+        assert_eq!(value["failure"]["stage"], json!("delivery"));
+        assert_eq!(value["failure"]["logExcerpt"], json!("boom"));
+        assert_eq!(serde_json::from_value::<Tracking>(value).unwrap(), tracking);
+
+        flow.build = BuildProvider::None;
+        let direct = Tracking::new(&flow, "abc", 5);
+        assert_eq!(direct.state, TrackingState::Delivering);
+        assert_eq!(direct.build_finished_at, Some(5));
+    }
+}

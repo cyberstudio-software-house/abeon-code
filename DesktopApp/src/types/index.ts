@@ -59,3 +59,8 @@ export type { DeployFlow } from './DeployFlow';
 export type { FlowProposal } from './FlowProposal';
 export type { RepoFlow } from './RepoFlow';
 export type { DeployChangedEvent } from './DeployChangedEvent';
+export type { TrackingState } from './TrackingState';
+export type { TrackingStage } from './TrackingStage';
+export type { Blocker } from './Blocker';
+export type { TrackingFailure } from './TrackingFailure';
+export type { Tracking } from './Tracking';
