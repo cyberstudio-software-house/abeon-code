@@ -74,3 +74,34 @@ pub struct DeployFlow {
     #[ts(type = "number")]
     pub updated_at: i64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct FlowProposal {
+    pub id: String,
+    pub repo_path: String,
+    pub flow: DeployFlow,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct RepoFlow {
+    pub repo_path: String,
+    pub label: String,
+    pub remotes: Vec<String>,
+    pub flow: Option<DeployFlow>,
+    pub proposal: Option<FlowProposal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct DeployChangedEvent {
+    pub repo_path: Option<String>,
+}

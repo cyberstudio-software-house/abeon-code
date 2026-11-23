@@ -5,6 +5,10 @@ import type { Project } from '../../types';
 const h = vi.hoisted(() => ({ state: {} as Record<string, unknown>, update: vi.fn() }));
 vi.mock('../../store', () => ({ useStore: (sel: (s: unknown) => unknown) => sel(h.state) }));
 
+vi.mock('../deploy/DeployFlowSection', () => ({
+  DeployFlowSection: ({ projectId }: { projectId: number }) => <div data-testid="deploy-flow-section">{projectId}</div>,
+}));
+
 import { EditProjectDialog } from './EditProjectDialog';
 
 const project: Project = {
@@ -36,6 +40,20 @@ describe('EditProjectDialog', () => {
     fireEvent.click(screen.getByLabelText('Kolor #b78640'));
     fireEvent.click(screen.getByText('Zapisz'));
     expect(h.update).toHaveBeenCalledWith(3, { name: 'gamma2', color: '#b78640' });
+    await Promise.resolve();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('mounts the deployment flow section for the edited project', () => {
+    render(<EditProjectDialog project={project} onClose={() => {}} />);
+    expect(screen.getByTestId('deploy-flow-section')).toHaveTextContent('3');
+  });
+
+  it('keeps the main save independent of the flow section', async () => {
+    const onClose = vi.fn();
+    render(<EditProjectDialog project={project} onClose={onClose} />);
+    fireEvent.click(screen.getByText('Zapisz'));
+    expect(h.update).toHaveBeenCalledWith(3, { name: 'gamma', color: '' });
     await Promise.resolve();
     expect(onClose).toHaveBeenCalledOnce();
   });

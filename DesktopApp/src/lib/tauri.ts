@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound, FileEntry, FileSearchResponse, FileReadResponse, FilesDirChangedEvent } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound, FileEntry, FileSearchResponse, FileReadResponse, FilesDirChangedEvent, DeployFlow, RepoFlow, DeployChangedEvent } from '../types';
 import type { NotesChangedEvent } from '../types/NotesChangedEvent';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
@@ -252,4 +252,11 @@ export const tauri = {
     listen<SupervisorSnapshot>('supervisor:snapshot', e => cb(e.payload)),
   onSupervisorSessionRebound: (cb: (rebound: SessionRebound) => void): Promise<UnlistenFn> =>
     listen<SessionRebound>('supervisor:session-rebound', e => cb(e.payload)),
+  deployListRepoFlows: (projectId: number) =>
+    invoke<RepoFlow[]>('deploy_list_repo_flows', { projectId }),
+  deployDetectFlow: (repoPath: string) => invoke<DeployFlow>('deploy_detect_flow', { repoPath }),
+  deploySaveFlow: (flow: DeployFlow) => invoke<DeployFlow>('deploy_save_flow', { flow }),
+  deployDeleteFlow: (repoPath: string) => invoke<void>('deploy_delete_flow', { repoPath }),
+  onDeployChanged: (cb: (event: DeployChangedEvent) => void): Promise<UnlistenFn> =>
+    listen<DeployChangedEvent>('deploy://changed', e => cb(e.payload)),
 };

@@ -10,6 +10,7 @@ import { createTabsSlice, type TabsSlice } from './tabsSlice';
 import { createActionsSlice, type ActionsSlice } from './actionsSlice';
 import { createGitSlice, type GitSlice } from './gitSlice';
 import { createClickUpSlice, type ClickUpSlice } from './clickupSlice';
+import { createDeploySlice, type DeploySlice } from './deploySlice';
 import { createPanesSlice, ROOT_PANE_ID, type PanesSlice } from './panesSlice';
 import { createNotesSlice, type NotesSlice } from './notesSlice';
 import { createFilesSlice, dirtyFileTabIds, type FilesSlice } from './filesSlice';
@@ -36,7 +37,7 @@ import type { Provider, SupervisorLevel } from '../types';
 import { isProvider } from '../lib/providers';
 import { migrateClaudeModelSettings } from '../lib/models';
 
-export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & PanesSlice & TerminalDrawersSlice & SupervisorSlice & NotesSlice & FilesSlice;
+export type AppState = SettingsSlice & ProjectsSlice & SessionsSlice & TabsSlice & ActionsSlice & GitSlice & ClickUpSlice & DeploySlice & PanesSlice & TerminalDrawersSlice & SupervisorSlice & NotesSlice & FilesSlice;
 
 export const useStore = create<AppState>()((...a) => ({
   ...createSettingsSlice(...a),
@@ -46,6 +47,7 @@ export const useStore = create<AppState>()((...a) => ({
   ...createActionsSlice(...a),
   ...createGitSlice(...a),
   ...createClickUpSlice(...a),
+  ...createDeploySlice(...a),
   ...createPanesSlice(...a),
   ...createTerminalDrawersSlice(...a),
   ...createSupervisorSlice(...a),
