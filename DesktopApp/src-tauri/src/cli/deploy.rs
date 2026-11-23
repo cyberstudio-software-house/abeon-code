@@ -5,7 +5,7 @@ use rusqlite::Connection;
 
 use crate::cli::flow::{target, Target};
 use crate::db::{db_path, deploy_flows_repo, deploy_trackings_repo, init_pool};
-use crate::deploy::reflog::{latest_push, reflog_path};
+use crate::deploy::reflog::{latest_push, reflog_path, PushEntry};
 use crate::deploy::repos::repo_label;
 use crate::domain::deploy::{
     BuildProvider, Blocker, Delivery, Tracking, TrackingStage, TrackingState,
@@ -20,9 +20,12 @@ const MAX_TIMEOUT_SECS: u64 = 3600;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const GRACE: Duration = Duration::from_secs(30);
 const BLOCKER_LIMIT: Duration = Duration::from_secs(120);
+const MIN_BLOCKER_LIMIT: Duration = Duration::from_secs(10);
+const BLOCKER_SHARE_PERCENT: u32 = 80;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 const RECENT_TRACKING_MS: i64 = 10 * 60 * 1000;
 const FRESH_PUSH_MS: i64 = 60 * 60 * 1000;
+const PUSH_MATCH_SLACK_MS: i64 = 1000;
 const HISTORY_LIMIT: usize = 20;
 const PAUSED_NOTICE: &str =
     "The pipeline is waiting for the user's approval. Do not try to approve it; tell the user and stop.";
@@ -169,6 +172,12 @@ pub fn render(tracking: &Tracking) -> String {
     text
 }
 
+pub fn blocker_limit(timeout: Duration) -> Duration {
+    (timeout * BLOCKER_SHARE_PERCENT / 100)
+        .min(BLOCKER_LIMIT)
+        .max(MIN_BLOCKER_LIMIT)
+}
+
 pub fn wait_outcome(
     tracking: Option<&Tracking>,
     waited: Duration,
@@ -184,7 +193,7 @@ pub fn wait_outcome(
             TrackingState::Failed | TrackingState::Stalled => return Some(WaitOutcome::Failed),
             TrackingState::Paused => return Some(WaitOutcome::NeedsUser),
             TrackingState::Superseded => {}
-            _ if tracking.blocker().is_some() && blocked_for > BLOCKER_LIMIT => {
+            _ if tracking.blocker().is_some() && blocked_for > blocker_limit(limit) => {
                 return Some(WaitOutcome::NeedsUser)
             }
             _ => {}
@@ -242,6 +251,11 @@ fn is_recent(tracking: &Tracking, started_ms: i64) -> bool {
             .is_some_and(|finished| finished >= started_ms - RECENT_TRACKING_MS)
 }
 
+fn answers_push(tracking: &Tracking, push: &PushEntry) -> bool {
+    tracking.commit.eq_ignore_ascii_case(&push.commit)
+        && tracking.started_at + PUSH_MATCH_SLACK_MS >= push.at
+}
+
 fn observe(db: &Path, repo: &str, started_ms: i64) -> Result<Observation, String> {
     let (flow, history) = {
         let conn = Connection::open(db).map_err(|error| error.to_string())?;
@@ -262,9 +276,7 @@ fn observe(db: &Path, repo: &str, started_ms: i64) -> Result<Observation, String
     let pushed = reflog_path(Path::new(repo), &flow.remote, &flow.production_branch)
         .and_then(|path| latest_push(&path));
     let tracking = match &pushed {
-        Some(push) => history
-            .into_iter()
-            .find(|tracking| tracking.commit.eq_ignore_ascii_case(&push.commit)),
+        Some(push) => history.into_iter().find(|tracking| answers_push(tracking, push)),
         None => history
             .into_iter()
             .next()
@@ -868,6 +880,80 @@ mod tests {
         });
         assert_eq!(verdict.outcome, WaitOutcome::NeedsUser);
         assert!(waited > secs(270) && waited <= secs(274), "{waited:?}");
+    }
+
+    #[test]
+    fn the_blocker_limit_is_two_minutes_or_most_of_a_shorter_call() {
+        assert_eq!(blocker_limit(secs(540)), secs(120));
+        assert_eq!(blocker_limit(secs(3600)), secs(120));
+        assert_eq!(blocker_limit(secs(150)), secs(120));
+        assert_eq!(blocker_limit(secs(100)), secs(80));
+        assert_eq!(blocker_limit(secs(20)), secs(16));
+        assert_eq!(blocker_limit(secs(10)), secs(10));
+        assert_eq!(blocker_limit(secs(0)), secs(10));
+    }
+
+    #[test]
+    fn a_blocker_seen_for_most_of_the_call_needs_the_user_whatever_the_timeout() {
+        for (timeout, after, by) in [(100, 80, 84), (540, 120, 124), (20, 16, 20)] {
+            let fixture = fixture("b");
+            let mut blocked = insert(&fixture, "b", TrackingState::Delivering);
+            blocked.cluster_blocker = Some(Blocker::ClusterUnreachable);
+            deploy_trackings_repo::update(&fixture.conn, &blocked).unwrap();
+            let (verdict, waited) = run(&fixture, timeout);
+            assert_eq!(verdict.outcome, WaitOutcome::NeedsUser, "{timeout}");
+            assert!(waited > secs(after) && waited <= secs(by), "{timeout}: {waited:?}");
+            assert_eq!(finish(verdict).code, 4, "{timeout}");
+        }
+    }
+
+    #[test]
+    fn an_old_tracking_of_a_commit_pushed_again_is_not_the_answer_but_the_new_one_is() {
+        let fixture = fixture("b");
+        let old = insert_at(
+            &fixture,
+            "b",
+            TrackingState::Succeeded,
+            PUSH_MS - HOUR_MS,
+            Some(PUSH_MS - HOUR_MS + 5 * MINUTE_MS),
+        );
+        push(&fixture.flow.repo_path, "c");
+        push(&fixture.flow.repo_path, "b");
+        let (verdict, waited) = run(&fixture, 540);
+        assert_eq!(verdict.outcome, WaitOutcome::NoTracking);
+        assert_eq!(verdict.tracking, None);
+        assert!(waited >= GRACE && waited <= GRACE + POLL_INTERVAL, "{waited:?}");
+
+        let mut fresh: Option<Tracking> = None;
+        let (verdict, waited) = run_with(&fixture, 540, |now| {
+            if now >= secs(4) && fresh.is_none() {
+                fresh = Some(insert_at(&fixture, "b", TrackingState::Building, PUSH_MS + 3_000, None));
+            }
+            if now >= secs(10) {
+                let mut done = fresh.clone().unwrap();
+                done.state = TrackingState::Failed;
+                done.finished_at = Some(PUSH_MS + 60_000);
+                deploy_trackings_repo::update(&fixture.conn, &done).unwrap();
+            }
+        });
+        assert_eq!(verdict.outcome, WaitOutcome::Failed);
+        let answered = verdict.tracking.unwrap();
+        assert_ne!(answered.id, old.id);
+        assert_eq!(answered.state, TrackingState::Failed);
+        assert_eq!(waited, secs(10));
+    }
+
+    #[test]
+    fn a_tracking_answers_a_push_from_one_second_before_it() {
+        for (started_at, expected) in [
+            (PUSH_MS - 1_000, WaitOutcome::Succeeded),
+            (PUSH_MS - 1_001, WaitOutcome::NoTracking),
+        ] {
+            let fixture = fixture("b");
+            insert_at(&fixture, "b", TrackingState::Succeeded, started_at, Some(PUSH_MS + 5_000));
+            let (verdict, _) = run(&fixture, 540);
+            assert_eq!(verdict.outcome, expected, "{started_at}");
+        }
     }
 
     #[test]
