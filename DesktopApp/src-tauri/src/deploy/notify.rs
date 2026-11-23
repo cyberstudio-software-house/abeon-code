@@ -126,10 +126,21 @@ fn repo_label(flow: &DeployFlow) -> String {
         .unwrap_or_else(|| flow.repo_path.clone())
 }
 
+fn delivery_line(kind: NotifyKind, label: &str, discord: Option<&Result<(), String>>) -> String {
+    let discord = match discord {
+        Some(Ok(())) => "sent to the desktop and to Discord".to_string(),
+        Some(Err(reason)) => format!("sent to the desktop, not to Discord ({reason})"),
+        None => "sent to the desktop, Discord is not used for this kind".to_string(),
+    };
+    format!("deploy: {kind:?} notice for {label}: {discord}")
+}
+
 pub fn announce(app: &AppHandle, kind: NotifyKind, tracking: &Tracking, flow: &DeployFlow) {
-    let text = notice_text(kind, tracking, &repo_label(flow));
+    let label = repo_label(flow);
+    let text = notice_text(kind, tracking, &label);
     show_link_notification(app, text.title.clone(), text.body.clone(), text.url.clone());
     if !text.to_discord {
+        eprintln!("{}", delivery_line(kind, &label, None));
         return;
     }
     let notice = DiscordNotice {
@@ -140,7 +151,8 @@ pub fn announce(app: &AppHandle, kind: NotifyKind, tracking: &Tracking, flow: &D
     };
     let app = app.clone();
     tauri::async_runtime::spawn(async move {
-        crate::supervisor::runtime::post_discord_notice(&app, notice).await;
+        let sent = crate::supervisor::runtime::post_discord_notice(&app, notice).await;
+        eprintln!("{}", delivery_line(kind, &label, Some(&sent)));
     });
 }
 
@@ -329,6 +341,26 @@ mod tests {
             .collect();
         let payload = discord_payload(&crowded);
         assert_eq!(payload["components"][1]["components"].as_array().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn the_delivery_line_says_where_each_kind_went_or_why_not() {
+        assert_eq!(
+            delivery_line(NotifyKind::Paused, "hs-training", Some(&Ok(()))),
+            "deploy: Paused notice for hs-training: sent to the desktop and to Discord"
+        );
+        assert_eq!(
+            delivery_line(
+                NotifyKind::Failed,
+                "app",
+                Some(&Err("the supervisor is not running".to_string()))
+            ),
+            "deploy: Failed notice for app: sent to the desktop, not to Discord (the supervisor is not running)"
+        );
+        assert_eq!(
+            delivery_line(NotifyKind::Succeeded, "app", None),
+            "deploy: Succeeded notice for app: sent to the desktop, Discord is not used for this kind"
+        );
     }
 
     #[test]

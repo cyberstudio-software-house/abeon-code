@@ -81,6 +81,11 @@ const REASON_DISCORD_OFF: &str = "Discord wyłączony";
 const REASON_CHAT_UNLINKED: &str = "rozmowa niesparowana";
 const REASON_NO_TOKEN: &str = "brak tokenu bota";
 const REASON_NO_USER: &str = "brak sparowanego użytkownika";
+const NOTICE_NO_SUPERVISOR: &str = "the supervisor runtime is not running";
+const NOTICE_ROUTED_TO_APP: &str =
+    "routed to the app: the Discord channel is not live or the user is present";
+const NOTICE_NO_BUTTONS: &str = "the Discord buttons service is not running";
+const NOTICE_NOT_TAKEN: &str = "Discord did not take the message, see the discord buttons log";
 
 fn session_label(project_name: &str, title: &str) -> String {
     format!("{project_name} · {title}")
@@ -759,17 +764,21 @@ pub fn buttons_status(app: &AppHandle) -> Option<GatewayStatus> {
     Some(status)
 }
 
-pub async fn post_discord_notice(app: &AppHandle, notice: DiscordNotice) -> bool {
+pub async fn post_discord_notice(app: &AppHandle, notice: DiscordNotice) -> Result<(), String> {
     let (Some(runtime), Some(core)) = (runtime(app), core(app)) else {
-        return false;
+        return Err(NOTICE_NO_SUPERVISOR.to_string());
     };
     if core.notice_channel() != EscalationChannel::Discord {
-        return false;
+        return Err(NOTICE_ROUTED_TO_APP.to_string());
     }
     let Some(buttons) = runtime.effects.buttons.get().cloned() else {
-        return false;
+        return Err(NOTICE_NO_BUTTONS.to_string());
     };
-    buttons.notice(discord_payload(&notice)).await
+    if buttons.notice(discord_payload(&notice)).await {
+        Ok(())
+    } else {
+        Err(NOTICE_NOT_TAKEN.to_string())
+    }
 }
 
 fn buttons_link(status: Option<GatewayStatus>) -> (bool, Option<String>) {

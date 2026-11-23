@@ -232,6 +232,24 @@ async fn send_message(
     }
 }
 
+async fn send_notice(live: &Live, payload: &Value, deadline: Instant) -> bool {
+    if deadline <= Instant::now() {
+        log_error(&"notice deadline passed before the notice was picked up");
+        return false;
+    }
+    match send_message(live, payload, deadline).await {
+        Ok(_) => true,
+        Err(SendFailure::Discord(error)) => {
+            log_error(&error);
+            false
+        }
+        Err(SendFailure::Deadline) => {
+            log_error(&"notice did not finish before its deadline");
+            false
+        }
+    }
+}
+
 async fn post(
     shared: &Shared,
     live: &Live,
@@ -372,26 +390,24 @@ impl Service {
                     let _ = reply.send(Err(ERROR_BUTTONS_OFFLINE.to_string()));
                 }
             },
-            ButtonJob::Notice { payload, reply } => {
-                let sent = match &current {
-                    Ok(live) => {
-                        let deadline = Instant::now() + POST_DEADLINE;
-                        match send_message(live, &payload, deadline).await {
-                            Ok(_) => true,
-                            Err(SendFailure::Discord(error)) => {
-                                log_error(&error);
-                                false
-                            }
-                            Err(SendFailure::Deadline) => {
-                                log_error(&"notice did not finish before its deadline");
-                                false
-                            }
-                        }
-                    }
-                    Err(_) => false,
-                };
-                let _ = reply.send(sent);
-            }
+            ButtonJob::Notice {
+                payload,
+                deadline,
+                reply,
+            } => match current {
+                Ok(live) => {
+                    let deadline = (Instant::now() + POST_DEADLINE).min(deadline);
+                    tokio::spawn(async move {
+                        let _ = reply.send(send_notice(&live, &payload, deadline).await);
+                    });
+                }
+                Err(reason) => {
+                    log_error(&format!(
+                        "notice not sent, the Discord connection is not configured: {reason}"
+                    ));
+                    let _ = reply.send(false);
+                }
+            },
             ButtonJob::Sync(change) => {
                 let changed = apply_sync(&mut self.shared.registry.lock(), change);
                 match &current {
@@ -946,6 +962,49 @@ mod tests {
                 .mount(&server)
                 .await;
             assert!(!handle.notice(json!({ "components": [] })).await);
+            assert_eq!(requests(&server, "POST", MESSAGES_PATH).await.len(), 1);
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_slow_notice_does_not_hold_up_the_other_jobs() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness { server, handle, .. } = harness(Ok(config_with(BOT_TOKEN))).await;
+            Mock::given(method("POST"))
+                .and(path(MESSAGES_PATH))
+                .respond_with(posted_reply("d-9").set_delay(Duration::from_secs(2)))
+                .mount(&server)
+                .await;
+            let notice = tokio::spawn({
+                let handle = handle.clone();
+                async move { handle.notice(json!({ "components": [] })).await }
+            });
+            wait_for_requests(&server, "POST", MESSAGES_PATH, 1).await;
+
+            let started = Instant::now();
+            assert_eq!(answered(&handle, vec![]).await, Ok(vec![]));
+            assert!(started.elapsed() < Duration::from_secs(1));
+            assert!(!notice.is_finished());
+            assert!(notice.await.unwrap());
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_notice_whose_deadline_passed_in_the_queue_is_not_sent() {
+        timeout(TEST_TIMEOUT, async {
+            let Harness { server, handle, .. } = harness(Ok(config_with(BOT_TOKEN))).await;
+            respond_to_posts(&server, "d-9").await;
+            assert!(
+                !handle
+                    .notice_with_timeout(json!({ "components": [] }), Duration::from_secs(5))
+                    .await
+            );
+            assert!(requests(&server, "POST", MESSAGES_PATH).await.is_empty());
+            assert!(handle.notice(json!({ "components": [] })).await);
             assert_eq!(requests(&server, "POST", MESSAGES_PATH).await.len(), 1);
         })
         .await

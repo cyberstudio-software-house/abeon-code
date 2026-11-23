@@ -25,6 +25,7 @@ pub enum ButtonJob {
     Sync(DiscordSync),
     Notice {
         payload: serde_json::Value,
+        deadline: Instant,
         reply: tokio::sync::oneshot::Sender<bool>,
     },
     Reconfigure,
@@ -53,14 +54,21 @@ impl ButtonsHandle {
     }
 
     pub async fn notice(&self, payload: serde_json::Value) -> bool {
+        self.notice_with_timeout(payload, REPLY_TIMEOUT).await
+    }
+
+    pub async fn notice_with_timeout(&self, payload: serde_json::Value, timeout: Duration) -> bool {
         let (reply, receiver) = tokio::sync::oneshot::channel();
-        if self.jobs.send(ButtonJob::Notice { payload, reply }).is_err() {
+        let deadline = Instant::now() + timeout.saturating_sub(POST_DEADLINE_MARGIN);
+        let job = ButtonJob::Notice {
+            payload,
+            deadline,
+            reply,
+        };
+        if self.jobs.send(job).is_err() {
             return false;
         }
-        matches!(
-            tokio::time::timeout(REPLY_TIMEOUT, receiver).await,
-            Ok(Ok(true))
-        )
+        matches!(tokio::time::timeout(timeout, receiver).await, Ok(Ok(true)))
     }
 
     pub fn post(&self, request: PostRequest) -> Result<PostResult, String> {
@@ -146,6 +154,53 @@ mod tests {
         assert!(deadline <= tokio::time::Instant::now());
         reply.send(Err(offline())).unwrap();
         assert_eq!(waiter.join().unwrap(), Err(offline()));
+    }
+
+    #[tokio::test]
+    async fn notice_deadline_leaves_a_margin_before_the_reply_timeout() {
+        let (sender, mut jobs) = tokio::sync::mpsc::unbounded_channel();
+        let handle = ButtonsHandle::new(sender);
+        let before = tokio::time::Instant::now();
+        let waiter = tokio::spawn({
+            let handle = handle.clone();
+            async move { handle.notice(serde_json::json!({ "components": [] })).await }
+        });
+        let Some(ButtonJob::Notice {
+            deadline, reply, ..
+        }) = jobs.recv().await
+        else {
+            panic!("expected a notice job");
+        };
+        let after = tokio::time::Instant::now();
+        assert!(deadline >= before + Duration::from_secs(25));
+        assert!(deadline <= after + Duration::from_secs(25));
+        reply.send(true).unwrap();
+        assert!(waiter.await.unwrap());
+
+        let waiter = tokio::spawn(async move {
+            handle
+                .notice_with_timeout(serde_json::json!({}), Duration::from_secs(3))
+                .await
+        });
+        let Some(ButtonJob::Notice {
+            deadline, reply, ..
+        }) = jobs.recv().await
+        else {
+            panic!("expected a notice job");
+        };
+        assert!(deadline <= tokio::time::Instant::now());
+        reply.send(false).unwrap();
+        assert!(!waiter.await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn notice_without_a_consumer_fails_at_once() {
+        let (sender, jobs) = tokio::sync::mpsc::unbounded_channel();
+        drop(jobs);
+        let handle = ButtonsHandle::new(sender);
+        let started = Instant::now();
+        assert!(!handle.notice(serde_json::json!({})).await);
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]
