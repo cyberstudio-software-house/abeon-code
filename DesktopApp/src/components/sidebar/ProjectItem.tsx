@@ -10,6 +10,7 @@ import { EditProjectDialog } from '../dialogs/EditProjectDialog';
 import { ProjectSummaryDialog } from '../dialogs/ProjectSummaryDialog';
 import { ConfirmDialog } from '../dialogs/ConfirmDialog';
 import { getProjectColor } from '../../lib/projectColors';
+import { DeployStatusChip } from '../deploy/DeployStatusChip';
 
 type Props = { project: Project };
 
@@ -55,13 +56,16 @@ export function ProjectItem({ project }: Props) {
 
   return (
     <li>
-      <div className="relative group/proj" ref={manageRef}>
+      <div
+        className={`relative group/proj flex items-center rounded-[7px] transition-colors ${expanded ? 'bg-bg-elev-2' : 'hover:bg-bg-elev-2'}`}
+        ref={manageRef}
+      >
         <button
           onClick={() => toggle(project.id)}
           onContextMenu={(e) => { e.preventDefault(); setMenuOpen(false); setManageOpen(true); }}
           aria-expanded={expanded}
-          className={`group w-full h-7 flex items-center gap-2 px-2 rounded-[7px] text-left text-[13px] transition-colors ${
-            expanded ? 'bg-bg-elev-2 text-fg-strong' : 'text-fg-secondary hover:bg-bg-elev-2 hover:text-fg-strong'
+          className={`group flex-1 min-w-0 h-7 flex items-center gap-2 px-2 rounded-[7px] text-left text-[13px] transition-colors ${
+            expanded ? 'text-fg-strong' : 'text-fg-secondary hover:text-fg-strong'
           }`}
         >
           <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: getProjectColor(project) }} />
@@ -70,6 +74,7 @@ export function ProjectItem({ project }: Props) {
             <span className={`font-mono text-[11px] text-label tabular-nums transition-opacity ${manageOpen ? 'opacity-0' : 'group-hover/proj:opacity-0'}`}>{count}</span>
           )}
         </button>
+        <DeployStatusChip projectId={project.id} className="mr-6" />
         <button
           onClick={(e) => { e.stopPropagation(); setMenuOpen(false); setManageOpen(o => !o); }}
           className={`absolute right-1 top-1/2 -translate-y-1/2 w-5 h-5 grid place-items-center rounded-[5px] text-icon hover:bg-track hover:text-fg-strong transition-opacity ${manageOpen ? 'opacity-100' : 'opacity-0 group-hover/proj:opacity-100'}`}

@@ -2,6 +2,9 @@ import { useStore } from '../../store';
 import { getProjectColor } from '../../lib/projectColors';
 import { SETTINGS_CATEGORIES } from '../../lib/settingsCategories';
 import { HeaderProjectRow } from '../center/HeaderProjectRow';
+import { usePaneTabs } from '../center/PaneBar';
+import { DeployBanner } from '../deploy/DeployBanner';
+import { DeployStatusChip } from '../deploy/DeployStatusChip';
 
 const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
 
@@ -68,6 +71,19 @@ function SettingsBreadcrumb() {
   );
 }
 
+function HeaderDeploy({ fixedProjectId }: { fixedProjectId: number | null }) {
+  const focusedPaneId = useStore(s => s.focusedPaneId);
+  const { selectedProjectId } = usePaneTabs(focusedPaneId);
+  const projectId = fixedProjectId ?? selectedProjectId;
+  if (projectId === null) return null;
+  return (
+    <>
+      <DeployBanner projectId={projectId} />
+      <DeployStatusChip projectId={projectId} showLabel />
+    </>
+  );
+}
+
 const HEADER_PADDING_LEFT = IS_MAC ? 78 : 16;
 const MAIN_HEADER_GAP = 16;
 const SHELL_BODY_PADDING = 4;
@@ -93,6 +109,7 @@ export function AppHeader({ variant }: { variant: AppHeaderVariant }) {
       {variant.kind === 'project'
         ? <ProjectBreadcrumb projectId={variant.projectId} />
         : showSettingsBreadcrumb ? <SettingsBreadcrumb /> : <HeaderProjectRow />}
+      {!showSettingsBreadcrumb && <HeaderDeploy fixedProjectId={variant.kind === 'project' ? variant.projectId : null} />}
       <ActiveSessionsCount label={variant.kind === 'main' ? 'aktywne sesje' : 'aktywne'} />
     </header>
   );

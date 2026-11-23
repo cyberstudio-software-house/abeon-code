@@ -21,6 +21,7 @@ import { usePresenceReporter } from '../../lib/usePresenceReporter';
 import { useSupervisorSnapshot } from '../../lib/useSupervisorSnapshot';
 import { useSupervisorAutoOpen } from '../../lib/useSupervisorAutoOpen';
 import { useNotesSync } from '../../lib/useNotesSync';
+import { useDeploySync } from '../../lib/useDeploySync';
 import { useFilesSync } from '../../lib/useFilesSync';
 import { SupervisorPanel } from '../supervisor/SupervisorPanel';
 import { openProjectPath } from '../../lib/openProject';
@@ -78,6 +79,7 @@ export function AppShell() {
   useSupervisorSnapshot();
   useSupervisorAutoOpen();
   useNotesSync();
+  useDeploySync();
   useFilesSync();
 
   useEffect(() => {

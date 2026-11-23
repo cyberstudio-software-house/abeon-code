@@ -4,6 +4,7 @@ import { useStore } from '../../store';
 import { createLeaf } from '../../lib/paneTree';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
 import type { Tab } from '../../store/tabsSlice';
+import { makeView } from '../../test-helpers/deploy';
 import { AppHeader } from './AppHeader';
 
 const projects = [
@@ -97,6 +98,40 @@ describe('AppHeader', () => {
     const session = render(<AppHeader variant={{ kind: 'session' }} />);
     expect(session.container.querySelector('[data-project-tab-id="1"]')).not.toBeNull();
     expect(screen.queryByText('Ustawienia')).toBeNull();
+  });
+
+  describe('deployment status', () => {
+    beforeEach(() => { useStore.setState({ trackings: [] }); });
+
+    it('shows the status and the banner of the project of the focused pane', () => {
+      seed([liveSession]);
+      useStore.setState({ trackings: [makeView({ state: 'paused', runUrl: 'https://ci.example/run/1' }, [1])] });
+      render(<AppHeader variant={{ kind: 'main' }} />);
+      expect(screen.getByText('Pipeline czeka na Twoją akceptację')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'api: Pipeline czeka na Ciebie' })).toHaveTextContent('Pipeline czeka na Ciebie');
+    });
+
+    it('shows nothing for a project without trackings', () => {
+      seed([liveSession]);
+      useStore.setState({ trackings: [makeView({ state: 'paused' }, [2])] });
+      render(<AppHeader variant={{ kind: 'main' }} />);
+      expect(screen.queryByText('Pipeline czeka na Twoją akceptację')).toBeNull();
+      expect(screen.queryByRole('button', { name: /api:/ })).toBeNull();
+    });
+
+    it('follows the project of a project window', () => {
+      seed([]);
+      useStore.setState({ trackings: [makeView({ state: 'failed' }, [2])] });
+      render(<AppHeader variant={{ kind: 'project', projectId: 2 }} />);
+      expect(screen.getByRole('button', { name: 'api: Wdrożenie nie powiodło się' })).toBeInTheDocument();
+    });
+
+    it('hides the status while the settings view is open', () => {
+      seed([liveSession]);
+      useStore.setState({ trackings: [makeView({ state: 'failed' }, [1])], settingsOpen: true });
+      render(<AppHeader variant={{ kind: 'main' }} />);
+      expect(screen.queryByRole('button', { name: /api:/ })).toBeNull();
+    });
   });
 
   it('marks the header as the window drag region', () => {
