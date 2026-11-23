@@ -5,7 +5,8 @@ katalogu (tworząc projekt, jeśli nie istnieje).
 
 ## Instalacja
 
-Ustawienia → CLI → „Zainstaluj komendę". Zapisuje wrapper do `~/.local/bin/abeon-code`.
+Ustawienia → Dostawcy CLI → Terminal i skill → „Zainstaluj komendę". Zapisuje wrapper do
+`~/.local/bin/abeon-code`.
 Upewnij się, że `~/.local/bin` jest w `PATH`.
 
 ## Użycie
@@ -68,8 +69,12 @@ Kody wyjścia `deploy wait`:
 | 1 | wdrożenie nie powiodło się albo utknęło (w wyniku przyczyna i fragment logu) |
 | 2 | błąd użycia lub inny prawdziwy błąd (stderr) |
 | 3 | brak śledzenia: brak przepływu, śledzenie wyłączone, nic do śledzenia, aplikacja nie działa albo `no new push to <remote>/<gałąź>` (ostatni push jest stary, `git push` nic nie wysłał lub poszedł gdzie indziej) |
-| 4 | potrzebny użytkownik: pipeline wstrzymany (ręczny krok czeka na akceptację) albo blokada dłuższa niż 120 s (klaster niedostępny, brak narzędzia) |
-| 8 | wdrożenie wciąż trwa po upływie limitu, trzeba wywołać komendę ponownie |
+| 4 | potrzebny użytkownik: pipeline wstrzymany (ręczny krok czeka na akceptację) albo blokada widziana przez większą część wywołania: 120 s albo 80 % krótszego `--timeout`, co najmniej 10 s (klaster niedostępny, brak narzędzia) |
+| 8 | wdrożenie wciąż trwa po upływie limitu, trzeba wywołać komendę ponownie; z linią `blocked:` w wyniku agent zgłasza blokadę użytkownikowi jak przy kodzie 4 |
+
+Śledzenie odpowiada pushowi tylko wtedy, gdy zaczęło się najwyżej sekundę przed nim, więc commit
+wypchnięty ponownie (np. force-push z powrotem na wcześniejszy commit) czeka na nowe śledzenie, a nie
+dostaje od razu wyniku starego.
 
 Agent uruchamia `deploy wait` zamiast pętli `sleep` + `bkt`/`gh`. Narzędzie powłoki agenta zabija
 polecenie po własnym limicie (w Claude Code domyślnie 120 s), więc trzeba ustawić limit narzędzia na
@@ -81,14 +86,15 @@ zamkniętej aplikacji.
 
 ### Skille dla agenta
 
-Ustawienia → „Skill dla Claude Code” → „Zainstaluj skill” instaluje w `~/.claude/skills` skille
+Ustawienia → Dostawcy CLI → Terminal i skill → „Skill dla Claude Code” → „Zainstaluj skill” instaluje
+w `~/.claude/skills` skille
 `abeon-open-session`, `abeon-notes` i `abeon-deploy` oraz odświeża wrapper.
 
 ### Ponowna instalacja komendy
 
 Wrapper z wersji sprzed śledzenia wdrożeń nie zna `flow` ani `deploy` (uruchomiłby aplikację zamiast
-komendy). Po aktualizacji aplikacji zainstaluj komendę ponownie: Ustawienia → CLI → „Zainstaluj
-komendę”. Nowy wrapper ma w nagłówku `wrapper_features="note flow deploy"`; skille sprawdzają ten
+komendy). Po aktualizacji aplikacji zainstaluj komendę ponownie: Ustawienia → Dostawcy CLI → Terminal
+i skill → „Zainstaluj komendę”. Nowy wrapper ma w nagłówku `wrapper_features="note flow deploy"`; skille sprawdzają ten
 znacznik przed pierwszym wywołaniem i każą zainstalować komendę ponownie, gdy go brak. Sprawdzenie:
 
     grep wrapper_features "$(command -v abeon-code)"

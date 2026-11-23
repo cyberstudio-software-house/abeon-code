@@ -806,13 +806,35 @@ for where the code differs from the text); manual QA list:
   `core.logAllRefUpdates=false`, single-branch clones that do not map the production branch to a
   remote-tracking ref, reftable repositories. A new push supersedes the open tracking of the repository
   (`start_tracking`, state `superseded`); trackings of a flow that was removed or disabled are
-  superseded too (`close_orphans`). The last `TRACKING_HISTORY` (10) trackings per repository are kept.
+  superseded too (`close_orphans`). **Removed projects**: `refresh` keeps only the flows whose
+  repository belongs to a registered project (`repos::is_known_repo`), so after `remove_project` the
+  repository's open tracking is superseded and its pushes start nothing. Flow rows are not deleted (a
+  repository can belong to two projects); re-adding the project restores the flow, and tracking resumes
+  from its next push. The last `TRACKING_HISTORY` (10) trackings per repository are kept. A stored
+  tracking whose JSON body does not parse is skipped (and logged once per row) by `open`,
+  `latest_per_repo` and `history`, so one bad row does not stop the tracker; `get` by id still fails.
 - **Tracking** (`domain::deploy::Tracking`): states `waitingForRun`, `building`, `paused`, `delivering`
   (open) and `succeeded`, `failed`, `stalled`, `superseded`. `has_build` and `has_delivery` are frozen
-  from the flow at creation, so editing the flow does not change what an old tracking shows. A tracking
-  is tied to a repository and a commit, never to a session. Open trackings are read from SQLite at start and
-  resume; each has its own poll schedule (`BUILD_POLL` 15 s for CI, `CLUSTER_POLL` 10 s, `BLOCKED_POLL`
-  60 s while blocked), kept in the tracker's ledger, not in the DB.
+  from the flow at creation, so editing the flow does not change what a closed tracking shows; an open
+  tracking follows its flow's delivery being switched on or off (`machine::follow_delivery_switch`):
+  switched off, the cluster blocker is cleared and the tracking ends by the build alone (`succeeded` if
+  it is already delivering; `superseded` when it had no build either). A tracking is tied to a
+  repository and a commit, never to a session. Open trackings are read from SQLite at start and resume.
+- **Delivery key** (`DeliveryKey`: delivery kind, namespace, sorted workloads, trimmed kube context),
+  frozen on the tracking at creation (`delivery_key`, serde default `None` for older rows, which take
+  the first flow they see). The tracker reloads the flow every tick, so a flow edited mid-tracking would
+  compare a snapshot of other workloads with the old baseline and report a false „Wdrożono”. When the
+  flow's key differs from the tracking's, the cluster observation stores the new key, drops the
+  baseline and clears the cluster blocker; the snapshot that sees the change re-records the baseline
+  (`baseline_at = now`) and is not judged.
+- **Poll schedule** (per tracking, in the tracker's ledger, not in the DB): CI every `BUILD_POLL` 15 s,
+  `PAUSED_POLL` 60 s while `paused`; the cluster every `CLUSTER_POLL` 10 s until the first snapshot and
+  during `delivering` (entering delivery brings the next cluster poll within 10 s), `IDLE_CLUSTER_POLL`
+  60 s otherwise once a baseline exists; `BLOCKED_POLL` 60 s for a blocked side. Bitbucket: once
+  `run_id` is known, `bkt api /repositories/<ws>/<repo>/pipelines/<uuid>` is queried directly
+  (`observe_known_run`); the list of the newest 30 is used only before that or when the direct call
+  says the pipeline does not exist (`says_missing`: exit ≠ 0 with `404` or `not found` in the output,
+  or an answer for another commit). Any other failure of the direct call is a CI blocker.
 - **Blocker vs failure**: a blocker (cluster unreachable, tool missing or not logged in) is **never** a
   failure. `ci_blocker` and `cluster_blocker` are two separate fields, one per side, set and cleared by
   that side's own observation; `Tracking::blocker()` shows the one of the stage in progress first. Each
@@ -822,28 +844,35 @@ for where the code differs from the text); manual QA list:
   new version that cannot become ready (reason + pod log), or a limit that ran out (`stalled`, worded
   „Nie widać dalszego ciągu” and shown as a problem). The frontend decides what to show with
   `shownBlocker` / `openBlocker` in `lib/deployStatus.ts`.
-- **VPN**: on cluster-unreachable the tracker tries once per tracking (`vpn_attempted`) to run `nmcli
-  connection up id <name>` with the name from the setting `deployVpnConnection` (Settings → Wdrożenia),
-  Linux only (`vpn::supported`); the `id` keyword makes a name such as `help` a connection id, not an
-  nmcli keyword. It never disconnects. On Windows and macOS the stage only reports „Klaster
-  niedostępny”.
+- **VPN, once per outage**: on cluster-unreachable the machine emits `ConnectVpn` on every unreachable
+  poll while `vpn_attempted` is unset; the tracker runs `nmcli connection up id <name>` with the name
+  from the setting `deployVpnConnection` (Settings → Wdrożenia), Linux only (`vpn::supported`), and
+  sets `vpn_attempted` only when it actually tried (a name is set and the platform supports it), so a
+  name entered after the first unreachable poll is used on the next one. A cluster `Snapshot` clears
+  the flag, so the next outage (for example after a long pause) gets its own attempt. „Spróbuj
+  ponownie” (`deploy_retry` → `DeployTracker::retry`) clears it too, forces both polls, emits
+  `deploy://changed` and the UI shows the toast „Sprawdzam ponownie…”. The `id` keyword makes a name
+  such as `help` a connection id, not an nmcli keyword. It never disconnects. On Windows and macOS the
+  stage only reports „Klaster niedostępny”.
 - **Cluster readiness** (`cluster.rs`): only live pods count (no deletion timestamp, phase not
   `Succeeded`/`Failed`), a workload scaled to 0 is ready, empty `workloads` means every Deployment of
   the namespace. „Image” covers container images and CSI image volumes. The expected tag is not
   computed, so with two pushes in quick succession the image chain can report „Wdrożono” for the second
   push when the image that landed is the first push's. The Kubemeter variant has no real project to
   test against.
-- **Log excerpts**: the last `LOG_EXCERPT_LINES` (60) lines, redacted by `excerpt::tail_redacted` (the
-  supervisor's redaction rules). They live in `TrackingFailure.log_excerpt` and appear in the details
+- **Log excerpts**: the last `LOG_EXCERPT_LINES` (60) lines, redacted by `excerpt::tail_redacted`
+  (`deploy/excerpt.rs`' own implementation, not the supervisor's redaction code). They live in `TrackingFailure.log_excerpt` and appear in the details
   dialog and the CLI output, never in a notification or a Discord message.
 - **`deploy://changed`** (`DeployChangedEvent { repoPath }`): emitted by the tracker, the commands and,
   for the CLI process, by `IpcRequest::DeployChanged` sent over the supervisor socket after `flow
   propose` (best effort, unix only; the router in `supervisor/runtime.rs` calls the deploy hook).
   `useDeploySync` (both shells) reloads trackings and proposals on it, and proposals also on window
   focus, because a CLI process started while the app was closed cannot send it.
-- **Notifications** (`notify.rs`): paused, failed and stalled go to a desktop notification (click opens
-  the pipeline, `show_link_notification`) and to Discord; success is one quiet desktop notification
-  („Wdrożono: <projekt>”) and nothing on Discord. Discord goes out only through
+- **Notifications** (`notify.rs`): paused, failed and stalled go to a desktop notification and to
+  Discord; success is one quiet desktop notification and nothing on Discord. The title names the
+  repository folder (`notify::repo_label`), e.g. „Wdrożono: hs-training”, not the project. On Linux a
+  click on the notification opens the pipeline (`show_link_notification`, notify_rust action); on macOS
+  and Windows it is a plain notification and a click does not open the pipeline. Discord goes out only through
   `supervisor::runtime::post_discord_notice`, which needs the supervisor level above Off, its session
   running, Discord connected and routing not forced to the app (unix only); otherwise the desktop
   notification and the in-app marks remain. Proposals take the same path from `commands/deploy.rs`; a
@@ -860,9 +889,13 @@ for where the code differs from the text); manual QA list:
   wrapper like `note`; the wrapper has `wrapper_features="note flow deploy"` and must be reinstalled to
   get them (Ustawienia → „Zainstaluj komendę”). Results go to stdout (also the `no tracking` messages),
   usage and real errors to stderr with exit 2. **`deploy wait` exit codes**: 0 succeeded, 1 failed or
-  stalled, 3 no tracking, 4 needs the user (paused, or a blocker seen for more than 120 s), 8 still
-  running at the timeout (default 540 s, maximum 3600 s). The skill documents these; change them
-  together with `cli/skill.rs`. There are two `no tracking` answers: the generic one (no flow, tracking
+  stalled, 3 no tracking, 4 needs the user (paused, or a blocker seen continuously for longer than
+  `blocker_limit(timeout)` = 120 s or 80 % of a shorter `--timeout`, at least 10 s), 8 still running at
+  the timeout (default 540 s, maximum 3600 s). The skill documents these; change them together with
+  `cli/skill.rs`. A tracking answers the newest push only when its commit matches and it started no
+  earlier than one second before the push (`answers_push`: `started_at + 1000 >= push.at`); otherwise
+  it is "not seen yet" and the 30 s grace applies, so a commit pushed again (a force-push back) is not
+  answered by its old tracking. There are two `no tracking` answers: the generic one (no flow, tracking
   off, nothing to track, AbeonCode not running) and `no new push to <remote>/<branch>: the newest push
   is <sha>, <age> ago, state <state> — …`, given when the newest push is older than 60 minutes and its
   deployment finished more than 10 minutes before the command started, which usually means the agent's
@@ -877,7 +910,11 @@ for where the code differs from the text); manual QA list:
   `updated_at` of the flow it was compared against. Only the user's „Zatwierdź” (`FlowProposalCard` or
   the Discord button) saves it, through `proposals::resolve`, which refuses as stale when the flow
   changed after the proposal („Przepływ zmienił się po propozycji — sprawdź w aplikacji”); the card sends
-  the base it rendered, Discord uses the stored one. A Discord tap after an in-app decision answers
+  the base it rendered, Discord uses the stored one. So the in-app card approves what it shows: its list
+  of changes is recomputed against the current flow, a flow changed since the proposal gets the neutral
+  note „Przepływ zmienił się od czasu propozycji — lista zmian jest aktualna.”, and the red stale
+  sentence appears only after a decision was actually refused; only the Discord button refuses a
+  changed flow. A Discord tap after an in-app decision answers
   „Zatwierdzono w aplikacji” / „Odrzucono w aplikacji” (`ProposalNotices`). There is no `flow approve`.
   This guards agents that use the CLI; it is not a sandbox: a process running as the user can still
   write the SQLite file or post a fake button with the bot token.
@@ -886,7 +923,8 @@ for where the code differs from the text); manual QA list:
   `bkt`/`gh`), and the flow setup through `flow show | detect | propose`.
 - **Not covered by tests**: the tracker's production loop (`DeployTracker::start`, the wake loop, the
   event sink) has no automated test and has not been run in the app; the Bitbucket paused mapping
-  (`state.stage.name` `PAUSED`) and the failed-step log fetch have not met a real run.
+  (`state.stage.name` `PAUSED`), the failed-step log fetch and the direct pipeline query (including how
+  `bkt api` reports a 404, which `says_missing` assumes) have not met a real run.
 
 ## Gotchas
 

@@ -330,7 +330,10 @@ the design is left as approved.
 - **Stale proposals are refused.** A proposal stores `base_updated_at`, the `updated_at` of the flow it
   was compared against (§2). Approving it is refused as stale („Przepływ zmienił się po propozycji —
   sprawdź w aplikacji”) when the flow changed after the proposal. The card sends the base it rendered,
-  the Discord button uses the stored one. The confirmation guards agents that use the CLI; it is not a
+  the Discord button uses the stored one. So the in-app card approves what it shows: it recomputes the
+  list of changes against the current flow, notes a flow changed since the proposal neutrally
+  („Przepływ zmienił się od czasu propozycji — lista zmian jest aktualna.”) and shows the red stale
+  sentence only after a decision was actually refused; only the Discord button refuses a changed flow. The confirmation guards agents that use the CLI; it is not a
   sandbox, a process running as the user can still write the SQLite file or post a fake button with the
   bot token. Proposing the same flow twice returns the existing proposal, and a flow identical to the
   current one is refused.
@@ -339,13 +342,34 @@ the design is left as approved.
   when the newest push is older than 60 minutes and its deployment finished more than 10 minutes before
   the command started, because that usually means the agent's push was a no-op or went elsewhere.
   Exit codes: 0 succeeded, 1 failed or stalled, 3 no tracking, 4 needs the user (paused, or a blocker
-  seen for more than 120 s), 8 still running at the timeout (default 540 s, maximum 3600 s). The skill
-  tells agents to run it with a 600000 ms tool timeout or a shorter `--timeout`. The skill is called
-  `abeon-deploy`, not `abeon-project-flow`.
+  seen for most of the call: 120 s, or 80 % of a shorter `--timeout`, at least 10 s), 8 still running at
+  the timeout (default 540 s, maximum 3600 s). The skill tells agents to run it with a 600000 ms tool
+  timeout or a shorter `--timeout`, and to report and stop on exit 8 when the output has a `blocked:`
+  line. A tracking answers the newest push only when it started no earlier than one second before that
+  push, so a commit pushed again (a force-push back) waits for its new tracking instead of getting the
+  old result. The skill is called `abeon-deploy`, not `abeon-project-flow`.
 - **Only live pods count for readiness** (§4). Pods with a deletion timestamp and pods in phase
   `Succeeded` or `Failed` are ignored, and a workload scaled to 0 is ready.
 - **VPN command** (§5). `nmcli connection up id <name>`, so a name that is an nmcli keyword is still
-  taken as a connection id. Tried once per tracking, Linux only.
+  taken as a connection id. Linux only.
+- **VPN once per outage, not once per tracking** (§5). An attempt counts only when a connection was
+  really tried (a name is set and the platform supports it), so a name entered after the first
+  unreachable poll is used. A successful cluster read clears the attempt, so a VPN that drops again
+  later in the same tracking (for example during a long pause) is reconnected again. „Spróbuj
+  ponownie” also clears it and shows „Sprawdzam ponownie…”.
+- **Poll intervals** (§4 "Time limits"). The build is polled every 15 s, but every 60 s while the
+  pipeline is paused; the cluster every 10 s until the first snapshot and during delivery, and every
+  60 s before delivery once the starting images are known. Once the Bitbucket run is known it is
+  queried directly instead of through the list of the newest 30 pipelines, which a long-paused run in a
+  busy repository could drop out of.
+- **Delivery key and re-baselining** (§4). A tracking keeps the delivery kind, namespace, workloads and
+  kube context it compared against. When the flow is edited during a tracking, the next cluster read
+  records a new starting set of images instead of comparing the new workloads with the old set (which
+  reported a false „Wdrożono”). A delivery switched to `none` during a tracking ends it by the build
+  alone.
+- **Removed projects are not tracked** (§1, §3). Only repositories of registered projects are tracked;
+  removing a project closes its repository's open tracking as superseded and stops new ones. The flow
+  itself is kept and works again when the project is added back.
 - **Log excerpts are the last 60 lines** (§4), redacted, in the details view and the CLI output; they
   are never put into a notification or a Discord message.
 - **Discord notices need the supervisor on** (§6). Deployment and proposal messages go out only when
@@ -354,6 +378,11 @@ the design is left as approved.
   user is present with „mute when present”, is not posted to Discord later.
 - **Header while paused.** While the paused banner shows, the header chip is a flat dot without a
   label; the sidebar row keeps the filled accent pill.
+- **Failure mark** (§6). A failed or stalled deployment shows a red status dot (tone `problem`) on the
+  project, not the mark of a session needing attention.
+- **Notification title and click** (§6). Notifications name the repository folder, e.g. „Wdrożono:
+  hs-training”, not the project. A click on the notification opens the pipeline only on Linux; on
+  macOS and Windows it is a plain notification.
 - **Push detection limits.** The reflog trigger does not see repositories with
   `core.logAllRefUpdates=false`, single-branch clones that do not map the production branch to a
   remote-tracking ref, or reftable repositories; a push made while the app was closed is not tracked
@@ -362,5 +391,5 @@ the design is left as approved.
   the second push when the image that landed is the first push's, because the expected tag is not
   computed.
 - **Not exercised yet.** The tracker's production loop has no automated test and has not been run in the
-  app; the Bitbucket paused mapping (`state.stage.name` `PAUSED`) and the failed-step log fetch have not
-  met a real run. The QA checklist `2026-11-23-deployment-tracking-qa-checklist.md` covers them.
+  app; the Bitbucket paused mapping (`state.stage.name` `PAUSED`), the failed-step log fetch and the
+  direct pipeline query (how `bkt api` reports a pipeline that does not exist) have not met a real run. The QA checklist `2026-11-23-deployment-tracking-qa-checklist.md` covers them.

@@ -77,8 +77,8 @@ z pipeline'em, który się szybko kończy.
 15. **[PUSH]** Kliknij status: „Status wdrożenia” pokazuje repozytorium, skrócony commit, gałąź, etap
     „Budowanie” z godziną rozpoczęcia i przycisk „Otwórz pipeline” (otwiera stronę w przeglądarce).
 16. **[PUSH]** Po zakończeniu pipeline'u status zmienia się na „Wdrażanie na klaster”; po wymianie
-    obrazu i gotowych podach na „Wdrożono”. Pojawia się jedno ciche powiadomienie „Wdrożono: <projekt>”,
-    bez wiadomości na Discordzie. Okno szczegółów pokazuje oba etapy z czasami, a gdy w tagu obrazu jest
+    obrazu i gotowych podach na „Wdrożono”. Pojawia się jedno ciche powiadomienie „Wdrożono: <nazwa
+    katalogu repozytorium>” (nie nazwa projektu), bez wiadomości na Discordzie. Okno szczegółów pokazuje oba etapy z czasami, a gdy w tagu obrazu jest
     numer builda, wiersz „Obraz zawiera numer builda …”.
 17. **[PUSH]** Wypchnij drugi commit tuż po pierwszym, gdy pierwsze śledzenie jeszcze trwa: pierwsze
     przechodzi w „Zastąpione”, a śledzone jest drugie. Znane ograniczenie: przy dwóch pushach w krótkim
@@ -125,7 +125,8 @@ Nie psuj pipeline'u projektu klienta, żeby sprawdzić błąd. W projekcie testo
 celowo nieprzechodzącym krokiem (np. `exit 1` w skrypcie testowym) albo użyj już nieudanego runu.
 
 27. **[PUSH]** Po nieudanym kroku status zmienia się na „Wdrożenie nie powiodło się”, projekt dostaje
-    to samo oznaczenie co sesja wymagająca uwagi, a powiadomienie na pulpicie jest bez treści logu.
+    czerwoną kropkę statusu (ton `problem`), a nie oznaczenie sesji wymagającej uwagi, a powiadomienie
+    na pulpicie jest bez treści logu.
     Szczegóły pokazują „Niepowodzenie na etapie budowanie: …” i fragment logu (najwyżej 60 ostatnich
     linii, sekrety zamaskowane). To pierwsze prawdziwe sprawdzenie pobrania logu nieudanego kroku.
 28. **[PUSH][DISCORD]** Na Discordzie jest wiadomość o niepowodzeniu bez treści logu.
@@ -149,12 +150,17 @@ którego nie chcesz podnosić. Test dotyczy tylko Linuksa.
     „Spróbuj ponownie”) śledzenie rusza dalej i kończy się „Wdrożono”.
 33. **[PUSH]** VPN wyłączony, **z** nazwą połączenia w ustawieniach: aplikacja sama podnosi połączenie
     (`nmcli connection up id <nazwa>`, widać to w `nmcli connection show --active`), robi to raz na
-    śledzenie, zostawia VPN włączony, a śledzenie kończy się „Wdrożono”. Z błędną nazwą połączenia
+    każdą przerwę w dostępie do klastra (nie raz na śledzenie, zob. krok 56), zostawia VPN włączony, a
+    śledzenie kończy się „Wdrożono”. Z błędną nazwą połączenia
     status zostaje „Klaster niedostępny” i nie jest to niepowodzenie wdrożenia.
 34. Brak jednego z narzędzi (`bkt` albo `gh`) przy aktywnym śledzeniu: status pokazuje „Nie mogę
     sprawdzić” z powodem, nigdy „Wdrożenie nie powiodło się”.
 
 ## 7. Restart aplikacji w trakcie śledzenia [PUSH]
+
+Nie zamykaj aplikacji w trakcie wdrożenia projektu klienta i nie przerywaj ani nie uruchamiaj ponownie
+pipeline'u, żeby sprawdzić wznowienie: użyj projektu testowego z pipeline'em, który i tak się zakończy.
+Nie usuwaj bazy ani wierszy śledzeń w czasie, gdy aplikacja jest zamknięta.
 
 35. **[PUSH]** Wypchnij commit i w trakcie budowania zamknij aplikację, odczekaj do końca pipeline'u i
     uruchom ją ponownie: otwarte śledzenie wznawia się z bazy i kończy prawidłowo (stan zależy od
@@ -171,8 +177,8 @@ którego nie chcesz podnosić. Test dotyczy tylko Linuksa.
 
 ## 9. `abeon-code deploy wait` z sesji [PUSH]
 
-Nie ustawiaj limitu krótszego niż pipeline tylko po to, żeby zobaczyć kod 8: wystarczy `--timeout 5`.
-Nie próbuj zatwierdzać wstrzymanego pipeline'u żadną komendą.
+Kod 8 sprawdzasz tylko w kroku 40, krótkim `--timeout 5`; w pozostałych krokach nie skracaj limitu, żeby
+agent doczekał prawdziwego wyniku. Nie próbuj zatwierdzać wstrzymanego pipeline'u żadną komendą.
 
 39. **[PUSH]** W sesji agenta w projekcie testowym (z zainstalowanym skillem `abeon-deploy`) poproś o
     wypchnięcie zmiany i sprawdzenie wdrożenia. Agent uruchamia `abeon-code deploy wait` (z limitem
@@ -211,9 +217,14 @@ Discordzie.
     samo JSON) daje jedną wiadomość i tę samą propozycję.
 48. Propozycja odrzucona w aplikacji, a potem kliknięty przycisk na Discordzie: odpowiedź „Odrzucono w
     aplikacji”. To samo przy zatwierdzeniu w aplikacji: „Zatwierdzono w aplikacji”. **[DISCORD]**
-49. Propozycja nieaktualna: wyślij propozycję, zmień przepływ ręcznie w oknie edycji projektu i zapisz,
-    potem kliknij „Zatwierdź” na karcie albo na Discordzie: odmowa „Przepływ zmienił się po propozycji —
-    sprawdź w aplikacji”, a przepływ zostaje ten z ustawień.
+49. Propozycja po zmianie przepływu: wyślij propozycję, zmień przepływ ręcznie w oknie edycji projektu i
+    zapisz. Karta w aplikacji przelicza listę zmian względem nowego przepływu i pokazuje szarą uwagę
+    „Przepływ zmienił się od czasu propozycji — lista zmian jest aktualna.”; „Zatwierdź” na karcie
+    zapisuje to, co karta pokazuje. Tylko przycisk „Zatwierdź” na Discordzie **[DISCORD]** odmawia przy
+    zmienionym przepływie: „Przepływ zmienił się po propozycji — sprawdź w aplikacji”, a przepływ zostaje
+    ten z ustawień. Czerwony komunikat na karcie pojawia się tylko wtedy, gdy zatwierdzenie z karty
+    zostało faktycznie odrzucone (przepływ zapisany w drugim oknie między wyświetleniem karty a
+    kliknięciem).
 50. Propozycja identyczna z bieżącym przepływem: `flow propose` kończy się kodem 2 z komunikatem, że
     przepływ ma już te wartości. Niepoprawna wartość (np. `"namespace": "x;y"`) i nieznane pole dają kod 2
     z listą powodów. Propozycja z folderu z kilkoma repozytoriami bez `repoPath` kończy się kodem 2 z listą
@@ -226,3 +237,32 @@ Discordzie.
 52. Jasny i ciemny motyw: chip statusu w sidebarze, pigułka akcentowa (kontrast tekstu na akcencie),
     pasek w nagłówku, okno szczegółów z blokiem logu, karta propozycji i formularz przepływu są czytelne
     i bez „wypalonych” kolorów w obu motywach.
+
+## 12. Zmiany w trakcie śledzenia: przepływ, projekt, VPN [PUSH]
+
+Wszystko na projekcie testowym. Nie usuwaj z aplikacji projektu klienta, nie zmieniaj przepływu projektu
+klienta w trakcie jego wdrożenia i nie wyłączaj VPN-u, z którego ktoś akurat korzysta. Nie zatwierdzaj
+wstrzymanego kroku z aplikacji ani z terminala: tylko w przeglądarce, jako własna decyzja.
+
+53. **[PUSH]** Przepływ z pustymi „Zasobami” (wszystkie Deploymenty namespace'u). Wypchnij commit i w
+    trakcie budowania zmień „Zasoby” na jeden z nich (albo zmień namespace) i zapisz. Po zakończeniu
+    pipeline'u status zostaje „Wdrażanie na klaster” aż do faktycznej wymiany obrazu; nie ma
+    natychmiastowego „Wdrożono” ani powiadomienia. `abeon-code deploy wait` w tym czasie nie kończy się
+    kodem 0.
+54. **[PUSH]** Przy wyłączonym VPN-ie i pustej nazwie połączenia w ustawieniach (szczegóły pokazują
+    „Klaster niedostępny”) przełącz w trakcie budowania „Dostarczenie” na „brak” i zapisz: blokada
+    klastra znika, a po zakończeniu pipeline'u śledzenie kończy się „Wdrożono” bez etapu „Wdrażanie na
+    klaster” w szczegółach.
+55. **[PUSH]** W trakcie śledzenia usuń projekt testowy z aplikacji. Wypchnij kolejny commit i poczekaj
+    do końca jego pipeline'u: nie przychodzi żadne powiadomienie o wdrożeniu. Dodaj projekt ponownie:
+    sekcja „Przepływ wdrożenia” ma dawne wartości, commit wypchnięty w czasie, gdy projektu nie było,
+    nie jest śledzony, a następny push już jest.
+56. **[PUSH][PAUZA]** Z nazwą połączenia w ustawieniach i włączonym VPN-em: gdy pipeline czeka na ręczny
+    krok, wyłącz VPN. W ciągu około minuty aplikacja sama go podnosi, także w czasie pauzy. Zatwierdź krok
+    w przeglądarce: wdrożenie kończy się „Wdrożono”. Wyłącz VPN drugi raz przed końcem wdrożenia:
+    aplikacja podnosi go ponownie (jedna próba na każdą przerwę w dostępie do klastra, nie jedna na całe
+    śledzenie). Bez pipeline'u z pauzą sprawdź to samo dwoma wyłączeniami VPN-u w jednym śledzeniu.
+57. **[PUSH]** VPN wyłączony, nazwa połączenia pusta: po „Klaster niedostępny” wpisz nazwę w ustawieniach.
+    Przy następnym sprawdzeniu (najwyżej po minucie) aplikacja podnosi VPN z tą nazwą. „Spróbuj ponownie”
+    w szczegółach pokazuje komunikat „Sprawdzam ponownie…”, od razu sprawdza klaster i, jeśli nadal jest
+    niedostępny, jeszcze raz próbuje podnieść VPN.
