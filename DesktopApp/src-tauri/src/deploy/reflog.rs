@@ -1,5 +1,5 @@
 use crate::domain::deploy::DeployFlow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
@@ -95,26 +95,29 @@ impl PushDetector {
     }
 
     pub fn poll(&mut self, flows: &[DeployFlow]) -> Vec<(DeployFlow, PushEntry)> {
-        let enabled: Vec<&DeployFlow> = flows.iter().filter(|flow| flow.enabled).collect();
+        let mut enabled: Vec<&DeployFlow> = flows.iter().filter(|flow| flow.enabled).collect();
+        enabled.sort_by(|left, right| left.repo_path.cmp(&right.repo_path));
         self.seen
             .retain(|path, _| enabled.iter().any(|flow| &flow.repo_path == path));
 
         let mut found = Vec::new();
+        let mut reported: HashSet<PathBuf> = HashSet::new();
         for flow in enabled {
             let Some(reflog) =
                 reflog_path(Path::new(&flow.repo_path), &flow.remote, &flow.production_branch)
             else {
-                self.seen.remove(&flow.repo_path);
                 continue;
             };
             let current = latest_push(&reflog);
             match self.seen.get_mut(&flow.repo_path) {
                 Some(seen) if seen.reflog == reflog => {
-                    if seen.last != current {
-                        seen.last = current.clone();
-                        if let Some(entry) = current {
-                            found.push((flow.clone(), entry));
-                        }
+                    let Some(entry) = current else { continue };
+                    if seen.last.as_ref() == Some(&entry) {
+                        continue;
+                    }
+                    seen.last = Some(entry.clone());
+                    if reported.insert(file_identity(&reflog)) {
+                        found.push((flow.clone(), entry));
                     }
                 }
                 _ => {
@@ -125,6 +128,10 @@ impl PushDetector {
         }
         found
     }
+}
+
+fn file_identity(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]
@@ -226,10 +233,8 @@ mod tests {
         assert_eq!(reflog_path(repo.path(), "origin", ""), None);
     }
 
-    #[test]
-    fn a_linked_worktree_resolves_to_the_main_reflog() {
-        let (repo, _) = repo_with_push("a");
-        let main = git2::Repository::open(repo.path()).unwrap();
+    fn linked_worktree(repo: &Path) -> (tempfile::TempDir, PathBuf) {
+        let main = git2::Repository::open(repo).unwrap();
         let signature = git2::Signature::now("test", "test@example.com").unwrap();
         let tree_id = main.treebuilder(None).unwrap().write().unwrap();
         let tree = main.find_tree(tree_id).unwrap();
@@ -237,6 +242,17 @@ mod tests {
         let outside = tempfile::tempdir().unwrap();
         let worktree_path = outside.path().join("wt");
         main.worktree("wt", &worktree_path, None).unwrap();
+        (outside, worktree_path)
+    }
+
+    fn origin_master(repo: &Path) -> PathBuf {
+        repo.join(".git/logs/refs/remotes/origin/master")
+    }
+
+    #[test]
+    fn a_linked_worktree_resolves_to_the_main_reflog() {
+        let (repo, _) = repo_with_push("a");
+        let (_outside, worktree_path) = linked_worktree(repo.path());
         let from_worktree = reflog_path(&worktree_path, "origin", "master").unwrap();
         let from_main = reflog_path(repo.path(), "origin", "master").unwrap();
         assert_eq!(
@@ -321,6 +337,98 @@ mod tests {
         assert!(detector.poll(&[flow.clone()]).is_empty());
         push(&repo, "e");
         assert!(detector.poll(&[flow]).is_empty());
+    }
+
+    #[test]
+    fn a_push_to_the_new_branch_is_reported_after_the_production_branch_changes() {
+        let (repo, mut flow) = repo_with_push("a");
+        let mut detector = PushDetector::new();
+        assert!(detector.poll(&[flow.clone()]).is_empty());
+        flow.production_branch = "main".to_string();
+        crate::deploy::test_support::push_to(&repo, "origin", "main", "d");
+        assert!(detector.poll(&[flow.clone()]).is_empty());
+        crate::deploy::test_support::push_to(&repo, "origin", "main", "e");
+        let found = detector.poll(&[flow.clone()]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0.production_branch, "main");
+        assert_eq!(found[0].1.commit, "e".repeat(40));
+        assert!(detector.poll(&[flow]).is_empty());
+    }
+
+    #[test]
+    fn a_push_after_a_fetch_line_is_reported() {
+        let (repo, flow) = repo_with_push("a");
+        let mut detector = PushDetector::new();
+        assert!(detector.poll(&[flow.clone()]).is_empty());
+        push(&repo, "b");
+        assert_eq!(detector.poll(&[flow.clone()])[0].1.commit, "b".repeat(40));
+        append(
+            &origin_master(repo.path()),
+            &line(&"b".repeat(40), &"c".repeat(40), "P S <p@x>", 1795009999, "fetch origin: fast-forward"),
+        );
+        assert!(detector.poll(&[flow.clone()]).is_empty());
+        push(&repo, "d");
+        let found = detector.poll(&[flow.clone()]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].1.commit, "d".repeat(40));
+        assert!(detector.poll(&[flow]).is_empty());
+    }
+
+    #[test]
+    fn a_reflog_that_cannot_be_read_for_a_while_does_not_repeat_the_last_push() {
+        let (repo, flow) = repo_with_push("a");
+        let mut detector = PushDetector::new();
+        assert!(detector.poll(&[flow.clone()]).is_empty());
+        push(&repo, "b");
+        assert_eq!(detector.poll(&[flow.clone()]).len(), 1);
+        let file = origin_master(repo.path());
+        let aside = repo.path().join("reflog-aside");
+        std::fs::rename(&file, &aside).unwrap();
+        assert!(detector.poll(&[flow.clone()]).is_empty());
+        std::fs::rename(&aside, &file).unwrap();
+        assert!(detector.poll(&[flow.clone()]).is_empty());
+        push(&repo, "c");
+        assert_eq!(detector.poll(&[flow])[0].1.commit, "c".repeat(40));
+    }
+
+    #[test]
+    fn a_repository_that_cannot_be_opened_for_a_while_is_not_forgotten() {
+        let (repo, flow) = repo_with_push("a");
+        let mut detector = PushDetector::new();
+        assert!(detector.poll(&[flow.clone()]).is_empty());
+        let git_dir = repo.path().join(".git");
+        let aside = repo.path().join("git-aside");
+        std::fs::rename(&git_dir, &aside).unwrap();
+        assert!(detector.poll(&[flow.clone()]).is_empty());
+        std::fs::rename(&aside, &git_dir).unwrap();
+        push(&repo, "b");
+        let found = detector.poll(&[flow.clone()]);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].1.commit, "b".repeat(40));
+    }
+
+    #[test]
+    fn a_reflog_shared_by_a_worktree_is_reported_once_by_the_first_flow() {
+        let (repo, main_flow) = repo_with_push("a");
+        let (_outside, worktree_path) = linked_worktree(repo.path());
+        let worktree_flow = flow_at(worktree_path.to_str().unwrap());
+        let first = [&main_flow, &worktree_flow]
+            .into_iter()
+            .min_by(|left, right| left.repo_path.cmp(&right.repo_path))
+            .unwrap()
+            .clone();
+        for flows in [
+            vec![main_flow.clone(), worktree_flow.clone()],
+            vec![worktree_flow.clone(), main_flow.clone()],
+        ] {
+            let mut detector = PushDetector::new();
+            assert!(detector.poll(&flows).is_empty());
+            push(&repo, "b");
+            let found = detector.poll(&flows);
+            assert_eq!(found.len(), 1);
+            assert_eq!(found[0].0, first);
+            assert!(detector.poll(&flows).is_empty());
+        }
     }
 
     #[test]
