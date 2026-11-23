@@ -1,9 +1,10 @@
-use crate::db::{deploy_flows_repo, deploy_trackings_repo, settings_repo, DbPool};
+use crate::db::{deploy_flows_repo, deploy_trackings_repo, projects_repo, settings_repo, DbPool};
 use crate::deploy::ci::{self, CiRun, CiStatus};
 use crate::deploy::cluster;
 use crate::deploy::excerpt::tail_redacted;
 use crate::deploy::machine::{self, Effect, NotifyKind, Observation};
 use crate::deploy::reflog::PushDetector;
+use crate::deploy::repos::is_known_repo;
 use crate::deploy::runner::{shell_runner, CommandRunner, SystemRunner};
 use crate::deploy::{
     notify, vpn, BLOCKED_POLL, BUILD_POLL, CLUSTER_POLL, DEPLOY_CHANGED_EVENT, IDLE_CLUSTER_POLL,
@@ -18,6 +19,7 @@ use futures_util::future::join_all;
 use parking_lot::Mutex;
 use rusqlite::{Connection, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
@@ -217,7 +219,11 @@ impl DeployTracker {
         changed: &mut BTreeSet<String>,
     ) -> AppResult<(Vec<DeployFlow>, Vec<Tracking>)> {
         let mut conn = self.db.get()?;
-        let enabled = deploy_flows_repo::list_enabled(&conn)?;
+        let projects = projects_repo::list(&conn)?;
+        let enabled: Vec<DeployFlow> = deploy_flows_repo::list_enabled(&conn)?
+            .into_iter()
+            .filter(|flow| is_known_repo(&projects, Path::new(&flow.repo_path)))
+            .collect();
         for (flow, push) in pushes.detector.poll(&enabled) {
             pushes.pending.insert(flow.repo_path, push.commit);
         }
@@ -551,7 +557,7 @@ impl TrackerSink for AppSink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::init_pool;
+    use crate::db::{init_pool, projects_repo};
     use crate::deploy::runner::{ok, CommandOutput, FakeRunner, RunError};
     use crate::deploy::test_support::{conn, push, repo_with_push, TestConn};
     use crate::domain::deploy::{Blocker, BuildProvider, Delivery, TrackingState};
@@ -613,7 +619,15 @@ mod tests {
             let pool = init_pool(&db.db_path().to_path_buf()).unwrap();
             let (repo, flow) = repo_with_push("a");
             deploy_flows_repo::upsert(&pool.get().unwrap(), &flow).unwrap();
-            Fixture { _db: db, pool, repo, flow }
+            let fixture = Fixture { _db: db, pool, repo, flow };
+            fixture.register(&fixture.flow.repo_path);
+            fixture
+        }
+
+        fn register(&self, path: &str) -> i64 {
+            projects_repo::insert(&self.pool.get().unwrap(), "project", path, "-project", None)
+                .unwrap()
+                .id
         }
 
         fn tracker(
@@ -1190,6 +1204,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn removing_the_project_stops_tracking_its_repository_until_it_is_added_again() {
+        let f = Fixture::new();
+        let sink = Arc::new(RecordingSink::default());
+        let ci = pipelines(vec![
+            pipeline(&commit("b"), 7, running()),
+            pipeline(&commit("c"), 8, completed("FAILED")),
+            pipeline(&commit("d"), 9, running()),
+        ]);
+        let runner = Arc::new(fake(&ci, "app:1"));
+        let tracker = f.tracker(runner.clone(), &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        tracker.tick(at(3)).await;
+        assert!(f.only().is_open());
+
+        let project = projects_repo::list(&f.pool.get().unwrap()).unwrap()[0].id;
+        projects_repo::delete(&f.pool.get().unwrap(), project).unwrap();
+        let announced = sink.changed_repos().len();
+        tracker.tick(at(6)).await;
+        let closed = f.only();
+        assert_eq!(closed.state, TrackingState::Superseded);
+        assert_eq!(closed.finished_at, Some(at(6)));
+        assert_eq!(
+            sink.changed_repos()[announced..].to_vec(),
+            vec![Some(f.flow.repo_path.clone())]
+        );
+
+        let calls = runner.calls().len();
+        push(&f.repo, "c");
+        for second in (9..=120).step_by(3) {
+            tracker.tick(at(second)).await;
+        }
+        assert_eq!(f.only().id, closed.id);
+        assert_eq!(runner.calls().len(), calls);
+        assert!(sink.kinds().is_empty());
+        assert!(deploy_flows_repo::get(&f.pool.get().unwrap(), &f.flow.repo_path).unwrap().is_some());
+
+        f.register(&f.flow.repo_path);
+        tracker.tick(at(123)).await;
+        assert_eq!(f.trackings().len(), 1);
+        push(&f.repo, "d");
+        tracker.tick(at(126)).await;
+        let all = f.trackings();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].commit, commit("d"));
+        assert!(all[0].is_open());
+    }
+
+    #[tokio::test]
     async fn polls_respect_their_intervals() {
         let f = Fixture::new();
         let sink = Arc::new(RecordingSink::default());
@@ -1471,6 +1534,7 @@ mod tests {
         let (other_repo, mut other) = repo_with_push("a");
         other.build = BuildProvider::None;
         f.save_flow(&other);
+        f.register(&other.repo_path);
         let sink = Arc::new(RecordingSink::default());
         let runner = Arc::new(GatedRunner::new(fake(&building("b"), "app:1")));
         let tracker = f.tracker(runner.clone(), &sink, None);
