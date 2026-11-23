@@ -1,6 +1,6 @@
 # Deployment tracking and per-project deployment flow — design
 
-Date: 2026-11-23 · App: `DesktopApp/` · Status: draft, read once by an independent builder, waiting for the user's approval
+Date: 2026-11-23 · App: `DesktopApp/` · Status: approved by the user on 2026-11-23, after one read by an independent builder
 
 Scope: a per-project description of what happens after a push to the production branch (the
 "deployment flow"), a tracker inside the app that follows every such push to its end, and a way for
@@ -109,27 +109,22 @@ One optional flow per repository, stored in SQLite (new migration). Fields:
 | Remote | the git remote whose pushes count (default: the only remote, else `origin`) |
 | Build | `bitbucket` / `github` / `none` |
 | Build repository | workspace + repo slug, or owner + repo; derived from the remote URL, editable |
-| Environments | one or more, see below |
-
-An **environment** is where a branch deploys to. About 30 of the user's ~50 Bitbucket pipelines
-deploy a second branch (`dev`, `development`, `release-to-dev`, `beta`, …) to a separate dev
-namespace, so one namespace per flow is not enough. Each environment has:
-
-| Field | Values |
-|-------|--------|
-| Name | free label, e.g. „Produkcja”, „Dev” |
-| Branch | the branch whose push deploys here |
-| Production | yes / no. The approval-policies design reads this flag. |
+| Production branch | the branch whose push deploys to production (default: `main`/`master`, whichever the remote has) |
 | Delivery | `image` (Docker Hub → Bandzior → Argo) / `kubemeter` (webhook, init container) / `none` |
-| Namespace | Kubernetes namespace (required unless delivery is `none`) |
+| Namespace | the production Kubernetes namespace (required unless delivery is `none`) |
 | Workloads | Deployment / StatefulSet names in that namespace that this repository deploys; empty = all Deployments in the namespace |
 | Kube context | optional; empty = the current context |
+
+**Only production is tracked** (the user's decision). About 30 of the user's ~50 Bitbucket
+pipelines also deploy a second branch (`dev`, `development`, `release-to-dev`, `beta`, …) to a
+separate dev namespace. Those pushes are not tracked, and the flow has no notion of other
+environments. The approval-policies design reads the production branch from here.
 
 Every value that ends up as a command argument is validated against a strict character set when
 saved, and commands are run without a shell.
 
-A repository without a flow, or with tracking off, behaves exactly as today. A push to a branch
-that no environment names is not tracked.
+A repository without a flow, or with tracking off, behaves exactly as today. A push to any branch
+other than the production branch is not tracked.
 
 ### 2. Three ways to set the flow
 
@@ -143,21 +138,17 @@ Przepływ wdrożenia     Repozytorium [ isp-manager-panel ▾ ]   [ Wykryj z rep
   Zdalne repozytorium    [ origin  ▾ ]
   Budowanie              ( Bitbucket Pipelines ) ( GitHub Actions ) ( brak )
   Repozytorium (CI)      [ cybercode/podyplomowka-isp-manager-panel ]
-
-  Środowiska                                                    [ + Dodaj ]
-  ┌ Produkcja ── gałąź [ master ]       [x] produkcyjne
-  │   Dostarczenie ( Obraz + Bandzior/Argo ) ( Webhook Kubemeter ) ( brak )
-  │   Namespace [ cs-app-podyplomowka ]        Zasoby [ app ]
-  └ Dev ──────── gałąź [ development ]  [ ] produkcyjne
-      Dostarczenie ( Obraz + Bandzior/Argo ) …
-      Namespace [ cs-app-podyplomowka-dev ]    Zasoby [ app ]
+  Gałąź produkcyjna      [ master ]
+  Dostarczenie           ( Obraz + Bandzior/Argo ) ( Webhook Kubemeter ) ( brak )
+  Namespace              [ cs-app-podyplomowka ]
+  Zasoby                 [ app ]
 ```
 
 **Detection.** "Wykryj z repozytorium" fills the form from what the repository shows: which
-pipeline file exists, the remote URL, the default branch and the branches named in the pipeline
-file. Each branch the pipeline deploys becomes an environment; `main`/`master` is marked as
-production and every other branch as not production, for the user to correct. It does not save; the
-user reviews and saves. Namespace and workloads cannot be read from the repository and stay empty.
+pipeline file exists, the remote URL, and the production branch (`main` or `master`, whichever the
+pipeline file or the remote has; dev branches named in the pipeline file are ignored). It does not
+save; the user reviews and saves. Namespace and workloads cannot be read from the repository and
+stay empty.
 
 **Agent.** A new CLI subcommand next to `abeon-code note` and `abeon-code session`, plus a bundled
 skill (working name `abeon-project-flow`) installed the same way as the two existing skills:
@@ -177,25 +168,25 @@ namespace through the Bandzior MCP tools when it has them, and to tell the user 
 is waiting for their confirmation.
 
 The confirmation applies to every agent proposal, also in a session where the user typed the
-request. Reason: the second design (approval policies) will read from this flow which branches are
+request. Reason: the second design (approval policies) will read from this flow which branch is
 production, so the flow must not be something an agent can rewrite alone.
 
 ### 3. What starts a tracking
 
-A push to the branch of one of the flow's environments, on the flow's remote. The tracker notices
+A push to the flow's production branch, on the flow's remote. The tracker notices
 it from git itself: the remote-tracking ref moved and its reflog entry says `update by push`. This
 covers pushes from agent sessions of every provider, from the terminal drawer and from a terminal
 outside the app, whether the user or an agent asked for the push, and it does not depend on the
 supervisor's hooks. A ref that moved because of a fetch starts nothing.
 
-A tracking is tied to the repository, the environment and the pushed commit. It is **not** tied to
+A tracking is tied to the repository and the pushed commit. It is **not** tied to
 a session: the supervisor's guard does not look at pushes that follow the user's own prompt and is
 absent when the supervisor is off, so it cannot tell reliably which session pushed. Sessions get
 the result by asking for it (§7).
 
 A new push to the same branch while a tracking is still running supersedes it: the older one is
-closed as "zastąpione" and the new commit is followed. Several trackings (different repositories or
-environments of one project) can run at the same time.
+closed as "zastąpione" and the new commit is followed. Several trackings (different repositories of
+one project) can run at the same time.
 
 ### 4. Stages
 
@@ -292,6 +283,10 @@ global file is the user's decision and outside this design.
    finished and are ready.
 2. **Paused pipeline.** A link to the pipeline page is enough. Approving the manual step from the
    app or from Discord is out of scope.
+3. **Only production is tracked.** Dev and staging deployments are left out; the flow has one
+   production branch and one namespace.
+
+The user approved the design with change 3 applied (answer relayed from Discord by the supervisor).
 
 ## Calls made by Claude (not discussed with the user)
 
@@ -300,8 +295,6 @@ global file is the user's decision and outside this design.
 - Detecting pushes from the git reflog rather than from session hooks.
 - A flow per repository rather than per project (after the reviewer found the multi-repository
   projects).
-- Environments: each tracked branch has its own namespace, workloads and production flag (pending
-  the user's confirmation that dev deployments should be tracked).
 - No link between a tracking and a session; sessions get results through `abeon-code deploy wait`,
   and the supervisor gets no new events in this version.
 - The Kubemeter variant stays in this version although nothing can exercise it today.
