@@ -1,6 +1,7 @@
 pub mod bitbucket;
 pub mod github;
 
+use crate::deploy::excerpt::redact_line;
 use crate::deploy::runner::{CommandRunner, RunError};
 use crate::domain::deploy::{BuildProvider, DeployFlow};
 use std::time::Duration;
@@ -59,7 +60,7 @@ pub(crate) async fn call(
                 .lines()
                 .map(str::trim)
                 .find(|line| !line.is_empty())
-                .map(str::to_string)
+                .map(redact_line)
                 .unwrap_or_else(|| match output.status {
                     Some(code) => format!("polecenie zakończyło się kodem {code}"),
                     None => "polecenie zostało przerwane".to_string(),
@@ -127,6 +128,27 @@ mod tests {
             panic!("expected unavailable")
         };
         assert_eq!(problem.reason, "not logged in");
+    }
+
+    #[tokio::test]
+    async fn the_stderr_reason_is_redacted_and_capped() {
+        let stderr = format!(
+            "\u{1b}[31merror: bad credentials for https://bob:hunter2@bitbucket.org token=abc123 {}\nignored",
+            "z".repeat(600)
+        );
+        let runner = FakeRunner::new().on(
+            "bkt",
+            &["api"],
+            Ok(CommandOutput { status: Some(1), stdout: String::new(), stderr }),
+        );
+        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc").await else {
+            panic!("expected unavailable")
+        };
+        assert!(!problem.reason.contains("hunter2"), "{}", problem.reason);
+        assert!(!problem.reason.contains("abc123"), "{}", problem.reason);
+        assert!(!problem.reason.contains('\u{1b}'));
+        assert!(problem.reason.starts_with("error: bad credentials for https://***@bitbucket.org"));
+        assert_eq!(problem.reason.chars().count(), 400);
     }
 
     #[tokio::test]

@@ -86,7 +86,8 @@ pub(super) async fn failure_log(
     let build_number = run.build_number?;
     let (workspace, repo) = flow.build_repo.split_once('/')?;
     let steps_path = format!("/repositories/{}/pipelines/{}/steps/", flow.build_repo, run.id);
-    let steps_body = call(runner, TOOL, owned(&["api", &steps_path])).await.ok()?;
+    let steps_args = owned(&["api", &steps_path, "-P", "pagelen=100"]);
+    let steps_body = call(runner, TOOL, steps_args).await.ok()?;
     let steps: Value = serde_json::from_str(&steps_body).ok()?;
     let step_id = steps["values"]
         .as_array()?
@@ -358,6 +359,15 @@ mod tests {
         let log = failure_log(&runner, &flow(), &failed_run()).await.unwrap();
         assert_eq!(log, "building\nDOCKER_PASSWORD=***\nboom");
         let calls = runner.calls();
+        assert_eq!(
+            calls[0].1,
+            [
+                "api",
+                "/repositories/cybercode/hr-management/pipelines/{uuid-307}/steps/",
+                "-P",
+                "pagelen=100"
+            ]
+        );
         assert_eq!(
             calls[1].1,
             [
