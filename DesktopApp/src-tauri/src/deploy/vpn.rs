@@ -11,7 +11,7 @@ pub async fn connect(runner: &dyn CommandRunner, connection: &str) -> bool {
     if !supported() {
         return false;
     }
-    let args = vec!["connection".to_string(), "up".to_string(), connection.to_string()];
+    let args = ["connection", "up", "id", connection].map(str::to_string).to_vec();
     match runner.run("nmcli", &args, NMCLI_TIMEOUT).await {
         Ok(output) => output.status == Some(0),
         Err(_) => false,
@@ -41,9 +41,17 @@ mod tests {
             runner.calls(),
             vec![(
                 "nmcli".to_string(),
-                vec!["connection".to_string(), "up".to_string(), "Office VPN".to_string()]
+                ["connection", "up", "id", "Office VPN"].map(str::to_string).to_vec()
             )]
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_name_that_is_an_nmcli_keyword_is_still_passed_as_the_connection_id() {
+        let runner = FakeRunner::new().on("nmcli", &["connection", "up", "id"], ok(""));
+        assert!(connect(&runner, "help").await);
+        assert_eq!(runner.calls()[0].1, ["connection", "up", "id", "help"].map(str::to_string).to_vec());
     }
 
     #[cfg(target_os = "linux")]

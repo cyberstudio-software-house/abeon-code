@@ -2,7 +2,7 @@ pub mod bitbucket;
 pub mod github;
 
 use crate::deploy::excerpt::redact_line;
-use crate::deploy::runner::{CommandRunner, RunError};
+use crate::deploy::runner::{CommandOutput, CommandRunner, RunError};
 use crate::domain::deploy::{BuildProvider, DeployFlow};
 use std::time::Duration;
 
@@ -43,30 +43,37 @@ pub(crate) fn owned(args: &[&str]) -> Vec<String> {
     args.iter().map(|arg| arg.to_string()).collect()
 }
 
+pub(crate) fn failure_reason(output: &CommandOutput) -> String {
+    output
+        .stderr
+        .lines()
+        .map(|line| redact_line(line.trim()))
+        .map(|line| line.trim().to_string())
+        .find(|line| !line.is_empty())
+        .unwrap_or_else(|| match output.status {
+            Some(code) => format!("polecenie zakończyło się kodem {code}"),
+            None => "polecenie zostało przerwane".to_string(),
+        })
+}
+
+pub(crate) fn run_error_problem(tool: &str, error: RunError) -> ToolProblem {
+    let reason = match error {
+        RunError::NotFound => "nie znaleziono polecenia".to_string(),
+        RunError::TimedOut => "przekroczono limit czasu".to_string(),
+        RunError::Io(message) => message,
+    };
+    ToolProblem { tool: tool.to_string(), reason }
+}
+
 pub(crate) async fn call(
     runner: &dyn CommandRunner,
     tool: &str,
     args: Vec<String>,
 ) -> Result<String, ToolProblem> {
-    let problem = |reason: String| ToolProblem { tool: tool.to_string(), reason };
     match runner.run(tool, &args, CI_TIMEOUT).await {
-        Err(RunError::NotFound) => Err(problem("nie znaleziono polecenia".to_string())),
-        Err(RunError::TimedOut) => Err(problem("przekroczono limit czasu".to_string())),
-        Err(RunError::Io(message)) => Err(problem(message)),
+        Err(error) => Err(run_error_problem(tool, error)),
         Ok(output) if output.status == Some(0) => Ok(output.stdout),
-        Ok(output) => {
-            let line = output
-                .stderr
-                .lines()
-                .map(|line| redact_line(line.trim()))
-                .map(|line| line.trim().to_string())
-                .find(|line| !line.is_empty())
-                .unwrap_or_else(|| match output.status {
-                    Some(code) => format!("polecenie zakończyło się kodem {code}"),
-                    None => "polecenie zostało przerwane".to_string(),
-                });
-            Err(problem(line))
-        }
+        Ok(output) => Err(ToolProblem { tool: tool.to_string(), reason: failure_reason(&output) }),
     }
 }
 

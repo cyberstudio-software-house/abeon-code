@@ -1,5 +1,4 @@
-use crate::deploy::ci::{unexpected_response, ToolProblem};
-use crate::deploy::excerpt::redact_line;
+use crate::deploy::ci::{failure_reason, run_error_problem, unexpected_response, ToolProblem};
 use crate::deploy::runner::{CommandRunner, RunError};
 use crate::domain::deploy::DeployFlow;
 use serde_json::Value;
@@ -10,15 +9,15 @@ const TOOL: &str = "kubectl";
 const KUBECTL_TIMEOUT: Duration = Duration::from_secs(20);
 const REQUEST_TIMEOUT_FLAG: &str = "--request-timeout=10s";
 const POD_LOG_TAIL_FLAG: &str = "--tail=60";
-const UNREACHABLE_MARKERS: [&str; 6] = [
+const UNREACHABLE_MARKERS: [&str; 7] = [
     "unable to connect to the server",
     "dial tcp",
     "i/o timeout",
     "no route to host",
     "connection refused",
     "context deadline exceeded",
+    "no such host",
 ];
-const UNRESOLVED_HOST_MARKER: &str = "no such host";
 const FAILING_REASONS: [&str; 5] = [
     "CrashLoopBackOff",
     "ImagePullBackOff",
@@ -37,6 +36,7 @@ pub struct PodFailure {
 pub struct WorkloadState {
     pub name: String,
     pub images: Vec<String>,
+    pub desired_replicas: i64,
     pub rollout_complete: bool,
     pub oldest_pod_started_at: Option<i64>,
     pub pods_ready: bool,
@@ -80,35 +80,19 @@ fn kubectl_args(flow: &DeployFlow, subcommand: &[&str]) -> Vec<String> {
 
 fn is_unreachable(stderr: &str) -> bool {
     let lowered = stderr.to_lowercase();
-    UNREACHABLE_MARKERS
-        .iter()
-        .chain(std::iter::once(&UNRESOLVED_HOST_MARKER))
-        .any(|marker| lowered.contains(marker))
+    UNREACHABLE_MARKERS.iter().any(|marker| lowered.contains(marker))
 }
 
 async fn kubectl(runner: &dyn CommandRunner, args: Vec<String>) -> Result<String, KubectlFailure> {
-    let problem = |reason: String| {
-        KubectlFailure::Problem(ToolProblem { tool: TOOL.to_string(), reason })
-    };
     match runner.run(TOOL, &args, KUBECTL_TIMEOUT).await {
-        Err(RunError::NotFound) => Err(problem("nie znaleziono polecenia".to_string())),
         Err(RunError::TimedOut) => Err(KubectlFailure::Unreachable),
-        Err(RunError::Io(message)) => Err(problem(message)),
+        Err(error) => Err(KubectlFailure::Problem(run_error_problem(TOOL, error))),
         Ok(output) if output.status == Some(0) => Ok(output.stdout),
         Ok(output) if is_unreachable(&output.stderr) => Err(KubectlFailure::Unreachable),
-        Ok(output) => {
-            let line = output
-                .stderr
-                .lines()
-                .map(|line| redact_line(line.trim()))
-                .map(|line| line.trim().to_string())
-                .find(|line| !line.is_empty())
-                .unwrap_or_else(|| match output.status {
-                    Some(code) => format!("polecenie zakończyło się kodem {code}"),
-                    None => "polecenie zostało przerwane".to_string(),
-                });
-            Err(problem(line))
-        }
+        Ok(output) => Err(KubectlFailure::Problem(ToolProblem {
+            tool: TOOL.to_string(),
+            reason: failure_reason(&output),
+        })),
     }
 }
 
@@ -142,11 +126,18 @@ fn select_workloads<'a>(
     flow: &DeployFlow,
 ) -> Result<Vec<(&'a Value, WorkloadKind)>, ToolProblem> {
     if flow.workloads.is_empty() {
-        return Ok(items
+        let deployments: Vec<_> = items
             .iter()
             .filter(|item| kind_of(item) == Some(WorkloadKind::Deployment))
             .map(|item| (item, WorkloadKind::Deployment))
-            .collect());
+            .collect();
+        if deployments.is_empty() {
+            return Err(ToolProblem {
+                tool: TOOL.to_string(),
+                reason: format!("nie znaleziono żadnego wdrożenia w {}", flow.namespace),
+            });
+        }
+        return Ok(deployments);
     }
     flow.workloads
         .iter()
@@ -190,8 +181,12 @@ fn count(value: &Value) -> i64 {
     value.as_i64().unwrap_or(0)
 }
 
+fn desired_replicas(workload: &Value) -> i64 {
+    workload["spec"]["replicas"].as_i64().unwrap_or(1)
+}
+
 fn rollout_complete(workload: &Value) -> bool {
-    let desired = workload["spec"]["replicas"].as_i64().unwrap_or(1);
+    let desired = desired_replicas(workload);
     if desired == 0 {
         return true;
     }
@@ -220,6 +215,11 @@ fn belongs_to(pod: &Value, workload: &str, kind: WorkloadKind) -> bool {
             _ => false,
         }
     })
+}
+
+fn is_live(pod: &Value) -> bool {
+    pod["metadata"]["deletionTimestamp"].is_null()
+        && !matches!(pod["status"]["phase"].as_str(), Some("Succeeded") | Some("Failed"))
 }
 
 fn is_ready(pod: &Value) -> bool {
@@ -258,16 +258,21 @@ fn workload_state(
     new_pods_since: i64,
 ) -> WorkloadState {
     let name = name_of(workload).unwrap_or_default().to_string();
+    let desired = desired_replicas(workload);
     let own_pods: Vec<&Value> =
         pods.iter().filter(|pod| belongs_to(pod, &name, kind)).collect();
+    let live_pods: Vec<&Value> = own_pods.iter().copied().filter(|pod| is_live(pod)).collect();
     WorkloadState {
         images: images_of(workload),
+        desired_replicas: desired,
         rollout_complete: rollout_complete(workload),
-        oldest_pod_started_at: own_pods
-            .iter()
-            .filter_map(|pod| millis(&pod["status"]["startTime"]))
-            .min(),
-        pods_ready: !own_pods.is_empty() && own_pods.iter().all(|pod| is_ready(pod)),
+        oldest_pod_started_at: if desired == 0 {
+            None
+        } else {
+            live_pods.iter().filter_map(|pod| millis(&pod["status"]["startTime"])).min()
+        },
+        pods_ready: desired == 0
+            || (!live_pods.is_empty() && live_pods.iter().all(|pod| is_ready(pod))),
         failing: failure_of(&own_pods, new_pods_since),
         name,
     }
@@ -516,7 +521,105 @@ mod tests {
         scaled_down["status"] = json!({ "observedGeneration": 7 });
         let states = snapshot(&runner(&list(vec![scaled_down]), &list(vec![])), &flow(), 0).await;
         assert!(states[0].rollout_complete);
+        assert_eq!(states[0].desired_replicas, 0);
+        assert!(states[0].pods_ready);
+        assert_eq!(states[0].oldest_pod_started_at, None);
+    }
+
+    #[tokio::test]
+    async fn a_workload_scaled_to_zero_ignores_leftover_pods() {
+        let mut scaled_down = deployment("app", 0, 0, 0, "repo/app:1.1.306");
+        scaled_down["status"] = json!({ "observedGeneration": 7 });
+        let mut leftover = pod_spec("app-5d8f7c9b6-old", "ReplicaSet", "app-5d8f7c9b6");
+        leftover.ready = false;
+        let pods = list(vec![pod(leftover)]);
+        let states = snapshot(&runner(&list(vec![scaled_down]), &pods), &flow(), 0).await;
+        assert!(states[0].pods_ready);
+        assert_eq!(states[0].oldest_pod_started_at, None);
+    }
+
+    #[tokio::test]
+    async fn desired_replicas_is_reported() {
+        let deployments = list(vec![deployment("app", 3, 3, 3, "repo/app:1")]);
+        let states = snapshot(&runner(&deployments, &pods_ready()), &flow(), 0).await;
+        assert_eq!(states[0].desired_replicas, 3);
+    }
+
+    #[tokio::test]
+    async fn an_evicted_pod_does_not_block_readiness_or_pin_the_oldest_start() {
+        let mut evicted = pod(pod_spec("app-5d8f7c9b6-evicted", "ReplicaSet", "app-5d8f7c9b6"));
+        evicted["status"]["phase"] = json!("Failed");
+        evicted["status"]["startTime"] = json!("2026-01-01T00:00:00Z");
+        evicted["status"]["conditions"] = json!([{ "type": "Ready", "status": "False" }]);
+        let mut finished = pod(pod_spec("app-5d8f7c9b6-done", "ReplicaSet", "app-5d8f7c9b6"));
+        finished["status"]["phase"] = json!("Succeeded");
+        finished["status"]["startTime"] = json!("2026-01-02T00:00:00Z");
+        let mut running = pod(pod_spec("app-5d8f7c9b6-live", "ReplicaSet", "app-5d8f7c9b6"));
+        running["status"]["phase"] = json!("Running");
+        let pods = list(vec![evicted, finished, running]);
+        let states = snapshot(&runner(&deploy_csi(), &pods), &flow(), 0).await;
+        assert!(states[0].pods_ready);
+        assert_eq!(states[0].oldest_pod_started_at, millis(&json!(STARTED_EARLY)));
+    }
+
+    #[tokio::test]
+    async fn a_terminating_old_pod_does_not_hold_back_the_oldest_start_or_readiness() {
+        let mut terminating = pod_spec("app-old-aaaa", "ReplicaSet", "app-old");
+        terminating.started = "2026-11-22T10:00:00Z";
+        terminating.ready = false;
+        let mut terminating = pod(terminating);
+        terminating["metadata"]["deletionTimestamp"] = json!("2026-11-23T10:04:00Z");
+        let mut fresh = pod_spec("app-5d8f7c9b6-new", "ReplicaSet", "app-5d8f7c9b6");
+        fresh.started = STARTED_LATE;
+        let pods = list(vec![terminating, pod(fresh)]);
+        let states = snapshot(&runner(&deploy_csi(), &pods), &flow(), 0).await;
+        assert!(states[0].pods_ready);
+        assert_eq!(states[0].oldest_pod_started_at, millis(&json!(STARTED_LATE)));
+    }
+
+    #[tokio::test]
+    async fn a_live_old_pod_still_holds_back_the_oldest_start_mid_rollout() {
+        let mut old = pod_spec("app-old-aaaa", "ReplicaSet", "app-old");
+        old.started = "2026-11-22T10:00:00Z";
+        let mut fresh = pod_spec("app-5d8f7c9b6-new", "ReplicaSet", "app-5d8f7c9b6");
+        fresh.started = STARTED_LATE;
+        let pods = list(vec![pod(old), pod(fresh)]);
+        let states = snapshot(&runner(&deploy_csi(), &pods), &flow(), 0).await;
+        assert_eq!(states[0].oldest_pod_started_at, millis(&json!("2026-11-22T10:00:00Z")));
+    }
+
+    #[tokio::test]
+    async fn only_dead_pods_means_not_ready() {
+        let mut evicted = pod(pod_spec("app-5d8f7c9b6-evicted", "ReplicaSet", "app-5d8f7c9b6"));
+        evicted["status"]["phase"] = json!("Failed");
+        let states =
+            snapshot(&runner(&deploy_csi(), &list(vec![evicted])), &flow(), 0).await;
         assert!(!states[0].pods_ready);
+        assert_eq!(states[0].oldest_pod_started_at, None);
+    }
+
+    #[tokio::test]
+    async fn no_deployment_found_with_an_empty_workload_list_is_unavailable() {
+        let mut flow = flow();
+        flow.workloads = Vec::new();
+        for deployments in [list(vec![]), list(vec![stateful_set("db")])] {
+            assert_eq!(
+                observe(&runner(&deployments, &pods_ready()), &flow, 0).await,
+                ClusterObservation::Unavailable(ToolProblem {
+                    tool: "kubectl".to_string(),
+                    reason: "nie znaleziono żadnego wdrożenia w cs-app-hs".to_string()
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn every_unreachable_marker_is_recognised() {
+        for marker in UNREACHABLE_MARKERS {
+            assert!(is_unreachable(&format!("error: {}", marker.to_uppercase())), "{marker}");
+        }
+        assert_eq!(UNREACHABLE_MARKERS.len(), 7);
+        assert!(!is_unreachable("error: forbidden"));
     }
 
     #[tokio::test]
