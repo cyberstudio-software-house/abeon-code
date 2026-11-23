@@ -34,6 +34,12 @@ pub fn is_known_repo(projects: &[Project], repo: &Path) -> bool {
     !projects_of_repo(projects, repo).is_empty()
 }
 
+pub fn repo_label(repo: &Path) -> String {
+    repo.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| repo.to_string_lossy().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,6 +78,12 @@ mod tests {
         std::fs::create_dir_all(&nested).unwrap();
         assert_eq!(repo_for_dir(&nested), Some(dir.path().canonicalize().unwrap()));
         assert_eq!(repo_for_dir(dir.path()), Some(dir.path().canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn the_label_of_a_repository_is_its_directory_name() {
+        assert_eq!(repo_label(Path::new("/p/yachtic/api")), "api");
+        assert_eq!(repo_label(Path::new("/")), "/");
     }
 
     #[test]

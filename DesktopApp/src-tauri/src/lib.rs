@@ -67,6 +67,11 @@ pub fn run() {
             crate::diagnostics::watch_termination_signals();
             crate::remote::startup::init_remote_bridge(app.handle().clone());
             crate::supervisor::runtime::start(app.handle().clone());
+            let tracker = crate::deploy::tracker::DeployTracker::start(
+                app.handle().clone(),
+                app.state::<AppState>().db.clone(),
+            );
+            app.manage(tracker);
             if let Ok(dir) = crate::commands::notifications::markers_dir(app.handle()) {
                 let watcher = crate::notifications::marker::AttentionWatcher::new(
                     dir,
@@ -117,6 +122,10 @@ pub fn run() {
             commands::deploy::deploy_detect_flow,
             commands::deploy::deploy_save_flow,
             commands::deploy::deploy_delete_flow,
+            commands::deploy::deploy_list_trackings,
+            commands::deploy::deploy_tracking_history,
+            commands::deploy::deploy_retry,
+            commands::deploy::deploy_dismiss,
             commands::cli::take_pending_open_paths,
             commands::cli::install_cli_command,
             commands::cli::install_claude_skill,

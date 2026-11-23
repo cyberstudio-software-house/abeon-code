@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, emit, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound, FileEntry, FileSearchResponse, FileReadResponse, FilesDirChangedEvent, DeployFlow, RepoFlow, DeployChangedEvent } from '../types';
+import type { Project, SessionMeta, ActiveSession, SessionActivity, SessionHistory, HistoryBlock, SubagentInfo, Action, ActionInput, ActionPatch, DetectedScript, GitStatus, GitUser, GitBranch, GitCommit, GitCommitDetail, ShellInfo, EditorInfo, DiffResult, UsageSummary, ProviderLimits, ClaudeOptions, Provider, ProviderInfo, Note, OpenRequest, SupervisorSnapshot, DiscordSetupStatus, DecisionEntry, SessionRebound, FileEntry, FileSearchResponse, FileReadResponse, FilesDirChangedEvent, DeployFlow, RepoFlow, DeployChangedEvent, TrackingView } from '../types';
 import type { NotesChangedEvent } from '../types/NotesChangedEvent';
 import type { ClickUpConnectionStatus } from '../types/ClickUpConnectionStatus';
 import type { ClickUpWorkspace } from '../types/ClickUpWorkspace';
@@ -257,6 +257,11 @@ export const tauri = {
   deployDetectFlow: (repoPath: string) => invoke<DeployFlow>('deploy_detect_flow', { repoPath }),
   deploySaveFlow: (flow: DeployFlow) => invoke<DeployFlow>('deploy_save_flow', { flow }),
   deployDeleteFlow: (repoPath: string) => invoke<void>('deploy_delete_flow', { repoPath }),
+  deployListTrackings: () => invoke<TrackingView[]>('deploy_list_trackings'),
+  deployTrackingHistory: (repoPath: string) =>
+    invoke<TrackingView[]>('deploy_tracking_history', { repoPath }),
+  deployRetry: (trackingId: number) => invoke<void>('deploy_retry', { trackingId }),
+  deployDismiss: (trackingId: number) => invoke<void>('deploy_dismiss', { trackingId }),
   onDeployChanged: (cb: (event: DeployChangedEvent) => void): Promise<UnlistenFn> =>
     listen<DeployChangedEvent>('deploy://changed', e => cb(e.payload)),
 };

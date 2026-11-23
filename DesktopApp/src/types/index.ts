@@ -64,3 +64,4 @@ export type { TrackingStage } from './TrackingStage';
 export type { Blocker } from './Blocker';
 export type { TrackingFailure } from './TrackingFailure';
 export type { Tracking } from './Tracking';
+export type { TrackingView } from './TrackingView';

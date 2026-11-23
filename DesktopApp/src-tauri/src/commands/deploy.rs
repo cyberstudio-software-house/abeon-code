@@ -1,15 +1,17 @@
-use crate::db::{deploy_flows_repo, projects_repo};
+use crate::db::{deploy_flows_repo, deploy_trackings_repo, projects_repo};
 use crate::deploy::detect::detect_flow;
-use crate::deploy::repos::{is_known_repo, project_repos};
+use crate::deploy::repos::{is_known_repo, project_repos, projects_of_repo, repo_label};
+use crate::deploy::tracker::DeployTracker;
 use crate::deploy::validate::validate_flow;
-use crate::deploy::DEPLOY_CHANGED_EVENT;
-use crate::domain::deploy::{DeployChangedEvent, DeployFlow, RepoFlow};
+use crate::deploy::{DEPLOY_CHANGED_EVENT, TRACKING_HISTORY};
+use crate::domain::deploy::{DeployChangedEvent, DeployFlow, RepoFlow, Tracking, TrackingView};
 use crate::domain::Project;
 use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use git2::Repository;
 use rusqlite::Connection;
 use std::path::Path;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
 fn remote_names(repo_path: &Path) -> Vec<String> {
@@ -27,10 +29,7 @@ fn repo_flows(conn: &Connection, project: &Project) -> AppResult<Vec<RepoFlow>> 
         .into_iter()
         .map(|repo| {
             let repo_path = repo.to_string_lossy().to_string();
-            let label = repo
-                .file_name()
-                .map(|name| name.to_string_lossy().to_string())
-                .unwrap_or_else(|| repo_path.clone());
+            let label = repo_label(&repo);
             Ok(RepoFlow {
                 flow: deploy_flows_repo::get(conn, &repo_path)?,
                 remotes: remote_names(&repo),
@@ -95,6 +94,39 @@ fn announce_change(app: &AppHandle, repo_path: &str) {
     }
 }
 
+fn tracking_views(conn: &Connection, trackings: Vec<Tracking>) -> AppResult<Vec<TrackingView>> {
+    let projects = projects_repo::list(conn)?;
+    Ok(trackings
+        .into_iter()
+        .map(|tracking| {
+            let repo = Path::new(&tracking.repo_path);
+            TrackingView {
+                project_ids: projects_of_repo(&projects, repo),
+                repo_label: repo_label(repo),
+                tracking,
+            }
+        })
+        .collect())
+}
+
+fn known_tracking(conn: &Connection, tracking_id: i64) -> AppResult<Tracking> {
+    let tracking = deploy_trackings_repo::get(conn, tracking_id)?;
+    ensure_known_repo(conn, &tracking.repo_path)?;
+    Ok(tracking)
+}
+
+fn dismiss_tracking(conn: &Connection, tracking_id: i64) -> AppResult<Tracking> {
+    let mut tracking = known_tracking(conn, tracking_id)?;
+    if tracking.is_open() {
+        return Err(AppError::InvalidInput(format!(
+            "deploy tracking {tracking_id} is still running"
+        )));
+    }
+    tracking.dismissed = true;
+    deploy_trackings_repo::update(conn, &tracking)?;
+    Ok(tracking)
+}
+
 #[tauri::command(async)]
 pub fn deploy_list_repo_flows(state: State<AppState>, project_id: i64) -> AppResult<Vec<RepoFlow>> {
     let conn = state.db.get()?;
@@ -116,11 +148,13 @@ pub fn deploy_detect_flow(state: State<AppState>, repo_path: String) -> AppResul
 pub fn deploy_save_flow(
     app: AppHandle,
     state: State<AppState>,
+    tracker: State<Arc<DeployTracker>>,
     flow: DeployFlow,
 ) -> AppResult<DeployFlow> {
     let conn = state.db.get()?;
     ensure_known_repo(&conn, flow.repo_path.trim())?;
     let saved = persist_flow(&conn, flow)?;
+    tracker.flows_changed();
     announce_change(&app, &saved.repo_path);
     Ok(saved)
 }
@@ -129,12 +163,54 @@ pub fn deploy_save_flow(
 pub fn deploy_delete_flow(
     app: AppHandle,
     state: State<AppState>,
+    tracker: State<Arc<DeployTracker>>,
     repo_path: String,
 ) -> AppResult<()> {
     let conn = state.db.get()?;
     ensure_known_repo(&conn, &repo_path)?;
     deploy_flows_repo::delete(&conn, &repo_path)?;
+    tracker.flows_changed();
     announce_change(&app, &repo_path);
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn deploy_list_trackings(state: State<AppState>) -> AppResult<Vec<TrackingView>> {
+    let conn = state.db.get()?;
+    let latest = deploy_trackings_repo::latest_per_repo(&conn)?;
+    tracking_views(&conn, latest)
+}
+
+#[tauri::command(async)]
+pub fn deploy_tracking_history(
+    state: State<AppState>,
+    repo_path: String,
+) -> AppResult<Vec<TrackingView>> {
+    let conn = state.db.get()?;
+    ensure_known_repo(&conn, &repo_path)?;
+    let history = deploy_trackings_repo::history(&conn, &repo_path, TRACKING_HISTORY)?;
+    tracking_views(&conn, history)
+}
+
+#[tauri::command(async)]
+pub fn deploy_retry(
+    state: State<AppState>,
+    tracker: State<Arc<DeployTracker>>,
+    tracking_id: i64,
+) -> AppResult<()> {
+    let conn = state.db.get()?;
+    let tracking = known_tracking(&conn, tracking_id)?;
+    if tracking.is_open() {
+        tracker.retry(tracking.id);
+    }
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn deploy_dismiss(app: AppHandle, state: State<AppState>, tracking_id: i64) -> AppResult<()> {
+    let conn = state.db.get()?;
+    let tracking = dismiss_tracking(&conn, tracking_id)?;
+    announce_change(&app, &tracking.repo_path);
     Ok(())
 }
 
@@ -142,6 +218,7 @@ pub fn deploy_delete_flow(
 mod tests {
     use super::*;
     use crate::deploy::test_support::{conn, flow, flow_at, init_repo, project};
+    use crate::domain::deploy::TrackingState;
     use tempfile::tempdir;
 
     #[test]
@@ -236,6 +313,65 @@ mod tests {
         init_repo(&dir.path().join("api"));
         let error = ensure_known_repo(&connection, dir.path().join("api").to_str().unwrap()).unwrap_err();
         assert!(matches!(error, AppError::InvalidPath { .. }));
+    }
+
+    fn registered_repo(connection: &Connection) -> (tempfile::TempDir, String, i64) {
+        let dir = tempdir().unwrap();
+        init_repo(&dir.path().join("api"));
+        let project = projects_repo::insert(connection, "p", dir.path().to_str().unwrap(), "-p", None).unwrap();
+        let repo = dir.path().join("api").to_str().unwrap().to_string();
+        (dir, repo, project.id)
+    }
+
+    fn stored(connection: &Connection, repo: &str, state: TrackingState) -> Tracking {
+        let mut tracking = Tracking::new(&flow_at(repo), "abc", 1_000);
+        tracking.state = state;
+        if !tracking.is_open() {
+            tracking.finished_at = Some(2_000);
+        }
+        deploy_trackings_repo::insert(connection, &tracking).unwrap()
+    }
+
+    #[test]
+    fn tracking_views_carry_the_projects_and_the_directory_name() {
+        let connection = conn();
+        let (_dir, repo, project_id) = registered_repo(&connection);
+        let tracking = stored(&connection, &repo, TrackingState::Building);
+
+        let views = tracking_views(&connection, vec![tracking.clone()]).unwrap();
+
+        assert_eq!(
+            views,
+            vec![TrackingView { tracking, project_ids: vec![project_id], repo_label: "api".to_string() }]
+        );
+    }
+
+    #[test]
+    fn only_a_closed_tracking_of_a_known_repository_is_dismissed() {
+        let connection = conn();
+        let (_dir, repo, _) = registered_repo(&connection);
+        let open = stored(&connection, &repo, TrackingState::Delivering);
+        let closed = stored(&connection, &repo, TrackingState::Failed);
+
+        assert!(matches!(dismiss_tracking(&connection, open.id), Err(AppError::InvalidInput(_))));
+        assert!(!deploy_trackings_repo::get(&connection, open.id).unwrap().dismissed);
+
+        let dismissed = dismiss_tracking(&connection, closed.id).unwrap();
+        assert!(dismissed.dismissed);
+        assert_eq!(deploy_trackings_repo::get(&connection, closed.id).unwrap(), dismissed);
+        assert!(matches!(dismiss_tracking(&connection, 999), Err(AppError::NotFound(_))));
+    }
+
+    #[test]
+    fn a_tracking_of_an_unknown_repository_is_refused() {
+        let connection = conn();
+        let outside = tempdir().unwrap();
+        init_repo(outside.path());
+        let tracking = stored(&connection, outside.path().to_str().unwrap(), TrackingState::Failed);
+
+        assert!(matches!(known_tracking(&connection, tracking.id), Err(AppError::InvalidPath { .. })));
+        assert!(matches!(dismiss_tracking(&connection, tracking.id), Err(AppError::InvalidPath { .. })));
+        assert!(!deploy_trackings_repo::get(&connection, tracking.id).unwrap().dismissed);
     }
 
     #[test]

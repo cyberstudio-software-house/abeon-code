@@ -248,6 +248,16 @@ impl Tracking {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[ts(export, export_to = "../../src/types/")]
+#[serde(rename_all = "camelCase")]
+pub struct TrackingView {
+    pub tracking: Tracking,
+    #[ts(type = "Array<number>")]
+    pub project_ids: Vec<i64>,
+    pub repo_label: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
