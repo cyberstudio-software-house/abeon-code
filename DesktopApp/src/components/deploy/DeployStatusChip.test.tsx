@@ -68,6 +68,19 @@ describe('DeployStatusChip', () => {
     expect(chip).toHaveTextContent('Pipeline czeka na Ciebie');
   });
 
+  it('draws a paused tracking as a plain dot when flat and keeps the pill otherwise', () => {
+    useStore.setState({ trackings: [makeView({ state: 'paused' })] });
+    const { unmount } = render(<DeployStatusChip projectId={1} flat />);
+    const flat = screen.getByRole('button');
+    expect(flat).not.toHaveClass('bg-accent');
+    expect(flat.querySelector('svg')).toBeNull();
+    expect(flat.querySelector('span[aria-hidden]')).toHaveClass('bg-accent');
+    unmount();
+    render(<DeployStatusChip projectId={1} />);
+    expect(screen.getByRole('button')).toHaveClass('bg-accent');
+    expect(screen.getByRole('button').querySelector('svg')).not.toBeNull();
+  });
+
   it('opens the details dialog on click', () => {
     useStore.setState({ trackings: [makeView({ state: 'building' })] });
     render(<DeployStatusChip projectId={1} />);

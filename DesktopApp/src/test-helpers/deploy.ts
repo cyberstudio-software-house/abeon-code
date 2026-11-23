@@ -22,6 +22,8 @@ export function makeTracking(overrides: Partial<Tracking> = {}): Tracking {
     finishedAt: null,
     vpnAttempted: false,
     dismissed: false,
+    hasBuild: true,
+    hasDelivery: true,
     ...overrides,
   };
 }

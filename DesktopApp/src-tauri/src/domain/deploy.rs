@@ -202,6 +202,14 @@ pub struct Tracking {
     pub finished_at: Option<i64>,
     pub vpn_attempted: bool,
     pub dismissed: bool,
+    #[serde(default = "default_true")]
+    pub has_build: bool,
+    #[serde(default = "default_true")]
+    pub has_delivery: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Tracking {
@@ -232,6 +240,8 @@ impl Tracking {
             finished_at: None,
             vpn_attempted: false,
             dismissed: false,
+            has_build: builds,
+            has_delivery: flow.delivery != Delivery::None,
         }
     }
 
@@ -345,6 +355,42 @@ mod tests {
             .unwrap(),
             json!({ "type": "toolUnavailable", "tool": "kubectl", "reason": "forbidden" })
         );
+    }
+
+    #[test]
+    fn a_new_tracking_records_from_the_flow_whether_it_builds_and_delivers() {
+        for (build, delivery) in [
+            (BuildProvider::Bitbucket, Delivery::Image),
+            (BuildProvider::Github, Delivery::Kubemeter),
+            (BuildProvider::Bitbucket, Delivery::None),
+            (BuildProvider::None, Delivery::Image),
+            (BuildProvider::None, Delivery::None),
+        ] {
+            let mut flow = flow();
+            flow.build = build;
+            flow.delivery = delivery;
+            let tracking = Tracking::new(&flow, "abc", 5);
+            assert_eq!(tracking.has_build, build != BuildProvider::None, "{build:?}");
+            assert_eq!(
+                tracking.has_delivery,
+                delivery != Delivery::None,
+                "{delivery:?}"
+            );
+        }
+        let value = serde_json::to_value(Tracking::new(&flow(), "abc", 5)).unwrap();
+        assert_eq!(value["hasBuild"], json!(true));
+        assert_eq!(value["hasDelivery"], json!(true));
+    }
+
+    #[test]
+    fn a_tracking_stored_without_the_stage_flags_reads_both_as_true() {
+        let mut value = serde_json::to_value(Tracking::new(&flow(), "abc", 5)).unwrap();
+        let body = value.as_object_mut().unwrap();
+        body.remove("hasBuild");
+        body.remove("hasDelivery");
+        let tracking: Tracking = serde_json::from_value(value).unwrap();
+        assert!(tracking.has_build);
+        assert!(tracking.has_delivery);
     }
 
     #[test]

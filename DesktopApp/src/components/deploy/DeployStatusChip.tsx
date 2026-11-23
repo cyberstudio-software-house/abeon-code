@@ -16,10 +16,11 @@ const TONE_TEXT: Record<DeployTone, string> = {
 type Props = {
   projectId: number;
   showLabel?: boolean;
+  flat?: boolean;
   className?: string;
 };
 
-export function DeployStatusChip({ projectId, showLabel = false, className = '' }: Props) {
+export function DeployStatusChip({ projectId, showLabel = false, flat = false, className = '' }: Props) {
   const trackings = useStore(s => s.trackings);
   const [open, setOpen] = useState(false);
   const summary = useMemo(() => projectTracking(trackings, projectId), [trackings, projectId]);
@@ -35,9 +36,10 @@ export function DeployStatusChip({ projectId, showLabel = false, className = '' 
   const title = `${top.repoLabel}: ${label}`;
   const extra = count > 1 ? <span className="font-mono text-[11px] tabular-nums opacity-80">+{count - 1}</span> : null;
 
-  const shape = tone === 'attention'
+  const pill = tone === 'attention' && !flat;
+  const shape = pill
     ? `h-[20px] px-2 rounded-full bg-accent ${TONE_TEXT.attention} font-semibold`
-    : `h-[22px] px-1.5 rounded-md hover:bg-track ${TONE_TEXT[tone]}`;
+    : `h-[22px] px-1.5 rounded-md hover:bg-track ${tone === 'attention' ? 'text-accent' : TONE_TEXT[tone]}`;
 
   return (
     <>
@@ -48,7 +50,7 @@ export function DeployStatusChip({ projectId, showLabel = false, className = '' 
         onClick={() => setOpen(true)}
         className={`shrink-0 flex items-center gap-1.5 text-[12px] whitespace-nowrap ${shape} ${className}`}
       >
-        {tone === 'attention'
+        {pill
           ? <Icon name="bell" className="w-3 h-3" strokeWidth={2.25} />
           : <span aria-hidden className={`w-1.5 h-1.5 rounded-full shrink-0 ${TONE_DOT[tone]}`} />}
         {showLabel && <span>{label}</span>}

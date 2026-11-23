@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useStore } from '../../store';
 import { createLeaf } from '../../lib/paneTree';
 import { ROOT_PANE_ID } from '../../store/panesSlice';
@@ -118,13 +118,20 @@ describe('AppHeader', () => {
       expect(screen.getByRole('button', { name: 'api: Wdrożenie nie powiodło się' })).toHaveTextContent('Wdrożenie nie powiodło się');
     });
 
-    it('keeps the paused accent pill with a blocker set', () => {
+    it('renders the chip as a plain dot next to the banner, with a blocker set too, and it still opens the details', () => {
       seed([liveSession]);
       useStore.setState({
         trackings: [makeView({ state: 'paused', clusterBlocker: { type: 'clusterUnreachable' } }, [1])],
       });
       render(<AppHeader variant={{ kind: 'main' }} />);
-      expect(screen.getByRole('button', { name: 'api: Pipeline czeka na Ciebie' })).toHaveClass('bg-accent');
+      const chip = screen.getByRole('button', { name: 'api: Pipeline czeka na Ciebie' });
+      expect(chip).not.toHaveClass('bg-accent');
+      expect(chip).not.toHaveClass('rounded-full');
+      expect(chip.querySelector('svg')).toBeNull();
+      expect(chip.querySelector('span[aria-hidden]')).toHaveClass('bg-accent');
+      expect(screen.queryByRole('dialog')).toBeNull();
+      fireEvent.click(chip);
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
 
     it('shows nothing for a project without trackings', () => {

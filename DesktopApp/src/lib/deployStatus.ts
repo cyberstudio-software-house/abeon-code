@@ -101,6 +101,11 @@ export function pausedViews(views: TrackingView[], projectId: number): TrackingV
   return visibleViews(views, projectId).filter(view => view.tracking.state === 'paused');
 }
 
+export function hasPausedView(views: TrackingView[], projectId: number): boolean {
+  return views.some(view =>
+    view.projectIds.includes(projectId) && !view.tracking.dismissed && view.tracking.state === 'paused');
+}
+
 export function projectTracking(
   views: TrackingView[],
   projectId: number,
@@ -154,10 +159,9 @@ function stageRange(start: number, end: number | null, ongoing: boolean, withDat
 }
 
 function reachedDelivery(tracking: Tracking): boolean {
+  if (!tracking.hasDelivery || tracking.buildFinishedAt === null) return false;
   if (tracking.state === 'delivering') return true;
   if (isOpenTracking(tracking)) return false;
-  const { buildFinishedAt, finishedAt } = tracking;
-  if (buildFinishedAt === null || finishedAt === null || finishedAt <= buildFinishedAt) return false;
   return tracking.failure?.stage !== 'build';
 }
 
@@ -165,11 +169,11 @@ export function stageLines(tracking: Tracking, now: number = Date.now()): string
   const open = isOpenTracking(tracking);
   const withDate = !sameDay(new Date(tracking.startedAt), new Date(now));
   const lines: string[] = [];
-  if (tracking.runId !== null || tracking.buildFinishedAt !== null) {
+  if (tracking.hasBuild && (tracking.runId !== null || tracking.buildFinishedAt !== null)) {
     const buildEnd = tracking.buildFinishedAt ?? (open ? null : tracking.finishedAt);
     lines.push(`Budowanie: ${stageRange(tracking.startedAt, buildEnd, open, withDate)}`);
   }
-  if (reachedDelivery(tracking) && tracking.buildFinishedAt !== null) {
+  if (tracking.buildFinishedAt !== null && reachedDelivery(tracking)) {
     lines.push(`Wdrażanie na klaster: ${stageRange(tracking.buildFinishedAt, open ? null : tracking.finishedAt, open, withDate)}`);
   }
   return lines;

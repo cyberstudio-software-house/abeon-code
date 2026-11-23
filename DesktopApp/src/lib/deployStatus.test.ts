@@ -171,11 +171,32 @@ describe('stageLines', () => {
     expect(stageLines(tracking, NOW)).toEqual(['Budowanie: 10:00 – 10:05', 'Wdrażanie na klaster: 10:05 – 10:09']);
   });
 
-  it('has no zero-length delivery line when the tracking closed with the build', () => {
+  it('has no delivery line for a successful build-only tracking closed after the CI finish time', () => {
     const tracking = makeTracking({
-      state: 'succeeded', runId: '12', startedAt: at(10, 0), buildFinishedAt: at(10, 5), finishedAt: at(10, 5),
+      state: 'succeeded',
+      hasDelivery: false,
+      runId: '12',
+      startedAt: at(10, 0),
+      buildFinishedAt: at(10, 5),
+      finishedAt: at(10, 6),
     });
     expect(stageLines(tracking, NOW)).toEqual(['Budowanie: 10:00 – 10:05']);
+  });
+
+  it('has no build line for a delivery-only tracking', () => {
+    const delivering = makeTracking({
+      state: 'delivering', hasBuild: false, startedAt: at(10, 0), buildFinishedAt: at(10, 0),
+    });
+    expect(stageLines(delivering, NOW)).toEqual(['Wdrażanie na klaster: 10:00 – trwa']);
+    const done = makeTracking({
+      state: 'succeeded', hasBuild: false, startedAt: at(10, 0), buildFinishedAt: at(10, 0), finishedAt: at(10, 4),
+    });
+    expect(stageLines(done, NOW)).toEqual(['Wdrażanie na klaster: 10:00 – 10:04']);
+  });
+
+  it('has no build line while no run was seen and the build has not finished', () => {
+    const tracking = makeTracking({ state: 'waitingForRun', startedAt: at(10, 0) });
+    expect(stageLines(tracking, NOW)).toEqual([]);
   });
 
   it('has no delivery line for a build failure that closed after the build ended', () => {
