@@ -142,18 +142,19 @@ abeon-code deploy wait
 It blocks until the tracking of the newest push ends or needs the user, for at most 540 seconds
 (`--timeout <seconds>`, maximum 3600). Your shell tool kills a command after its own timeout, which
 is 120 seconds by default in Claude Code. Run it with a tool timeout of 600000 ms, or pass a shorter
-`--timeout` (for example `--timeout 100`) and run it again on exit code 8.
+`--timeout` (for example `--timeout 100`) and run it again on exit code 8, unless its output has a
+`blocked:` line (see the table).
 
 The result is printed on stdout: `state:`, `commit:`, `pipeline:` (link), `blocked:` or `failure:`
 lines, and for a failure the redacted tail of the failing step's log. Judge it by the exit code:
 
 | Code | Meaning | What to do |
 |------|---------|------------|
-| 0 | Deployed (build done and, if the flow has a delivery, the rollout complete) | Tell the user in one line. |
+| 0 | Deployed (build done and, if the flow has a delivery, the rollout complete) | Compare the printed `commit:` with `git rev-parse HEAD` (or the commit you pushed). If they match, tell the user in one line; if they differ, say that the deployed commit is not the one you pushed. |
 | 1 | The deployment failed or stalled (`state: failed` or `state: stalled`) | Read `failure:` and the log excerpt and fix the cause. Do not push to the production branch again without the approval that a push needs anyway. |
-| 3 | No tracking | Read the message. Either the repository has no flow, tracking is off, there is nothing to track, AbeonCode is not running, or `no new push to <remote>/<branch>: the newest push is …`: your `git push` was a no-op or went to another remote or branch. Check with `git status` and `git log`, then fall back to checking the pipeline the usual way, once, without a polling loop. |
-| 4 | The user is needed: the pipeline is paused (`state: paused`, a manual step waits for approval), or the deployment has been blocked for more than 120 seconds (`blocked:` cluster unreachable, tool unavailable) | Tell the user what is waiting and give the `pipeline:` link. Then stop. |
-| 8 | Still running at the timeout | Run `abeon-code deploy wait` again. |
+| 3 | No tracking | Read the message. `no new push to <remote>/<branch>: the newest push is …` means your `git push` was a no-op or went to another remote or branch: check that the push went to that remote and branch (`git status`, `git log`, `git remote -v`). Any other message means the repository has no flow, tracking is off, there is nothing to track, or AbeonCode is not running: fall back to checking the pipeline the usual way for this repository, and offer the user to set up a deployment flow so AbeonCode can track it. |
+| 4 | The user is needed: the pipeline is paused (`state: paused`, a manual step waits for approval), or a blocker has been seen for most of this call (120 s, or 80 % of a shorter `--timeout`): the `blocked:` line names it (cluster unreachable, tool unavailable) | Tell the user what is waiting and give the `pipeline:` link. Then stop. |
+| 8 | Still running at the timeout | If the output has a `blocked:` line, tell the user what blocks it and stop, exactly as for 4. Otherwise run `abeon-code deploy wait` again. |
 | 2 | Usage error or a real error, message on stderr | Show the `abeon-code: …` message. "is not inside a repository of an AbeonCode project" means the directory is not in a registered project. |
 
 `abeon-code deploy status` prints the newest tracking of the repository at once, whatever its age,
@@ -183,9 +184,11 @@ never change one unasked.
    ```
 
    `show` prints `repoPath`, the current `flow` (null when none) and the `proposal` waiting for
-   confirmation (null when none). From a folder that only holds several repositories both commands
-   print one entry per repository. `detect` prints what the repository itself shows (pipeline file,
-   remote URL, production branch); namespace and workloads stay empty.
+   confirmation (null when none). Only from the root folder of a registered project that holds
+   several repositories do both commands print one entry per repository; from any other folder
+   outside a repository they answer "is not inside a repository of an AbeonCode project". `detect`
+   prints what the repository itself shows (pipeline file, remote URL, production branch);
+   namespace and workloads stay empty.
 2. Settle the open values with the user: at least the namespace, the workloads and the delivery.
    Look the namespace up with the Bandzior MCP tools (`project_find`, then `project_show`) when you
    have them. If you do not have them, or the project is not there, ask the user. Do not guess.
@@ -232,8 +235,9 @@ tracked.
 Rules:
 
 - Never claim the flow is active after `propose`. It is active only when `abeon-code flow show`
-  prints it as `flow` and no `proposal` is pending, which happens after the user confirmed. Until
-  then say that the proposal is waiting.
+  prints the values you proposed as `flow` and no `proposal` is pending, which happens after the
+  user confirmed. A rejected proposal leaves the old flow and no pending proposal, so check the
+  values. Until then say that the proposal is waiting.
 - There is no command to confirm a proposal and you must not try to bypass the confirmation. Do not
   edit the database.
 - A proposal identical to the current flow is refused. Proposing the same flow twice returns the
@@ -309,5 +313,15 @@ mod tests {
         for code in ["0", "1", "3", "4", "8"] {
             assert!(content.contains(&format!("| {code} ")), "exit code {code}");
         }
+        assert!(content.contains("seen for most of this call (120 s, or 80 % of a shorter `--timeout`)"));
+        assert!(content.contains("has a `blocked:` line, tell the user what blocks it and stop, exactly as for 4"));
+        assert!(content.contains("git rev-parse HEAD"));
+        assert!(content.contains("offer the user to set up a deployment flow"));
+        assert!(content.contains("check that the push went to that remote and branch"));
+        assert!(!content.contains("once, without a polling loop"));
+        assert!(content.contains("prints the values you proposed as `flow`"));
+        assert!(content.contains("A rejected proposal leaves the old flow"));
+        assert!(content.contains("the root folder of a registered project"));
+        assert!(content.contains("is not inside a repository of an AbeonCode project"));
     }
 }
