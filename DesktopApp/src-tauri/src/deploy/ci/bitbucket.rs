@@ -1,5 +1,6 @@
-use super::{call, owned, unexpected_response, CiObservation, CiRun, CiStatus, LOG_TAIL_LINES};
+use super::{call, owned, unexpected_response, CiObservation, CiRun, CiStatus};
 use crate::deploy::excerpt::tail_redacted;
+use crate::deploy::LOG_EXCERPT_LINES;
 use crate::deploy::runner::CommandRunner;
 use crate::domain::deploy::DeployFlow;
 use serde_json::Value;
@@ -109,7 +110,7 @@ pub(super) async fn failure_log(
         &step_id,
     ]);
     let log = call(runner, TOOL, args).await.ok()?;
-    let excerpt = tail_redacted(&log, LOG_TAIL_LINES);
+    let excerpt = tail_redacted(&log, LOG_EXCERPT_LINES);
     if excerpt.trim().is_empty() {
         None
     } else {
@@ -382,6 +383,19 @@ mod tests {
                 "{step-2}"
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn the_failure_log_keeps_the_last_sixty_lines() {
+        let log: Vec<String> = (1..=100).map(|line| format!("line {line}")).collect();
+        let runner = FakeRunner::new()
+            .on("bkt", &["api"], ok(STEPS))
+            .on("bkt", &["pipeline", "logs"], ok(&log.join("\n")));
+        let excerpt = failure_log(&runner, &flow(), &failed_run()).await.unwrap();
+        let lines: Vec<&str> = excerpt.lines().collect();
+        assert_eq!(lines.len(), 60);
+        assert_eq!(lines[0], "line 41");
+        assert_eq!(lines[59], "line 100");
     }
 
     #[tokio::test]

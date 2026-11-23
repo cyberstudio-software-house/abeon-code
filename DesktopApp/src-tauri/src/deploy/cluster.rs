@@ -1,5 +1,6 @@
 use crate::deploy::ci::{failure_reason, run_error_problem, unexpected_response, ToolProblem};
 use crate::deploy::runner::{CommandRunner, RunError};
+use crate::deploy::LOG_EXCERPT_LINES;
 use crate::domain::deploy::DeployFlow;
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -8,7 +9,6 @@ use std::time::Duration;
 const TOOL: &str = "kubectl";
 const KUBECTL_TIMEOUT: Duration = Duration::from_secs(20);
 const REQUEST_TIMEOUT_FLAG: &str = "--request-timeout=10s";
-const POD_LOG_TAIL_FLAG: &str = "--tail=60";
 const UNREACHABLE_MARKERS: [&str; 7] = [
     "unable to connect to the server",
     "dial tcp",
@@ -323,7 +323,8 @@ pub async fn pod_log(runner: &dyn CommandRunner, flow: &DeployFlow, pod: &str) -
     if pod.is_empty() || pod.starts_with('-') {
         return None;
     }
-    let args = kubectl_args(flow, &["logs", pod, "--all-containers", POD_LOG_TAIL_FLAG]);
+    let tail = format!("--tail={LOG_EXCERPT_LINES}");
+    let args = kubectl_args(flow, &["logs", pod, "--all-containers", &tail]);
     kubectl(runner, args).await.ok()
 }
 

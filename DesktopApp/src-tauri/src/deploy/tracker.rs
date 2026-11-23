@@ -6,22 +6,22 @@ use crate::deploy::machine::{self, Effect, NotifyKind, Observation};
 use crate::deploy::reflog::PushDetector;
 use crate::deploy::runner::{shell_runner, CommandRunner, SystemRunner};
 use crate::deploy::{
-    vpn, BLOCKED_POLL, BUILD_POLL, CLUSTER_POLL, DEPLOY_CHANGED_EVENT, PUSH_POLL,
-    TRACKING_HISTORY, VPN_SETTING_KEY,
+    vpn, BLOCKED_POLL, BUILD_POLL, CLUSTER_POLL, DEPLOY_CHANGED_EVENT, LOG_EXCERPT_LINES,
+    PUSH_POLL, TRACKING_HISTORY, VPN_SETTING_KEY,
 };
-use crate::domain::deploy::{DeployChangedEvent, DeployFlow, Tracking};
-use crate::error::AppResult;
+use crate::domain::deploy::{BuildProvider, Delivery, DeployChangedEvent, DeployFlow, Tracking};
+use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 use futures_util::future::join_all;
 use parking_lot::Mutex;
-use rusqlite::Connection;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use rusqlite::{Connection, TransactionBehavior};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Notify;
 
-const LOG_EXCERPT_LINES: usize = 60;
+const RUNNER_BUILD_LIMIT: Duration = Duration::from_secs(20);
 
 pub trait TrackerSink: Send + Sync {
     fn changed(&self, repo_path: Option<&str>);
@@ -38,10 +38,46 @@ struct Schedule {
 
 #[derive(Default)]
 struct Ledger {
-    detector: PushDetector,
     schedule: HashMap<i64, Schedule>,
     in_flight: HashSet<i64>,
     forced: HashSet<i64>,
+}
+
+#[derive(Default)]
+struct Pushes {
+    detector: PushDetector,
+    pending: BTreeMap<String, String>,
+}
+
+#[derive(Default)]
+struct ErrorLog {
+    last: Mutex<HashMap<String, String>>,
+}
+
+impl ErrorLog {
+    fn record<T>(&self, key: &str, result: AppResult<T>) -> Option<T> {
+        match result {
+            Ok(value) => {
+                self.last.lock().remove(key);
+                Some(value)
+            }
+            Err(error) => {
+                if self.is_new(key, &error.to_string()) {
+                    eprintln!("deploy: {key} failed: {error}");
+                }
+                None
+            }
+        }
+    }
+
+    fn is_new(&self, key: &str, message: &str) -> bool {
+        let mut last = self.last.lock();
+        if last.get(key).map(String::as_str) == Some(message) {
+            return false;
+        }
+        last.insert(key.to_string(), message.to_string());
+        true
+    }
 }
 
 pub struct DeployTracker {
@@ -49,7 +85,9 @@ pub struct DeployTracker {
     runner: OnceLock<Arc<dyn CommandRunner>>,
     sink: Arc<dyn TrackerSink>,
     vpn_name: VpnName,
-    ledger: Mutex<Ledger>,
+    pushes: Mutex<Pushes>,
+    ledger: Arc<Mutex<Ledger>>,
+    errors: ErrorLog,
     wake: Notify,
 }
 
@@ -60,15 +98,21 @@ struct Selection {
     cluster: bool,
 }
 
-struct InFlight<'a> {
-    tracker: &'a DeployTracker,
+struct InFlight {
+    ledger: Arc<Mutex<Ledger>>,
     id: i64,
 }
 
-impl Drop for InFlight<'_> {
+impl Drop for InFlight {
     fn drop(&mut self) {
-        self.tracker.ledger.lock().in_flight.remove(&self.id);
+        self.ledger.lock().in_flight.remove(&self.id);
     }
+}
+
+struct Round {
+    selection: Selection,
+    runner: Arc<dyn CommandRunner>,
+    guard: InFlight,
 }
 
 struct Outcome {
@@ -84,7 +128,9 @@ impl DeployTracker {
             runner: OnceLock::new(),
             sink,
             vpn_name,
-            ledger: Mutex::new(Ledger::default()),
+            pushes: Mutex::new(Pushes::default()),
+            ledger: Arc::new(Mutex::new(Ledger::default())),
+            errors: ErrorLog::default(),
             wake: Notify::new(),
         }
     }
@@ -95,14 +141,15 @@ impl DeployTracker {
         let tracker = Arc::new(Self::new(db, sink, Box::new(move || read_vpn_name(&settings))));
         let ready = tracker.clone();
         tauri::async_runtime::spawn(async move {
-            let built = tauri::async_runtime::spawn_blocking(move || {
-                shell_runner(&app.state::<AppState>())
-            })
+            let runner = blocking_or(
+                RUNNER_BUILD_LIMIT,
+                move || shell_runner(&app.state::<AppState>()),
+                || {
+                    eprintln!("deploy: the shell environment did not load, using the app environment");
+                    SystemRunner::new(std::env::vars().collect())
+                },
+            )
             .await;
-            let runner = built.unwrap_or_else(|error| {
-                eprintln!("deploy: the shell environment could not be loaded: {error}");
-                SystemRunner::new(std::env::vars().collect())
-            });
             let _ = ready.runner.set(Arc::new(runner));
             ready.wake.notify_one();
         });
@@ -122,23 +169,8 @@ impl DeployTracker {
     }
 
     pub async fn tick(&self, now: i64) {
-        let runner = self.runner.get().cloned();
-        let mut changed = BTreeSet::new();
-        let selections = match self.prepare(now, runner.is_some(), &mut changed) {
-            Ok(selections) => selections,
-            Err(error) => {
-                eprintln!("deploy: tracker tick failed: {error}");
-                Vec::new()
-            }
-        };
-        self.settle(&changed);
-        let Some(runner) = runner else { return };
-        let rounds = selections.into_iter().map(|selection| {
-            let guard = InFlight { tracker: self, id: selection.tracking.id };
-            self.round(runner.as_ref(), selection, guard, now)
-        });
-        let changed: BTreeSet<String> = join_all(rounds).await.into_iter().flatten().collect();
-        self.settle(&changed);
+        let rounds = self.prepare(now);
+        join_all(rounds.into_iter().map(|round| self.run(round, now))).await;
     }
 
     pub fn retry(&self, tracking_id: i64) {
@@ -147,74 +179,116 @@ impl DeployTracker {
     }
 
     pub fn flows_changed(&self) {
+        {
+            let mut ledger = self.ledger.lock();
+            let known: Vec<i64> =
+                ledger.schedule.keys().chain(ledger.in_flight.iter()).copied().collect();
+            ledger.forced.extend(known);
+        }
         self.wake.notify_one();
     }
 
-    fn prepare(
+    fn prepare(&self, now: i64) -> Vec<Round> {
+        let Some(mut pushes) = self.pushes.try_lock() else { return Vec::new() };
+        let mut changed = BTreeSet::new();
+        let refreshed = self.refresh(&mut pushes, now, &mut changed);
+        let state = self.errors.record("reading the deployment state", refreshed);
+        for repo in &changed {
+            self.sink.changed(Some(repo));
+        }
+        match (state, self.runner.get()) {
+            (Some((flows, open)), Some(runner)) => self.select(&flows, open, runner, now),
+            _ => Vec::new(),
+        }
+    }
+
+    fn refresh(
         &self,
+        pushes: &mut Pushes,
         now: i64,
-        observe: bool,
         changed: &mut BTreeSet<String>,
-    ) -> AppResult<Vec<Selection>> {
-        let conn = self.db.get()?;
-        let flows = deploy_flows_repo::list_enabled(&conn)?;
-        let mut ledger = self.ledger.lock();
-        for (flow, push) in ledger.detector.poll(&flows) {
-            match start_tracking(&conn, &flow, &push.commit, now) {
-                Ok(()) => {
-                    changed.insert(flow.repo_path.clone());
-                }
-                Err(error) => eprintln!("deploy: starting a tracking failed: {error}"),
+    ) -> AppResult<(Vec<DeployFlow>, Vec<Tracking>)> {
+        let mut conn = self.db.get()?;
+        let enabled = deploy_flows_repo::list_enabled(&conn)?;
+        for (flow, push) in pushes.detector.poll(&enabled) {
+            pushes.pending.insert(flow.repo_path, push.commit);
+        }
+        let flows: Vec<DeployFlow> = enabled.into_iter().filter(tracks_anything).collect();
+        pushes.pending.retain(|repo, _| flow_of(&flows, repo).is_some());
+        let pending: Vec<(String, String)> =
+            pushes.pending.iter().map(|(repo, commit)| (repo.clone(), commit.clone())).collect();
+        for (repo, commit) in pending {
+            let Some(flow) = flow_of(&flows, &repo) else { continue };
+            let started = start_tracking(&mut conn, flow, &commit, now);
+            if self.errors.record(&format!("starting a tracking for {repo}"), started).is_some() {
+                pushes.pending.remove(&repo);
+                changed.insert(repo);
             }
         }
-        let open = deploy_trackings_repo::open(&conn)?;
+        let mut open = deploy_trackings_repo::open(&conn)?;
+        if open.iter().any(|tracking| flow_of(&flows, &tracking.repo_path).is_none()) {
+            let closed = close_orphans(&mut conn, &flows, now);
+            changed.extend(self.errors.record("closing trackings without a flow", closed).unwrap_or_default());
+            open = deploy_trackings_repo::open(&conn)?;
+        }
+        if !changed.is_empty() {
+            let pruned = deploy_trackings_repo::prune(&conn, TRACKING_HISTORY);
+            self.errors.record("pruning trackings", pruned);
+        }
+        Ok((flows, open))
+    }
+
+    fn select(
+        &self,
+        flows: &[DeployFlow],
+        open: Vec<Tracking>,
+        runner: &Arc<dyn CommandRunner>,
+        now: i64,
+    ) -> Vec<Round> {
+        let mut rounds = Vec::new();
+        let mut ledger = self.ledger.lock();
         let open_ids: HashSet<i64> = open.iter().map(|tracking| tracking.id).collect();
         ledger.schedule.retain(|id, _| open_ids.contains(id));
         ledger.forced.retain(|id| open_ids.contains(id));
-
-        let mut selections = Vec::new();
         for tracking in open {
-            let Some(flow) = flows.iter().find(|flow| flow.repo_path == tracking.repo_path) else {
-                match deploy_trackings_repo::update(&conn, &machine::supersede(&tracking, now)) {
-                    Ok(()) => {
-                        changed.insert(tracking.repo_path.clone());
-                    }
-                    Err(error) => eprintln!("deploy: closing a tracking failed: {error}"),
-                }
-                continue;
-            };
-            if !observe || ledger.in_flight.contains(&tracking.id) {
+            let Some(flow) = flow_of(flows, &tracking.repo_path) else { continue };
+            if ledger.in_flight.contains(&tracking.id) {
                 continue;
             }
             let forced = ledger.forced.remove(&tracking.id);
             let due = ledger.schedule.get(&tracking.id).copied();
             let needs = machine::needs(&tracking, flow);
             ledger.in_flight.insert(tracking.id);
-            selections.push(Selection {
-                ci: needs.ci && (forced || due.is_none_or(|due| due.next_ci <= now)),
-                cluster: needs.cluster && (forced || due.is_none_or(|due| due.next_cluster <= now)),
-                flow: flow.clone(),
-                tracking,
+            rounds.push(Round {
+                guard: InFlight { ledger: self.ledger.clone(), id: tracking.id },
+                runner: runner.clone(),
+                selection: Selection {
+                    ci: needs.ci && (forced || due.is_none_or(|due| due.next_ci <= now)),
+                    cluster: needs.cluster
+                        && (forced || due.is_none_or(|due| due.next_cluster <= now)),
+                    flow: flow.clone(),
+                    tracking,
+                },
             });
         }
-        Ok(selections)
+        rounds
     }
 
-    async fn round(
-        &self,
-        runner: &dyn CommandRunner,
-        selection: Selection,
-        _guard: InFlight<'_>,
-        now: i64,
-    ) -> Option<String> {
-        let outcome = self.observe(runner, &selection, now).await;
-        if !self.persist(&selection, &outcome, now) {
-            return None;
+    async fn run(&self, round: Round, now: i64) {
+        let Round { selection, runner, guard: _guard } = round;
+        let outcome = self.observe(runner.as_ref(), &selection, now).await;
+        self.reschedule(&selection, &outcome, now);
+        if outcome.tracking == selection.tracking {
+            return;
+        }
+        let key = format!("saving tracking {}", outcome.tracking.id);
+        if !self.errors.record(&key, self.save(&outcome.tracking)).unwrap_or(false) {
+            return;
         }
         for kind in &outcome.notices {
             self.sink.notify(*kind, &outcome.tracking, &selection.flow);
         }
-        Some(outcome.tracking.repo_path)
+        self.sink.changed(Some(&outcome.tracking.repo_path));
     }
 
     async fn observe(&self, runner: &dyn CommandRunner, selection: &Selection, now: i64) -> Outcome {
@@ -265,15 +339,17 @@ impl DeployTracker {
         match effect {
             Effect::Notify(kind) => outcome.notices.push(kind),
             Effect::FetchBuildLog => {
-                let log = match failed_run(&outcome.tracking) {
+                let excerpt = match failed_run(&outcome.tracking) {
                     Some(run) => ci::failure_log(runner, flow, &run).await,
                     None => None,
                 };
-                attach_log(&mut outcome.tracking, log);
+                attach_excerpt(&mut outcome.tracking, excerpt);
             }
             Effect::FetchPodLog { pod } => {
-                let log = cluster::pod_log(runner, flow, &pod).await;
-                attach_log(&mut outcome.tracking, log);
+                let excerpt = cluster::pod_log(runner, flow, &pod)
+                    .await
+                    .map(|log| tail_redacted(&log, LOG_EXCERPT_LINES));
+                attach_excerpt(&mut outcome.tracking, excerpt);
             }
             Effect::ConnectVpn => {
                 if !vpn::supported() {
@@ -291,9 +367,9 @@ impl DeployTracker {
         }
     }
 
-    fn persist(&self, selection: &Selection, outcome: &Outcome, now: i64) -> bool {
-        let mut ledger = self.ledger.lock();
+    fn reschedule(&self, selection: &Selection, outcome: &Outcome, now: i64) {
         let blocked = machine::blocked(&outcome.tracking);
+        let mut ledger = self.ledger.lock();
         let schedule = ledger
             .schedule
             .entry(selection.tracking.id)
@@ -308,53 +384,50 @@ impl DeployTracker {
                 (false, false) => now + millis(CLUSTER_POLL),
             };
         }
-        if outcome.tracking == selection.tracking {
-            return false;
-        }
-        match self.save_open(&outcome.tracking) {
-            Ok(saved) => saved,
-            Err(error) => {
-                eprintln!("deploy: saving tracking {} failed: {error}", outcome.tracking.id);
-                false
-            }
-        }
     }
 
-    fn save_open(&self, tracking: &Tracking) -> AppResult<bool> {
+    fn save(&self, tracking: &Tracking) -> AppResult<bool> {
         let conn = self.db.get()?;
-        if !deploy_trackings_repo::get(&conn, tracking.id)?.is_open() {
+        if !deploy_trackings_repo::update_open(&conn, tracking)? {
             return Ok(false);
         }
-        deploy_trackings_repo::update(&conn, tracking)?;
+        let pruned = deploy_trackings_repo::prune(&conn, TRACKING_HISTORY);
+        self.errors.record("pruning trackings", pruned);
         Ok(true)
-    }
-
-    fn prune(&self) -> AppResult<()> {
-        let conn = self.db.get()?;
-        deploy_trackings_repo::prune(&conn, TRACKING_HISTORY)
-    }
-
-    fn settle(&self, repos: &BTreeSet<String>) {
-        if repos.is_empty() {
-            return;
-        }
-        if let Err(error) = self.prune() {
-            eprintln!("deploy: pruning trackings failed: {error}");
-        }
-        for repo in repos {
-            self.sink.changed(Some(repo));
-        }
     }
 }
 
-fn start_tracking(conn: &Connection, flow: &DeployFlow, commit: &str, now: i64) -> AppResult<()> {
-    for open in deploy_trackings_repo::open(conn)? {
+fn flow_of<'a>(flows: &'a [DeployFlow], repo_path: &str) -> Option<&'a DeployFlow> {
+    flows.iter().find(|flow| flow.repo_path == repo_path)
+}
+
+fn tracks_anything(flow: &DeployFlow) -> bool {
+    flow.build != BuildProvider::None || flow.delivery != Delivery::None
+}
+
+fn start_tracking(conn: &mut Connection, flow: &DeployFlow, commit: &str, now: i64) -> AppResult<()> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    for open in deploy_trackings_repo::open(&tx)? {
         if open.repo_path == flow.repo_path {
-            deploy_trackings_repo::update(conn, &machine::supersede(&open, now))?;
+            deploy_trackings_repo::update(&tx, &machine::supersede(&open, now))?;
         }
     }
-    deploy_trackings_repo::insert(conn, &Tracking::new(flow, commit, now))?;
+    deploy_trackings_repo::insert(&tx, &Tracking::new(flow, commit, now))?;
+    tx.commit()?;
     Ok(())
+}
+
+fn close_orphans(conn: &mut Connection, flows: &[DeployFlow], now: i64) -> AppResult<Vec<String>> {
+    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let mut closed = Vec::new();
+    for tracking in deploy_trackings_repo::open(&tx)? {
+        if flow_of(flows, &tracking.repo_path).is_none() {
+            deploy_trackings_repo::update(&tx, &machine::supersede(&tracking, now))?;
+            closed.push(tracking.repo_path);
+        }
+    }
+    tx.commit()?;
+    Ok(closed)
 }
 
 fn failed_run(tracking: &Tracking) -> Option<CiRun> {
@@ -363,17 +436,25 @@ fn failed_run(tracking: &Tracking) -> Option<CiRun> {
         build_number: tracking.build_number,
         url: tracking.run_url.clone().unwrap_or_default(),
         status: CiStatus::Failed,
-        finished_at: tracking.finished_at,
+        finished_at: None,
     })
 }
 
-fn attach_log(tracking: &mut Tracking, log: Option<String>) {
+fn attach_excerpt(tracking: &mut Tracking, excerpt: Option<String>) {
     let Some(failure) = tracking.failure.as_mut() else { return };
-    let excerpt = log
-        .map(|text| tail_redacted(&text, LOG_EXCERPT_LINES))
-        .filter(|excerpt| !excerpt.trim().is_empty());
-    if excerpt.is_some() {
-        failure.log_excerpt = excerpt;
+    if let Some(excerpt) = excerpt.filter(|excerpt| !excerpt.trim().is_empty()) {
+        failure.log_excerpt = Some(excerpt);
+    }
+}
+
+async fn blocking_or<T: Send + 'static>(
+    limit: Duration,
+    work: impl FnOnce() -> T + Send + 'static,
+    fallback: impl FnOnce() -> T,
+) -> T {
+    match tokio::time::timeout(limit, tokio::task::spawn_blocking(work)).await {
+        Ok(Ok(value)) => value,
+        _ => fallback(),
     }
 }
 
@@ -399,8 +480,15 @@ fn spawn_loop(tracker: Arc<DeployTracker>) {
                 _ = interval.tick() => {}
                 _ = tracker.wake.notified() => {}
             }
-            let current = tracker.clone();
-            tauri::async_runtime::spawn(async move { current.tick(now_millis()).await });
+            let now = now_millis();
+            let preparing = tracker.clone();
+            let prepared = tokio::task::spawn_blocking(move || preparing.prepare(now))
+                .await
+                .map_err(|error| AppError::Other(error.to_string()));
+            for round in tracker.errors.record("preparing a tick", prepared).unwrap_or_default() {
+                let current = tracker.clone();
+                tauri::async_runtime::spawn(async move { current.run(round, now).await });
+            }
         }
     });
 }
@@ -431,7 +519,7 @@ mod tests {
     use crate::db::init_pool;
     use crate::deploy::runner::{ok, CommandOutput, FakeRunner, RunError};
     use crate::deploy::test_support::{conn, push, repo_with_push, TestConn};
-    use crate::domain::deploy::{Blocker, BuildProvider, TrackingState};
+    use crate::domain::deploy::{Blocker, BuildProvider, Delivery, TrackingState};
     use async_trait::async_trait;
     use serde_json::{json, Value};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1009,6 +1097,17 @@ mod tests {
         gate: tokio::sync::Notify,
     }
 
+    impl GatedRunner {
+        fn new(inner: FakeRunner) -> Self {
+            GatedRunner {
+                inner,
+                first: AtomicBool::new(true),
+                entered: tokio::sync::Notify::new(),
+                gate: tokio::sync::Notify::new(),
+            }
+        }
+    }
+
     #[async_trait]
     impl CommandRunner for GatedRunner {
         async fn run(
@@ -1025,6 +1124,232 @@ mod tests {
         }
     }
 
+    fn flow_without_stages(flow: &DeployFlow) -> DeployFlow {
+        let mut idle = flow.clone();
+        idle.build = BuildProvider::None;
+        idle.delivery = Delivery::None;
+        idle
+    }
+
+    #[tokio::test]
+    async fn a_flow_with_neither_build_nor_delivery_starts_no_tracking() {
+        let f = Fixture::new();
+        f.save_flow(&flow_without_stages(&f.flow));
+        let sink = Arc::new(RecordingSink::default());
+        let runner = Arc::new(fake(&building("c"), "app:1"));
+        let tracker = f.tracker(runner.clone(), &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        for second in (3..=1200).step_by(3) {
+            tracker.tick(at(second)).await;
+        }
+        assert!(f.trackings().is_empty());
+        assert!(sink.changed_repos().is_empty());
+        assert!(sink.kinds().is_empty());
+        assert!(runner.calls().is_empty());
+
+        f.save_flow(&f.flow);
+        tracker.tick(at(1203)).await;
+        assert!(f.trackings().is_empty());
+        push(&f.repo, "c");
+        tracker.tick(at(1206)).await;
+        assert_eq!(f.only().commit, commit("c"));
+        assert!(f.only().is_open());
+
+        f.save_flow(&flow_without_stages(&f.flow));
+        tracker.tick(at(1209)).await;
+        let closed = f.only();
+        assert_eq!(closed.state, TrackingState::Superseded);
+        assert_eq!(closed.finished_at, Some(at(1209)));
+        for second in (1212..=2400).step_by(3) {
+            tracker.tick(at(second)).await;
+        }
+        assert!(sink.kinds().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_tick_is_skipped_while_another_one_is_preparing() {
+        let f = Fixture::new();
+        let sink = Arc::new(RecordingSink::default());
+        let runner = Arc::new(fake(&building("b"), "app:1"));
+        let tracker = f.tracker(runner.clone(), &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+
+        let preparing = tracker.pushes.lock();
+        tracker.tick(at(3)).await;
+        drop(preparing);
+        assert!(f.trackings().is_empty());
+        assert!(runner.calls().is_empty());
+
+        tracker.tick(at(6)).await;
+        assert_eq!(f.only().commit, commit("b"));
+        assert_eq!((ci_polls(&runner), cluster_polls(&runner)), (1, 1));
+    }
+
+    #[tokio::test]
+    async fn a_fast_round_announces_its_change_without_waiting_for_a_slow_one() {
+        let f = Fixture::new();
+        let (other_repo, mut other) = repo_with_push("a");
+        other.build = BuildProvider::None;
+        f.save_flow(&other);
+        let sink = Arc::new(RecordingSink::default());
+        let runner = Arc::new(GatedRunner::new(fake(&building("b"), "app:1")));
+        let tracker = f.tracker(runner.clone(), &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        push(&other_repo, "b");
+        let slow = tokio::spawn({
+            let tracker = tracker.clone();
+            async move { tracker.tick(at(3)).await }
+        });
+        runner.entered.notified().await;
+        let fast = Some(other.repo_path.clone());
+        let announced = || sink.changed_repos().iter().filter(|repo| **repo == fast).count();
+        for _ in 0..1000 {
+            if announced() >= 2 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(announced(), 2);
+        assert!(!slow.is_finished());
+
+        runner.gate.notify_one();
+        slow.await.unwrap();
+        assert_eq!(f.only().state, TrackingState::Building);
+    }
+
+    #[tokio::test]
+    async fn a_shell_environment_that_hangs_falls_back_to_the_process_environment() {
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let hung = blocking_or(Duration::ZERO, move || {
+            let _ = wait.recv();
+            "shell"
+        }, || "process")
+        .await;
+        assert_eq!(hung, "process");
+        release.send(()).unwrap();
+        assert_eq!(blocking_or(RUNNER_BUILD_LIMIT, || "shell", || "process").await, "shell");
+    }
+
+    #[tokio::test]
+    async fn a_failed_insert_leaves_the_old_tracking_open_and_is_retried() {
+        let f = Fixture::new();
+        let sink = Arc::new(RecordingSink::default());
+        let ci = pipelines(vec![
+            pipeline(&commit("b"), 7, running()),
+            pipeline(&commit("c"), 8, running()),
+        ]);
+        let tracker = f.tracker(Arc::new(fake(&ci, "app:1")), &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        tracker.tick(at(3)).await;
+        let first = f.only();
+
+        f.pool
+            .get()
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER refuse_insert BEFORE INSERT ON deploy_trackings
+                 BEGIN SELECT RAISE(ABORT, 'refused'); END;",
+            )
+            .unwrap();
+        push(&f.repo, "c");
+        tracker.tick(at(6)).await;
+        tracker.tick(at(9)).await;
+        let still = f.only();
+        assert_eq!(still.id, first.id);
+        assert_eq!(still.state, TrackingState::Building);
+        assert_eq!(still.finished_at, None);
+
+        f.pool.get().unwrap().execute_batch("DROP TRIGGER refuse_insert;").unwrap();
+        tracker.tick(at(12)).await;
+        let all = f.trackings();
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].commit, commit("c"));
+        assert!(all[0].is_open());
+        assert_eq!(all[0].started_at, at(12));
+        assert_eq!(all[1].id, first.id);
+        assert_eq!(all[1].state, TrackingState::Superseded);
+    }
+
+    #[tokio::test]
+    async fn a_flow_change_makes_every_open_tracking_due_at_once() {
+        let f = Fixture::new();
+        let sink = Arc::new(RecordingSink::default());
+        let runner = Arc::new(fake(&building("b"), "app:1"));
+        let tracker = f.tracker(runner.clone(), &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        tracker.tick(at(3)).await;
+        tracker.tick(at(6)).await;
+        assert_eq!((ci_polls(&runner), cluster_polls(&runner)), (1, 1));
+
+        tracker.flows_changed();
+        tracker.tick(at(9)).await;
+        assert_eq!((ci_polls(&runner), cluster_polls(&runner)), (2, 2));
+        tracker.tick(at(12)).await;
+        assert_eq!((ci_polls(&runner), cluster_polls(&runner)), (2, 2));
+    }
+
+    #[tokio::test]
+    async fn the_build_log_excerpt_keeps_the_last_sixty_lines() {
+        let f = Fixture::new();
+        let sink = Arc::new(RecordingSink::default());
+        let mut log: Vec<String> = (1..=100).map(|line| format!("line {line}")).collect();
+        log[95] = "API_TOKEN=abc".to_string();
+        let failed = pipelines(vec![pipeline(&commit("b"), 7, completed("FAILED"))]);
+        let runner = Arc::new(
+            FakeRunner::new()
+                .on("bkt", &["api", STEPS_PATH], ok(STEPS))
+                .on("bkt", &["pipeline", "logs"], ok(&log.join("\n")))
+                .on("bkt", &["api", PIPELINES_PATH], ok(&failed))
+                .on("kubectl", &["-n"], ok(&workloads("app:1"))),
+        );
+        let tracker = f.tracker(runner, &sink, None);
+        tracker.tick(at(0)).await;
+        push(&f.repo, "b");
+        tracker.tick(at(3)).await;
+
+        let excerpt = f.only().failure.and_then(|failure| failure.log_excerpt).unwrap();
+        let lines: Vec<&str> = excerpt.lines().collect();
+        assert_eq!(lines.len(), 60);
+        assert_eq!(lines[0], "line 41");
+        assert_eq!(lines[59], "line 100");
+        assert!(lines.contains(&"API_TOKEN=***"));
+    }
+
+    #[test]
+    fn an_error_is_printed_once_until_it_changes_or_clears() {
+        let errors = ErrorLog::default();
+        let fail = |message: &str| -> AppResult<()> {
+            Err(crate::error::AppError::Other(message.to_string()))
+        };
+        assert!(errors.is_new("tick", "database is locked"));
+        assert_eq!(errors.record("tick", fail("database is locked")), None);
+        assert!(!errors.is_new("tick", "database is locked"));
+        assert!(errors.is_new("tick", "disk I/O error"));
+        assert!(errors.is_new("prune", "disk I/O error"));
+        assert_eq!(errors.record("tick", Ok(7)), Some(7));
+        assert!(errors.is_new("tick", "disk I/O error"));
+    }
+
+    #[test]
+    fn the_run_rebuilt_for_the_build_log_carries_no_finish_time() {
+        let mut tracking = Tracking::new(&crate::deploy::test_support::flow(), "abc", at(0));
+        assert_eq!(failed_run(&tracking), None);
+        tracking.run_id = Some("{run-7}".to_string());
+        tracking.build_number = Some(7);
+        tracking.run_url = Some("https://example.test/7".to_string());
+        tracking.finished_at = Some(at(60));
+        let run = failed_run(&tracking).unwrap();
+        assert_eq!(run.id, "{run-7}");
+        assert_eq!(run.build_number, Some(7));
+        assert_eq!(run.status, CiStatus::Failed);
+        assert_eq!(run.finished_at, None);
+    }
+
     #[tokio::test]
     async fn a_slow_round_neither_blocks_the_next_push_nor_reopens_a_superseded_tracking() {
         let f = Fixture::new();
@@ -1033,12 +1358,7 @@ mod tests {
             pipeline(&commit("b"), 7, running()),
             pipeline(&commit("c"), 8, running()),
         ]);
-        let runner = Arc::new(GatedRunner {
-            inner: fake(&ci, "app:1"),
-            first: AtomicBool::new(true),
-            entered: tokio::sync::Notify::new(),
-            gate: tokio::sync::Notify::new(),
-        });
+        let runner = Arc::new(GatedRunner::new(fake(&ci, "app:1")));
         let tracker = f.tracker(runner.clone(), &sink, None);
         tracker.tick(at(0)).await;
         push(&f.repo, "b");

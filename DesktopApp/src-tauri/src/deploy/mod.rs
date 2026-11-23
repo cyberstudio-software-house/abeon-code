@@ -18,6 +18,7 @@ use std::time::Duration;
 pub const DEPLOY_CHANGED_EVENT: &str = "deploy://changed";
 pub const VPN_SETTING_KEY: &str = "deployVpnConnection";
 pub const TRACKING_HISTORY: usize = 10;
+pub const LOG_EXCERPT_LINES: usize = 60;
 
 pub const RUN_APPEAR_LIMIT: Duration = Duration::from_secs(5 * 60);
 pub const ROLLOUT_LIMIT: Duration = Duration::from_secs(15 * 60);

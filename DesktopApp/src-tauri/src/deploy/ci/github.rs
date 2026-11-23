@@ -1,5 +1,6 @@
-use super::{call, owned, unexpected_response, CiObservation, CiRun, CiStatus, LOG_TAIL_LINES};
+use super::{call, owned, unexpected_response, CiObservation, CiRun, CiStatus};
 use crate::deploy::excerpt::tail_redacted;
+use crate::deploy::LOG_EXCERPT_LINES;
 use crate::deploy::runner::CommandRunner;
 use crate::domain::deploy::DeployFlow;
 use serde_json::Value;
@@ -125,7 +126,7 @@ pub(super) async fn failure_log(
 ) -> Option<String> {
     let args = owned(&["run", "view", &run.id, "--repo", &flow.build_repo, "--log-failed"]);
     let log = call(runner, TOOL, args).await.ok()?;
-    let excerpt = tail_redacted(&log, LOG_TAIL_LINES);
+    let excerpt = tail_redacted(&log, LOG_EXCERPT_LINES);
     if excerpt.trim().is_empty() {
         None
     } else {
@@ -347,6 +348,24 @@ mod tests {
             runner.calls()[0].1,
             ["run", "view", "44", "--repo", "owner/repo", "--log-failed"]
         );
+    }
+
+    #[tokio::test]
+    async fn the_failure_log_keeps_the_last_sixty_lines() {
+        let log: Vec<String> = (1..=100).map(|line| format!("line {line}")).collect();
+        let runner = FakeRunner::new().on("gh", &["run", "view"], ok(&log.join("\n")));
+        let failed = CiRun {
+            id: "44".to_string(),
+            build_number: None,
+            url: String::new(),
+            status: CiStatus::Failed,
+            finished_at: None,
+        };
+        let excerpt = failure_log(&runner, &github_flow(), &failed).await.unwrap();
+        let lines: Vec<&str> = excerpt.lines().collect();
+        assert_eq!(lines.len(), 60);
+        assert_eq!(lines[0], "line 41");
+        assert_eq!(lines[59], "line 100");
     }
 
     #[tokio::test]

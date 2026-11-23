@@ -74,6 +74,28 @@ pub fn update(conn: &Connection, tracking: &Tracking) -> AppResult<()> {
     Ok(())
 }
 
+pub fn update_open(conn: &Connection, tracking: &Tracking) -> AppResult<bool> {
+    let changed = conn.execute(
+        &format!(
+            "UPDATE deploy_trackings
+             SET repo_path = ?, commit_sha = ?, state = ?, started_at = ?, finished_at = ?, dismissed = ?, body = ?
+             WHERE id = ? AND state IN ({})",
+            open_states()
+        ),
+        params![
+            tracking.repo_path,
+            tracking.commit,
+            tracking.state.as_str(),
+            tracking.started_at,
+            tracking.finished_at,
+            tracking.dismissed as i64,
+            serde_json::to_string(tracking)?,
+            tracking.id,
+        ],
+    )?;
+    Ok(changed > 0)
+}
+
 pub fn open(conn: &Connection) -> AppResult<Vec<Tracking>> {
     select(
         conn,
@@ -236,6 +258,30 @@ mod tests {
                 1
             )
         );
+    }
+
+    #[test]
+    fn update_open_writes_only_while_the_stored_tracking_is_open() {
+        let conn = conn();
+        let saved = insert(&conn, &tracking("/r/a", "aaa", TrackingState::Building)).unwrap();
+        let mut delivering = saved.clone();
+        delivering.state = TrackingState::Delivering;
+        assert!(update_open(&conn, &delivering).unwrap());
+        assert_eq!(get(&conn, saved.id).unwrap(), delivering);
+
+        let mut superseded = delivering.clone();
+        superseded.state = TrackingState::Superseded;
+        superseded.finished_at = Some(3_000);
+        assert!(update_open(&conn, &superseded).unwrap());
+
+        let mut late = delivering.clone();
+        late.run_url = Some("https://example.test/run/2".to_string());
+        assert!(!update_open(&conn, &late).unwrap());
+        assert_eq!(get(&conn, saved.id).unwrap(), superseded);
+
+        let mut ghost = delivering;
+        ghost.id = 99;
+        assert!(!update_open(&conn, &ghost).unwrap());
     }
 
     #[test]

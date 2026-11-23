@@ -7,7 +7,6 @@ use crate::domain::deploy::{BuildProvider, DeployFlow};
 use std::time::Duration;
 
 pub(crate) const CI_TIMEOUT: Duration = Duration::from_secs(30);
-pub(crate) const LOG_TAIL_LINES: usize = 40;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CiStatus {
