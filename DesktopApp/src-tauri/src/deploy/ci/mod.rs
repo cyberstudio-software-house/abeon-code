@@ -58,9 +58,9 @@ pub(crate) async fn call(
             let line = output
                 .stderr
                 .lines()
-                .map(str::trim)
+                .map(|line| redact_line(line.trim()))
+                .map(|line| line.trim().to_string())
                 .find(|line| !line.is_empty())
-                .map(redact_line)
                 .unwrap_or_else(|| match output.status {
                     Some(code) => format!("polecenie zakończyło się kodem {code}"),
                     None => "polecenie zostało przerwane".to_string(),
@@ -149,6 +149,34 @@ mod tests {
         assert!(!problem.reason.contains('\u{1b}'));
         assert!(problem.reason.starts_with("error: bad credentials for https://***@bitbucket.org"));
         assert_eq!(problem.reason.chars().count(), 400);
+    }
+
+    async fn reason_for(status: i32, stderr: &str) -> String {
+        let runner = FakeRunner::new().on(
+            "bkt",
+            &["api"],
+            Ok(CommandOutput {
+                status: Some(status),
+                stdout: String::new(),
+                stderr: stderr.to_string(),
+            }),
+        );
+        let CiObservation::Unavailable(problem) = observe(&runner, &flow(), "abc").await else {
+            panic!("expected unavailable")
+        };
+        problem.reason
+    }
+
+    #[tokio::test]
+    async fn lines_made_only_of_escape_codes_are_skipped() {
+        let stderr = "\u{1b}[0m\r\n\u{1b}[2K\u{1b}[1G\n  \r\nreal error\n";
+        assert_eq!(reason_for(1, stderr).await, "real error");
+    }
+
+    #[tokio::test]
+    async fn an_escape_only_stderr_falls_back_to_the_exit_code() {
+        let stderr = "\u{1b}[31m\u{1b}[0m\n\r\n";
+        assert_eq!(reason_for(3, stderr).await, "polecenie zakończyło się kodem 3");
     }
 
     #[tokio::test]
