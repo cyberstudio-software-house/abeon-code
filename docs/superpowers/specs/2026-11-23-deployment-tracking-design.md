@@ -313,3 +313,54 @@ The user approved the design with change 3 applied (answer relayed from Discord 
 - The visual design of the status, the details view and the banner.
 - Where the flow section lives if the project edit dialog becomes too crowded.
 - Tests, following the existing split (cargo for the Rust side, Vitest for the UI).
+
+## Implementation notes (2026-11)
+
+Where the implementation deliberately differs from the text above. The code is the truth; the body of
+the design is left as approved.
+
+- **Two blockers, not one.** `Tracking` has `ci_blocker` and `cluster_blocker`, one per side (§5). Each
+  side sets and clears only its own, and each stage's time limit follows its own side: it does not run
+  while that side is blocked and restarts when the blocker clears. A blocker is still never a failure.
+- **`has_build` / `has_delivery`.** A tracking freezes from the flow whether it has a build and a
+  delivery, so editing the flow later does not change how an old tracking is shown, and the details
+  view lists only the stages the tracking had.
+- **A flow with neither build nor delivery tracks nothing.** It is accepted and saved, but no tracking is created and `deploy wait` answers
+  `no tracking`.
+- **Stale proposals are refused.** A proposal stores `base_updated_at`, the `updated_at` of the flow it
+  was compared against (§2). Approving it is refused as stale („Przepływ zmienił się po propozycji —
+  sprawdź w aplikacji”) when the flow changed after the proposal. The card sends the base it rendered,
+  the Discord button uses the stored one. The confirmation guards agents that use the CLI; it is not a
+  sandbox, a process running as the user can still write the SQLite file or post a fake button with the
+  bot token. Proposing the same flow twice returns the existing proposal, and a flow identical to the
+  current one is refused.
+- **Freshness rule of `deploy wait`** (§7). Besides the exit codes in the design, it answers `no
+  tracking` with `no new push to <remote>/<branch>: the newest push is <sha>, <age> ago, state <state>`
+  when the newest push is older than 60 minutes and its deployment finished more than 10 minutes before
+  the command started, because that usually means the agent's push was a no-op or went elsewhere.
+  Exit codes: 0 succeeded, 1 failed or stalled, 3 no tracking, 4 needs the user (paused, or a blocker
+  seen for more than 120 s), 8 still running at the timeout (default 540 s, maximum 3600 s). The skill
+  tells agents to run it with a 600000 ms tool timeout or a shorter `--timeout`. The skill is called
+  `abeon-deploy`, not `abeon-project-flow`.
+- **Only live pods count for readiness** (§4). Pods with a deletion timestamp and pods in phase
+  `Succeeded` or `Failed` are ignored, and a workload scaled to 0 is ready.
+- **VPN command** (§5). `nmcli connection up id <name>`, so a name that is an nmcli keyword is still
+  taken as a connection id. Tried once per tracking, Linux only.
+- **Log excerpts are the last 60 lines** (§4), redacted, in the details view and the CLI output; they
+  are never put into a notification or a Discord message.
+- **Discord notices need the supervisor on** (§6). Deployment and proposal messages go out only when
+  the supervisor level is above Off, its session runs and Discord is connected (unix only); otherwise
+  desktop notifications and in-app marks remain. A proposal made while the app is closed, or while the
+  user is present with „mute when present”, is not posted to Discord later.
+- **Header while paused.** While the paused banner shows, the header chip is a flat dot without a
+  label; the sidebar row keeps the filled accent pill.
+- **Push detection limits.** The reflog trigger does not see repositories with
+  `core.logAllRefUpdates=false`, single-branch clones that do not map the production branch to a
+  remote-tracking ref, or reftable repositories; a push made while the app was closed is not tracked
+  afterwards (the first poll of a flow only records the current entry).
+- **Known limitation.** With two pushes in quick succession the image chain can report „Wdrożono” for
+  the second push when the image that landed is the first push's, because the expected tag is not
+  computed.
+- **Not exercised yet.** The tracker's production loop has no automated test and has not been run in the
+  app; the Bitbucket paused mapping (`state.stage.name` `PAUSED`) and the failed-step log fetch have not
+  met a real run. The QA checklist `2026-11-23-deployment-tracking-qa-checklist.md` covers them.

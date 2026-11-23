@@ -14,7 +14,7 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 ## Folder map
 
 ### Frontend (`src/`)
-- `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `panesSlice`, `actionsSlice`, `gitSlice`, `terminalDrawersSlice`, `notesSlice`, `filesSlice`. Composed in `store/index.ts`.
+- `store/` — Zustand slices, one per domain: `settingsSlice`, `projectsSlice`, `sessionsSlice`, `tabsSlice`, `panesSlice`, `actionsSlice`, `gitSlice`, `terminalDrawersSlice`, `notesSlice`, `filesSlice`, `deploySlice`. Composed in `store/index.ts`.
 - `lib/settingsCategories.ts` — settings categories (groups, labels, icons, search keywords), `filterSettingsCategories` and the "Terminal is new" flag; `lib/terminalAppearance.ts` — terminal fonts, palettes and xterm option builders; `lib/toolStatus.ts` — pairs tool-use blocks with their results for the history view; `lib/activity.ts` — session activity labels and colours (amber = running, blue = waiting for you); `lib/fileText.ts` (file tab ids, path helpers, BOM/EOL decode and encode), `lib/useFilesSync.ts` (directory-change listener) and `lib/fileGitStatus.ts` (git status by relative path) belong to the file browser.
 - `lib/tauri.ts` — **single typed wrapper** over `invoke()`/`listen()`. Every IPC call lives here; do not call `invoke` directly from components.
 - `types/` — TS types, several are ts-rs-generated from Rust (`PtyKind.ts`, `GitStatus.ts`, etc.) — do not edit by hand.
@@ -26,7 +26,7 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
   - `right/` — right column: Git panel (`GitSection` with tabs: working-tree changes / commit history via `GitHistory` + `CommitDiffDialog`), Actions list, runnable scripts. `RightPanel` swaps in `NotesPanel` while `notesPanelOpen`.
   - `notes/` — notes: `NotesPanel` (right-column list/editor), `NoteTiles`, `NoteEditor` (shared by panel and tab), `NoteTabView` (the `note` tab). Store in `store/notesSlice.ts`, helpers in `lib/noteText.ts`, change sync in `lib/useNotesSync.ts`. See "Notes".
   - `files/` — file browser: `FilesPanel` (right-column header, search box, tree or results), `FileTree`, `FileSearchResults`, `FileEntryMenu`, `FileTabView` (the `file` tab) and `CodeEditor` (the only CodeMirror import). Store in `store/filesSlice.ts`. See "File browser".
-  - `deploy/` — deployment tracking UI: `DeployStatusChip` (sidebar row compact, header with label; paused is a filled accent pill), `DeployDetailsDialog` (stages, blocker, log excerpt, „Wyślij do sesji” types a single-line summary into a chosen session PTY without Enter), `DeployBanner` (header, paused pipeline). State in `store/deploySlice.ts`, rules in `lib/deployStatus.ts` (`shownBlocker`, tones, priority), reload on `deploy://changed` in `lib/useDeploySync.ts` (mounted in `AppShell` and `DetachedShell`).
+  - `deploy/` — deployment tracking UI: `DeployStatusChip` (the sidebar row shows it compact, a paused one is a filled accent pill; the header shows it with a label, but while `DeployBanner` is on it is `flat`, a dot without a label and without the pill), `DeployDetailsDialog` (stages the flow has, blocker, log excerpt, „Wyślij do sesji” types a single-line summary into a chosen session PTY without Enter), `DeployBanner` (header, paused pipeline), `DeployFlowSection` (flow form inside `EditProjectDialog`), `FlowProposalCard` (agent proposals, rendered by `AppShell`), `openPipeline.ts`. State in `store/deploySlice.ts`, rules in `lib/deployStatus.ts` (`shownBlocker`, tones, priority), reload on `deploy://changed` in `lib/useDeploySync.ts` (mounted in `AppShell` and `DetachedShell`). Settings page: `settings/categories/DeployCategory.tsx` („Wdrożenia”). See "Deployment tracking".
   - `terminal/TerminalView.tsx` — xterm wrapper for any PTY (claude, action, shell); `useTerminalAppearance.ts` feeds it the persisted appearance settings.
   - `history/` — session history viewer (markdown blocks).
   - `settings/` — the full-window settings view: `SettingsView` (search, nav column, page), `SettingsNav`, `controls.tsx` (shared `SettingsPage`/`SettingsSection`/`SettingsRow`, `Segmented`, `Switch`, `Stepper`, `SelectField`) and `categories/*` (one page per category, plus `TerminalPreview` and `CustomPaletteEditor`). See "Settings view".
@@ -35,11 +35,13 @@ Tauri 2 + React 19 + Zustand 5 + Tailwind 4 desktop app for managing AI-CLI codi
 
 ### Backend (`src-tauri/src/`)
 - `diagnostics.rs` — log file redirect and lifecycle lines, see "Diagnostics log".
-- `commands/` — Tauri command handlers grouped by domain: `projects.rs`, `sessions.rs`, `pty.rs`, `actions.rs`, `git.rs`, `settings.rs`, `activity.rs`, `notes.rs`, `files.rs`. Registered in `lib.rs`.
+- `commands/` — Tauri command handlers grouped by domain: `projects.rs`, `sessions.rs`, `pty.rs`, `actions.rs`, `git.rs`, `settings.rs`, `activity.rs`, `notes.rs`, `files.rs`, `deploy.rs`. Registered in `lib.rs`.
 - `db/` — SQLite migrations + queries.
 - `pty/` — PTY spawning and lifecycle (claude / action / shell variants).
 - `sessions/` — session reading and watch; Claude Code JSONL format at top level, `sessions/codex/` holds the OpenAI Codex rollout adapter, and `sessions/opencode/` holds the read-only OpenCode SQLite adapter.
 - `files/` — file browser backend: `paths` (path safety), `listing` (directory listing + `IgnoreChecker`), `search`, `content` (read, classify, version), `write` (conflict-checked save), `watch` (shared directory watcher + dirty-file registry); `commands/files.rs` is the thin command layer. See "File browser".
+- `deploy/` — deployment tracking backend (flows, trackings, proposals, the tracker); `ci/` holds the Bitbucket and GitHub readers. See "Deployment tracking".
+- `cli/` — the `abeon-code` subcommands run by the app binary: `notes.rs`, `flow.rs`, `deploy.rs`, `request.rs`/`open_input.rs` (open requests and the `abeon-code://` scheme), `installer.rs` (the wrapper script), `skill.rs` (the three bundled skills).
 - `git/` — git2 wrappers: `mod.rs` (status + working-tree diff), `history.rs` (branches, log, commit detail, per-commit file diff).
 - `detectors/` — script detection (npm/cargo/etc).
 - `domain/` — shared structs (ts-rs derives live here).
@@ -358,12 +360,13 @@ Short plain-text notes, per project or global, edited in the right column (`Note
   match is an error unless `--global`. The note comes from stdin (heredoc, max `MAX_NOTE_BYTES`),
   the output formats are what the skill documents (`abeon-code: note added …`,
   `--- note <id> · <date> ---`), so change them together with `cli/skill.rs`.
-- **`wrapper_features` marker**: `cli/installer.rs` writes `wrapper_features="note"` into the wrapper.
-  The `abeon-notes` skill greps for it before calling `abeon-code note`, because an outdated wrapper
-  would not know `note` and start the app instead. Adding a new wrapper subcommand means extending
-  that list (the skill's `grep 'wrapper_features=.*note'` stays valid when features are appended).
-- **Skills**: `cli/skill.rs` installs `abeon-open-session` and `abeon-notes` into
-  `~/.claude/skills`; "Zainstaluj skill" in Settings reinstalls the wrapper first, then both skills,
+- **`wrapper_features` marker**: `cli/installer.rs` writes `wrapper_features="note flow deploy"` into the wrapper.
+  The `abeon-notes` skill greps for it before calling `abeon-code note`, and `abeon-deploy` for `flow`
+  and `deploy`, because an outdated wrapper would not know the subcommand and start the app instead.
+  Adding a new wrapper subcommand means extending that list (the skills' `grep
+  'wrapper_features=.*<feature>'` stays valid when features are appended).
+- **Skills**: `cli/skill.rs` installs `abeon-open-session`, `abeon-notes` and `abeon-deploy` into
+  `~/.claude/skills`; "Zainstaluj skill" in Settings reinstalls the wrapper first, then the skills,
   and shows the skills root directory.
 
 ## File browser
@@ -763,6 +766,127 @@ Assistant, Autonomous. Spec: `docs/superpowers/specs/2026-10-28-supervisor-agent
   other's clicks. Settings show a status row for the buttons connection. `claude_md.rs` teaches all
   of it: a validation error is corrected and retried once, and the text layout is the fallback only
   when the buttons are offline or the retry fails.
+
+## Deployment tracking
+
+Follows every push to a repository's production branch through the CI pipeline and the rollout on the
+cluster, shows the result per project, and lets agents wait for it and propose the flow. Spec:
+`docs/superpowers/specs/2026-11-23-deployment-tracking-design.md` (see its "Implementation notes"
+for where the code differs from the text); manual QA list:
+`docs/superpowers/specs/2026-11-23-deployment-tracking-qa-checklist.md`.
+
+- **Module map** (`src-tauri/src/deploy/`): `validate` (strict character sets for everything that
+  becomes a command argument), `flows` (normalise + save), `repos` (repository of a directory,
+  projects of a repository, `repo_label`), `detect` (flow from the pipeline file, remote URL and
+  branch), `reflog` (`PushDetector`, `latest_push`), `machine` (the state machine), `ci/`
+  (`bitbucket` through `bkt`, `github` through `gh`), `cluster` (`kubectl` snapshot of the workloads),
+  `excerpt` (`tail_redacted`), `vpn` (`nmcli`), `runner` (`CommandRunner`, `SystemRunner`, `FakeRunner`
+  for tests), `tracker` (`DeployTracker`, the loop and the DB writes), `notify` (desktop and Discord
+  notices), `proposals` (agent proposals, `diff`, `resolve`); `test_support` is test-only. Domain types
+  in `domain/deploy.rs`; tables `deploy_flows`, `deploy_trackings`, `deploy_flow_proposals`
+  (migration 008, repos in `db/deploy_*_repo.rs`); commands in `commands/deploy.rs`; CLI in
+  `cli/flow.rs` and `cli/deploy.rs`.
+- **A flow belongs to a repository** (canonical path of its root), not to a project; a project shows the
+  flows of every repository `discover_repos` finds in it, and a repository reachable from two projects has
+  one flow. One flow per repository, only its production branch on its remote is tracked. A flow with
+  neither build (`none`) nor delivery (`none`) tracks nothing; a flow with `enabled: false` neither.
+  Validation lives in `validate_flow` and runs for the form, the proposal and the CLI alike.
+- **The state machine is pure, every process call goes through `CommandRunner`**: `machine::advance`
+  takes a `Tracking`, the `DeployFlow`, an `Observation` (CI, cluster or tick) and `now`, and returns the
+  next `Tracking` plus `Effect`s (notify, fetch a log, connect the VPN). It runs nothing and reads no
+  clock. `ci/*`, `cluster`, `vpn` and the log fetches only call `runner.run(program, args, timeout)`: no
+  shell, arguments as a list, with a timeout. Tests use `FakeRunner`; never spawn a process in these
+  modules any other way.
+- **Trigger is the reflog, not hooks**: `PushDetector` polls (every `PUSH_POLL`, 3 s) the reflog of
+  `refs/remotes/<remote>/<branch>` and starts a tracking when its last entry says `update by push`. It
+  covers pushes from agent sessions of every provider, the terminal drawer and any outside terminal, and
+  does not depend on the supervisor's hooks (which are off when the supervisor is). A fetch moves the
+  ref with another message and starts nothing. The first poll of a flow only records the current entry,
+  so a push made while the app was closed is never tracked afterwards. Not detected: repositories with
+  `core.logAllRefUpdates=false`, single-branch clones that do not map the production branch to a
+  remote-tracking ref, reftable repositories. A new push supersedes the open tracking of the repository
+  (`start_tracking`, state `superseded`); trackings of a flow that was removed or disabled are
+  superseded too (`close_orphans`). The last `TRACKING_HISTORY` (10) trackings per repository are kept.
+- **Tracking** (`domain::deploy::Tracking`): states `waitingForRun`, `building`, `paused`, `delivering`
+  (open) and `succeeded`, `failed`, `stalled`, `superseded`. `has_build` and `has_delivery` are frozen
+  from the flow at creation, so editing the flow does not change what an old tracking shows. A tracking
+  is tied to a repository and a commit, never to a session. Open trackings are read from SQLite at start and
+  resume; each has its own poll schedule (`BUILD_POLL` 15 s for CI, `CLUSTER_POLL` 10 s, `BLOCKED_POLL`
+  60 s while blocked), kept in the tracker's ledger, not in the DB.
+- **Blocker vs failure**: a blocker (cluster unreachable, tool missing or not logged in) is **never** a
+  failure. `ci_blocker` and `cluster_blocker` are two separate fields, one per side, set and cleared by
+  that side's own observation; `Tracking::blocker()` shows the one of the stage in progress first. Each
+  stage's time limit (`RUN_APPEAR_LIMIT` 5 min, `ROLLOUT_LIMIT` 15 min, `PAUSE_LIMIT` 24 h) follows its own
+  side: it does not run while that side is blocked and starts again from zero when the blocker clears.
+  A real failure is a CI run that failed, a pod of the
+  new version that cannot become ready (reason + pod log), or a limit that ran out (`stalled`, worded
+  „Nie widać dalszego ciągu” and shown as a problem). The frontend decides what to show with
+  `shownBlocker` / `openBlocker` in `lib/deployStatus.ts`.
+- **VPN**: on cluster-unreachable the tracker tries once per tracking (`vpn_attempted`) to run `nmcli
+  connection up id <name>` with the name from the setting `deployVpnConnection` (Settings → Wdrożenia),
+  Linux only (`vpn::supported`); the `id` keyword makes a name such as `help` a connection id, not an
+  nmcli keyword. It never disconnects. On Windows and macOS the stage only reports „Klaster
+  niedostępny”.
+- **Cluster readiness** (`cluster.rs`): only live pods count (no deletion timestamp, phase not
+  `Succeeded`/`Failed`), a workload scaled to 0 is ready, empty `workloads` means every Deployment of
+  the namespace. „Image” covers container images and CSI image volumes. The expected tag is not
+  computed, so with two pushes in quick succession the image chain can report „Wdrożono” for the second
+  push when the image that landed is the first push's. The Kubemeter variant has no real project to
+  test against.
+- **Log excerpts**: the last `LOG_EXCERPT_LINES` (60) lines, redacted by `excerpt::tail_redacted` (the
+  supervisor's redaction rules). They live in `TrackingFailure.log_excerpt` and appear in the details
+  dialog and the CLI output, never in a notification or a Discord message.
+- **`deploy://changed`** (`DeployChangedEvent { repoPath }`): emitted by the tracker, the commands and,
+  for the CLI process, by `IpcRequest::DeployChanged` sent over the supervisor socket after `flow
+  propose` (best effort, unix only; the router in `supervisor/runtime.rs` calls the deploy hook).
+  `useDeploySync` (both shells) reloads trackings and proposals on it, and proposals also on window
+  focus, because a CLI process started while the app was closed cannot send it.
+- **Notifications** (`notify.rs`): paused, failed and stalled go to a desktop notification (click opens
+  the pipeline, `show_link_notification`) and to Discord; success is one quiet desktop notification
+  („Wdrożono: <projekt>”) and nothing on Discord. Discord goes out only through
+  `supervisor::runtime::post_discord_notice`, which needs the supervisor level above Off, its session
+  running, Discord connected and routing not forced to the app (unix only); otherwise the desktop
+  notification and the in-app marks remain. Proposals take the same path from `commands/deploy.rs`; a
+  proposal made while the app is closed, or while the user is present with „mute when present”, is not
+  posted to Discord later. A paused pipeline marks the project in the sidebar (filled accent pill),
+  shows `DeployBanner` in the header and keeps both until the pipeline moves on or the tracking ends.
+- **Settings keys**: `deployVpnConnection` (string, `VPN_SETTING_KEY`). Everything else (flows,
+  trackings, proposals) is in the three tables, not in `settings`. The Settings page „Wdrożenia”
+  (`DeployCategory`) shows which of `bkt`, `gh`, `kubectl` (and `nmcli` on Linux) were found (`deploy_tools_status`),
+  the VPN name field and a static note on when Discord notices are sent; new labels there need `keywords` in
+  `lib/settingsCategories.ts`.
+- **CLI** (`cli/flow.rs`, `cli/deploy.rs`; the wrapper appends `--cwd "$(pwd -P)"`): `abeon-code flow
+  show | detect | propose` and `abeon-code deploy status | wait [--timeout <seconds>]`. Reached from the
+  wrapper like `note`; the wrapper has `wrapper_features="note flow deploy"` and must be reinstalled to
+  get them (Ustawienia → „Zainstaluj komendę”). Results go to stdout (also the `no tracking` messages),
+  usage and real errors to stderr with exit 2. **`deploy wait` exit codes**: 0 succeeded, 1 failed or
+  stalled, 3 no tracking, 4 needs the user (paused, or a blocker seen for more than 120 s), 8 still
+  running at the timeout (default 540 s, maximum 3600 s). The skill documents these; change them
+  together with `cli/skill.rs`. There are two `no tracking` answers: the generic one (no flow, tracking
+  off, nothing to track, AbeonCode not running) and `no new push to <remote>/<branch>: the newest push
+  is <sha>, <age> ago, state <state> — …`, given when the newest push is older than 60 minutes and its
+  deployment finished more than 10 minutes before the command started, which usually means the agent's
+  `git push` did nothing or went elsewhere. `deploy wait` reads SQLite and the reflog itself and needs
+  the app running only for the tracking to progress. An agent's shell tool kills a command after its own
+  timeout (120 s by default in Claude Code), so the skill tells it to use a 600000 ms tool timeout or a
+  shorter `--timeout` and re-run on exit 8. `deploy status` prints the newest tracking whatever its age.
+- **Proposal confirmation**: `flow propose` reads JSON from stdin (64 KiB, unknown fields refused),
+  accepts only the root of a git repository of a registered project, refuses a flow identical to the
+  current one, and returns the existing proposal when the same flow is proposed twice. It stores a
+  `FlowProposal` (24 h, one per repository, the newer replaces the older) with `base_updated_at`, the
+  `updated_at` of the flow it was compared against. Only the user's „Zatwierdź” (`FlowProposalCard` or
+  the Discord button) saves it, through `proposals::resolve`, which refuses as stale when the flow
+  changed after the proposal („Przepływ zmienił się po propozycji — sprawdź w aplikacji”); the card sends
+  the base it rendered, Discord uses the stored one. A Discord tap after an in-app decision answers
+  „Zatwierdzono w aplikacji” / „Odrzucono w aplikacji” (`ProposalNotices`). There is no `flow approve`.
+  This guards agents that use the CLI; it is not a sandbox: a process running as the user can still
+  write the SQLite file or post a fake button with the bot token.
+- **Skill** `abeon-deploy` (`cli/skill.rs`): `deploy wait` after a push, exit codes, what an agent must
+  not do (approve a paused pipeline, claim a flow active before the confirmation, poll with `sleep` and
+  `bkt`/`gh`), and the flow setup through `flow show | detect | propose`.
+- **Not covered by tests**: the tracker's production loop (`DeployTracker::start`, the wake loop, the
+  event sink) has no automated test and has not been run in the app; the Bitbucket paused mapping
+  (`state.stage.name` `PAUSED`) and the failed-step log fetch have not met a real run.
 
 ## Gotchas
 

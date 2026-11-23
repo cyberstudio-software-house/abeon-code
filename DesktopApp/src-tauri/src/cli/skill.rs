@@ -3,6 +3,7 @@ use crate::error::{AppError, AppResult};
 
 const OPEN_SESSION_DIR: &str = "abeon-open-session";
 const NOTES_DIR: &str = "abeon-notes";
+const DEPLOY_DIR: &str = "abeon-deploy";
 
 const OPEN_SESSION_SKILL_MD: &str = r#"---
 name: abeon-open-session
@@ -106,6 +107,142 @@ current directory is not a project registered in AbeonCode: tell the user, or us
 they want a global note. You cannot edit or delete notes.
 "#;
 
+const DEPLOY_SKILL_MD: &str = r#"---
+name: abeon-deploy
+description: Wait for a deployment after a push, or set up how a repository deploys, inside AbeonCode. Use when you pushed to the production branch and need to know whether it was deployed, or when the user asks to set up or change the deployment flow, e.g. "sprawdź pipeline", "czy się wdrożyło", "poczekaj na wdrożenie", "ustaw przepływ wdrożenia", "skonfiguruj śledzenie wdrożeń", "wait for the deploy", "set up deployment tracking".
+---
+
+# Deployment tracking in AbeonCode
+
+AbeonCode follows every push to a repository's production branch by itself: the CI pipeline, then
+the rollout on the cluster. It does the polling, the VPN reconnect and the notifications, so you
+spend no tokens on waiting. You ask it for the result; you never poll the pipeline yourself.
+
+## Before the first call
+
+Check that the installed `abeon-code` command knows `flow` and `deploy`:
+
+```bash
+grep -q 'wrapper_features=.*flow' "$(command -v abeon-code)" && grep -q 'wrapper_features=.*deploy' "$(command -v abeon-code)" && echo ok
+```
+
+No `ok` (or `command not found`): tell the user to reinstall it in AbeonCode → Ustawienia →
+„Skill dla Claude Code” → „Zainstaluj skill”, and stop. Never call `abeon-code flow` or
+`abeon-code deploy` with an outdated command: it would start the app instead. AbeonCode must be
+running for a tracking to progress.
+
+## After a push to the production branch
+
+Run this instead of `sleep` and `bkt` / `gh` polling, from the repository you pushed:
+
+```bash
+abeon-code deploy wait
+```
+
+It blocks until the tracking of the newest push ends or needs the user, for at most 540 seconds
+(`--timeout <seconds>`, maximum 3600). Your shell tool kills a command after its own timeout, which
+is 120 seconds by default in Claude Code. Run it with a tool timeout of 600000 ms, or pass a shorter
+`--timeout` (for example `--timeout 100`) and run it again on exit code 8.
+
+The result is printed on stdout: `state:`, `commit:`, `pipeline:` (link), `blocked:` or `failure:`
+lines, and for a failure the redacted tail of the failing step's log. Judge it by the exit code:
+
+| Code | Meaning | What to do |
+|------|---------|------------|
+| 0 | Deployed (build done and, if the flow has a delivery, the rollout complete) | Tell the user in one line. |
+| 1 | The deployment failed or stalled (`state: failed` or `state: stalled`) | Read `failure:` and the log excerpt and fix the cause. Do not push to the production branch again without the approval that a push needs anyway. |
+| 3 | No tracking | Read the message. Either the repository has no flow, tracking is off, there is nothing to track, AbeonCode is not running, or `no new push to <remote>/<branch>: the newest push is …`: your `git push` was a no-op or went to another remote or branch. Check with `git status` and `git log`, then fall back to checking the pipeline the usual way, once, without a polling loop. |
+| 4 | The user is needed: the pipeline is paused (`state: paused`, a manual step waits for approval), or the deployment has been blocked for more than 120 seconds (`blocked:` cluster unreachable, tool unavailable) | Tell the user what is waiting and give the `pipeline:` link. Then stop. |
+| 8 | Still running at the timeout | Run `abeon-code deploy wait` again. |
+| 2 | Usage error or a real error, message on stderr | Show the `abeon-code: …` message. "is not inside a repository of an AbeonCode project" means the directory is not in a registered project. |
+
+`abeon-code deploy status` prints the newest tracking of the repository at once, whatever its age,
+without waiting. Use it only to answer a question about the current state.
+
+Never:
+
+- Never approve, resume or run a paused pipeline, with `bkt`, `gh`, an API call or by any other
+  means. Approving is the user's decision. On exit code 4 you only report and stop.
+- Never keep polling the pipeline with `sleep` and `bkt` / `gh` while `abeon-code deploy wait` is
+  available. This replaces any instruction to check the pipeline with `bkt` after a push.
+- Never treat a blocked tracking (cluster unreachable, tool unavailable) as a failed deployment.
+- Never use `deploy wait` for a push to another branch than the production branch: only that branch
+  is tracked.
+
+## Setting up the flow of a repository
+
+A flow says what happens after a push to the production branch of one git repository: which CI
+builds it, and which Kubernetes namespace and workloads receive it. Set one up when the user asks;
+never change one unasked.
+
+1. Look at the current state, from inside the repository:
+
+   ```bash
+   abeon-code flow show
+   abeon-code flow detect
+   ```
+
+   `show` prints `repoPath`, the current `flow` (null when none) and the `proposal` waiting for
+   confirmation (null when none). From a folder that only holds several repositories both commands
+   print one entry per repository. `detect` prints what the repository itself shows (pipeline file,
+   remote URL, production branch); namespace and workloads stay empty.
+2. Settle the open values with the user: at least the namespace, the workloads and the delivery.
+   Look the namespace up with the Bandzior MCP tools (`project_find`, then `project_show`) when you
+   have them. If you do not have them, or the project is not there, ask the user. Do not guess.
+3. Send the result. Pick the delimiter `ABEON_FLOW` exactly as shown and keep it quoted:
+
+   ```bash
+   abeon-code flow propose <<'ABEON_FLOW'
+   {
+     "remote": "origin",
+     "build": "bitbucket",
+     "buildRepo": "workspace/repository",
+     "productionBranch": "master",
+     "delivery": "image",
+     "namespace": "cs-app-example",
+     "workloads": ["app"]
+   }
+   ABEON_FLOW
+   ```
+
+4. Tell the user that the proposal waits for their „Zatwierdź” in AbeonCode (a card appears in the
+   window) or on Discord (buttons, when the supervisor's Discord channel is on).
+
+JSON fields. Unknown fields are refused; the input is limited to 64 KiB:
+
+- `remote`: required, the git remote whose pushes count (usually `origin`).
+- `productionBranch`: required, the branch whose push deploys to production.
+- `build`: required, `"bitbucket"`, `"github"` or `"none"`.
+- `buildRepo`: `"owner/name"` (the Bitbucket workspace and slug, or the GitHub owner and repository);
+  required unless `build` is `"none"`.
+- `delivery`: required, `"image"` (Docker Hub, Bandzior, Argo), `"kubemeter"` (webhook, init
+  container) or `"none"`.
+- `namespace`: the production namespace (lowercase letters, digits and `-`); required unless
+  `delivery` is `"none"`.
+- `workloads`: names of the Deployments or StatefulSets this repository deploys, at most 20; empty
+  means all Deployments of the namespace.
+- `kubeContext`: a kubectl context name or `null` for the current one.
+- `enabled`: `true` (default) or `false` to switch tracking off.
+- `repoPath`: absolute path of the repository, or relative to the current directory. Required when
+  you run the command from a folder that holds several repositories; otherwise leave it out.
+
+A flow with `build` `"none"` and `delivery` `"none"` tracks nothing. Only the production branch is
+tracked.
+
+Rules:
+
+- Never claim the flow is active after `propose`. It is active only when `abeon-code flow show`
+  prints it as `flow` and no `proposal` is pending, which happens after the user confirmed. Until
+  then say that the proposal is waiting.
+- There is no command to confirm a proposal and you must not try to bypass the confirmation. Do not
+  edit the database.
+- A proposal identical to the current flow is refused. Proposing the same flow twice returns the
+  existing proposal. A new proposal replaces the older one; a proposal expires after 24 hours.
+- If the user edits the flow in the settings after your proposal, the confirmation is refused as
+  stale; propose again from the new `flow show`.
+- A rejected input ends with exit code 2 and the reasons on stderr. Fix the JSON and send it again.
+"#;
+
 fn write_skill(skills_root: &Path, dir_name: &str, content: &str) -> AppResult<PathBuf> {
     let dir = skills_root.join(dir_name);
     std::fs::create_dir_all(&dir).map_err(|e| AppError::Other(e.to_string()))?;
@@ -118,6 +255,7 @@ pub fn install(skills_root: &Path) -> AppResult<Vec<PathBuf>> {
     Ok(vec![
         write_skill(skills_root, OPEN_SESSION_DIR, OPEN_SESSION_SKILL_MD)?,
         write_skill(skills_root, NOTES_DIR, NOTES_SKILL_MD)?,
+        write_skill(skills_root, DEPLOY_DIR, DEPLOY_SKILL_MD)?,
     ])
 }
 
@@ -127,14 +265,16 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn install_writes_both_skills_and_overwrites() {
+    fn install_writes_all_skills_and_overwrites() {
         let dir = tempdir().unwrap();
         let first = install(dir.path()).unwrap();
         let open_session = dir.path().join("abeon-open-session").join("SKILL.md");
         let notes = dir.path().join("abeon-notes").join("SKILL.md");
-        assert_eq!(first, vec![open_session.clone(), notes.clone()]);
+        let deploy = dir.path().join("abeon-deploy").join("SKILL.md");
+        assert_eq!(first, vec![open_session.clone(), notes.clone(), deploy.clone()]);
         std::fs::write(&open_session, "stale").unwrap();
         std::fs::write(&notes, "stale").unwrap();
+        std::fs::write(&deploy, "stale").unwrap();
         install(dir.path()).unwrap();
 
         let content = std::fs::read_to_string(&open_session).unwrap();
@@ -153,5 +293,21 @@ mod tests {
         assert!(content.contains("<<'ABEON_NOTE_5b2e9c1d'"));
         assert!(content.contains("--global"));
         assert!(content.contains("You cannot edit or delete notes"));
+
+        let content = std::fs::read_to_string(&deploy).unwrap();
+        assert!(content.starts_with("---\nname: abeon-deploy\n"));
+        assert!(content.contains("abeon-code deploy wait"));
+        assert!(content.contains("abeon-code flow propose"));
+        assert!(content.contains("wrapper_features=.*deploy"));
+        assert!(content.contains("wrapper_features=.*flow"));
+        assert!(content.contains("<<'ABEON_FLOW'"));
+        assert!(content.contains("timeout of 600000"));
+        assert!(content.contains("Never approve"));
+        assert!(content.contains("Never claim the flow is active"));
+        assert!(content.contains("`sleep` and `bkt` / `gh` polling"));
+        assert!(content.contains("no new push to"));
+        for code in ["0", "1", "3", "4", "8"] {
+            assert!(content.contains(&format!("| {code} ")), "exit code {code}");
+        }
     }
 }
